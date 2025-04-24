@@ -38,6 +38,7 @@
     "@angular/router": "19.2.3",
     "@angular/ssr": "19.2.3",
     "@faker-js/faker": "^9.6.0",
+    "@formatjs/intl": "^3.1.6",
     "date-fns": "^4.1.0",
     "express": "4.21.2",
     "luxon": "^3.6.0",

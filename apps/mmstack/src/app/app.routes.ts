@@ -1,6 +1,7 @@
 import { Route } from '@angular/router';
 import { createNamespace, register } from '@mmstack/translate';
 import { FormsPlaygroundComponent } from './forms.component';
+import { TablePlaygroundComponent } from './table.component';
 
 const ns = createNamespace('app', {
   test: 'test case',
@@ -21,5 +22,9 @@ export const appRoutes: Route[] = [
     resolve: {
       t: registered.resolveNamespaceTranslation,
     },
+  },
+  {
+    path: 'table',
+    component: TablePlaygroundComponent,
   },
 ];

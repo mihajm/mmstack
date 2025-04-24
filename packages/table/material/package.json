@@ -8,7 +8,8 @@
   "peerDependencies": {
     "@angular/core": "~19.2.3",
     "@angular/material": "~19.2.3",
-    "@angular/forms": "~19.2.3"
+    "@angular/forms": "~19.2.3",
+    "@angular/cdk": "^19.2.6"
   },
   "sideEffects": false
 }

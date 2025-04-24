@@ -1,3 +1,4 @@
+import { DragDropModule } from '@angular/cdk/drag-drop';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -6,18 +7,18 @@ import {
   signal,
   ViewEncapsulation,
 } from '@angular/core';
-import { HeaderRow, TableFeatures } from '@mmstack/table-core';
+import { FormsModule } from '@angular/forms';
 import { MatIconButton } from '@angular/material/button';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIcon } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import {
   MatMenu,
   MatMenuContent,
   MatMenuItem,
   MatMenuTrigger,
 } from '@angular/material/menu';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { FormsModule } from '@angular/forms';
-import { MatInput } from '@angular/material/input';
+import { HeaderRow, TableFeatures } from '@mmstack/table-core';
 
 @Component({
   selector: 'mm-column-menu',
@@ -33,6 +34,7 @@ import { MatInput } from '@angular/material/input';
     MatInput,
     FormsModule,
     MatMenuContent,
+    DragDropModule,
   ],
   template: `
     <button type="button" mat-icon-button [matMenuTriggerFor]="menu">
@@ -40,42 +42,58 @@ import { MatInput } from '@angular/material/input';
     </button>
     <mat-menu #menu xPosition="before" class="mm-table-column-menu">
       <ng-template matMenuContent>
-        <div class="mm-column-menu-list-container">
-          <mat-form-field appearance="fill" (click)="$event.stopPropagation()">
-            <mat-icon matPrefix>search</mat-icon>
-            <mat-label>Search</mat-label>
-            <input
-              matInput
-              [(ngModel)]="filter"
-              (keydown)="$event.stopPropagation()"
+        <div class="mm-column-menu-list-container" cdkScrollable>
+          <div cdkDropList>
+            <mat-form-field
+              appearance="fill"
               (click)="$event.stopPropagation()"
-            />
-          </mat-form-field>
-          @for (column of filteredColumns(); track column.name) {
-            <button
-              type="button"
-              reverse
-              mat-menu-item
-              (click)="$event.stopPropagation()"
-              disableRipple
             >
-              <mat-icon matMenuItemIcon>drag_handle</mat-icon>
+              <mat-icon matPrefix>search</mat-icon>
+              <mat-label>Search</mat-label>
+              <input
+                matInput
+                [(ngModel)]="filter"
+                (keydown)="$event.stopPropagation()"
+                (click)="$event.stopPropagation()"
+              />
+            </mat-form-field>
+            @for (column of filteredColumns(); track column.name) {
               <button
+                class="mm-table-column-menu-item column"
                 type="button"
-                mat-icon-button
-                matMenuItemIcon
-                (click)="
-                  $event.stopPropagation();
-                  features().columnVisibility.toggle(column.name)
+                cdkDrag
+                cdkDragPreviewClass="mm-table-column-drag-preview"
+                reverse
+                mat-menu-item
+                (click)="$event.stopPropagation()"
+                (cdkDragDropped)="
+                  droppedColumn(column.name, $event.currentIndex)
                 "
+                disableRipple
               >
-                <mat-icon>{{
-                  column.isVisible() ? 'visibility' : 'visibility_off'
-                }}</mat-icon>
+                <mat-icon
+                  class="mm-table-column-menu-item-drag-handle"
+                  cdkDragHandle
+                  matMenuItemIcon
+                  >drag_handle
+                </mat-icon>
+                <button
+                  type="button"
+                  mat-icon-button
+                  matMenuItemIcon
+                  (click)="
+                    $event.stopPropagation();
+                    features().columnVisibility.toggle(column.name)
+                  "
+                >
+                  <mat-icon
+                    >{{ column.isVisible() ? 'visibility' : 'visibility_off' }}
+                  </mat-icon>
+                </button>
+                {{ column.label() }}
               </button>
-              {{ column.label() }}
-            </button>
-          }
+            }
+          </div>
         </div>
       </ng-template>
     </mat-menu>
@@ -100,6 +118,53 @@ import { MatInput } from '@angular/material/input';
       .mat-mdc-menu-item:not([disabled]):hover {
         background-color: unset;
       }
+    }
+
+    .mm-table-column-menu-item {
+      cursor: auto;
+
+      &:hover {
+        background-color: unset !important;
+      }
+    }
+
+    .mm-table-column-menu-item-drag-handle {
+      cursor: grab;
+      --mat-menu-item-spacing: 0;
+    }
+
+    .mm-table-column-drag-preview {
+      box-sizing: border-box;
+      border-radius: 4px;
+      box-shadow:
+        0 5px 5px -3px rgba(0, 0, 0, 0.2),
+        0 8px 10px 1px rgba(0, 0, 0, 0.14),
+        0 3px 14px 2px rgba(0, 0, 0, 0.12);
+      display: flex;
+      position: relative;
+      justify-content: flex-start;
+      overflow: hidden;
+      padding-left: 12px;
+      padding-right: 12px;
+      min-height: 48px;
+      width: 100%;
+
+      .mat-mdc-menu-item-text {
+        flex: 1;
+        font-family: var(--mat-sys-label-large-font);
+        line-height: var(--mat-sys-label-large-line-height);
+        font-size: var(--mat-sys-label-large-size);
+        letter-spacing: var(--mat-sys-label-large-tracking);
+        font-weight: var(--mat-sys-label-large-weight);
+      }
+    }
+
+    [cdkdragpreviewclass='mm-table-column-drag-preview'].cdk-drag-placeholder {
+      opacity: 0;
+    }
+
+    div.menuList.cdk-drop-list-dragging .column:not(.cdk-drag-placeholder) {
+      transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
     }
   `,
 })
@@ -138,6 +203,10 @@ export class ColumnMenuComponent<T, TColumnName extends string> {
   protected readonly filteredColumns = computed(() =>
     this.columns().filter((c) => c.show()),
   );
+
+  protected droppedColumn(columnName: TColumnName, index: number) {
+    this.features().columnOrder.set(columnName, index);
+  }
 }
 
 @Component({

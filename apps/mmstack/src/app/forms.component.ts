@@ -13,7 +13,7 @@ import {
 export class FormsPlaygroundComponent {
   readonly state = injectCreateStringState()('', {
     validation: () => ({
-      pattern: '^dynamic\.',
+      pattern: '^dynamic.',
       notOneOf: ['yay', 'test', 'lol'],
     }),
   });

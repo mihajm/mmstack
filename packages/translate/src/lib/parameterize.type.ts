@@ -26,7 +26,7 @@ type extractComplexParam<T extends string> = T extends
     ? extractSelectParam<VarName, `${SelectOptions}}`> | extractParams<REST>
     : never;
 
-type extractParams<T extends string> =
+export type extractParams<T extends string> =
   T extends `${infer _Start}{${infer Var}}${infer End}`
     ? Var extends `${infer _}, ${infer __}`
       ? extractComplexParam<`{${Var}}${End}`>
@@ -67,3 +67,29 @@ export type inferTranslationParamMap<
     ? `${TNS}.${Tuple[0]}`
     : never]: Tuple extends [string, infer Vars] ? Vars : void;
 }>;
+
+type StringContaining<Placeholder extends string> =
+  `${string}${Placeholder}${string}`;
+
+type TypeEnsuringAllPlaceholders<PlaceholdersUnion extends string> =
+  StringContaining<PlaceholdersUnion>;
+
+export type extractParamString<T extends string> =
+  T extends `${infer _Start}{${infer Var}}${infer End}`
+    ? Var extends `${infer VarName},${string}`
+      ? `{${VarName}}` | extractParamString<End>
+      : `{${Var}}` | extractParamString<End>
+    : never;
+
+type inferParamsFromValue<V extends string> =
+  extractParamString<V> extends never
+    ? string
+    : TypeEnsuringAllPlaceholders<extractParamString<V>>;
+
+export type inferTranslationShape<T extends UnknownStringKeyObject> = {
+  [K in keyof T]: T[K] extends UnknownStringKeyObject
+    ? inferTranslationShape<T[K]>
+    : T[K] extends string
+      ? inferParamsFromValue<T[K]>
+      : never;
+};

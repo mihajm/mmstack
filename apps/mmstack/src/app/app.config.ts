@@ -23,6 +23,7 @@ import {
   provideQueryCache,
 } from '@mmstack/resource';
 import { PreloadLinkStrategy } from '@mmstack/router-core';
+import { provideIntlConfig } from '@mmstack/translate';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { delay } from 'rxjs';
@@ -36,6 +37,9 @@ function createDelayInterceptor(): HttpInterceptorFn {
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    provideIntlConfig({
+      defaultLocale: 'fr-FR',
+    }),
     provideClientHydration(
       withEventReplay(),
       withHttpTransferCacheOptions({

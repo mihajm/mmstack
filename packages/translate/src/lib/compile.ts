@@ -1,16 +1,13 @@
 import { prependDelim } from './delim';
-import { inferTranslationParamMap } from './parameterize.type';
+import {
+  inferTranslationParamMap,
+  inferTranslationShape,
+} from './parameterize.type';
 import { UnknownStringKeyObject } from './string-key-object.type';
 
 const INTERNAL_SYMBOL = Symbol.for('mmstack-translate-internal');
 
 type InternalSymbol = typeof INTERNAL_SYMBOL;
-
-type inferTranslationShape<T extends UnknownStringKeyObject> = {
-  [K in keyof T]: T[K] extends UnknownStringKeyObject
-    ? inferTranslationShape<T[K]>
-    : string;
-};
 
 export type CompiledTranslation<
   T extends UnknownStringKeyObject,
@@ -81,13 +78,16 @@ export function compileTranslation<
   ns: TNS,
   locale?: TLocale,
 ): CompiledTranslation<T, TNS, TLocale> {
+  type $Shape = inferTranslationShape<T>;
+  type $Map = inferTranslationParamMap<TNS, T>;
+
   return {
     locale,
     flat: flattenTranslation(translation),
     namespace: ns,
     [INTERNAL_SYMBOL]: {
-      shape: {} as inferTranslationShape<T>,
-      map: {} as inferTranslationParamMap<TNS, T>,
+      shape: {} as $Shape,
+      map: {} as $Map,
     },
   };
 }

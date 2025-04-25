@@ -62,7 +62,7 @@ export function createNamespace<
         TOtherNS,
         mergeTranslationMaps<TOtherCompiled, TCompiled>,
         inferCompiledTranslationShape<TOtherCompiled>
-      >;
+      > as unknown as any;
     },
   };
 

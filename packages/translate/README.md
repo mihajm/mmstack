@@ -25,7 +25,7 @@ It uses the robust **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message 
 - 📦 **Namespacing:** Organize translations by feature/library (e.g., 'quotes', 'userProfile', 'common').
 - ⏳ **Lazy Loading:** Load namespaced translations on demand using Route Resolvers.
 - ✨ **Reactive API:** Includes `t.asSignal()` for creating computed translation signals based on signal parameters.
-- 🌍 **ICU Message Syntax:** Uses FormatJS runtime for robust support of variables (`{name}`), `plural`, `select`, and `selectordinal`. (Note: Complex inline date/number formats are not the focus; use Angular's built in Pipes/format functions & ues the result as variables in your translation.)
+- 🌍 **ICU Message Syntax:** Uses FormatJS runtime for robust support of variables (`{name}`), `plural`, `select`, and `selectordinal`. (Note: Complex inline date/number formats are not the focus; use Angular's built in Pipes/format functions & use the result as variables in your translation.)
 - 🔗 **Shared Namespace Support:** Define common translations (e.g., 'Save', 'Cancel') in one namespace and make them type-safely accessible from others.
 - 🛠️ **Template Helpers:** Includes abstract `BaseTranslatePipe` and `BaseTranslateDirective` for easy, type-safe templating.
 

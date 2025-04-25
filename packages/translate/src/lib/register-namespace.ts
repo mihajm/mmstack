@@ -6,63 +6,19 @@ import {
   LOCALE_ID,
   Signal,
 } from '@angular/core';
-import { keys } from '@mmstack/object';
-import {
-  inferCompiledTranslationContent,
-  inferCompiledTranslationShape,
-} from './create-namespace';
-import { KEY_DELIM } from './flatten';
-import { INTERNAL_SYMBOL } from './internal-symbol';
-import { injectDefaultLocale, TranslationStore } from './translation.store';
 import {
   CompiledTranslation,
-  SignalTFunction,
-  TAllFunction,
-  TFunction,
-  TranslationMap,
-  UnknownStringKeyObject,
-} from './types';
-
-type TypedTAllFunction<T extends CompiledTranslation<UnknownStringKeyObject>> =
-  TAllFunction<T> & {
-    [INTERNAL_SYMBOL]: {
-      content: inferCompiledTranslationContent<T>;
-      map: TranslationMap<inferCompiledTranslationContent<T>>;
-    };
-  };
-
-type TFunctionWithSignalConstructor<T extends UnknownStringKeyObject> =
-  TFunction<T> & {
-    asSignal: SignalTFunction<T>;
-  };
-
-export function injectAllT<
-  T extends CompiledTranslation<UnknownStringKeyObject>,
->() {
-  type $Map = TranslationMap<inferCompiledTranslationContent<T>>;
-
-  const store = inject(TranslationStore);
-
-  const fn: TAllFunction<T> = <K extends keyof $Map>(
-    ns: T['namespace'],
-    key: K,
-    ...args: $Map[K] extends [string, infer Vars] ? [variables: Vars] : []
-  ): string => {
-    const variables = args[0] as Record<string, any> | undefined;
-    const stringKey = key as string;
-
-    const flatPath = stringKey.replaceAll('.', KEY_DELIM);
-
-    return store.formatMessage(`${ns}${KEY_DELIM}${flatPath}`, variables);
-  };
-
-  return fn as TypedTAllFunction<T>;
-}
+  inferCompiledTranslationMap,
+  inferCompiledTranslationShape,
+} from './compile';
+import { replaceWithDelim } from './delim';
+import { UnknownStringKeyObject } from './string-key-object.type';
+import { injectDefaultLocale, TranslationStore } from './translation.store';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createEqualsRecord<T extends Record<string, any>>(
-  keys: (keyof T)[] = [],
-) {
+type AnyStringRecord = Record<string, any>;
+
+function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {
   let keyMatcher: (a: T, b: T) => boolean;
 
   if (keys.length === 0) {
@@ -83,66 +39,101 @@ function createEqualsRecord<T extends Record<string, any>>(
   };
 }
 
+type TFunction<TMap extends AnyStringRecord> = <
+  TKey extends keyof TMap & string,
+>(
+  key: TKey,
+  ...args: TMap[TKey] extends void ? [] : [TMap[TKey]]
+) => string;
+
+type SignalTFunction<TMap extends AnyStringRecord> = <
+  TKey extends keyof TMap & string,
+>(
+  key: TKey,
+  ...args: TMap[TKey] extends void ? [] : [() => TMap[TKey]]
+) => Signal<string>;
+
+type TFunctionWithSignalConstructor<
+  TMap extends AnyStringRecord,
+  TFN extends TFunction<TMap>,
+> = TFN & {
+  asSignal: SignalTFunction<TMap>;
+};
+
+function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
+  fn: TFn,
+  store: TranslationStore,
+): TFunctionWithSignalConstructor<TMap, TFn> {
+  const withSig = fn as TFunctionWithSignalConstructor<TMap, TFn>;
+
+  const asSignal = <TKey extends keyof TMap & string>(
+    key: TKey,
+    ...args: TMap[TKey] extends void ? [] : [() => TMap[TKey]]
+  ): Signal<string> => {
+    const variables = args[0] as () => AnyStringRecord | undefined;
+    const stringKey = key as string;
+
+    const flatPath = replaceWithDelim(stringKey);
+
+    const varsFn = variables === undefined ? () => undefined : variables;
+    const varsSignal = isSignal(varsFn)
+      ? varsFn
+      : computed(varsFn, {
+          equal: createEqualsRecord(Object.keys(varsFn() as object)),
+        });
+
+    return computed(() => store.formatMessage(flatPath, varsSignal()));
+  };
+
+  withSig.asSignal = asSignal;
+
+  return withSig;
+}
+
+export function createT<TMap extends AnyStringRecord>(
+  store: TranslationStore,
+): TFunction<TMap> {
+  return <TKey extends keyof TMap & string>(
+    key: TKey,
+    ...args: TMap[TKey] extends void ? [] : [TMap[TKey]]
+  ): string => {
+    const variables = args[0] as AnyStringRecord | undefined;
+    const stringKey = key as string;
+
+    return store.formatMessage(replaceWithDelim(stringKey), variables);
+  };
+}
+
 export function registerNamespace<
-  TDefault extends CompiledTranslation<UnknownStringKeyObject>,
+  TDefault extends CompiledTranslation<UnknownStringKeyObject, string>,
   TOther extends CompiledTranslation<
     inferCompiledTranslationShape<TDefault>,
     string
   >,
->(def: TDefault, other: Record<string, () => Promise<TOther>>) {
-  type $Content = inferCompiledTranslationContent<TDefault>;
-  type $Map = TranslationMap<$Content>;
+>(
+  { namespace: ns, flat: defaultTranslation }: TDefault,
+  other: Record<string, () => Promise<TOther>>,
+) {
+  type $Map = inferCompiledTranslationMap<TDefault>;
+  type $BaseTFN = TFunction<$Map>;
+  type $TFN = TFunctionWithSignalConstructor<$Map, $BaseTFN>;
 
-  const ns = def.namespace;
-
-  const injectT = (): TFunctionWithSignalConstructor<$Content> => {
+  const injectT = (): $TFN => {
     const store = inject(TranslationStore);
 
-    const translate = (<K extends keyof $Map>(
-      key: K,
-      ...args: $Map[K] extends [string, infer Vars] ? [variables: Vars] : []
-    ): string => {
-      const variables = args[0] as Record<string, any> | undefined;
-      const stringKey = key as string;
-
-      const flatPath = stringKey.replaceAll('.', KEY_DELIM);
-
-      return store.formatMessage(`${ns}${KEY_DELIM}${flatPath}`, variables);
-    }) as TFunctionWithSignalConstructor<$Content>;
-
-    translate.asSignal = <K extends keyof $Map>(
-      key: K,
-      ...args: $Map[K] extends [string, infer Vars]
-        ? [variables: () => Vars]
-        : []
-    ): Signal<string> => {
-      const variables = args[0] as () => Record<string, any> | undefined;
-      const stringKey = key as string;
-
-      const flatPath = stringKey.replaceAll('.', KEY_DELIM);
-
-      const varsFn = variables === undefined ? () => undefined : variables;
-      const varsSignal = isSignal(varsFn)
-        ? varsFn
-        : computed(varsFn, {
-            equal: createEqualsRecord(keys(varsFn() as object)),
-          });
-
-      return computed(() => store.formatMessage(flatPath, varsSignal()));
-    };
-
-    return translate;
+    return addSignalFn(createT(store), store);
   };
 
   const resolver = async () => {
     const locale = inject(LOCALE_ID);
     const store = inject(TranslationStore);
+    const defaultLocale = injectDefaultLocale();
 
     store.register(ns, {
-      [injectDefaultLocale()]: def.flat,
+      [defaultLocale]: defaultTranslation,
     });
 
-    if (locale === injectDefaultLocale()) return;
+    if (locale === defaultLocale) return;
 
     const promise = other[locale] as () => Promise<TOther>;
 

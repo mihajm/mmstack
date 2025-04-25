@@ -5,11 +5,10 @@ import {
   InjectionToken,
   LOCALE_ID,
   Provider,
+  signal,
 } from '@angular/core';
 import { createIntl, createIntlCache, IntlConfig } from '@formatjs/intl';
-import { entries, remap } from '@mmstack/object';
-import { mutable } from '@mmstack/primitives';
-import { KEY_DELIM } from './flatten';
+import { prependDelim } from './delim';
 
 const CONFIG_TOKEN = new InjectionToken<
   Omit<IntlConfig, 'locale' | 'messages'>
@@ -40,7 +39,7 @@ export class TranslationStore {
   private readonly config = injectIntlConfig();
   private readonly locale = inject(LOCALE_ID);
   private readonly defaultLocale = injectDefaultLocale();
-  private readonly translations = mutable<
+  private readonly translations = signal<
     Record<string, Record<string, string>>
   >({
     [this.defaultLocale]: {},
@@ -82,20 +81,28 @@ export class TranslationStore {
     namespace: string,
     flat: Partial<Record<string, Record<string, string>>>,
   ) {
-    this.translations.mutate((cur) => {
-      return entries(flat).reduce((acc, [locale, translation]) => {
-        const localeTranslation = acc[locale] ?? {};
+    this.translations.update((cur) => {
+      return Object.entries(flat).reduce(
+        (acc, [locale, translation]) => {
+          const localeTranslation = acc[locale] ?? {};
 
-        acc[locale] = {
-          ...localeTranslation,
-          ...remap(translation ?? {}, (key, value) => ({
-            value,
-            key: `${namespace}${KEY_DELIM}${key}`,
-          })),
-        };
+          const withNS = Object.entries(translation ?? {}).reduce(
+            (acc, [key, value]) => {
+              acc[prependDelim(namespace, key)] = value;
+              return acc;
+            },
+            {} as Record<string, string>,
+          );
 
-        return acc;
-      }, cur);
+          acc[locale] = {
+            ...localeTranslation,
+            ...withNS,
+          };
+
+          return acc;
+        },
+        { ...cur },
+      );
     });
   }
 }

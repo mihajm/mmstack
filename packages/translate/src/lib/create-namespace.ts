@@ -1,49 +1,70 @@
-import { flattenTranslation } from './flatten';
-import { INTERNAL_SYMBOL, InternalSymbol } from './internal-symbol';
 import {
   CompiledTranslation,
-  inferTranslationShape,
-  UnknownStringKeyObject,
-} from './types';
+  compileTranslation,
+  inferCompiledTranslationShape,
+  mergeTranslationMaps,
+} from './compile';
+import { UnknownStringKeyObject } from './string-key-object.type';
 
-export type inferCompiledTranslationShape<
-  T extends CompiledTranslation<UnknownStringKeyObject>,
-> = T[InternalSymbol]['shape'];
-
-export type inferCompiledTranslationContent<
-  T extends CompiledTranslation<UnknownStringKeyObject>,
-> = T[InternalSymbol]['translation'];
+type TranslationNamespace<
+  TNS extends string,
+  T extends CompiledTranslation<UnknownStringKeyObject, TNS>,
+  TShape extends UnknownStringKeyObject,
+> = {
+  translation: T;
+  createTranslation: <TLocale extends string>(
+    locale: TLocale,
+    translation: TShape,
+  ) => CompiledTranslation<TShape, TNS, TLocale>;
+  createMergedNamespace: <
+    TOtherNS extends string,
+    TOther extends UnknownStringKeyObject,
+    TOtherCompiled extends CompiledTranslation<TOther, TOtherNS>,
+  >(
+    ns: TOtherNS,
+    translation: TOther,
+  ) => TranslationNamespace<
+    TOtherNS,
+    mergeTranslationMaps<TOtherCompiled, T>,
+    inferCompiledTranslationShape<TOtherCompiled>
+  >;
+};
 
 export function createNamespace<
-  TNS extends string,
   T extends UnknownStringKeyObject,
+  TNS extends string,
 >(ns: TNS, translation: T) {
-  type $Shape = inferTranslationShape<T>;
+  const compiled = compileTranslation<T, TNS>(translation, ns);
 
-  const createTranslation = <TLocale extends string>(
-    locale: TLocale,
-    translation: $Shape,
-  ) => {
-    return {
-      locale,
-      flat: flattenTranslation(translation),
-      namespace: ns,
-      [INTERNAL_SYMBOL]: {
-        shape: {} as $Shape,
-        translation: {} as T,
-      },
-    };
+  type TCompiled = typeof compiled;
+  type TShape = inferCompiledTranslationShape<typeof compiled>;
+
+  const namespace: TranslationNamespace<TNS, TCompiled, TShape> = {
+    translation: compileTranslation(translation, ns),
+    createTranslation: <TLocale extends string>(
+      locale: TLocale,
+      translation: TShape,
+    ) => {
+      return compileTranslation(translation, ns, locale);
+    },
+    createMergedNamespace: <
+      TOther extends UnknownStringKeyObject,
+      TOtherNS extends string,
+      TOtherCompiled extends CompiledTranslation<
+        TOther,
+        TOtherNS
+      > = CompiledTranslation<TOther, TOtherNS>,
+    >(
+      otherNs: TOtherNS,
+      otherTranslation: TOther,
+    ) => {
+      return createNamespace(otherNs, otherTranslation) as TranslationNamespace<
+        TOtherNS,
+        mergeTranslationMaps<TOtherCompiled, TCompiled>,
+        inferCompiledTranslationShape<TOtherCompiled>
+      >;
+    },
   };
 
-  return {
-    createTranslation,
-    translation: {
-      flat: flattenTranslation(translation),
-      namespace: ns,
-      [INTERNAL_SYMBOL]: {
-        shape: {} as $Shape,
-        translation: {} as T,
-      },
-    },
-  } as const;
+  return namespace;
 }

@@ -7,53 +7,61 @@ import {
   input,
   Renderer2,
 } from '@angular/core';
-import { inferCompiledTranslationContent } from './create-namespace';
-import { injectAllT } from './register-namespace';
-import {
-  CompiledTranslation,
-  TranslationMap,
-  UnknownStringKeyObject,
-} from './types';
+import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
+import { createT } from './register-namespace';
+import { UnknownStringKeyObject } from './string-key-object.type';
+import { TranslationStore } from './translation.store';
 
 @Directive()
 export abstract class BaseTranslateDirective<
   TInput extends string,
-  T extends CompiledTranslation<UnknownStringKeyObject>,
-  $Content extends
-    inferCompiledTranslationContent<T> = inferCompiledTranslationContent<T>,
-  $Map extends TranslationMap<$Content> = TranslationMap<$Content>,
-  $Key extends keyof $Map & TInput = keyof $Map & TInput,
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+  TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,
+  TKey extends TInput & keyof TMap & string = TInput & keyof TMap & string,
 > {
-  private readonly t = injectAllT<T>();
-  abstract readonly namespace: T['namespace'];
+  private readonly t = createT(inject(TranslationStore));
 
   readonly translate =
     input.required<
-      $Map[$Key] extends [string, infer Vars]
-        ? [key: $Key, variables: Vars]
-        : $Key | [key: $Key]
+      TMap[TKey] extends void
+        ? TKey | [key: TKey]
+        : [key: TKey, vars: TMap[TKey]]
     >();
 
-  private readonly anyT = this.t as unknown as (
-    ns: T['namespace'],
-    key: $Key,
-    vars: $Map[$Key],
-  ) => string;
-
-  readonly translation = computed(() => {
-    const input = this.translate();
-    const key = (Array.isArray(input) ? input[0] : input) as $Key;
-    const vars = (Array.isArray(input) ? input[1] : undefined) as $Map[$Key];
-
-    return this.anyT(this.namespace, key, vars);
-  });
-
   constructor() {
+    const key = computed(() => {
+      const vars = this.translate();
+      return (Array.isArray(vars) ? vars[0] : vars) as TKey;
+    });
+
+    const args = computed(
+      () => {
+        const vars = this.translate();
+        return (Array.isArray(vars) ? vars[1] : undefined) as TMap[TKey];
+      },
+      {
+        equal: (a, b) => {
+          if (a === undefined && b === undefined) return true;
+          if (a === undefined || b === undefined) return false;
+
+          const aObj = a as Record<string, string>;
+          const keys = Object.keys(aObj);
+          const bObj = b as Record<string, string>;
+
+          if (!keys.length) return !Object.keys(bObj).length;
+
+          return keys.every((key) => aObj[key] === bObj[key]);
+        },
+      },
+    );
+
+    const translation = computed(() => this.t(key(), args()));
+
     const renderer = inject(Renderer2);
     const el = inject<ElementRef<HTMLElement>>(ElementRef);
 
     effect(() =>
-      renderer.setProperty(el.nativeElement, 'textContent', this.translation()),
+      renderer.setProperty(el.nativeElement, 'textContent', translation()),
     );
   }
 }

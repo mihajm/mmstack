@@ -13,6 +13,10 @@
     "type": "git",
     "url": "https://github.com/mihajm/mmstack"
   },
+  "peerDependencies": {
+    "@angular/core": "~19.2.3",
+    "@formatjs/intl": "~3.1.6"
+  },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/translate",
   "sideEffects": false
 }

@@ -1,25 +1,19 @@
-import { PipeTransform } from '@angular/core';
-
-import { InternalSymbol } from './internal-symbol';
-import { injectAllT } from './register-namespace';
-import { CompiledTranslation, UnknownStringKeyObject } from './types';
+import { inject } from '@angular/core';
+import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
+import { createT } from './register-namespace';
+import { UnknownStringKeyObject } from './string-key-object.type';
+import { TranslationStore } from './translation.store';
 
 export abstract class BaseTranslatePipe<
-  T extends CompiledTranslation<UnknownStringKeyObject>,
-> implements PipeTransform
-{
-  private readonly t = injectAllT<T>();
-  abstract readonly namespace: T['namespace'];
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+  TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,
+> {
+  private readonly t = createT<TMap>(inject(TranslationStore));
 
-  transform<K extends keyof (typeof this.t)[InternalSymbol]['content']>(
-    value: K,
-    ...args: (typeof this.t)[InternalSymbol]['map'][K] extends [
-      string,
-      infer Vars,
-    ]
-      ? [variables: Vars]
-      : []
+  transform<K extends keyof TMap & string>(
+    key: K,
+    ...args: TMap[K] extends void ? [] : [TMap[K]]
   ): string {
-    return this.t(this.namespace, value, ...args);
+    return this.t(key, ...args);
   }
 }

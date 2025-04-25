@@ -40,14 +40,22 @@ export function createRow<T, TColumnName extends string>(
   defs: ColumnDef<T, any, TColumnName>[],
   features: TableFeatures<T, TColumnName>,
 ): Row<T, TColumnName> {
-  const allCells = computed(() => defs.map((d) => createCell(source, d, features)));
+  const allCells = computed(() =>
+    defs.map((d) => createCell(source, d, features)),
+  );
   const cellMap = computed(() => new Map(allCells().map((c) => [c.name, c])));
 
-  const cells = computed(() => features.columnOrder.state().map((name) => cellMap().get(name)!))
-
+  const cells = computed(() =>
+    features.columnOrder
+      .state()
+      .map((name) => cellMap().get(name) ?? null)
+      .filter((c) => c !== null),
+  );
 
   const visibleCells = computed(() =>
-    cells().filter((c) => computed(() => features.columnVisibility.state()[c.name] !== false)()),
+    cells().filter((c) =>
+      computed(() => features.columnVisibility.state()[c.name] !== false)(),
+    ),
   );
 
   return {
@@ -61,36 +69,47 @@ export function createRow<T, TColumnName extends string>(
 
 export function createHeaderRow<T, TColumnName extends string>(
   defs: ColumnDef<T, any, TColumnName>[],
-  features: Omit<TableFeatures<T, TColumnName>, "pagination">,
+  features: Omit<TableFeatures<T, TColumnName>, 'pagination'>,
 ): HeaderRow<TColumnName> {
-
-  const allCells = computed(() => defs.map((d) => createHeaderCell(d, features)));
+  const allCells = computed(() =>
+    defs.map((d) => createHeaderCell(d, features)),
+  );
   const cellMap = computed(() => new Map(allCells().map((c) => [c.name, c])));
 
-  const cells = computed(() => features.columnOrder.state().map((name) => cellMap().get(name)!))
+  const cells = computed(() =>
+    features.columnOrder.state().map((name) => cellMap().get(name)!),
+  );
   return {
     id: v7(),
     cells,
-    visibleCells:  computed(() =>
-      cells().filter((c) => computed(() => features.columnVisibility.state()[c.name] !== false)()),
-    )
+    visibleCells: computed(() =>
+      cells().filter((c) =>
+        computed(() => features.columnVisibility.state()[c.name] !== false)(),
+      ),
+    ),
   };
 }
 
 export function createFooterRow<T, TColumnName extends string>(
   defs: ColumnDef<T, any, TColumnName>[],
-  features: Omit<TableFeatures<T, TColumnName>, "pagination">,
+  features: Omit<TableFeatures<T, TColumnName>, 'pagination'>,
 ): FooterRow<TColumnName> {
-
   const allCells = computed(() => defs.map((d) => createFooterCell(d)));
   const cellMap = computed(() => new Map(allCells().map((c) => [c.name, c])));
 
-  const cells = computed(() => features.columnOrder.state().map((name) => cellMap().get(name)!))
+  const cells = computed(() =>
+    features.columnOrder
+      .state()
+      .map((name) => cellMap().get(name) ?? null)
+      .filter((c) => c !== null),
+  );
   return {
     id: v7(),
     cells,
-    visibleCells:  computed(() =>
-      cells().filter((c) => computed(() => features.columnVisibility.state()[c.name] !== false)()),
-    )
+    visibleCells: computed(() =>
+      cells().filter((c) =>
+        computed(() => features.columnVisibility.state()[c.name] !== false)(),
+      ),
+    ),
   };
 }

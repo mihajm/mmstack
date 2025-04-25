@@ -3,13 +3,13 @@ import {
   injectCreateStringState,
   StringFieldComponent,
 } from '@mmstack/form-material';
-import { registered } from './app.routes';
+import { injectT } from './t/r';
 
 @Component({
   selector: 'app-forms-playground',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [StringFieldComponent],
-  template: `{{ greeting }}<mm-string-field [state]="state" />`,
+  template: `hre{{ test }}`,
 })
 export class FormsPlaygroundComponent {
   readonly state = injectCreateStringState()('', {
@@ -18,7 +18,7 @@ export class FormsPlaygroundComponent {
       notOneOf: ['yay', 'test', 'lol'],
     }),
   });
-  readonly t = registered.injectNamespaceT();
+  readonly t = injectT();
 
-  readonly greeting = this.t('test');
+  test = this.t('app.yay');
 }

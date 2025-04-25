@@ -69,6 +69,7 @@ export class TranslationStore {
 
   formatMessage(key: string, values?: Record<string, string | number>) {
     const message = this.translations()[this.locale]?.[key] ?? '';
+
     if (!message) return '';
 
     return this.intl().formatMessage(

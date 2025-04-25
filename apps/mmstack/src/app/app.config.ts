@@ -6,6 +6,7 @@ import {
 } from '@angular/common/http';
 import {
   ApplicationConfig,
+  LOCALE_ID,
   provideExperimentalZonelessChangeDetection,
 } from '@angular/core';
 import { provideDateFnsAdapter } from '@angular/material-date-fns-adapter';
@@ -23,7 +24,6 @@ import {
   provideQueryCache,
 } from '@mmstack/resource';
 import { PreloadLinkStrategy } from '@mmstack/router-core';
-import { provideIntlConfig } from '@mmstack/translate';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { delay } from 'rxjs';
@@ -37,9 +37,10 @@ function createDelayInterceptor(): HttpInterceptorFn {
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideIntlConfig({
-      defaultLocale: 'fr-FR',
-    }),
+    {
+      provide: LOCALE_ID,
+      useValue: 'sl-SI',
+    },
     provideClientHydration(
       withEventReplay(),
       withHttpTransferCacheOptions({

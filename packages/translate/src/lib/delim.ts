@@ -5,5 +5,5 @@ export function prependDelim(prefix: string, key: string): string {
 }
 
 export function replaceWithDelim(str: string, repl = '.'): string {
-  return str.replaceAll(KEY_DELIM, repl);
+  return str.replaceAll(repl, KEY_DELIM);
 }

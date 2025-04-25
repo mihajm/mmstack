@@ -77,7 +77,7 @@ type TypeEnsuringAllPlaceholders<PlaceholdersUnion extends string> =
 export type extractParamString<T extends string> =
   T extends `${infer _Start}{${infer Var}}${infer End}`
     ? Var extends `${infer VarName},${string}`
-      ? `{${VarName}}` | extractParamString<End>
+      ? `{${VarName}, ${string}}` | extractParamString<End>
       : `{${Var}}` | extractParamString<End>
     : never;
 

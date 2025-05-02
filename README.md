@@ -22,6 +22,7 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 - **[`@mmstack/form-validation`](./packages/form/validation/README.md):** A composable, type-safe, and localizable validation system designed for `@mmstack/form-core`.
 - **[`@mmstack/form-adapters`](./packages/form/adapters/README.md):** Headless, reusable state adapters for common form field types, bridging form logic and UI components.
 - **[`@mmstack/form-material`](./packages/form/material/README.md):** A set of Angular Material components that directly consume state adapters from `@mmstack/form-adapters` for easy form building.
+- **[`@mmstack/translate`](./packages/translate/README.md):** A modular & type safe solution to localization.
 
 **Upcoming Libraries:**
 

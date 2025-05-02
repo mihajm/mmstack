@@ -31,5 +31,5 @@
 		"": true,
 		"**/node_modules": false
 	},
-	"search.useIgnoreFiles": false
+	"search.useIgnoreFiles": true,
 }

@@ -115,7 +115,7 @@ const ns = createNamespace('quote', {
     minLength: 'Quote must be at least {min} characters long.',
   },
   stats: '{count, plural, one {# quote} other {# quotes}} available',
-} as const); // Note the as const, without it variable inference won't work correctly
+});
 
 export default ns.translation;
 
@@ -152,7 +152,7 @@ import q from './quote.namespace';
 // Register the namespace
 // Example: packages/quote/src/lib/quote.t.ts
 const r = registerNamespace(
-  q, // Default locale's compiled translation (functions as fallback if no locale of type provided)
+  () => import('./quote.namespace.ts').then((m) => m.default), // Default locale's compiled translation (functions as fallback if no locale of type provided)
   {
     // Map other locales to promise factories (dynamic imports)
     'sl-SI': () => import('./quote-sl.translation.ts').then((m) => m.default),
@@ -241,7 +241,7 @@ import { createNamespace } from '@mmstack/translate';
 const ns = createNamespace('common', {
   yes: 'Yes',
   no: 'No',
-} as const);
+});
 
 // ... rest
 
@@ -257,7 +257,7 @@ import { createAppNamespace } from '@org/common/locale'; // replace with your li
 // Create the namespace definition object
 const ns = createAppNamespace('quote', {
   pageTitle: 'Famous Quotes',
-} as const);
+});
 
 // registration & other stuff remains the same
 ```

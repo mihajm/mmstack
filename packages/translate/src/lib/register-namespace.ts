@@ -13,7 +13,7 @@ import {
 } from './compile';
 import { replaceWithDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';
-import { injectDefaultLocale, TranslationStore } from './translation.store';
+import { TranslationStore } from './translation.store';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyStringRecord = Record<string, any>;
@@ -111,7 +111,7 @@ export function registerNamespace<
     string
   >,
 >(
-  { namespace: ns, flat: defaultTranslation }: TDefault,
+  defaultTranslation: () => Promise<TDefault>,
   other: Record<string, () => Promise<TOther>>,
 ) {
   type $Map = inferCompiledTranslationMap<TDefault>;
@@ -124,22 +124,19 @@ export function registerNamespace<
     return addSignalFn(createT(store), store);
   };
 
+  let defaultTranslationLoaded = false;
   const resolver = async () => {
     const locale = inject(LOCALE_ID);
     const store = inject(TranslationStore);
-    const defaultLocale = injectDefaultLocale();
 
-    store.register(ns, {
-      [defaultLocale]: defaultTranslation,
-    });
+    const tPromise = other[locale] as (() => Promise<TOther>) | undefined;
 
-    if (locale === defaultLocale) return;
-
-    const promise = other[locale] as () => Promise<TOther>;
-
+    const promise = tPromise ?? defaultTranslation;
     if (!promise && isDevMode()) {
       return console.warn(`No translation found for locale: ${locale}`);
     }
+
+    if (promise === defaultTranslation && defaultTranslationLoaded) return;
 
     try {
       const translation = await promise();
@@ -150,9 +147,12 @@ export function registerNamespace<
         );
       }
 
-      store.register(ns, {
+      store.register(translation.namespace, {
         [locale]: translation.flat,
       });
+      if (promise === defaultTranslation) {
+        defaultTranslationLoaded = true;
+      }
     } catch {
       if (isDevMode()) {
         console.warn(`Failed to load translation for locale: ${locale}`);

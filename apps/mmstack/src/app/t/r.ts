@@ -1,7 +1,6 @@
 import { registerNamespace } from '@mmstack/translate';
-import t from './ns';
 
-const r = registerNamespace(t, {
+const r = registerNamespace(() => import('./ns').then((m) => m.default), {
   'sl-SI': () => {
     return import('./sl').then((m) => m.default);
   },

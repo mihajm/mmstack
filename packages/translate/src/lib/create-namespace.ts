@@ -31,7 +31,7 @@ type TranslationNamespace<
 };
 
 export function createNamespace<
-  T extends UnknownStringKeyObject,
+  const T extends UnknownStringKeyObject,
   TNS extends string,
 >(ns: TNS, translation: T) {
   const compiled = compileTranslation<T, TNS>(translation, ns);

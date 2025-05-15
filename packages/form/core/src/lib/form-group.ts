@@ -268,6 +268,17 @@ export function formGroup<
     return obj;
   });
 
+  const childrenValid = computed(() => {
+    if (!derivationsArray().length) return true;
+    return derivationsArray().every((d) => d.valid());
+  });
+
+  const childrenPending = computed(
+    () =>
+      !!derivationsArray().length &&
+      derivationsArray().some((d) => d.pending()),
+  );
+
   return {
     ...ctrl,
     children,
@@ -277,6 +288,8 @@ export function formGroup<
     ownError: ctrl.error,
     touched,
     error,
+    valid: computed(() => ctrl.valid() && childrenValid()),
+    pending: computed(() => ctrl.pending() || childrenPending()),
     markAllAsPristine,
     markAllAsTouched,
     reset: () => {

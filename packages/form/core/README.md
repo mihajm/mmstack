@@ -206,7 +206,7 @@ export class PostFormComponent {
   protected submit() {
     if (untracked(this.svc.loading)) return;
     const state = untracked(this.formState);
-    if (untracked(state.error)) return state.markAllAsTouched();
+    if (!untracked(state.valid)) return state.markAllAsTouched();
     const value = untracked(state.value);
     if (value.id === -1) this.svc.createPost(value);
     else this.svc.updatePost(value.id, untracked(state.partialValue));

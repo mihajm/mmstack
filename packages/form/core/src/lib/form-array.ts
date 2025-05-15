@@ -213,10 +213,21 @@ export function formArray<
     ctrl.forceReconcile(newValue);
   };
 
+  const childrenValid = computed(() => {
+    if (!children().length) return true;
+    return children().every((d) => d.valid());
+  });
+
+  const childrenPending = computed(
+    () => !!children().length && children().some((d) => d.pending()),
+  );
+
   return {
     ...ctrl,
     ownError,
     error,
+    valid: computed(() => ctrl.valid() && childrenValid()),
+    pending: computed(() => ctrl.pending() || childrenPending()),
     touched,
     children,
     dirty,

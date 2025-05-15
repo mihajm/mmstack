@@ -45,7 +45,11 @@ export type FormControlSignal<
   touched: Signal<boolean>;
   /** A signal containing the current validation error message (empty string if valid). */
   error: Signal<string>;
+  /** A signal indicating whether the control is pending */
+  pending: Signal<boolean>;
   /** A signal indicating whether the control is disabled. */
+  /** A signal indicating whether the control is in a valid state (without errors & not pending) */
+  valid: Signal<boolean>;
   disabled: Signal<boolean>;
   /** A signal indicating whether the control is read-only. */
   readonly: Signal<boolean>;
@@ -110,6 +114,7 @@ export type CreateFormControlOptions<
   onReset?: () => void;
   controlType?: TControlType;
   overrideValidation?: () => string;
+  pending?: () => boolean;
 };
 
 /**
@@ -204,6 +209,8 @@ export function formControl<
     }
   };
 
+  const pending = computed(() => opt?.pending?.() ?? false);
+
   return {
     id: opt?.id?.() ?? v7(),
     value,
@@ -214,6 +221,8 @@ export function formControl<
     required: computed(() => opt?.required?.() ?? false),
     disabled,
     readonly,
+    pending,
+    valid: computed(() => !pending() && !error()),
     hint: computed(() => opt?.hint?.() ?? ''),
     markAsTouched,
     markAllAsTouched,

@@ -10,6 +10,7 @@ import { createBooleanValidators } from './boolean';
 import { createDateValidators } from './date';
 import { createDateRangeValidators } from './date/date-range';
 import { defaultFormatDate, defaultToDate } from './date/util';
+import { createFileValidators } from './file';
 import { createGeneralValidators } from './general';
 import { createMergeValidators } from './merge-validators';
 import { createNumberValidators } from './number';
@@ -22,6 +23,7 @@ type MessageFactories = {
   date: Parameters<typeof createDateValidators>[0];
   array: Parameters<typeof createArrayValidators>[0];
   boolean: Parameters<typeof createBooleanValidators>[0];
+  file: Parameters<typeof createFileValidators>[0];
   merge: Parameters<typeof createMergeValidators>[0];
 };
 
@@ -46,6 +48,7 @@ export type Validators<TDate = Date> = {
   dateRange: ReturnType<typeof createDateRangeValidators<TDate>>;
   array: ReturnType<typeof createArrayValidators>;
   boolean: ReturnType<typeof createBooleanValidators>;
+  file: ReturnType<typeof createFileValidators>;
 };
 
 const token = new InjectionToken<Validators>('INTERNAL_MMSTACK_VALIDATORS');
@@ -95,6 +98,7 @@ function createValidators<TDate = Date>(
       general,
       merger,
     ),
+    file: createFileValidators(msg?.file, general, merger),
     array: createArrayValidators(msg?.array, merger),
     boolean: createBooleanValidators(msg?.boolean),
   };

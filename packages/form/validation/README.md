@@ -152,6 +152,7 @@ Use the following exported `Options` types with the corresponding `.all()` metho
 - DateValidatorOptions: `required`, `min`, `max`, `mustBe`, `not`, `oneOf`, `notOneOf`. (Date comparisons respect the configured `toDate` function).
 - ArrayValidatorOptions: `minLength`, `maxLength`. (Note: required for arrays usually means minLength: 1).
 - Boolean: Simple validators like `validators.boolean.mustBeTrue()` is available directly (no .all() method needed).
+- FileValidatorOptions: `required`, `accepts`, `rejects`, `maxSize`.
 
 Refer to the JSDoc for each Options type for detailed explanations of the properties. The validators.general group provides the base logic for required, mustBe, not, oneOf, notOneOf.
 

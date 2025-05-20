@@ -18,7 +18,7 @@ type TranslationNamespace<
   ) => CompiledTranslation<TShape, TNS, TLocale>;
   createMergedNamespace: <
     TOtherNS extends string,
-    TOther extends UnknownStringKeyObject,
+    const TOther extends UnknownStringKeyObject,
     TOtherCompiled extends CompiledTranslation<TOther, TOtherNS>,
   >(
     ns: TOtherNS,

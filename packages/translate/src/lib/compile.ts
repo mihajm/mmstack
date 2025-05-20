@@ -1,9 +1,9 @@
 import { prependDelim } from './delim';
-import {
+import type {
   inferTranslationParamMap,
   inferTranslationShape,
 } from './parameterize.type';
-import { UnknownStringKeyObject } from './string-key-object.type';
+import type { UnknownStringKeyObject } from './string-key-object.type';
 
 const INTERNAL_SYMBOL = Symbol.for('mmstack-translate-internal');
 

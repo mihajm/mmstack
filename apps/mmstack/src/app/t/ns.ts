@@ -1,7 +1,7 @@
 import { createNamespace } from '@mmstack/translate';
 
 const ns = createNamespace('app', {
-  yay: 'yay',
+  yay: 'test',
   greeting: 'Hello, {name}!',
 });
 

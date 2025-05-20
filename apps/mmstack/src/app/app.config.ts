@@ -39,7 +39,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     {
       provide: LOCALE_ID,
-      useValue: 'sl-SI',
+      useValue: 'en-US',
     },
     provideClientHydration(
       withEventReplay(),

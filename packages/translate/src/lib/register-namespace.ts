@@ -141,7 +141,11 @@ export function registerNamespace<
     try {
       const translation = await promise();
 
-      if (translation.locale !== locale && isDevMode()) {
+      if (
+        promise !== defaultTranslation &&
+        translation.locale !== locale &&
+        isDevMode()
+      ) {
         return console.warn(
           `Expected locale to be ${locale} but got ${translation.locale}`,
         );

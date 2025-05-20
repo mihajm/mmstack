@@ -9,7 +9,7 @@ import { injectT } from './t/r';
   selector: 'app-forms-playground',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [StringFieldComponent],
-  template: `hre{{ test() }}`,
+  template: `hre{{ test }}`,
 })
 export class FormsPlaygroundComponent {
   readonly state = injectCreateStringState()('', {
@@ -20,5 +20,5 @@ export class FormsPlaygroundComponent {
   });
   readonly t = injectT();
 
-  test = this.t.asSignal('app.yay');
+  test = this.t('app.yay');
 }

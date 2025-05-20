@@ -79,7 +79,7 @@ function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
     const varsSignal = isSignal(varsFn)
       ? varsFn
       : computed(varsFn, {
-          equal: createEqualsRecord(Object.keys(varsFn() as object)),
+          equal: createEqualsRecord(Object.keys(varsFn() ?? {})),
         });
 
     return computed(() => store.formatMessage(flatPath, varsSignal()));

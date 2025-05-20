@@ -13,9 +13,15 @@ type extractSelectOptions<TOpt extends string> =
       ? Option
       : never;
 
+type Trimmed<T extends string> = T extends `${infer Trimmed} ${infer _}`
+  ? Trimmed
+  : T extends `${infer _} ${infer Trimmed}`
+    ? Trimmed
+    : T;
+
 type extractSelectParam<TName extends string, TOpt extends string> = [
   TName,
-  Autocomplete<Exclude<extractSelectOptions<TOpt>, 'other'>>,
+  Autocomplete<Exclude<Trimmed<extractSelectOptions<TOpt>>, 'other'>>,
 ];
 
 type extractComplexParam<T extends string> = T extends
@@ -34,7 +40,7 @@ export type extractParams<T extends string> =
     : never;
 
 type mergeParams<TExtracted extends [string, any]> = {
-  [K in TExtracted[0]]: TExtracted[1];
+  [K in TExtracted as K[0]]: K[1];
 };
 
 type flattenParams<

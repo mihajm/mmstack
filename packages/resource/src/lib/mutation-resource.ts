@@ -109,12 +109,17 @@ export type MutationResourceRef<
    *
    * @param value The request body and any other request parameters to use for the mutation.  The `body` property is *required*.
    */
-  mutate: (value: NextRequest<TMethod, TMutation>, ctx?: TICTX) => void;
+  mutate: (
+    value: Omit<NextRequest<TMethod, TMutation> & { url?: string }, 'url'>,
+    ctx?: TICTX,
+  ) => void;
   /**
    * A signal that holds the current mutation request, or `null` if no mutation is in progress.
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
-  current: Signal<NextRequest<TMethod, TMutation> | null>;
+  current: Signal<
+    (Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string }) | null
+  >;
 };
 
 /**
@@ -159,7 +164,9 @@ export function mutationResource<
     equal: requestEqual,
   });
 
-  const nextRequest = signal<NextRequest<TMethod, TMutation> | null>(null, {
+  const nextRequest = signal<
+    (Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string }) | null
+  >(null, {
     equal: (a, b) => {
       if (!a && !b) return true;
       if (!a || !b) return false;
@@ -240,7 +247,7 @@ export function mutationResource<
     },
     mutate: (value, ictx) => {
       ctx = onMutate?.(
-        (value as HttpResourceRequest).body as TMutation,
+        (value as unknown as HttpResourceRequest).body as TMutation,
         ictx,
       ) as TCTX;
       nextRequest.set(value);

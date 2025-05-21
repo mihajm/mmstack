@@ -43,7 +43,7 @@ export type ArrayValidatorOptions = {
    * (e.g., 'items', 'users', 'tags'). Defaults typically to 'items'.
    * @example { minLength: 2, elementsLabel: 'tags' } // Error might be "Min 2 tags"
    */
-  elementsLabel?: string;
+  elementsLabel?: string | ((num: number) => string);
 };
 
 export function createArrayValidators(
@@ -62,9 +62,23 @@ export function createArrayValidators(
       const validators: Validator<T>[] = [];
 
       if (opt.minLength !== undefined)
-        validators.push(base.minLength(opt.minLength, opt.elementsLabel));
+        validators.push(
+          base.minLength(
+            opt.minLength,
+            typeof opt.elementsLabel === 'function'
+              ? opt.elementsLabel(opt.minLength)
+              : opt.elementsLabel,
+          ),
+        );
       if (opt.maxLength !== undefined)
-        validators.push(base.maxLength(opt.maxLength, opt.elementsLabel));
+        validators.push(
+          base.maxLength(
+            opt.maxLength,
+            typeof opt.elementsLabel === 'function'
+              ? opt.elementsLabel(opt.maxLength)
+              : opt.elementsLabel,
+          ),
+        );
 
       return merger(validators);
     },

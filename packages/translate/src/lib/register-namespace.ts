@@ -6,11 +6,7 @@ import {
   LOCALE_ID,
   Signal,
 } from '@angular/core';
-import {
-  CompiledTranslation,
-  inferCompiledTranslationMap,
-  inferCompiledTranslationShape,
-} from './compile';
+import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { replaceWithDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';
 import { TranslationStore } from './translation.store';
@@ -106,10 +102,7 @@ export function createT<TMap extends AnyStringRecord>(
 
 export function registerNamespace<
   TDefault extends CompiledTranslation<UnknownStringKeyObject, string>,
-  TOther extends CompiledTranslation<
-    inferCompiledTranslationShape<TDefault>,
-    string
-  >,
+  TOther extends CompiledTranslation<UnknownStringKeyObject, string>,
 >(
   defaultTranslation: () => Promise<TDefault>,
   other: Record<string, () => Promise<TOther>>,

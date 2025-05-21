@@ -19,6 +19,17 @@ import { createEqualRequest } from './util';
 
 /**
  * @internal
+ * Helper type for inferring the request body type based on the HTTP method.
+ */
+type NextRequest<
+  TMethod extends HttpResourceRequest['method'],
+  TMutation,
+> = TMethod extends 'DELETE' | 'delete'
+  ? Omit<HttpResourceRequest, 'body'>
+  : Omit<HttpResourceRequest, 'body'> & { body: TMutation };
+
+/**
+ * @internal
  * Helper type for tracking mutation status.
  */
 type StatusResult<TResult> =
@@ -85,6 +96,7 @@ export type MutationResourceRef<
   TResult,
   TMutation = TResult,
   TICTX = void,
+  TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 > = Omit<
   QueryResourceRef<TResult>,
   'prefetch' | 'value' | 'hasValue' | 'set' | 'update' // we don't allow manually viewing the returned data or updating it manually, prefetching a mutation also doesn't make any sense
@@ -94,17 +106,12 @@ export type MutationResourceRef<
    *
    * @param value The request body and any other request parameters to use for the mutation.  The `body` property is *required*.
    */
-  mutate: (
-    value: Omit<Partial<HttpResourceRequest>, 'body'> & { body: TMutation },
-    ctx?: TICTX,
-  ) => void;
+  mutate: (value: NextRequest<TMethod, TMutation>, ctx?: TICTX) => void;
   /**
    * A signal that holds the current mutation request, or `null` if no mutation is in progress.
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
-  current: Signal<
-    (Omit<Partial<HttpResourceRequest>, 'body'> & { body: TMutation }) | null
-  >;
+  current: Signal<NextRequest<TMethod, TMutation> | null>;
 };
 
 /**
@@ -133,10 +140,11 @@ export function mutationResource<
   TMutation = TResult,
   TCTX = void,
   TICTX = TCTX,
+  TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 >(
   request: () => Omit<Partial<HttpResourceRequest>, 'body'> | undefined | void,
   options: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
-): MutationResourceRef<TResult, TMutation, TICTX> {
+): MutationResourceRef<TResult, TMutation, TICTX, TMethod> {
   const { onMutate, onError, onSuccess, onSettled, equal, ...rest } = options;
 
   const requestEqual = createEqualRequest(equal);
@@ -145,9 +153,7 @@ export function mutationResource<
     equal: requestEqual,
   });
 
-  const nextRequest = signal<
-    (Omit<Partial<HttpResourceRequest>, 'body'> & { body: TMutation }) | null
-  >(null, {
+  const nextRequest = signal<NextRequest<TMethod, TMutation> | null>(null, {
     equal: (a, b) => {
       if (!a && !b) return true;
       if (!a || !b) return false;
@@ -164,10 +170,13 @@ export function mutationResource<
     const url = nr.url ?? base?.url;
     if (!url) return;
 
+    const method = nr.method ?? base?.method;
+
     return {
       ...base,
       ...nr,
       url,
+      method,
     };
   });
 
@@ -224,7 +233,10 @@ export function mutationResource<
       resource.destroy();
     },
     mutate: (value, ictx) => {
-      ctx = onMutate?.(value.body as TMutation, ictx) as TCTX;
+      ctx = onMutate?.(
+        (value as HttpResourceRequest).body as TMutation,
+        ictx,
+      ) as TCTX;
       nextRequest.set(value);
     },
     current: nextRequest,

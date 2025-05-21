@@ -110,7 +110,7 @@ export type MutationResourceRef<
    * @param value The request body and any other request parameters to use for the mutation.  The `body` property is *required*.
    */
   mutate: (
-    value: Omit<NextRequest<TMethod, TMutation> & { url?: string }, 'url'>,
+    value: Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string },
     ctx?: TICTX,
   ) => void;
   /**

@@ -25,8 +25,11 @@ type NextRequest<
   TMethod extends HttpResourceRequest['method'],
   TMutation,
 > = TMethod extends 'DELETE' | 'delete'
-  ? Omit<HttpResourceRequest, 'body'>
-  : Omit<HttpResourceRequest, 'body'> & { body: TMutation };
+  ? Omit<HttpResourceRequest, 'body' | 'method'> & { method?: TMethod }
+  : Omit<HttpResourceRequest, 'body' | 'method'> & {
+      body: TMutation;
+      method?: TMethod;
+    };
 
 /**
  * @internal
@@ -142,7 +145,10 @@ export function mutationResource<
   TICTX = TCTX,
   TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 >(
-  request: () => Omit<Partial<HttpResourceRequest>, 'body'> | undefined | void,
+  request: () =>
+    | Omit<NextRequest<TMethod, TMutation>, 'body'>
+    | undefined
+    | void,
   options: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
 ): MutationResourceRef<TResult, TMutation, TICTX, TMethod> {
   const { onMutate, onError, onSuccess, onSettled, equal, ...rest } = options;

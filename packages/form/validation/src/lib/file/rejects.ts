@@ -21,8 +21,9 @@ export function createRejectsValidator(
       const mimeType = value.type.toLowerCase();
 
       if (nonWildcards.has(mimeType)) return msg;
-      if (wildcards.length && wildcards.some((a) => mimeType.startsWith(a)))
-        return msg;
+
+      if (!wildcards.length) return '';
+      if (wildcards.some((a) => mimeType.startsWith(a))) return msg;
 
       return '';
     };

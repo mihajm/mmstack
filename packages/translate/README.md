@@ -61,33 +61,55 @@ import { provideIntlConfig } from '@mmstack/translate';
 
 const appConfig: Providers = [
   provideIntlConfig({
-    defaultLocale: 'fr-FR', // defaults to 'en-US' if nothing is provided
+    defaultLocale: 'en-US', // defaults to 'en-US' if nothing is provided
   }),
 ];
 ```
 
 ```typescript
-import { Component, LOCALE_ID } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+// DEMO impl, how you actually provide LOCALE_ID & what it's based on is up to you, it just has to be available when the resolvers are called
 
-const KNOWN_LOCALES = ['en-US', 'sl-SI'];
+import { Component, LOCALE_ID } from '@angular/core';
 
 @Component({
   selector: 'app-locale-shell',
-  providers: [
-    {
-      provide: LOCALE_ID,
-      useFactory: (route: ActivatedRoute) => {
-        const locale = route.snapshot.paramMap.get('locale') || 'en-US';
-        if (KNOWN_LOCALES.includes(locale)) return locale;
-        return 'en-US';
-      },
-      deps: [ActivatedRoute],
-    },
-  ],
-  template: `<ng-content />`,
+  template: `<router-outlet />`,
 })
 export class LocaleShellComponent {}
+
+// app.routes.ts
+import { Routes, ActivatedRouteSnapshot } from '@angular/router';
+import { Injectable, LOCALE_ID } from '@angular/core';
+import { QuoteComponent } from './quote.component';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class LocaleStore {
+  locale = 'en-US';
+}
+
+export const routes: Routes = [
+  {
+    path: ':locale',
+    component: LocaleShellComponent,
+    resolve: {
+      localeId: (route: ActivatedRouteSnapshot) => {
+        return route.params['locale'] || 'en-US';
+      },
+    },
+    providers: [
+      {
+        provide: LOCALE_ID,
+        useFactory: (store: LocaleStore) => {
+          return store.locale;
+        },
+        deps: [LocaleStore],
+      },
+    ],
+    loadChildren: () => import('./quote.routes').then((m) => m.QUOTE_ROUTES),
+  },
+];
 ```
 
 _Note:_ `@mmstack/translate` relies on Angular's `LOCALE_ID` provider. You must provide a value for it. How you determine this value (e.g., hardcoded, from server config, from URL segment via a factory provider) is up to your application's architecture. The library assumes this `LOCALE_ID` is static for the duration of the application session and requires a page refresh to change.
@@ -129,7 +151,7 @@ export const createQuoteTranslation = ns.createTranslation;
 import { createQuoteTranslation } from './quote.namespace';
 
 // shape is typesafe (errors if you have missing or additional keys)
-export default createQuoteTranslation({
+export default createQuoteTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   greeting: 'Zdravo {name}!',
   detail: {
@@ -152,10 +174,10 @@ import q from './quote.namespace';
 // Register the namespace
 // Example: packages/quote/src/lib/quote.t.ts
 const r = registerNamespace(
-  () => import('./quote.namespace.ts').then((m) => m.default), // Default locale's compiled translation (functions as fallback if no locale of type provided)
+  () => import('./quote.namespace').then((m) => m.default), // Default locale's compiled translation (functions as fallback if no locale of type provided)
   {
     // Map other locales to promise factories (dynamic imports)
-    'sl-SI': () => import('./quote-sl.translation.ts').then((m) => m.default),
+    'sl-SI': () => import('./quote-sl.translation').then((m) => m.default),
   },
 );
 
@@ -167,10 +189,10 @@ export const resolveQuoteTranslations = r.resolveNamespaceTranslation;
 import { type Routes } from '@angular/router';
 import { resolveQuoteTranslations } from './quote.t';
 
-export const MODULE_ROUTES: Routes = [
-  // ...
+// quote.routes.ts
+export const QUOTE_ROUTES: Routes = [
   {
-    // ...
+    // ... component at or above where the translations need to be available
     resolve: {
       resolveQuoteTranslations,
     },

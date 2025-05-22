@@ -1,18 +1,49 @@
-import { Route } from '@angular/router';
-import { FormsPlaygroundComponent } from './forms.component';
-import { resolver } from './t/r';
-import { TablePlaygroundComponent } from './table.component';
+import { Injectable, LOCALE_ID } from '@angular/core';
+import { ActivatedRouteSnapshot, Routes } from '@angular/router';
 
-export const appRoutes: Route[] = [
+import { Component, inject } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+
+@Component({
+  selector: 'app-locale-shell',
+
+  imports: [RouterOutlet],
+  template: `shell: {{ locale }} <router-outlet />`,
+})
+export class LocaleShellComponent {
+  protected readonly locale = inject(LOCALE_ID);
+}
+
+@Injectable({
+  providedIn: 'root',
+})
+export class LocaleStore {
+  locale = 'en-US';
+}
+
+export const routes: Routes = [
   {
-    path: 'forms',
-    component: FormsPlaygroundComponent,
+    path: ':locale',
+    component: LocaleShellComponent,
     resolve: {
-      resolver,
+      localeId: (route: ActivatedRouteSnapshot) => {
+        inject(LocaleStore).locale = route.params['locale'] || 'en-US';
+      },
     },
+    providers: [
+      {
+        provide: LOCALE_ID,
+        useFactory: (store: LocaleStore) => {
+          return store.locale;
+        },
+        deps: [LocaleStore],
+      },
+    ],
+    loadChildren: () => import('./quote.routes').then((m) => m.QUOTE_ROUTES),
   },
   {
-    path: 'table',
-    component: TablePlaygroundComponent,
+    path: '',
+    redirectTo: 'en-US',
+    pathMatch: 'full',
   },
 ];

@@ -37,7 +37,7 @@ export function injectDefaultLocale() {
 export class TranslationStore {
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
-  private readonly locale = inject(LOCALE_ID);
+  private readonly locale = signal(inject(LOCALE_ID));
   private readonly defaultLocale = injectDefaultLocale();
   private readonly translations = signal<
     Record<string, Record<string, string>>
@@ -47,12 +47,12 @@ export class TranslationStore {
 
   private readonly nonMessageConfig = computed(() => ({
     ...this.config,
-    locale: this.locale,
+    locale: this.locale(),
   }));
 
   private readonly messages = computed(
     () =>
-      this.translations()[this.locale] ??
+      this.translations()[this.locale()] ??
       this.translations()[this.defaultLocale] ??
       {},
   );
@@ -68,7 +68,7 @@ export class TranslationStore {
   );
 
   formatMessage(key: string, values?: Record<string, string | number>) {
-    const message = this.translations()[this.locale]?.[key] ?? '';
+    const message = this.translations()[this.locale()]?.[key] ?? '';
 
     if (!message) return '';
 
@@ -81,7 +81,10 @@ export class TranslationStore {
   register(
     namespace: string,
     flat: Partial<Record<string, Record<string, string>>>,
+    locale: string,
   ) {
+    console.log(locale);
+    this.locale.set(locale);
     this.translations.update((cur) => {
       return Object.entries(flat).reduce(
         (acc, [locale, translation]) => {

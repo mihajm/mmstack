@@ -27,7 +27,7 @@ import { PreloadLinkStrategy } from '@mmstack/router-core';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { delay } from 'rxjs';
-import { appRoutes } from './app.routes';
+import { routes } from './app.routes';
 
 function createDelayInterceptor(): HttpInterceptorFn {
   return (req, next) => {
@@ -121,7 +121,7 @@ export const appConfig: ApplicationConfig = {
         createDelayInterceptor(),
       ]),
     ),
-    provideRouter(appRoutes, withPreloading(PreloadLinkStrategy)),
+    provideRouter(routes, withPreloading(PreloadLinkStrategy)),
     provideValidatorConfig(
       (locale) => {
         // switch (locale) {

@@ -139,14 +139,19 @@ export function registerNamespace<
         translation.locale !== locale &&
         isDevMode()
       ) {
+        console.log('hre');
         return console.warn(
           `Expected locale to be ${locale} but got ${translation.locale}`,
         );
       }
 
-      store.register(translation.namespace, {
-        [locale]: translation.flat,
-      });
+      store.register(
+        translation.namespace,
+        {
+          [locale]: translation.flat,
+        },
+        locale,
+      );
       if (promise === defaultTranslation) {
         defaultTranslationLoaded = true;
       }

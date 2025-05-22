@@ -95,6 +95,8 @@ export const routes: Routes = [
     component: LocaleShellComponent,
     resolve: {
       localeId: (route: ActivatedRouteSnapshot) => {
+        const locale = route.params['locale'] || 'en-US';
+
         return route.params['locale'] || 'en-US';
       },
     },

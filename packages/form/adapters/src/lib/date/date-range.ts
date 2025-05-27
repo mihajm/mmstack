@@ -15,6 +15,7 @@ import {
 } from '@mmstack/form-core';
 import {
   injectValidators,
+  Validators,
   type DateRange,
   type DateValidatorOptions,
 } from '@mmstack/form-validation';
@@ -301,7 +302,7 @@ export type InjectedDateRangeStateOptions<TDate = Date> = Omit<
  */
 export function injectCreateDateRangeState() {
   const locale = inject(LOCALE_ID);
-  const validators = injectValidators();
+  const v = injectValidators();
 
   /**
    * Factory function (returned by `injectCreateDateRangeState`) that creates `DateRangeState`.
@@ -320,6 +321,8 @@ export function injectCreateDateRangeState() {
     value: DateRange<TDate> | DerivedSignal<TParent, DateRange<TDate>>,
     opt?: InjectedDateRangeStateOptions<TDate>,
   ): DateRangeState<TParent, TDate> => {
+    const validators = v as Validators<TDate>;
+
     const validationOptions = computed(() => ({
       messageOptions: {
         label: opt?.label?.(),
@@ -330,18 +333,9 @@ export function injectCreateDateRangeState() {
     const min = computed(() => validationOptions().min ?? null);
     const max = computed(() => validationOptions().max ?? null);
 
-    const mergedValidator = computed(() =>
+    const validator = computed(() =>
       validators.dateRange.all(validationOptions()),
     );
-
-    type ValidatorParam = Parameters<ReturnType<typeof mergedValidator>>[0];
-
-    const validator = computed(() => {
-      const merged = mergedValidator();
-      return (value: DateRange<TDate>) => {
-        return merged(value as ValidatorParam);
-      };
-    });
 
     const state = createDateRangeState<TParent, TDate>(value, {
       ...opt,
@@ -353,7 +347,7 @@ export function injectCreateDateRangeState() {
     });
 
     const resolvedError = computed(() => {
-      const merger = mergedValidator();
+      const merger = validator();
 
       return merger.resolve(state.errorTooltip() || state.error());
     });

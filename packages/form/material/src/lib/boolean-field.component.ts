@@ -4,6 +4,7 @@ import {
   computed,
   effect,
   input,
+  output,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
@@ -21,7 +22,7 @@ import { BooleanState, SignalErrorValidator } from './adapters';
     class: 'mm-boolean-field',
   },
   template: `
-    <div class="mm-checkbox-field-container">
+    <div class="mm-checkbox-field-container" (click)="containerClicked.emit()">
       <mat-checkbox
         class="mm-checkbox-field"
         [class.readonly]="state().readonly()"
@@ -32,6 +33,7 @@ import { BooleanState, SignalErrorValidator } from './adapters';
         [(ngModel)]="state().value"
         (ngModelChange)="state().markAsTouched()"
         [mmSignalError]="state().error()"
+        (click)="$event.stopPropagation()"
         >{{ state().label() }}</mat-checkbox
       >
 
@@ -43,6 +45,7 @@ import { BooleanState, SignalErrorValidator } from './adapters';
           [matTooltip]="state().hintTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
+          (click)="$event.stopPropagation()"
           >{{ state().hint() }}</span
         >
       }
@@ -53,6 +56,7 @@ import { BooleanState, SignalErrorValidator } from './adapters';
           [matTooltip]="state().errorTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
+          (click)="$event.stopPropagation()"
           >{{ state().error() }}</span
         >
       }
@@ -116,6 +120,7 @@ import { BooleanState, SignalErrorValidator } from './adapters';
 })
 export class BooleanFieldComponent<TParent = undefined> {
   readonly state = input.required<BooleanState<TParent>>();
+  readonly containerClicked = output<void>();
 
   private readonly model = viewChild.required(NgModel);
 

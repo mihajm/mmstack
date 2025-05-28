@@ -4,6 +4,7 @@ export * from './search';
 export {
   createSelectState,
   injectCreateSelectState,
+  InjectedSelectStateOptions,
   SelectState,
   SelectStateOptions,
 } from './select';

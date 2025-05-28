@@ -4,9 +4,9 @@ import {
   type AutocompleteStateOptions as GenericAutocompleteStateOptions,
   createAutocompleteState as genericCreateAutocompleteState,
   injectCreateAutocompleteState as genericInjectCreateAutocompleteState,
+  type InjectedAutocompleteStateOptions as GenericInjectedAutocompleteStateOptions,
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
-import { type StringValidatorOptions } from '@mmstack/form-validation';
 import {
   MaterialStringStateExtension,
   MaterialStringStateOptionsExtension,
@@ -23,6 +23,12 @@ export type AutocompleteStateOptions = GenericAutocompleteStateOptions &
   MaterialStringStateOptionsExtension & {
     panelWidth?: () => string | number;
   };
+
+export type InjectedAutocompleteStateOptions =
+  GenericInjectedAutocompleteStateOptions &
+    MaterialStringStateOptionsExtension & {
+      panelWidth?: () => string | number;
+    };
 
 function toMaterialSpecifics<TParent = undefined>(
   state: GenericAutocompleteState<TParent>,
@@ -46,9 +52,7 @@ export function injectCreateAutocompleteState() {
 
   return <TParent = undefined>(
     value: string | null | DerivedSignal<TParent, string | null>,
-    opt?: Omit<AutocompleteStateOptions, 'required' | 'validator'> & {
-      validation?: () => StringValidatorOptions;
-    },
+    opt?: InjectedAutocompleteStateOptions,
   ) => {
     return toMaterialSpecifics(factory(value, opt), opt);
   };

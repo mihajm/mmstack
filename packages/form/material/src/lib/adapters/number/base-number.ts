@@ -2,11 +2,11 @@ import { computed, type Signal } from '@angular/core';
 import {
   createNumberState as genericCreateNumberState,
   injectCreateNumberState as genericInjectCreateNumberState,
+  type InjectedNumberStateOptions as GenericInjectedNumberStateOptions,
   type NumberState as GenericNumberState,
   type NumberStateOptions as GenericNumberStateOptions,
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
-import { type NumberValidatorOptions } from '@mmstack/form-validation';
 
 export type MaterialNumberStateExtension = {
   prefixIcon?: Signal<string>;
@@ -20,6 +20,9 @@ export type NumberState<TParent = undefined> = GenericNumberState<TParent> &
   MaterialNumberStateExtension;
 
 export type NumberStateOptions = GenericNumberStateOptions &
+  MaterialNumberStateOptionsExtension;
+
+export type InjectedNumberStateOptions = GenericInjectedNumberStateOptions &
   MaterialNumberStateOptionsExtension;
 
 export function toMaterialNumberSpecifics<T>(
@@ -44,10 +47,7 @@ export function injectCreateNumberState() {
 
   return <TParent = undefined>(
     value: number | null | DerivedSignal<TParent, number | null>,
-    opt?: Omit<NumberStateOptions, 'required' | 'validator' | 'decimal'> & {
-      validation?: () => NumberValidatorOptions;
-      localizeDecimal?: () => boolean | string;
-    },
+    opt?: InjectedNumberStateOptions,
   ): NumberState<TParent> => {
     return toMaterialNumberSpecifics(factory(value, opt), opt);
   };

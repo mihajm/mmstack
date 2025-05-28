@@ -1,11 +1,12 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import {
-  type SelectState as GenericSelectState,
-  type SelectStateOptions as GenericSelectStateOptions,
   createSelectState as genericCreateSelectState,
   injectCreateSelectState as genericInjectCreateSelectState,
+  type InjectedSelectStateOptions as GenericInjectedSelectStateOptions,
+  type SelectState as GenericSelectState,
+  type SelectStateOptions as GenericSelectStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 
 export type MaterialSelectStateExtension = {
   disableOptionCentering?: Signal<boolean>;
@@ -29,6 +30,9 @@ export type MaterialSelectStateOptionsExtension = {
 
 export type SelectStateOptions<T> = GenericSelectStateOptions<T> &
   MaterialSelectStateOptionsExtension;
+
+export type InjectedSelectStateOptions<T> =
+  GenericInjectedSelectStateOptions<T> & MaterialSelectStateOptionsExtension;
 
 export function toMaterialSelectSpecifics<T>(
   state: T,

@@ -2,11 +2,11 @@ import { computed, Signal } from '@angular/core';
 import {
   createTextareaState as genericCreateTextareaState,
   injectCreateTextareaState as genericInjectCreateTextareaState,
+  type InjectedTextareaStateOptions as GenericInjectedTextareaStateOptions,
   type TextareaState as GenericTextareaState,
   type TextareaStateOptions as GenericTextareaStateOptions,
 } from '@mmstack/form-adapters';
 import { DerivedSignal } from '@mmstack/form-core';
-import { StringValidatorOptions } from '@mmstack/form-validation';
 
 export type TextareaState<TParent = undefined> =
   GenericTextareaState<TParent> & {
@@ -16,6 +16,11 @@ export type TextareaState<TParent = undefined> =
 export type TextareaStateOptions = GenericTextareaStateOptions & {
   autosize?: () => boolean;
 };
+
+export type InjectedTextareaStateOptions =
+  GenericInjectedTextareaStateOptions & {
+    autosize?: () => boolean;
+  };
 
 function toMaterialSpecifics<TParent>(
   state: GenericTextareaState<TParent>,
@@ -39,9 +44,7 @@ export function injectCreateTextareaState() {
 
   return <TParent = undefined>(
     value: string | null | DerivedSignal<TParent, string | null>,
-    opt?: Omit<TextareaStateOptions, 'required' | 'validator'> & {
-      validation?: () => StringValidatorOptions;
-    },
+    opt?: InjectedTextareaStateOptions,
   ): TextareaState<TParent> => {
     return toMaterialSpecifics(factory(value, opt), opt);
   };

@@ -4,6 +4,7 @@ import {
   type BooleanStateOptions as GenericBooleanStateOptions,
   createBooleanState as genericCreateBooleanState,
   injectCreateBooleanState as genericInjectCreateBooleanState,
+  type InjectedBooleanStateOptions as GenericInjectedBooleanStateOptions,
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
 
@@ -19,6 +20,9 @@ export type MaterialBooleanStateOptionsExtension = {
 };
 
 export type BooleanStateOptions = GenericBooleanStateOptions &
+  MaterialBooleanStateOptionsExtension;
+
+export type InjectedBooleanStateOptions = GenericInjectedBooleanStateOptions &
   MaterialBooleanStateOptionsExtension;
 
 export function toMaterialBooleanSpecifics<T>(
@@ -43,11 +47,7 @@ export function injectCreateBooleanState() {
 
   return <TParent = undefined>(
     value: boolean | DerivedSignal<TParent, boolean>,
-    opt?: Omit<BooleanStateOptions, 'validator'> & {
-      validation?: () => {
-        requireTrue?: boolean;
-      };
-    },
+    opt?: InjectedBooleanStateOptions,
   ): BooleanState<TParent> => {
     return toMaterialBooleanSpecifics(factory(value, opt), opt);
   };

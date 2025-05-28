@@ -2,6 +2,7 @@ import { computed, Signal } from '@angular/core';
 import {
   type ButtonGroupState as GenericButtonGroupState,
   type ButtonGroupStateOptions as GenericButtonGroupStateOptions,
+  type InjectedButtonGroupStateOptions as GenericInjectedButtonGroupStateOptions,
   createButtonGroupState as genericCreateButtonGroupState,
   injectCreateButtonGroupState as genericInjectCreateButtonGroupState,
 } from '@mmstack/form-adapters';
@@ -19,6 +20,12 @@ export type ButtonGroupStateOptions<T> = GenericButtonGroupStateOptions<T> & {
   hideSingleSelectionIndicator?: () => boolean;
   vertical?: () => boolean;
 };
+
+export type InjectedButtonGroupStateOptions<T> =
+  GenericInjectedButtonGroupStateOptions<T> & {
+    hideSingleSelectionIndicator?: () => boolean;
+    vertical?: () => boolean;
+  };
 
 function toMaterialSpecifics<T, TParent = undefined>(
   state: GenericButtonGroupState<T, TParent>,
@@ -45,7 +52,7 @@ export function injectCreateButtonGroupState() {
 
   return <T, TParent = undefined>(
     value: T | DerivedSignal<TParent, T>,
-    opt: ButtonGroupStateOptions<T>,
+    opt: InjectedButtonGroupStateOptions<T>,
   ): ButtonGroupState<T, TParent> => {
     return toMaterialSpecifics(factory(value, opt), opt);
   };

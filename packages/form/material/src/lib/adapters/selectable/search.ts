@@ -1,14 +1,15 @@
 import { computed, Signal } from '@angular/core';
 import {
-  type SearchState as GenericSearchState,
-  type SearchStateOptions as GenericSearchStateOptions,
   createSearchState as genericCreateSearchState,
   injectCreateSearchState as genericInjectCreateSearchState,
+  type InjectedSearchStateOptions as GenericInjectedSearchStateOptions,
+  type SearchState as GenericSearchState,
+  type SearchStateOptions as GenericSearchStateOptions,
 } from '@mmstack/form-adapters';
 import { DerivedSignal } from '@mmstack/form-core';
 import {
-  MaterialSelectStateExtension,
-  MaterialSelectStateOptionsExtension,
+  type MaterialSelectStateExtension,
+  type MaterialSelectStateOptionsExtension,
   toMaterialSelectSpecifics,
 } from './select';
 
@@ -24,6 +25,9 @@ export type SearchStateOptions<T> = GenericSearchStateOptions<T> &
   MaterialSelectStateOptionsExtension & {
     searchPlaceholder?: () => string;
   };
+
+export type InjectedSearchStateOptions<T> =
+  GenericInjectedSearchStateOptions<T> & MaterialSelectStateOptionsExtension;
 
 function toMaterialSpecifics<T, TParent>(
   state: GenericSearchState<T, TParent>,
@@ -47,11 +51,7 @@ export function injectCreateSearchState() {
 
   return <T, TParent = undefined>(
     value: T | DerivedSignal<TParent, T>,
-    opt: Omit<SearchStateOptions<T>, 'required' | 'validator'> & {
-      validation?: () => {
-        required?: boolean;
-      };
-    },
+    opt: InjectedSearchStateOptions<T>,
   ) => {
     return toMaterialSpecifics(factory(value, opt), opt);
   };

@@ -1,6 +1,7 @@
 import {
   createToggleState as genericCreateToggleState,
   injectCreateToggleState as genericInjectCreateToggleState,
+  type InjectedToggleStateOptions as GenericInjectedToggleStateOptions,
   type ToggleState as GenericToggleState,
   type ToggleStateOptions as GenericToggleStateOptions,
 } from '@mmstack/form-adapters';
@@ -17,6 +18,9 @@ export type ToggleState<TParent = undefined> = GenericToggleState<TParent> &
 export type ToggleStateOptions = GenericToggleStateOptions &
   MaterialBooleanStateOptionsExtension;
 
+export type InjectedToggleStateOptions = GenericInjectedToggleStateOptions &
+  MaterialBooleanStateOptionsExtension;
+
 export function createToggleState<TParent = undefined>(
   value: boolean | DerivedSignal<TParent, boolean>,
   opt?: ToggleStateOptions,
@@ -29,11 +33,7 @@ export function injectCreateToggleState() {
 
   return <TParent = undefined>(
     value: boolean | DerivedSignal<TParent, boolean>,
-    opt?: Omit<ToggleStateOptions, 'validator'> & {
-      validation?: () => {
-        requireTrue?: boolean;
-      };
-    },
+    opt?: InjectedToggleStateOptions,
   ): ToggleState<TParent> => {
     return toMaterialBooleanSpecifics(factory(value, opt), opt);
   };

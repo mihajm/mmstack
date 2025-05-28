@@ -2,11 +2,11 @@ import { computed, type Signal } from '@angular/core';
 import {
   createStringState as genericCreateStringState,
   injectCreateStringState as genericInjectCreateStringState,
+  type InjectedStringStateOptions as GenericInjectedStringStateOptions,
   type StringState as GenericStringState,
   type StringStateOptions as GenericStringStateOptions,
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
-import { type StringValidatorOptions } from '@mmstack/form-validation';
 
 export type MaterialStringStateExtension = {
   prefixIcon?: Signal<string>;
@@ -20,6 +20,9 @@ export type StringState<TParent = undefined> = GenericStringState<TParent> &
   MaterialStringStateExtension;
 
 export type StringStateOptions = GenericStringStateOptions &
+  MaterialStringStateOptionsExtension;
+
+export type InjectedStringStateOptions = GenericInjectedStringStateOptions &
   MaterialStringStateOptionsExtension;
 
 export function toMaterialStringSpecifics<T>(
@@ -44,9 +47,7 @@ export function injectCreateStringState() {
 
   return <TParent = undefined>(
     value: string | null | DerivedSignal<TParent, string | null>,
-    opt?: Omit<StringStateOptions, 'required' | 'validator'> & {
-      validation?: () => StringValidatorOptions;
-    },
+    opt?: InjectedStringStateOptions,
   ): StringState<TParent> => {
     return toMaterialStringSpecifics(factory(value, opt), opt);
   };

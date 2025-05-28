@@ -1,11 +1,11 @@
 import {
-  type MultiSelectState as GenericMultiSelectState,
-  type MultiSelectStateOptions as GenericMultiSelectStateOptions,
   createMultiSelectState as genericCreateMultiSelectState,
   injectCreateMultiSelectState as genericInjectCreateMultiSelectState,
+  type InjectedMultiSelectStateOptions as GenericInjectedMultiSelectStateOptions,
+  type MultiSelectState as GenericMultiSelectState,
+  type MultiSelectStateOptions as GenericMultiSelectStateOptions,
 } from '@mmstack/form-adapters';
 import { DerivedSignal } from '@mmstack/form-core';
-import { ArrayValidatorOptions } from '@mmstack/form-validation';
 import {
   MaterialSelectStateExtension,
   MaterialSelectStateOptionsExtension,
@@ -19,6 +19,10 @@ export type MultiSelectState<
 
 export type MultiSelectStateOptions<T extends any[]> =
   GenericMultiSelectStateOptions<T> & MaterialSelectStateOptionsExtension;
+
+export type InjectedMultiSelectStateOptions<T extends any[]> =
+  GenericInjectedMultiSelectStateOptions<T> &
+    MaterialSelectStateOptionsExtension;
 
 export function createMultiSelectState<T extends any[], TParent = undefined>(
   value: T | DerivedSignal<TParent, T>,
@@ -35,9 +39,7 @@ export function injectCreateMultiSelectState() {
 
   return <T extends any[], TParent = undefined>(
     value: T | DerivedSignal<TParent, T>,
-    opt: Omit<MultiSelectStateOptions<T>, 'required' | 'validator'> & {
-      validation?: () => ArrayValidatorOptions;
-    },
+    opt: InjectedMultiSelectStateOptions<T>,
   ): MultiSelectState<T, TParent> => {
     return toMaterialSelectSpecifics(factory(value, opt), opt);
   };

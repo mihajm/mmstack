@@ -27,7 +27,10 @@ export type SearchStateOptions<T> = GenericSearchStateOptions<T> &
   };
 
 export type InjectedSearchStateOptions<T> =
-  GenericInjectedSearchStateOptions<T> & MaterialSelectStateOptionsExtension;
+  GenericInjectedSearchStateOptions<T> &
+    MaterialSelectStateOptionsExtension & {
+      searchPlaceholder?: () => string;
+    };
 
 function toMaterialSpecifics<T, TParent>(
   state: GenericSearchState<T, TParent>,

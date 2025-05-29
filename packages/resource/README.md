@@ -23,7 +23,7 @@
 1. Install mmstack-resource
 
 ```bash
-npm install @mmstack/primitives
+npm install @mmstack/resource
 ```
 
 2. Initialize the QueryCache & interceptors (optional)

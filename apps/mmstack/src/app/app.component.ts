@@ -1,8 +1,8 @@
 import { JsonPipe } from '@angular/common';
-import { Component, effect, signal } from '@angular/core';
+import { Component, effect, inject, Injector, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
-import { debounced, throttled, withHistory } from '@mmstack/primitives';
+import { debounced, throttled, until, withHistory } from '@mmstack/primitives';
 
 @Component({
   selector: 'app-throttle-demo',
@@ -54,17 +54,28 @@ export class ThrottleDemoComponent {
     </div>
     <p>History Stack:</p>
     <pre>{{ text.history() | json }}</pre>
+
+    {{ count() }}
+    <button (click)="run()">run</button>
+    <button (click)="count.set(count() + 1)">Increment Count</button>
   `,
 })
 export class HistoryDemoComponent {
   // Create a signal and immediately enhance it with history capabilities.
   text = withHistory(signal('Hello, type something!'), { maxSize: 10 });
+  private injector = inject(Injector);
+  count = signal(0);
 
   constructor() {
     // You can react to history changes as well
     effect(() => {
       console.log('History stack changed:', this.text.history());
     });
+  }
+
+  async run() {
+    const final = await until(this.count, (c) => c > 5, {});
+    console.log('Final count reached:', final);
   }
 }
 

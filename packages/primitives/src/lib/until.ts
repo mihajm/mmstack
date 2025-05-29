@@ -3,6 +3,8 @@ import {
   effect,
   EffectRef,
   inject,
+  Injector,
+  runInInjectionContext,
   Signal,
   untracked,
 } from '@angular/core';
@@ -19,6 +21,7 @@ export type UntilOptions = {
    * If not provided, it will attempt to inject one if called in an injection context.
    */
   destroyRef?: DestroyRef;
+  injector?: Injector;
 };
 
 /**
@@ -61,6 +64,7 @@ export function until<T>(
   predicate: (value: T) => boolean,
   options: UntilOptions = {},
 ): Promise<T> {
+  const injector = options.injector ?? inject(Injector);
   return new Promise<T>((resolve, reject) => {
     let effectRef: EffectRef | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -110,15 +114,17 @@ export function until<T>(
       );
     }
 
-    effectRef = effect(() => {
-      if (settled) {
-        return effectRef?.destroy();
-      }
+    runInInjectionContext(injector, () => {
+      effectRef = effect(() => {
+        if (settled) {
+          return effectRef?.destroy();
+        }
 
-      const currentValue = sourceSignal();
-      if (predicate(currentValue)) {
-        cleanupAndResolve(currentValue);
-      }
+        const currentValue = sourceSignal();
+        if (predicate(currentValue)) {
+          cleanupAndResolve(currentValue);
+        }
+      });
     });
   });
 }

@@ -5,6 +5,7 @@ import {
   inject,
   type Signal,
   signal,
+  untracked,
   type WritableSignal,
 } from '@angular/core';
 import { toWritable } from './to-writable';
@@ -48,63 +49,74 @@ export type DebouncedSignal<T> = WritableSignal<T> & {
 };
 
 /**
- * Creates a `WritableSignal` whose publicly readable value is updated only after
- * a specified debounce period (`ms`) has passed since the last call to its
- * `.set()` or `.update()` method.
+ * A convenience function that creates and debounces a new `WritableSignal` in one step.
  *
- * This implementation avoids using `effect` by leveraging intermediate `computed`
- * signals and a custom `equal` function to delay value propagation based on a timer.
+ * @see {debounce} for the core implementation details.
  *
  * @template T The type of value the signal holds.
  * @param initial The initial value of the signal.
- * @param opt Options for signal creation, including:
- * - `ms`: The debounce time in milliseconds. Defaults to 0 if omitted (no debounce).
- * - Other `CreateSignalOptions` (like `equal`) are passed to underlying signals.
- * @returns A `DebouncedSignal<T>` instance. Its readable value updates are debounced,
- * and it includes an `.original` property providing immediate access to the latest set value.
+ * @param opt Options for signal creation, including debounce time `ms`.
+ * @returns A `DebouncedSignal<T>` instance.
  *
  * @example
- * ```ts
- * import { effect } from '@angular/core';
- *
- * // Create a debounced signal with a 500ms delay
+ * // The existing example remains perfect here.
  * const query = debounced('', { ms: 500 });
- *
- * effect(() => {
- * // This effect runs 500ms after the last change to 'query'
- * console.log('Debounced Query:', query());
- * });
- *
- * effect(() => {
- * // This effect runs immediately when 'query.original' changes
- * console.log('Original Query:', query.original());
- * });
- *
- * console.log('Setting query to "a"');
- * query.set('a');
- * // Output: Original Query: a
- *
- * setTimeout(() => {
- * console.log('Setting query to "ab"');
- * query.set('ab');
- * // Output: Original Query: ab
- * }, 200); // Before debounce timeout
- *
- * setTimeout(() => {
- * console.log('Setting query to "abc"');
+ * effect(() => console.log('Debounced Query:', query()));
  * query.set('abc');
- * // Output: Original Query: abc
- * }, 400); // Before debounce timeout
- *
- * // ~500ms after the *last* set (at 400ms), the debounced effect runs:
- * // Output (at ~900ms): Debounced Query: abc
- * ```
+ * // ...500ms later...
+ * // Output: Debounced Query: abc
  */
 export function debounced<T>(
   initial: T,
   opt?: CreateDebouncedOptions<T>,
 ): DebouncedSignal<T> {
-  const internal = signal(initial, opt);
+  return debounce(signal(initial, opt), opt);
+}
+
+/**
+ * Wraps an existing `WritableSignal` to create a new one whose readable value is debounced.
+ *
+ * This implementation avoids using `effect` by pairing a trigger signal with an `untracked`
+ * read of the source signal to control when the debounced value is re-evaluated.
+ *
+ * @template T The type of value the signal holds.
+ * @param source The source `WritableSignal` to wrap. Writes are applied to this signal immediately.
+ * @param opt Options for debouncing, including debounce time `ms` and an optional `DestroyRef`.
+ * @returns A new `DebouncedSignal<T>` whose read value is debounced. The `.original` property
+ * of the returned signal is a reference back to the provided `source` signal.
+ *
+ * @example
+ * ```ts
+ * import { signal, effect } from '@angular/core';
+ *
+ * // 1. Create a standard source signal.
+ * const sourceQuery = signal('');
+ *
+ * // 2. Create a debounced version of it.
+ * const debouncedQuery = debounce(sourceQuery, { ms: 500 });
+ *
+ * // This effect tracks the original signal and runs immediately.
+ * effect(() => {
+ * console.log('Original Query:', debouncedQuery.original());
+ * });
+ *
+ * // This effect tracks the debounced signal and runs after the delay.
+ * effect(() => {
+ * console.log('Debounced Query:', debouncedQuery());
+ * });
+ *
+ * console.log('Setting query to "a"');
+ * debouncedQuery.set('a');
+ * // Output: Original Query: a
+ *
+ * // ...500ms later...
+ * // Output: Debounced Query: a
+ * ```
+ */
+export function debounce<T>(
+  source: WritableSignal<T>,
+  opt?: CreateDebouncedOptions<T>,
+): DebouncedSignal<T> {
   const ms = opt?.ms ?? 0;
 
   const trigger = signal(false);
@@ -123,40 +135,31 @@ export function debounced<T>(
     // not in injection context & no destroyRef provided opting out of cleanup
   }
 
-  const set = (value: T) => {
+  const triggerFn = (afterClean: () => void) => {
     if (timeout) clearTimeout(timeout);
-    internal.set(value);
-
+    afterClean();
     timeout = setTimeout(() => {
       trigger.update((c) => !c);
     }, ms);
+  };
+
+  const set = (value: T) => {
+    triggerFn(() => source.set(value));
   };
 
   const update = (fn: (prev: T) => T) => {
-    if (timeout) clearTimeout(timeout);
-    internal.update(fn);
-
-    timeout = setTimeout(() => {
-      trigger.update((c) => !c);
-    }, ms);
+    triggerFn(() => source.update(fn));
   };
 
-  const stable = computed(
-    () => ({
-      trigger: trigger(),
-      value: internal(),
-    }),
-    {
-      equal: (a, b) => a.trigger === b.trigger,
-    },
-  );
-
   const writable = toWritable(
-    computed(() => stable().value, opt),
+    computed(() => {
+      trigger();
+      return untracked(source);
+    }, opt),
     set,
     update,
   ) as DebouncedSignal<T>;
-  writable.original = internal;
+  writable.original = source;
 
   return writable;
 }

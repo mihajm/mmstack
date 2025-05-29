@@ -30,7 +30,7 @@ Creates a WritableSignal where the propagation of its value (after calls to .set
 
 ```typescript
 import { Component, signal, effect } from '@angular/core';
-import { debounced } from '@mmstack/primitives';
+import { debounced, debounce } from '@mmstack/primitives';
 import { FormsModule } from '@angular/forms';
 
 @Component({
@@ -51,6 +51,15 @@ export class SearchComponent {
     });
   }
 }
+```
+
+You can also debounce an existing signal:
+
+```typescript
+import { debounce } from '@mmstack/primitives';
+
+const query = signal('');
+const debouncedQuery = debounce(query, { ms: 300 });
 ```
 
 ### mutable

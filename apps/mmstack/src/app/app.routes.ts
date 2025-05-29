@@ -1,49 +1,23 @@
-import { Injectable, LOCALE_ID } from '@angular/core';
-import { ActivatedRouteSnapshot, Routes } from '@angular/router';
-
-import { Component, inject } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
-
-@Component({
-  selector: 'app-locale-shell',
-
-  imports: [RouterOutlet],
-  template: `shell: {{ locale }} <router-outlet />`,
-})
-export class LocaleShellComponent {
-  protected readonly locale = inject(LOCALE_ID);
-}
-
-@Injectable({
-  providedIn: 'root',
-})
-export class LocaleStore {
-  locale = 'en-US';
-}
+import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
-    path: ':locale',
-    component: LocaleShellComponent,
-    resolve: {
-      localeId: (route: ActivatedRouteSnapshot) => {
-        inject(LocaleStore).locale = route.params['locale'] || 'en-US';
-      },
-    },
-    providers: [
-      {
-        provide: LOCALE_ID,
-        useFactory: (store: LocaleStore) => {
-          return store.locale;
-        },
-        deps: [LocaleStore],
-      },
-    ],
-    loadChildren: () => import('./quote.routes').then((m) => m.QUOTE_ROUTES),
+    path: 'home',
+    loadComponent: () =>
+      import('./home.component').then((c) => c.HomeComponent),
+  },
+  {
+    path: 'about',
+    loadComponent: () =>
+      import('./about.component').then((c) => c.AboutComponent),
+  },
+  {
+    path: 'quote',
+    loadChildren: () => import('./quote.routes').then((m) => m.routes),
   },
   {
     path: '',
-    redirectTo: 'en-US',
+    redirectTo: 'home',
     pathMatch: 'full',
   },
 ];

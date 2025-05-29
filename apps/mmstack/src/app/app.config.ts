@@ -15,14 +15,18 @@ import {
   withEventReplay,
   withHttpTransferCacheOptions,
 } from '@angular/platform-browser';
-import { provideRouter, withPreloading } from '@angular/router';
+import {
+  provideRouter,
+  withComponentInputBinding,
+  withPreloading,
+} from '@angular/router';
 import { provideValidatorConfig } from '@mmstack/form-material';
 import {
   createCacheInterceptor,
   createDedupeRequestsInterceptor,
   provideQueryCache,
 } from '@mmstack/resource';
-import { PreloadLinkStrategy } from '@mmstack/router-core';
+import { MMPreloadStrategy } from '@mmstack/router-preload';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { routes } from './app.routes';
@@ -112,7 +116,11 @@ export const appConfig: ApplicationConfig = {
         createDedupeRequestsInterceptor(),
       ]),
     ),
-    provideRouter(routes, withPreloading(PreloadLinkStrategy)),
+    provideRouter(
+      routes,
+      withComponentInputBinding(),
+      withPreloading(MMPreloadStrategy),
+    ),
     provideValidatorConfig(
       (locale) => {
         // switch (locale) {

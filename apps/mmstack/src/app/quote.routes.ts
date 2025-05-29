@@ -1,14 +1,35 @@
-import { type Routes } from '@angular/router';
-import { QuoteComponent } from './quote.component';
-import { resolveQuoteTranslations } from './quote.r';
+import { Component } from '@angular/core';
+import { RouterOutlet, Routes } from '@angular/router';
+import { IdentifiedComponent } from './identified.component';
 
-// quote.routes.ts
-export const QUOTE_ROUTES: Routes = [
+@Component({
+  selector: 'app-quote-shell',
+  imports: [RouterOutlet],
+  template: `
+    <h1>Quote Feature Shell</h1>
+    <router-outlet></router-outlet>
+  `,
+})
+export class QuoteShellComponent {}
+
+export const routes: Routes = [
   {
-    component: QuoteComponent,
-    path: 'quote',
-    resolve: {
-      resolveQuoteTranslations,
-    },
+    path: '',
+    component: QuoteShellComponent,
+    children: [
+      {
+        path: 'child',
+        loadComponent: () =>
+          import('./quote-child.component').then((c) => c.QuoteChildrComponent),
+      },
+      {
+        path: ':id',
+        component: IdentifiedComponent,
+      },
+    ],
+  },
+  {
+    path: '**',
+    redirectTo: '',
   },
 ];

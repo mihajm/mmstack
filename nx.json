@@ -66,7 +66,7 @@
     }
   },
   "release": {
-    "projects": ["packages/**", "!packages/table-**"],
+    "projects": ["packages/**", "!packages/table-**", "router-preload"],
     "releaseTagPattern": "{projectName}@{version}",
     "projectsRelationship": "independent",
     "changelog": {

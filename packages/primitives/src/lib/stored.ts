@@ -79,6 +79,16 @@ export type CreateStoredOptions<T> = CreateSignalOptions<T> & {
    * Requires a browser environment. Defaults to `false`.
    */
   syncTabs?: boolean;
+  /**
+   * Optional parameter to specify how key changes should be handled, load is the default.
+   * - `load`: The signal will load the value from storage when the key changes & replace the signal's value.
+   * - `store`: The signal will store the current value to the new key when the key changes.
+   */
+  onKeyChange?: 'load' | 'store';
+  /**
+   * If 'true', the signal will remove the old key from storage when the key changes, defaults to `false`.
+   */
+  cleanupOldKey?: boolean;
 };
 
 /**
@@ -161,6 +171,8 @@ export function stored<T>(
     deserialize = JSON.parse,
     syncTabs = false,
     equal = Object.is,
+    onKeyChange = 'load',
+    cleanupOldKey = false,
     ...rest
   }: CreateStoredOptions<T>,
 ): StoredSignal<T> {
@@ -204,7 +216,8 @@ export function stored<T>(
     equal,
   };
 
-  const internal = signal(getValue(untracked(keySig)), {
+  const initialKey = untracked(keySig);
+  const internal = signal(getValue(initialKey), {
     ...opt,
     equal: (a, b) => {
       if (a === null && b === null) return true;
@@ -213,7 +226,31 @@ export function stored<T>(
     },
   });
 
-  effect(() => storeValue(keySig(), internal()));
+  let prevKey = initialKey;
+
+  if (onKeyChange === 'store') {
+    effect(() => {
+      const k = keySig();
+      storeValue(k, internal());
+      if (prevKey !== k) {
+        if (cleanupOldKey) store.removeItem(prevKey);
+        prevKey = k;
+      }
+    });
+  } else {
+    effect(() => {
+      const k = keySig();
+
+      if (k === prevKey) {
+        return storeValue(k, internal()); // normal operation
+      } else {
+        if (cleanupOldKey) store.removeItem(prevKey);
+        const value = getValue(k);
+        internal.set(value); // load new value
+        prevKey = k;
+      }
+    });
+  }
 
   if (syncTabs && !isServer) {
     const destroyRef = inject(DestroyRef);

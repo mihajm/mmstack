@@ -47,22 +47,37 @@ export type MutableSignal<T> = WritableSignal<T> & {
  * Creates a `MutableSignal`. This function overloads the standard `signal` function to provide
  * the additional `mutate` and `inline` methods.
  *
- * @typeParam T - The type of value held by the signal.
- *
- * @param initial - The initial value of the signal.  If no initial value is provided, it defaults to `undefined`.
- * @param options - Optional. An object containing signal options, including a custom equality function (`equal`).
- *
+ * @typeParam T The type of value held by the signal.
+ * @param initial The initial value of the signal.
+ * @param options Optional signal options, including a custom `equal` function.
  * @returns A `MutableSignal` instance.
  *
+ * ### Important Note on `computed` Signals
+ *
+ * When creating a `computed` signal that derives a non-primitive value (e.g., an object or array)
+ * from a `mutable` signal, you **must** provide the `{ equal: false }` option to the `computed`
+ * function.
+ *
+ * This is because a `.mutate()` call notifies its dependents that it has changed, but if the
+ * reference to a derived object hasn't changed, the `computed` signal will not trigger its
+ * own dependents by default.
+ *
  * @example
- * // Create a mutable signal with an initial value:
- * const mySignal = mutable({ count: 0 }) // MutableSignal<{ count: number }>;
+ * ```ts
+ * const state = mutable({ user: { name: 'John' }, lastUpdated: new Date() });
  *
- * // Create a mutable signal with no initial value (starts as undefined):
- * const = mutable<number>(); // MutableSignal<number | undefined>
+ * // ✅ CORRECT: Deriving a primitive value works as expected.
+ * const name = computed(() => state().user.name);
  *
- * // Create a mutable signal with a custom equality function:
- * const myCustomSignal = mutable({ a: 1 }, { equal: (a, b) => a.a === b.a });
+ * // ❌ INCORRECT: This will not update reliably after the first change.
+ * const userObject = computed(() => state().user);
+ *
+ * // ✅ CORRECT: For object derivations, `equal: false` is required.
+ * const userObjectFixed = computed(() => state().user, { equal: false });
+ *
+ * // This mutation will now correctly trigger effects depending on `userObjectFixed`.
+ * state.mutate(s => s.lastUpdated = new Date());
+ * ```
  */
 export function mutable<T>(): MutableSignal<T | undefined>;
 export function mutable<T>(initial: T): MutableSignal<T>;

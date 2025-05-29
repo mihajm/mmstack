@@ -61,6 +61,9 @@ import {
  * { equal: (a, b) => a.id === b.id && a.name === b.name }
  * );
  * ```
+ * @remarks
+ * This function achieves its high performance by leveraging the new `linkedSignal`
+ * API from Angular, which allows for efficient memoization and reuse of array items.
  */
 export function mapArray<T, U>(
   source: () => T[],

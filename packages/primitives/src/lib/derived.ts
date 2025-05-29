@@ -42,21 +42,26 @@ export type DerivedSignal<T, U> = WritableSignal<U> & {
 };
 
 /**
- * Creates a `DerivedSignal` that derives its value from another `WritableSignal` (the source signal).
+ * Creates a `DerivedSignal` that derives its value from another `WritableSignal`.
  * This overload provides the most flexibility, allowing you to specify custom `from` and `onChange` functions.
  *
- * @typeParam T - The type of the source signal's value.
- * @typeParam U - The type of the derived signal's value.
- * @param source - The source `WritableSignal`.
- * @param options - An object containing the `from` and `onChange` functions, and optional signal options.
+ * @typeParam T The type of the source signal's value.
+ * @typeParam U The type of the derived signal's value.
+ * @param source The source `WritableSignal`.
+ * @param options An object containing the `from` and `onChange` functions, and optional signal options.
  * @returns A `DerivedSignal` instance.
  *
  * @example
+ * ```ts
  * const user = signal({ name: 'John', age: 30 });
  * const name = derived(user, {
- *   from: (u) => u.name,
- *   onChange: (newName) => user.update((u) => ({ ...u, name: newName })),
+ * from: (u) => u.name,
+ * onChange: (newName) => user.update((u) => ({ ...u, name: newName })),
  * });
+ *
+ * name.set('Jane'); // Updates the original signal
+ * console.log(user().name); // Outputs: Jane
+ * ```
  */
 export function derived<T, U>(
   source: WritableSignal<T>,
@@ -65,18 +70,27 @@ export function derived<T, U>(
 
 /**
  * Creates a `DerivedSignal` that derives a property from an object held by the source signal.
- * This overload simplifies creating derived signals for object properties.
+ * This overload is a convenient shorthand for accessing object properties.
  *
- * @typeParam T - The type of the source signal's value (must be an object).
- * @typeParam TKey - The key of the property to derive.
- * @param source - The source `WritableSignal` (holding an object).
- * @param key - The key of the property to derive.
- * @param options - Optional signal options for the derived signal.
+ * @typeParam T The type of the source signal's value (must be an object).
+ * @typeParam TKey The key of the property to derive.
+ * @param source The source `WritableSignal` (holding an object).
+ * @param key The key of the property to derive.
+ * @param options Optional signal options for the derived signal.
  * @returns A `DerivedSignal` instance.
  *
  * @example
+ * ```ts
  * const user = signal({ name: 'John', age: 30 });
  * const name = derived(user, 'name');
+ *
+ * console.log(name()); // Outputs: John
+ *
+ * // Update the derived signal, which also updates the source
+ * name.set('Jane');
+ *
+ * console.log(user().name); // Outputs: Jane
+ * ```
  */
 export function derived<T extends UnknownObject, TKey extends keyof T>(
   source: WritableSignal<T>,
@@ -85,18 +99,27 @@ export function derived<T extends UnknownObject, TKey extends keyof T>(
 ): DerivedSignal<T, T[TKey]>;
 
 /**
- * Creates a `DerivedSignal` from an array, and derives an element by index.
+ * Creates a `DerivedSignal` from an array, deriving an element by its index.
+ * This overload is a convenient shorthand for accessing array elements.
  *
- * @typeParam T - The type of the source signal's value (must be an array).
- * @param source - The source `WritableSignal` (holding an array).
- * @param index - The index of the element to derive.
- * @param options - Optional signal options for the derived signal.
+ * @typeParam T The type of the source signal's value (must be an array).
+ * @param source The source `WritableSignal` (holding an array).
+ * @param index The index of the element to derive.
+ * @param options Optional signal options for the derived signal.
  * @returns A `DerivedSignal` instance.
  *
  * @example
+ * ```ts
  * const numbers = signal([1, 2, 3]);
- * const secondNumber = derived(numbers, 1); // secondNumber() === 2
- * secondNumber.set(5); // numbers() === [1, 5, 3]
+ * const secondNumber = derived(numbers, 1);
+ *
+ * console.log(secondNumber()); // Outputs: 2
+ *
+ * // Update the derived signal, which also updates the source
+ * secondNumber.set(5);
+ *
+ * console.log(numbers()); // Outputs: [1, 5, 3]
+ * ```
  */
 export function derived<T extends any[]>(
   source: WritableSignal<T>,
@@ -119,12 +142,11 @@ export function derived<T, U>(
       ? optOrKey.onChange
       : isArray
         ? (next: U) => {
-            source.update(
-              (cur) =>
-                (cur as unknown as any[]).map((v, i) =>
-                  i === optOrKey ? next : v,
-                ) as T,
-            );
+            source.update((cur) => {
+              const newArray = [...(cur as unknown as any[])];
+              newArray[optOrKey] = next;
+              return newArray as T;
+            });
           }
         : (next: U) => {
             source.update((cur) => ({ ...cur, [optOrKey]: next }));

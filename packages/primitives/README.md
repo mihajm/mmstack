@@ -581,7 +581,7 @@ it('should reject on timeout if the condition is not met in time', async () => {
 
 Tracks if a target DOM element is intersecting with the viewport (or a specified root element) using the `IntersectionObserver` API. This is highly performant for use cases like lazy-loading content or triggering animations when elements scroll into view.
 
-It can observe a static `ElementRef`/`Element` or a `Signal` that resolves to one, allowing for dynamic targets. The returned signal emits the full `IntersectionObserverEntry` object (or `undefined`).
+It can observe a static `ElementRef`/`Element` or a `Signal` that resolves to one, allowing for dynamic targets. The returned signal emits the full `IntersectionObserverEntry` object (or `undefined`) & exposes a sub-signal `.visible` which is just a boolean signal for ease of use
 
 ```typescript
 import { Component, effect, ElementRef, viewChild, computed } from '@angular/core';

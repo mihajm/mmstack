@@ -98,6 +98,9 @@ import { BooleanState, SignalErrorValidator } from './adapters';
             --mat-form-field-subscript-text-weight,
             var(--mat-sys-body-small-weight)
           );
+
+          padding-left: 2rem;
+          padding-top: 2px;
         }
 
         span.mm-checkbox-field-error {

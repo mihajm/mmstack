@@ -23,8 +23,10 @@ This library provides the following primitives:
 - `mapArray` - Maps a reactive array efficently into an array of stable derivations.
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
 - `derived` - Creates a signal with two-way binding to a source signal.
-- `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This makes it flow a bit better and more accurately lists what the facade produces.)
+- `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This was the suggestion from before; it just reads a little smoother and more accurately reflects what the facade creates directly).
 - `until` - Creates a Promise that resolves when a signal's value meets a specific condition.
+- `mediaQuery` - A generic primitive that tracks a CSS media query (forms the basis for `prefersDarkMode` and `prefersReducedMotion`).
+- `elementVisibility` - Tracks if an element is intersecting the viewport using IntersectionObserver.
 
 ---
 
@@ -289,6 +291,8 @@ Enhances any WritableSignal with a complete undo/redo history stack. This is use
 ```typescript
 import { FormsModule } from '@angular/forms';
 import { JsonPipe } from '@angular/common';
+import { withHistory } from '@mmstack/primitives';
+import { Component, signal, effect } from '@angular/core';
 
 @Component({
   selector: 'app-history-demo',
@@ -321,9 +325,13 @@ export class HistoryDemoComponent {
 
 ### sensor
 
-The sensor() facade provides a unified way to create various reactive sensor signals that track browser events, states, and user preferences. You specify the type of sensor you want, and it returns the corresponding signal, often with specific properties or methods. These primitives are generally SSR-safe and handle their own event listener cleanup.
+### sensor
 
-You can either use the sensor('sensorType', options) facade or import the specific sensor functions directly.
+The `sensor()` facade provides a unified way to create various reactive sensor signals that track browser events, states, and user preferences. You specify the type of sensor you want (e.g., `'mousePosition'`, `'networkStatus'`, `'windowSize'`, `'dark-mode'`), and it returns the corresponding signal, often with specific properties or methods. These primitives are generally SSR-safe and handle their own event listener cleanup.
+
+You can either use the `sensor('sensorType', options)` facade or import the specific sensor functions directly if you prefer.
+
+**Facade Usage Example:**
 
 ```typescript
 import { sensor } from '@mmstack/primitives';
@@ -331,10 +339,12 @@ import { effect } from '@angular/core';
 
 const network = sensor('networkStatus');
 const mouse = sensor('mousePosition', { throttle: 50, coordinateSpace: 'page' });
+const winSize = sensor('windowSize', { throttle: 150 });
 const isDark = sensor('dark-mode');
 
 effect(() => console.log('Online:', network().isOnline));
 effect(() => console.log('Mouse X:', mouse().x));
+effect(() => console.log('Window Width:', winSize().width));
 effect(() => console.log('Dark Mode Preferred:', isDark()));
 ```
 
@@ -439,6 +449,73 @@ export class VisibilityLoggerComponent {
 }
 ```
 
+#### windowSize
+
+Tracks the browser window's inner dimensions (width and height). Updates are throttled by default (100ms). It provides the main throttled signal and an .unthrottled property to access raw updates.
+
+```typescript
+import { Component, effect, computed } from '@angular/core';
+import { sensor } from '@mmstack/primitives'; // Or import { windowSize }
+
+@Component({
+  selector: 'app-responsive-display',
+  standalone: true,
+  template: `
+    <p>Current Window Size: {{ winSize().width }}px x {{ winSize().height }}px</p>
+    <p>Unthrottled: W: {{ winSize.unthrottled().width }} H: {{ winSize.unthrottled().height }}</p>
+    @if (isMobileDisplay()) {
+      <p>Displaying mobile layout.</p>
+    } @else {
+      <p>Displaying desktop layout.</p>
+    }
+  `,
+})
+export class ResponsiveDisplayComponent {
+  readonly winSize = sensor('windowSize', { throttle: 150 });
+  // Or: readonly winSize = windowSize({ throttle: 150 });
+
+  readonly isMobileDisplay = computed(() => this.winSize().width < 768);
+
+  constructor() {
+    effect(() => console.log('Window Size (Throttled):', this.winSize()));
+  }
+}
+```
+
+#### scrollPosition
+
+Tracks the scroll position (x, y) of the window or a specified HTML element. Updates are throttled by default (100ms). It provides the main throttled signal and an .unthrottled property to access raw updates.
+
+```typescript
+import { Component, effect, ElementRef, viewChild } from '@angular/core';
+import { sensor } from '@mmstack/primitives'; // Or import { scrollPosition }
+import { JsonPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-scroll-indicator',
+  standalone: true,
+  imports: [JsonPipe],
+  template: `
+    <div style="height: 100px; border-bottom: 2px solid red; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 10;">
+      Page Scroll Y: {{ pageScroll().y }}px
+      <p>Unthrottled Y: {{ pageScroll.unthrottled().y }}</p>
+    </div>
+    <div #scrollableContent style="height: 2000px; padding-top: 120px;">Scroll down...</div>
+  `,
+})
+export class ScrollIndicatorComponent {
+  readonly pageScroll = sensor('scrollPosition', { throttle: 50 });
+  // Or: readonly pageScroll = scrollPosition({ throttle: 50 });
+
+  constructor() {
+    effect(() => {
+      // Example: Change header style based on scroll
+      console.log('Page scroll Y (Throttled):', this.pageScroll().y);
+    });
+  }
+}
+```
+
 #### mediaQuery, prefersDarkMode() & prefersReducedMotion()
 
 A generic mediaQuery primitive, you can use directly for any CSS media query. Two specific versions have been created for `prefersDarkMode()` & `prefersReducedMotion()`.
@@ -498,4 +575,45 @@ it('should reject on timeout if the condition is not met in time', async () => {
 
   await expect(untilPromise).toThrow(`until: Timeout after ${timeoutDuration}ms.`);
 });
+```
+
+### elementVisibility
+
+Tracks if a target DOM element is intersecting with the viewport (or a specified root element) using the `IntersectionObserver` API. This is highly performant for use cases like lazy-loading content or triggering animations when elements scroll into view.
+
+It can observe a static `ElementRef`/`Element` or a `Signal` that resolves to one, allowing for dynamic targets. The returned signal emits the full `IntersectionObserverEntry` object (or `undefined`).
+
+```typescript
+import { Component, effect, ElementRef, viewChild, computed } from '@angular/core';
+import { elementVisibility } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-lazy-load-item',
+  standalone: true,
+  template: `
+    <div #itemToObserve style="height: 300px; margin-top: 100vh; border: 2px solid green;">
+      @if (intersectionEntry.isVisible()) {
+        <p>This content was lazy-loaded because it became visible!</p>
+      } @else {
+        <p>Item is off-screen. Scroll down to load it.</p>
+      }
+    </div>
+  `,
+})
+export class LazyLoadItemComponent {
+  readonly itemRef = viewChild.required<ElementRef<HTMLDivElement>>('itemToObserve');
+
+  // Observe the element, get the full IntersectionObserverEntry
+  readonly intersectionEntry = elementVisibility(this.itemRef);
+
+  constructor() {
+    effect(() => {
+      if (this.isVisible()) {
+        console.log('Item is now visible!', this.intersectionEntry());
+      } else {
+        console.log('Item is no longer visible or not yet visible.');
+      }
+    });
+  }
+}
 ```

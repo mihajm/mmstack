@@ -1,5 +1,6 @@
 export * from './lib/debounced';
 export * from './lib/derived';
+export * from './lib/element-visibility';
 export * from './lib/map-array';
 export * from './lib/mutable';
 export * from './lib/sensors';

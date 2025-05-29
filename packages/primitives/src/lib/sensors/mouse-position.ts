@@ -56,7 +56,12 @@ type InternalMousePositionSignal = Signal<MousePosition> & {
   unthrottled: Signal<MousePosition>;
 };
 
+/**
+ * A specialized Signal that tracks mouse position within an element.
+ * It's a throttled signal of the mouse coordinates with an attached `unthrottled` signal.
+ */
 export type MousePositionSignal = Signal<MousePosition> & {
+  /** A signal providing the raw, unthrottled mouse position. */
   readonly unthrottled: Signal<MousePosition>;
 };
 

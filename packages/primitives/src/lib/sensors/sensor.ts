@@ -7,6 +7,12 @@ import {
 } from './mouse-position';
 import { NetworkStatusSignal, networkStatus } from './network-status';
 import { pageVisibility } from './page-visibility';
+import {
+  ScrollPositionOptions,
+  ScrollPositionSignal,
+  scrollPosition,
+} from './scroll-position';
+import { WindowSizeOptions, WindowSizeSignal, windowSize } from './window-size';
 
 /**
  * Creates a sensor signal that tracks the mouse cursor's position.
@@ -74,6 +80,32 @@ export function sensor(
 ): Signal<boolean>;
 
 /**
+ * Creates a sensor signal that tracks the browser window's inner dimensions (width and height).
+ * @param type Must be `'windowSize'`.
+ * @param options Optional configuration for the window size sensor, including `throttle` and `debugName`.
+ * @returns A `WindowSizeSignal` that tracks window dimensions and provides an unthrottled version.
+ * @see {windowSize} for detailed documentation and examples.
+ * @example const size = sensor('windowSize', { throttle: 200 });
+ */
+export function sensor(
+  type: 'windowSize',
+  options?: WindowSizeOptions,
+): WindowSizeSignal;
+
+/**
+ * Creates a sensor signal that tracks the scroll position (x, y) of the window or a specified element.
+ * @param type Must be `'scrollPosition'`.
+ * @param options Optional configuration for the scroll position sensor, including `target`, `throttle`, and `debugName`.
+ * @returns A `ScrollPositionSignal` that tracks scroll coordinates and provides an unthrottled version.
+ * @see {scrollPosition} for detailed documentation and examples.
+ * @example const pageScroll = sensor('scrollPosition', { throttle: 150 });
+ */
+export function sensor(
+  type: 'scrollPosition',
+  options?: ScrollPositionOptions,
+): ScrollPositionSignal;
+
+/**
  * Implementation for sensor overloads.
  * Users should refer to the specific overloads for detailed documentation.
  * @internal
@@ -84,17 +116,24 @@ export function sensor(
     | 'networkStatus'
     | 'pageVisibility'
     | 'dark-mode'
-    | 'reduced-motion',
+    | 'reduced-motion'
+    | 'windowSize'
+    | 'scrollPosition',
   options?:
     | {
         debugName?: string;
       }
-    | MousePositionOptions,
+    | MousePositionOptions
+    | WindowSizeOptions
+    | ScrollPositionOptions,
 ):
   | MousePositionSignal
   | NetworkStatusSignal
   | Signal<DocumentVisibilityState>
-  | Signal<boolean> {
+  | Signal<boolean>
+  | WindowSizeSignal
+  | ScrollPositionSignal
+  | Signal<IntersectionObserverEntry | undefined> {
   switch (type) {
     case 'mousePosition':
       return mousePosition(options);
@@ -106,6 +145,10 @@ export function sensor(
       return prefersDarkMode(options?.debugName);
     case 'reduced-motion':
       return prefersReducedMotion(options?.debugName);
+    case 'windowSize':
+      return windowSize(options);
+    case 'scrollPosition':
+      return scrollPosition(options as ScrollPositionOptions);
     default:
       throw new Error(`Unknown sensor type: ${type}`);
   }

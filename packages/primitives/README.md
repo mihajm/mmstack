@@ -16,11 +16,15 @@ npm install @mmstack/primitives
 This library provides the following primitives:
 
 - `debounced` - Creates a writable signal whose value updates are debounced after set/update.
+- `throttled` - Creates a writable signal whose value updates are rate-limited.
 - `mutable` - A signal variant allowing in-place mutations while triggering updates.
 - `stored` - Creates a signal synchronized with persistent storage (e.g., localStorage).
+- `withHistory` - Enhances a signal with a complete undo/redo history stack.
 - `mapArray` - Maps a reactive array efficently into an array of stable derivations.
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
 - `derived` - Creates a signal with two-way binding to a source signal.
+- `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This makes it flow a bit better and more accurately lists what the facade produces.)
+- `until` - Creates a Promise that resolves when a signal's value meets a specific condition.
 
 ---
 
@@ -60,6 +64,46 @@ import { debounce } from '@mmstack/primitives';
 
 const query = signal('');
 const debouncedQuery = debounce(query, { ms: 300 });
+```
+
+### throttled
+
+Creates a WritableSignal whose value is rate-limited. It ensures that the public-facing signal only updates at most once per specified time interval (ms). It uses a trailing-edge strategy, meaning it updates with the most recent value at the end of the interval. This is useful for handling high-frequency events like scrolling or mouse movement without overwhelming your application's reactivity.
+
+```typescript
+import { Component, signal, effect } from '@angular/core';
+import { throttled } from '@mmstack/primitives';
+import { JsonPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-throttle-demo',
+  standalone: true,
+  imports: [JsonPipe],
+  template: `
+    <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here to see updates...</div>
+    <p><b>Original Position:</b> {{ position.original() | json }}</p>
+    <p><b>Throttled Position:</b> {{ position() | json }}</p>
+  `,
+})
+export class ThrottleDemoComponent {
+  // Throttle updates to at most once every 200ms
+  position = throttled({ x: 0, y: 0 }, { ms: 200 });
+
+  constructor() {
+    // This effect runs on every single mouse move event.
+    effect(() => {
+      // console.log('Original value updated:', this.position.original());
+    });
+    // This effect will only run at most every 200ms.
+    effect(() => {
+      console.log('Throttled value updated:', this.position());
+    });
+  }
+
+  onMouseMove(event: MouseEvent) {
+    this.position.set({ x: event.offsetX, y: event.offsetY });
+  }
+}
 ```
 
 ### mutable
@@ -235,5 +279,223 @@ const name = derived(user, 'name'); // WritableSignal<string>, which updates use
 const name2 = derived(user, {
   from: (u) => u.name,
   onChange: (name) => user.update((prev) => ({ ...prev, name })),
+});
+```
+
+### withHistory
+
+Enhances any WritableSignal with a complete undo/redo history stack. This is useful for building user-friendly editors, forms, or any feature where reverting changes is necessary. It provides .undo(), .redo(), and .clear() methods, along with reactive boolean signals like .canUndo and .canRedo to easily enable or disable UI controls.
+
+```typescript
+import { FormsModule } from '@angular/forms';
+import { JsonPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-history-demo',
+  standalone: true,
+  imports: [FormsModule, JsonPipe],
+  template: `
+    <h4>Simple Text Editor</h4>
+    <textarea [(ngModel)]="text" rows="4" cols="50"></textarea>
+    <div class="buttons" style="margin-top: 8px; display: flex; gap: 8px;">
+      <button (click)="text.undo()" [disabled]="!text.canUndo()">Undo</button>
+      <button (click)="text.redo()" [disabled]="!text.canRedo()">Redo</button>
+      <button (click)="text.clear()" [disabled]="!text.canClear()">Clear History</button>
+    </div>
+    <p>History Stack:</p>
+    <pre>{{ text.history() | json }}</pre>
+  `,
+})
+export class HistoryDemoComponent {
+  // Create a signal and immediately enhance it with history capabilities.
+  text = withHistory(signal('Hello, type something!'), { maxSize: 10 });
+
+  constructor() {
+    // You can react to history changes as well
+    effect(() => {
+      console.log('History stack changed:', this.text.history());
+    });
+  }
+}
+```
+
+### sensor
+
+The sensor() facade provides a unified way to create various reactive sensor signals that track browser events, states, and user preferences. You specify the type of sensor you want, and it returns the corresponding signal, often with specific properties or methods. These primitives are generally SSR-safe and handle their own event listener cleanup.
+
+You can either use the sensor('sensorType', options) facade or import the specific sensor functions directly.
+
+```typescript
+import { sensor } from '@mmstack/primitives';
+import { effect } from '@angular/core';
+
+const network = sensor('networkStatus');
+const mouse = sensor('mousePosition', { throttle: 50, coordinateSpace: 'page' });
+const isDark = sensor('dark-mode');
+
+effect(() => console.log('Online:', network().isOnline));
+effect(() => console.log('Mouse X:', mouse().x));
+effect(() => console.log('Dark Mode Preferred:', isDark()));
+```
+
+Individual sensors available through the facade or direct import:
+
+#### mousePosition
+
+Tracks the mouse cursor's position. By default, updates are throttled to 100ms. It provides the main throttled signal and an .unthrottled property to access the raw updates.
+
+Key Options: target, coordinateSpace ('client' or 'page'), touch (boolean), throttle (ms).
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { sensor } from '@mmstack/primitives'; // Or import { mousePosition }
+import { JsonPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-mouse-tracker',
+  standalone: true,
+  imports: [JsonPipe],
+  template: `
+    <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here...</div>
+    <p><b>Throttled Position:</b> {{ mousePos() | json }}</p>
+    <p><b>Unthrottled Position:</b> {{ mousePos.unthrottled() | json }}</p>
+  `,
+})
+export class MouseTrackerComponent {
+  // Using the facade
+  readonly mousePos = sensor('mousePosition', { coordinateSpace: 'page', throttle: 200 });
+  // Or direct import:
+  // readonly mousePos = mousePosition({ coordinateSpace: 'page', throttle: 200 });
+
+  // Note: The (mousemove) event here is just to show the example area works.
+  // The mousePosition sensor binds its own listeners based on the target option.
+  onMouseMove(event: MouseEvent) {
+    // No need to call set, mousePosition handles it.
+  }
+
+  constructor() {
+    effect(() => console.log('Throttled Mouse:', this.mousePos()));
+    effect(() => console.log('Unthrottled Mouse:', this.mousePos.unthrottled()));
+  }
+}
+```
+
+#### networkStatus
+
+Tracks the browser's online/offline status. The returned signal is a boolean (`true` for online) and has an attached `.since` signal indicating when the status last changed.
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { sensor } from '@mmstack/primitives'; // Or import { networkStatus }
+import { DatePipe } from '@angular/common';
+
+@Component({
+  selector: 'app-network-info',
+  standalone: true,
+  imports: [DatePipe],
+  template: `
+    @if (netStatus()) {
+      <p>✅ Online (Since: {{ netStatus.since() | date: 'short' }})</p>
+    } @else {
+      <p>❌ Offline (Since: {{ netStatus.since() | date: 'short' }})</p>
+    }
+  `,
+})
+export class NetworkInfoComponent {
+  readonly netStatus = sensor('networkStatus');
+
+  constructor() {
+    effect(() => {
+      console.log('Network online:', this.netStatus(), 'Since:', this.netStatus.since());
+    });
+  }
+}
+```
+
+#### pageVisibility
+
+Tracks the page's visibility state (e.g., 'visible', 'hidden') using the Page Visibility API.
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { sensor } from '@mmstack/primitives'; // Or import { pageVisibility }
+
+@Component({
+  selector: 'app-visibility-logger',
+  standalone: true,
+  template: `<p>Page is currently: {{ visibility() }}</p>`,
+})
+export class VisibilityLoggerComponent {
+  readonly visibility = sensor('pageVisibility');
+
+  constructor() {
+    effect(() => {
+      console.log('Page visibility changed to:', this.visibility());
+      if (this.visibility() === 'hidden') {
+        // Perform cleanup or pause tasks
+      }
+    });
+  }
+}
+```
+
+#### mediaQuery, prefersDarkMode() & prefersReducedMotion()
+
+A generic mediaQuery primitive, you can use directly for any CSS media query. Two specific versions have been created for `prefersDarkMode()` & `prefersReducedMotion()`.
+Reacts to changes in preferences & exposes a `Signal<boolean>`.
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { mediaQuery, prefersDarkMode, prefersReducedMotion } from '@mmstack/primitives'; // Direct import
+
+@Component({
+  selector: 'app-layout-checker',
+  standalone: true,
+  template: `
+    @if (isLargeScreen()) {
+      <p>Using large screen layout.</p>
+    } @else {
+      <p>Using small screen layout.</p>
+    }
+  `,
+})
+export class LayoutCheckerComponent {
+  readonly isLargeScreen = mediaQuery('(min-width: 1280px)');
+  readonly prefersDark = prefersDarkMode(); // is just a pre-defined mediaQuery signal
+  readonly prefersReducedMotion = prefersReducedMotion(); // is just a pre-defined mediaQuery signal
+  constructor() {
+    effect(() => {
+      console.log('Is large screen:', this.isLargeScreen());
+    });
+  }
+}
+```
+
+### until
+
+The `until` primitive provides a powerful way to bridge Angular's reactive signals with imperative, Promise-based asynchronous code. It returns a Promise that resolves when the value of a given signal satisfies a specified predicate function.
+
+This is particularly useful for:
+
+- Orchestrating complex sequences of operations (e.g., waiting for data to load or for a user action to complete before proceeding).
+- Writing tests where you need to await a certain state before making assertions.
+- Integrating with other Promise-based APIs.
+
+It also supports optional timeouts and automatic cancellation via DestroyRef if the consuming context (like a component) is destroyed before the condition is met.
+
+```typescript
+import { signal } from '@angular/core';
+import { until } from '@mmstack/primitives';
+
+it('should reject on timeout if the condition is not met in time', async () => {
+  const count = signal(0);
+  const timeoutDuration = 500;
+
+  const untilPromise = until(count, (value) => value >= 10, { timeout: timeoutDuration });
+
+  // Simulate a change that doesn't meet the condition
+  setTimeout(() => count.set(1), 10);
+
+  await expect(untilPromise).toThrow(`until: Timeout after ${timeoutDuration}ms.`);
 });
 ```

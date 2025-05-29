@@ -1,6 +1,8 @@
 import {
   computed,
   type CreateSignalOptions,
+  DestroyRef,
+  inject,
   type Signal,
   signal,
   type WritableSignal,
@@ -19,6 +21,13 @@ export type CreateDebouncedOptions<T> = CreateSignalOptions<T> & {
    * last `set` or `update` call before the debounced signal reflects the new value.
    */
   ms?: number;
+  /**
+   * Optional `DestroyRef` to clean up the debounce timer when the signal is destroyed.
+   * If provided, the timer will be cleared when the signal is destroyed.
+   * If the signal is called within a reactive context a DestroyRef is injected automatically.
+   * If it is not provided or injected, the timer will not be cleared automatically...which is usually fine :)
+   */
+  destroyRef?: DestroyRef;
 };
 
 /**
@@ -93,14 +102,26 @@ export type DebouncedSignal<T> = WritableSignal<T> & {
  */
 export function debounced<T>(
   initial: T,
-  opt: CreateDebouncedOptions<T>,
+  opt?: CreateDebouncedOptions<T>,
 ): DebouncedSignal<T> {
   const internal = signal(initial, opt);
-  const ms = opt.ms ?? 0;
+  const ms = opt?.ms ?? 0;
 
   const trigger = signal(false);
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const destroyRef =
+      opt?.destroyRef ?? inject(DestroyRef, { optional: true });
+
+    destroyRef?.onDestroy(() => {
+      if (timeout) clearTimeout(timeout);
+      timeout = undefined;
+    });
+  } catch {
+    // not in injection context & no destroyRef provided opting out of cleanup
+  }
 
   const set = (value: T) => {
     if (timeout) clearTimeout(timeout);

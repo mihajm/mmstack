@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-core",
-  "version": "19.1.1",
+  "version": "19.2.0",
   "keywords": [
     "angular",
     "signals",
@@ -19,8 +19,8 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/core",
   "dependencies": {
-    "@mmstack/primitives": "^19.1.0",
-    "@mmstack/object": "^19.1.0",
+    "@mmstack/primitives": "^19.2.1",
+    "@mmstack/object": "^19.2.0",
     "uuid": "~11.1.0"
   },
   "peerDependencies": {

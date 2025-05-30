@@ -19,6 +19,64 @@ import {
 import { elementVisibility } from '@mmstack/primitives';
 import { PreloadService } from './preload.service';
 
+function inputToUrlTree(
+  router: Router,
+  link: string | any[] | UrlTree | null,
+  relativeTo?: ActivatedRoute,
+  queryParams?: Params,
+  fragment?: string,
+  queryParamsHandling?: 'merge' | 'preserve' | '',
+  routerLinkUrlTree?: UrlTree | null,
+): UrlTree | null {
+  if (!link) return null;
+  if (routerLinkUrlTree) return routerLinkUrlTree;
+
+  if (link instanceof UrlTree) return link;
+
+  const arr = Array.isArray(link) ? link : [link];
+
+  return router.createUrlTree(arr, {
+    relativeTo,
+    queryParams,
+    fragment,
+    queryParamsHandling,
+  });
+}
+
+function treeToSerializedUrl(
+  router: Router,
+  urlTree: UrlTree | null,
+): string | null {
+  if (!urlTree) return null;
+  return router.serializeUrl(urlTree);
+}
+
+export function injectTriggerPreload() {
+  const svc = inject(PreloadService);
+  const router = inject(Router);
+
+  return (
+    link: string | any[] | UrlTree | null,
+    relativeTo?: ActivatedRoute,
+    queryParams?: Params,
+    fragment?: string,
+    queryParamsHandling?: 'merge' | 'preserve' | '',
+  ) => {
+    const urlTree = inputToUrlTree(
+      router,
+      link,
+      relativeTo,
+      queryParams,
+      fragment,
+      queryParamsHandling,
+    );
+    const fullPath = treeToSerializedUrl(router, urlTree);
+    if (!fullPath) return;
+
+    svc.startPreload(fullPath);
+  };
+}
+
 @Directive({
   selector: '[mmLink]',
   exportAs: 'mmLink',
@@ -67,32 +125,19 @@ export class LinkDirective {
   readonly preloading = output<void>();
 
   private readonly urlTree = computed(() => {
-    const link = this.mmLink();
-    const relativeTo = this.relativeTo();
-    const fragment = this.fragment();
-    const queryParams = this.queryParams();
-    const queryParamsHandling = this.queryParamsHandling();
-
-    if (!link) return null;
-    const resolvedTree = this.routerLink?.urlTree;
-    if (resolvedTree) return resolvedTree;
-
-    if (link instanceof UrlTree) return link;
-
-    const arr = Array.isArray(link) ? link : [link];
-
-    return this.router.createUrlTree(arr, {
-      relativeTo,
-      queryParams,
-      fragment,
-      queryParamsHandling,
-    });
+    return inputToUrlTree(
+      this.router,
+      this.mmLink(),
+      this.relativeTo(),
+      this.queryParams(),
+      this.fragment(),
+      this.queryParamsHandling(),
+      this.routerLink?.urlTree,
+    );
   });
 
   private readonly fullPath = computed(() => {
-    const urlTree = this.urlTree();
-    if (!urlTree) return null;
-    return this.router.serializeUrl(urlTree);
+    return treeToSerializedUrl(this.router, this.urlTree());
   });
 
   onHover() {

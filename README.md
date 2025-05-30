@@ -17,7 +17,7 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 - **[`@mmstack/object`](./packages/common/object/README.md):** Lightweight, type-safe object and data structure utility functions. Mostly an internal utility library TBH :)
 - **[`@mmstack/primitives`](./packages/primitives/README.md):** Foundational utilities and primitives for enhancing Angular Signals (`debounced`, `mutable`, `stored`, `mapArray`, etc.).
 - **[`@mmstack/resource`](./packages/resource/README.md):** Powerful, signal-based primitives for managing asynchronous data fetching and mutations (caching, retries, circuit breakers, etc.).
-- **[`@mmstack/router-core`](./packages/router/core/README.md):** Signal-based utilities for reactive integration with the Angular Router state (`queryParam`, `url`, upcoming preload features).
+- **[`@mmstack/router-core`](./packages/router/core/README.md):** Enhances Angular Router with signal-based state utilities (`queryParam`, `url`) and intelligent module preloading features (`LinkDirective`, `PreloadStrategy`).
 - **[`@mmstack/form-core`](./packages/form/core/README.md):** Provides the core primitives (`formControl`, `formGroup`, `formArray`) for building flexible, type-safe, signal-based reactive forms.
 - **[`@mmstack/form-validation`](./packages/form/validation/README.md):** A composable, type-safe, and localizable validation system designed for `@mmstack/form-core`.
 - **[`@mmstack/form-adapters`](./packages/form/adapters/README.md):** Headless, reusable state adapters for common form field types, bridging form logic and UI components.

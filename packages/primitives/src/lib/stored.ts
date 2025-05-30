@@ -240,14 +240,15 @@ export function stored<T>(
   } else {
     effect(() => {
       const k = keySig();
-
+      const internalValue = internal();
       if (k === prevKey) {
-        return storeValue(k, internal()); // normal operation
+        return storeValue(k, internalValue); // normal operation
       } else {
         if (cleanupOldKey) store.removeItem(prevKey);
         const value = getValue(k);
-        internal.set(value); // load new value
+
         prevKey = k;
+        internal.set(value); // load new value
       }
     });
   }

@@ -1,13 +1,16 @@
 {
   "name": "@mmstack/router-core",
-  "version": "19.2.0",
+  "version": "19.2.1",
   "keywords": [
     "angular",
     "signals",
     "router",
     "url",
     "query",
-    "params"
+    "params",
+    "preloading",
+    "preload",
+    "navigation"
   ],
   "license": "MIT",
   "repository": {
@@ -16,7 +19,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/router/core",
   "dependencies": {
-    "@mmstack/primitives": "^19.2.1"
+    "@mmstack/primitives": "^19.2.3"
   },
   "peerDependencies": {
     "@angular/core": "^19.2.3",

@@ -92,7 +92,7 @@ export function elementVisibility(
   target:
     | ElementRef<Element>
     | Element
-    | Signal<ElementRef<Element> | Element | null>,
+    | Signal<ElementRef<Element> | Element | null> = inject(ElementRef),
   opt?: ElementVisibilityOptions,
 ): ElementVisibilitySignal {
   if (isPlatformServer(inject(PLATFORM_ID)) || !observerSupported()) {

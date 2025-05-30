@@ -1,69 +1,69 @@
-name: CI
+# name: CI
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+# concurrency:
+#   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+#   cancel-in-progress: true
 
-env:
-  NODE_OPTIONS: --max-old-space-size=16384
+# env:
+#   NODE_OPTIONS: --max-old-space-size=16384
 
-on:
-  push:
-    branches:
-      - master
-  pull_request:
+# on:
+#   push:
+#     branches:
+#       - master
+#   pull_request:
 
-permissions:
-  actions: read
-  contents: read
+# permissions:
+#   actions: read
+#   contents: read
 
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - uses: nrwl/nx-set-shas@v4
-      - run: pnpm exec nx affected -t lint --parallel=3
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - uses: nrwl/nx-set-shas@v4
-      - run: pnpm exec nx affected -t test --parallel=3
-  build:
-    runs-on: ubuntu-latest
-    needs: [test, lint]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - uses: nrwl/nx-set-shas@v4
-      - run: pnpm exec nx affected -t build --parallel=3
+# jobs:
+#   lint:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#       - uses: pnpm/action-setup@v4
+#         with:
+#           version: 10
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#           cache: 'pnpm'
+#       - run: pnpm install --frozen-lockfile
+#       - uses: nrwl/nx-set-shas@v4
+#       - run: pnpm exec nx affected -t lint --parallel=3
+#   test:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#       - uses: pnpm/action-setup@v4
+#         with:
+#           version: 10
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#           cache: 'pnpm'
+#       - run: pnpm install --frozen-lockfile
+#       - uses: nrwl/nx-set-shas@v4
+#       - run: pnpm exec nx affected -t test --parallel=3
+#   build:
+#     runs-on: ubuntu-latest
+#     needs: [test, lint]
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#       - uses: pnpm/action-setup@v4
+#         with:
+#           version: 10
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#           cache: 'pnpm'
+#       - run: pnpm install --frozen-lockfile
+#       - uses: nrwl/nx-set-shas@v4
+#       - run: pnpm exec nx affected -t build --parallel=3

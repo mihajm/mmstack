@@ -3,7 +3,6 @@ import {
   computed,
   Directive,
   effect,
-  ElementRef,
   inject,
   input,
   output,
@@ -100,7 +99,7 @@ export class LinkDirective {
   }
 
   constructor() {
-    const intersection = elementVisibility(inject(ElementRef));
+    const intersection = elementVisibility();
 
     effect(() => {
       if (this.preloadOn() !== 'visible') return;
@@ -109,7 +108,7 @@ export class LinkDirective {
   }
 
   private requestPreload() {
-    if (!this.routerLink && untracked(this.fullPath)) return;
+    if (!this.routerLink || !untracked(this.fullPath)) return;
     this.svc.startPreload(untracked(this.fullPath));
     this.preloading.emit();
   }

@@ -1,5 +1,5 @@
 import { Component, signal } from '@angular/core';
-import { LinkDirective } from '@mmstack/preload';
+import { LinkDirective } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-home',

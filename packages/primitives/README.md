@@ -592,7 +592,7 @@ import { elementVisibility } from '@mmstack/primitives';
   standalone: true,
   template: `
     <div #itemToObserve style="height: 300px; margin-top: 100vh; border: 2px solid green;">
-      @if (intersectionEntry.isVisible()) {
+      @if (intersectionEntry.visible()) {
         <p>This content was lazy-loaded because it became visible!</p>
       } @else {
         <p>Item is off-screen. Scroll down to load it.</p>
@@ -601,14 +601,16 @@ import { elementVisibility } from '@mmstack/primitives';
   `,
 })
 export class LazyLoadItemComponent {
-  readonly itemRef = viewChild.required<ElementRef<HTMLDivElement>>('itemToObserve');
+  readonly itemRef = viewChild.required<ElementRef<HTMLDivElement>>('itemToObserve', {
+    read: ElementRef,
+  });
 
   // Observe the element, get the full IntersectionObserverEntry
   readonly intersectionEntry = elementVisibility(this.itemRef);
 
   constructor() {
     effect(() => {
-      if (this.isVisible()) {
+      if (this.intersectionEntry.visible()) {
         console.log('Item is now visible!', this.intersectionEntry());
       } else {
         console.log('Item is no longer visible or not yet visible.');

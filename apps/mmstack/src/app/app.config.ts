@@ -26,7 +26,7 @@ import {
   createDedupeRequestsInterceptor,
   provideQueryCache,
 } from '@mmstack/resource';
-import { MMPreloadStrategy } from '@mmstack/router-preload';
+import { PreloadStrategy } from '@mmstack/router-core';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { routes } from './app.routes';
@@ -119,7 +119,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(
       routes,
       withComponentInputBinding(),
-      withPreloading(MMPreloadStrategy),
+      withPreloading(PreloadStrategy),
     ),
     provideValidatorConfig(
       (locale) => {

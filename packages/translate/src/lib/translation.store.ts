@@ -83,7 +83,6 @@ export class TranslationStore {
     flat: Partial<Record<string, Record<string, string>>>,
     locale: string,
   ) {
-    console.log(locale);
     this.locale.set(locale);
     this.translations.update((cur) => {
       return Object.entries(flat).reduce(

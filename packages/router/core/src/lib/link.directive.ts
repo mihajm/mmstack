@@ -61,7 +61,7 @@ export class LinkDirective {
   readonly relativeTo = input<ActivatedRoute>();
   readonly skipLocationChange = input(false, { transform: booleanAttribute });
   readonly replaceUrl = input(false, { transform: booleanAttribute });
-  readonly mmLink = input.required<string | any[] | UrlTree>();
+  readonly mmLink = input.required<string | any[] | UrlTree | null>();
   readonly preloadOn = input<'hover' | 'visible' | null>('hover');
 
   readonly preloading = output<void>();
@@ -73,6 +73,7 @@ export class LinkDirective {
     const queryParams = this.queryParams();
     const queryParamsHandling = this.queryParamsHandling();
 
+    if (!link) return null;
     const resolvedTree = this.routerLink?.urlTree;
     if (resolvedTree) return resolvedTree;
 
@@ -90,6 +91,7 @@ export class LinkDirective {
 
   private readonly fullPath = computed(() => {
     const urlTree = this.urlTree();
+    if (!urlTree) return null;
     return this.router.serializeUrl(urlTree);
   });
 
@@ -108,8 +110,9 @@ export class LinkDirective {
   }
 
   private requestPreload() {
-    if (!this.routerLink || !untracked(this.fullPath)) return;
-    this.svc.startPreload(untracked(this.fullPath));
+    const fp = untracked(this.fullPath);
+    if (!this.routerLink || !fp) return;
+    this.svc.startPreload(fp);
     this.preloading.emit();
   }
 

@@ -1,24 +1,23 @@
-import { Component, computed, signal } from '@angular/core';
+import { Component, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterOutlet } from '@angular/router';
-import { stored } from '@mmstack/primitives';
+import { RouterLink, RouterOutlet } from '@angular/router';
+import { injectBreadcrumbs } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, FormsModule],
+  imports: [RouterOutlet, FormsModule, RouterLink],
   template: `
-    <input type="number" [(ngModel)]="key" />
-    <input type="text" [(ngModel)]="store" />
+    @for (crumb of crumbs(); track crumb.id) {
+      <a [routerLink]="crumb.link()">{{ crumb.label() }}</a> >
+    }
+    <router-outlet />
   `,
   styles: ``,
 })
 export class AppComponent {
-  readonly key = signal(0);
+  readonly crumbs = injectBreadcrumbs();
 
-  readonly store = stored('', {
-    key: computed(() => this.key().toString()),
-    serialize: (value: string) => value,
-    deserialize: (value: string) => value,
-    cleanupOldKey: true,
-  });
+  constructor() {
+    effect(() => console.log(this.crumbs()));
+  }
 }

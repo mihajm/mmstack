@@ -1,8 +1,8 @@
 import { inject, Injectable } from '@angular/core';
-import { PreloadingStrategy, Route, Router } from '@angular/router';
+import { PreloadingStrategy, type Route, Router } from '@angular/router';
 import { EMPTY, filter, finalize, Observable, switchMap, take } from 'rxjs';
+import { createRoutePredicate, findPath } from '../util';
 import { PreloadService } from './preload.service';
-import { createRoutePredicate, findPath } from './util';
 
 function hasSlowConnection() {
   if (

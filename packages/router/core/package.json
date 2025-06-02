@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/router-core",
-  "version": "19.2.3",
+  "version": "19.3.0",
   "keywords": [
     "angular",
     "signals",
@@ -10,7 +10,8 @@
     "params",
     "preloading",
     "preload",
-    "navigation"
+    "navigation",
+    "breadcrumbs"
   ],
   "license": "MIT",
   "repository": {

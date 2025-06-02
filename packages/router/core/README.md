@@ -146,3 +146,113 @@ import { RouterLink } from '@angular/router';
 })
 export class NavigationComponent {}
 ```
+
+## Headless breadcrumb utilities
+
+This library includes a signal-based, headless toolkit for generating and managing breadcrumbs in your Angular application. It provides the logic to derive breadcrumb data from your routes, allowing you to easily build a completely custom breadcrumb UI component & let the library worry about active routes :)
+
+### Consuming breadcrumbs
+
+The primary way to access the breadcrumb data is via the `injectBreadcrumbs` function. It returns a `Signal<Breadcrumb[]>` that updates automatically as navigation changes. Each `Breadcrumb` object in the array contains reactive signals for its `label`, `link`, `ariaLabel`, and a static id for iteration purposes.
+
+```typescript
+import { Component } from '@angular/core';
+import { injectBreadcrumbs } from '@mmstack/router-core'; // Adjust path if needed
+
+@Component({
+  selector: 'app-breadcrumbs',
+  standalone: true,
+  template: `
+    <nav aria-label="breadcrumb">
+      <ol>
+        @for (crumb of breadcrumbs(); track crumb.id) {
+          <li>
+            <a [href]="crumb.link()" [attr.aria-label]="crumb.ariaLabel()">{{ crumb.label() }}</a>
+          </li>
+        }
+      </ol>
+    </nav>
+  `,
+})
+export class CustomBreadcrumbsComponent {
+  protected readonly breadcrumbs = injectBreadcrumbs();
+}
+```
+
+### Registering custom breadcrumbs
+
+For routes where automatic breadcrumb generation isn't sufficient or when you need more control, you can manually define breadcrumbs using the `createBreadcrumb` route resolver.
+
+This function allows you to specify the label (static or dynamic via a function) and other properties for a breadcrumb associated with a particular route.
+You can use injection in the factory function, as you would with any resolver, making translations or subscribing to dynamic data a breaze! :)
+
+```typescript
+import { Routes } from '@angular/router';
+import { createBreadcrumb } from '@mmstack/router-core';
+import { HomeComponent } from './home.component';
+import { UserProfileComponent } from './user-profile.component';
+import { UserStore } from './user.store';
+import { inject } from '@angular/core';
+import { AdminComponent } from './admin.component';
+
+export const appRoutes: Routes = [
+  {
+    path: 'home',
+    component: HomeComponent,
+    resolve: {
+      // Simple static breadcrumb
+      breadcrumb: createBreadcrumb(() => ({
+        label: 'Home',
+      })),
+    },
+  },
+  {
+    path: 'admin',
+    component: AdminComponent,
+    data: {
+      skipBreadcrumb: true, // opt out of auto-generation for this specific route
+    },
+  },
+  {
+    path: 'users/:userId',
+    component: UserProfileComponent,
+    resolve: {
+      breadcrumb: createBreadcrumb(() => {
+        const userStore = inject(UserStore);
+        return {
+          label: () => `Profile: ${userStore.currentUser().name}` ?? 'Loading...',
+          ariaLabel: () => `View profile for ${userStore.currentUser().name ?? 'user'}`,
+        };
+      }),
+    },
+  },
+];
+```
+
+### Configuration [optional]
+
+The breadcrumb system can be configured globally using `provideBreadcrumbConfig`. This allows you to, for example, set the system to 'manual' mode (disabling all automatic generation) or provide a custom function for generating breadcrumb labels.
+
+```typescript
+import { provideRouter } from '@angular/router';
+import { provideBreadcrumbConfig, BreadcrumbConfig, ResolvedLeafRoute } from '@mmstack/router-core'; // Adjust path
+import { appRoutes } from './app.routes';
+import { ApplicationConfig } from '@angular/core';
+
+// Example: Custom label generation strategy
+const customLabelStrategy = () => {
+  // you can inject root injectable services/stores here.
+  return (leaf: ResolvedLeafRoute): string => {
+    return leaf.route.data?.['navTitle'] || leaf.route.title || 'Default Title';
+  };
+};
+export const appConfig: ApplicationConfig = {
+  providers: [
+    // ...rest
+    provideBreadcrumbConfig({
+      // generation: 'manual' // When set to 'manual' the system only uses explicitly defined breadcrumbs
+      generation: customLabelStrategy, // Or provide a custom generation function
+    }),
+  ],
+};
+```

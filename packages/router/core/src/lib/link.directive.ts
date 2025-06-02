@@ -17,7 +17,7 @@ import {
   UrlTree,
 } from '@angular/router';
 import { elementVisibility } from '@mmstack/primitives';
-import { PreloadService } from './preload.service';
+import { PreloadService } from './preloading';
 
 function inputToUrlTree(
   router: Router,

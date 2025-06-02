@@ -1,10 +1,17 @@
+import { computed } from '@angular/core';
 import { Routes } from '@angular/router';
-
+import { createBreadcrumb } from '@mmstack/router-core';
+import { HomeComponent } from './home.component';
 export const routes: Routes = [
   {
     path: 'home',
     loadComponent: () =>
       import('./home.component').then((c) => c.HomeComponent),
+    resolve: {
+      breadcrumb: createBreadcrumb(() => ({
+        label: computed(() => 'Home'),
+      })),
+    },
   },
   {
     path: 'about',
@@ -16,8 +23,12 @@ export const routes: Routes = [
     loadChildren: () => import('./quote.routes').then((m) => m.routes),
   },
   {
+    path: 'posts',
+    loadChildren: () => import('./post.routes').then((m) => m.POST_ROUTES),
+  },
+  {
     path: '',
-    redirectTo: 'home',
+    component: HomeComponent,
     pathMatch: 'full',
   },
 ];

@@ -1,23 +1,18 @@
-import { Component, effect } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { RouterLink, RouterOutlet } from '@angular/router';
-import { injectBreadcrumbs } from '@mmstack/router-core';
+import { Component } from '@angular/core';
+import {
+  ChipsFieldComponent,
+  injectCreateChipsState,
+} from '@mmstack/form-material';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, FormsModule, RouterLink],
-  template: `
-    @for (crumb of crumbs(); track crumb.id) {
-      <a [routerLink]="crumb.link()">{{ crumb.label() }}</a> >
-    }
-    <router-outlet />
-  `,
+  imports: [ChipsFieldComponent],
+  template: ` <mm-chips-field [state]="state" /> `,
   styles: ``,
 })
 export class AppComponent {
-  readonly crumbs = injectBreadcrumbs();
-
-  constructor() {
-    effect(() => console.log(this.crumbs()));
-  }
+  readonly state = injectCreateChipsState()([], {
+    options: () => ['yay', 'test'],
+    label: () => 'Test',
+  });
 }

@@ -69,6 +69,11 @@ export type FileValidatorOptions = {
       };
 
   /**
+   * Optional custom validation function
+   */
+  custom?: (value: File | null) => string;
+
+  /**
    * Optional configuration passed down to specific message factories.
    * Primarily used by the `required` validator's message factory.
    */
@@ -125,6 +130,8 @@ export function createFileValidators(
           ),
         );
       }
+
+      if (opt.custom) validators.push(opt.custom);
 
       return merger(validators);
     },

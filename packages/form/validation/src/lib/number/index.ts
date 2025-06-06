@@ -122,6 +122,11 @@ export type NumberValidatorOptions = {
   notOneOf?: (number | null)[];
 
   /**
+   * Optional custom validation function
+   */
+  custom?: (value: number | null) => string;
+
+  /**
    * Optional configuration passed down to specific message factories.
    * Primarily used by the `required` validator's message factory.
    */
@@ -179,6 +184,8 @@ export function createNumberValidators(
 
       if (opt.notOneOf)
         validators.push(generalValidators.notOneOf(opt.notOneOf));
+
+      if (opt.custom) validators.push(opt.custom);
 
       return merger(validators);
     },

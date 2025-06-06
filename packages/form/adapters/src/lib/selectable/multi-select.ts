@@ -8,7 +8,7 @@ import { type DerivedSignal } from '@mmstack/primitives';
 import { tooltip } from '../util';
 import { type SelectState, type SelectStateOptions } from './select';
 
-function defaultJoinLabel(labels: string[]) {
+export function defaultJoinLabel(labels: string[]) {
   const first = labels.at(0);
   if (!first) return '';
   if (labels.length === 1) return first;

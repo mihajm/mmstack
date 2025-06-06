@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-adapters",
-  "version": "19.2.0",
+  "version": "19.2.1",
   "keywords": [
     "angular",
     "signals",
@@ -16,7 +16,7 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/adapters",
   "dependencies": {
     "@mmstack/form-core": "^19.2.0",
-    "@mmstack/form-validation": "^19.2.0",
+    "@mmstack/form-validation": "^19.2.1",
     "@mmstack/primitives": "^19.2.1"
   },
   "peerDependencies": {

@@ -6,6 +6,13 @@ export {
   InjectedButtonGroupStateOptions,
 } from './button-group';
 export {
+  ChipsState,
+  ChipsStateOptions,
+  createChipsState,
+  injectCreateChipsState,
+  InjectedChipsStateOptions,
+} from './chips';
+export {
   createMultiSelectState,
   injectCreateMultiSelectState,
   InjectedMultiSelectStateOptions,

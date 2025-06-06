@@ -147,6 +147,11 @@ export type StringValidatorOptions = {
   notOneOf?: (string | null)[];
 
   /**
+   * Optional custom validation function
+   */
+  custom?: (value: string | null) => string;
+
+  /**
    * Optional configuration passed down to specific message factories.
    * Primarily used by the `required` validator's message factory.
    */
@@ -218,6 +223,8 @@ export function createStringValidators(
 
       if (opt.notOneOf)
         validators.push(generalValidators.notOneOf(opt.notOneOf));
+
+      if (opt.custom) validators.push(opt.custom);
 
       return merger(validators);
     },

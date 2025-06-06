@@ -4,6 +4,7 @@ export * from './lib/adapters/public_api';
 export * from './lib/autocomplete-field.component';
 export * from './lib/boolean-field.component';
 export * from './lib/button-group.component';
+export * from './lib/chips-field.component';
 export * from './lib/date-field.component';
 export * from './lib/date-range-field.component';
 export * from './lib/date-time-field.component';

@@ -292,9 +292,9 @@ export const appRoutes: Routes = [
   },
   {
     path: 'home',
-    title: 'Home' // works normally
+    title: 'Home', // works normally
     loadComponent: () => import('./home.component').then((m) => m.HomeComponent),
-  }
+  },
 ];
 ```
 

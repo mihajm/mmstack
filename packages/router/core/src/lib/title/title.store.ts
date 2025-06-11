@@ -54,8 +54,15 @@ export class TitleStore {
       this.title.setTitle(heldTitle());
     });
 
+    let firstNav = true;
     effect(() => {
       const activeLeafPath = this.activeLeafPath();
+
+      if (firstNav) {
+        firstNav = false;
+        return;
+      }
+
       if (!activeLeafPath) return this.map.inline((cur) => cur.clear());
       this.map.inline((cur) => {
         for (const key of cur.keys()) {

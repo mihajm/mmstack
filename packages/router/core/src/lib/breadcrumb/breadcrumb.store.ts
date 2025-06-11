@@ -168,8 +168,16 @@ export class BreadcrumbStore {
   constructor() {
     const activePaths = computed(() => this.leafRoutes().map((l) => l.path));
 
+    let firstNav = true;
+
     effect(() => {
       const paths = activePaths();
+
+      if (firstNav) {
+        firstNav = false;
+        return;
+      }
+
       if (!paths.length) return this.map.inline((m) => m.clear());
       this.map.inline((m) => {
         for (const key of m.keys()) {

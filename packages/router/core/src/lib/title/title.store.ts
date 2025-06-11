@@ -3,6 +3,7 @@ import {
   effect,
   inject,
   Injectable,
+  linkedSignal,
   Signal,
   untracked,
 } from '@angular/core';
@@ -39,8 +40,16 @@ export class TitleStore {
 
     const currentTitle = computed(() => currentTitleSignal()?.() ?? fallback());
 
+    const heldTitle = linkedSignal<string, string>({
+      source: () => currentTitle(),
+      computation: (value, prev) => {
+        if (!value) return prev?.value ?? '';
+        return value;
+      },
+    });
+
     effect(() => {
-      this.title.setTitle(currentTitle());
+      this.title.setTitle(heldTitle());
     });
 
     effect(() => {

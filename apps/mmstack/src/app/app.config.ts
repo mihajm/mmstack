@@ -26,7 +26,7 @@ import {
   createDedupeRequestsInterceptor,
   provideQueryCache,
 } from '@mmstack/resource';
-import { PreloadStrategy } from '@mmstack/router-core';
+import { PreloadStrategy, provideTitleConfig } from '@mmstack/router-core';
 import { enUS } from 'date-fns/locale';
 import { DateTime } from 'luxon';
 import { routes } from './app.routes';
@@ -49,6 +49,7 @@ export const appConfig: ApplicationConfig = {
         ],
       }),
     ),
+    provideTitleConfig({}),
     provideValidatorConfig<DateTime>(
       (locale) => {
         switch (locale) {

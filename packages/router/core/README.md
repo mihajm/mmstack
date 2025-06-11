@@ -256,3 +256,68 @@ export const appConfig: ApplicationConfig = {
   ],
 };
 ```
+
+## Title utilities
+
+This library provides a helper function, `createTitle`, to set the document title dynamically from within your route configuration. It integrates seamlessly with Angular's built-in `title` property on routes, allowing for both static and signal-based reactive titles.
+
+By default, the system will use a title defined on a route's `data` or `title` property. createTitle enhances this by allowing titles to be derived from reactive state.
+
+### Using `createTitle`
+
+The `createTitle` function is a route resolver that returns a title string. You use it directly in the `title` property of a route definition. It can accept a function that returns a static string or a function that returns a dynamic string (which will be converted to a `signal`).
+
+```typescript
+import { Routes } from '@angular/router';
+import { createTitle } from '@mmstack/router-core';
+import { inject } from '@angular/core';
+import { ProductStore } from './product.store';
+
+export const appRoutes: Routes = [
+  {
+    path: 'about',
+    // Example 1: Static title
+    title: createTitle(() => 'About Us'), // static
+    loadComponent: () => import('./about.component').then((m) => m.AboutComponent),
+  },
+  {
+    path: 'products/:id',
+    // Example 2: Dynamic, signal-based title from a store
+    title: createTitle(() => {
+      const productStore = inject(ProductStore);
+      // The inner function creates a computed signal under the hood
+      return () => `Product: ${productStore.product().name ?? 'Loading...'}`;
+    }),
+    loadComponent: () => import('./product-detail.component').then((m) => m.ProductComponent),
+  },
+  {
+    path: 'home',
+    title: 'Home' // works normally
+    loadComponent: () => import('./home.component').then((m) => m.HomeComponent),
+  }
+];
+```
+
+### Configuration [optional]
+
+You can provide a global configuration to prepend or append text to all titles using provideTitleConfig.
+
+```typescript
+import { provideRouter } from '@angular/router';
+import { provideTitleConfig } from '@mmstack/router-core';
+import { appRoutes } from './app.routes';
+import { ApplicationConfig } from '@angular/core';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(appRoutes),
+    provideTitleConfig({
+      // Prefix can be a static string...
+      // prefix: 'My Awesome App | '
+
+      // ...or a function for more control over the format
+      prefix: (title) => (title ? `${title} - MyApp` : 'MyApp'),
+    }),
+  ],
+};
+```

@@ -1,7 +1,9 @@
 import { Component } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-about',
-  template: `about component`,
+  imports: [RouterLink],
+  template: `about component <a routerLink="/home">Home</a>`,
 })
 export class AboutComponent {}

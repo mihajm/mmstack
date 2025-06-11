@@ -1,11 +1,13 @@
-import { computed, inject, Injectable, Signal, untracked } from '@angular/core';
 import {
-  ActivatedRouteSnapshot,
-  Router,
-  RouterStateSnapshot,
-} from '@angular/router';
+  computed,
+  effect,
+  inject,
+  Injectable,
+  Signal,
+  untracked,
+} from '@angular/core';
 import { mapArray, mutable } from '@mmstack/primitives';
-import { url } from '../url';
+import { injectLeafRoutes, ResolvedLeafRoute } from '../util/leaf.store';
 import { injectBreadcrumbConfig } from './breadcrumb.config';
 import {
   Breadcrumb,
@@ -13,65 +15,7 @@ import {
   getBreadcrumbInternals,
   InternalBreadcrumb,
   isInternalBreadcrumb,
-  ResolvedLeafRoute,
 } from './breadcrumb.type';
-
-function leafRoutes(): Signal<ResolvedLeafRoute[]> {
-  const router = inject(Router);
-
-  const getLeafRoutes = (
-    snapshot: RouterStateSnapshot,
-  ): ResolvedLeafRoute[] => {
-    const routes: ResolvedLeafRoute[] = [];
-    let route: ActivatedRouteSnapshot | null = snapshot.root;
-    const processed = new Set<string>();
-
-    while (route) {
-      const allSegments = route.pathFromRoot.flatMap(
-        (snap) => snap.routeConfig?.path ?? [],
-      );
-
-      const segments = allSegments.filter(Boolean);
-
-      const path = router.serializeUrl(router.parseUrl(segments.join('/')));
-
-      if (processed.has(path)) {
-        route = route.firstChild;
-        continue;
-      }
-      processed.add(path);
-
-      const parts = route.pathFromRoot
-        .flatMap((snap) => snap.url ?? [])
-        .map((u) => u.path)
-        .filter(Boolean);
-
-      const link = router.serializeUrl(router.parseUrl(parts.join('/')));
-
-      routes.push({
-        route,
-        segment: {
-          path: segments.at(-1) ?? '',
-          resolved: parts.at(-1) ?? '',
-        },
-        path,
-        link,
-      });
-      route = route.firstChild;
-    }
-
-    return routes;
-  };
-
-  const currentUrl = url();
-
-  const leafRoutes = computed(() => {
-    currentUrl();
-    return getLeafRoutes(router.routerState.snapshot);
-  });
-
-  return leafRoutes;
-}
 
 function uppercaseFirst(str: string): string {
   const lcs = str.toLowerCase();
@@ -179,9 +123,10 @@ export class BreadcrumbStore {
   private readonly map = mutable<Map<string, InternalBreadcrumb>>(new Map());
   private readonly isManual = injectIsManual();
   private readonly autoGenerateLabelFn = injectGenerateLabelFn();
+  private readonly leafRoutes = injectLeafRoutes();
 
   private readonly all = mapArray(
-    leafRoutes(),
+    this.leafRoutes,
     (leaf) => {
       const stableId = computed(() => leaf().path);
 
@@ -220,12 +165,23 @@ export class BreadcrumbStore {
 
   readonly unwrapped = computed(() => this.crumbs().map((c) => c()));
 
+  constructor() {
+    const activePaths = computed(() => this.leafRoutes().map((l) => l.path));
+
+    effect(() => {
+      const paths = activePaths();
+      if (!paths.length) return this.map.inline((m) => m.clear());
+      this.map.inline((m) => {
+        for (const key of m.keys()) {
+          if (paths.includes(key)) continue;
+          m.delete(key);
+        }
+      });
+    });
+  }
+
   register(breadcrumb: InternalBreadcrumb) {
     this.map.inline((m) => m.set(breadcrumb.id, breadcrumb));
-
-    return () => {
-      this.map.inline((m) => m.delete(breadcrumb.id));
-    };
   }
 
   has(id: string): boolean {

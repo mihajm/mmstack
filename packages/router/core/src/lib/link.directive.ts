@@ -119,7 +119,7 @@ export class LinkDirective {
   readonly relativeTo = input<ActivatedRoute>();
   readonly skipLocationChange = input(false, { transform: booleanAttribute });
   readonly replaceUrl = input(false, { transform: booleanAttribute });
-  readonly mmLink = input.required<string | any[] | UrlTree | null>();
+  readonly mmLink = input<string | any[] | UrlTree | null>(null);
   readonly preloadOn = input<'hover' | 'visible' | null>('hover');
 
   readonly preloading = output<void>();

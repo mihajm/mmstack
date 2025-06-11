@@ -1,5 +1,4 @@
 import { type Signal } from '@angular/core';
-import { ActivatedRouteSnapshot } from '@angular/router';
 
 /**
  * Represents a single breadcrumb item within the navigation path.
@@ -67,19 +66,6 @@ export function createInternalBreadcrumb(
     },
   };
 }
-
-/**
- * @internal
- */
-export type ResolvedLeafRoute = {
-  route: ActivatedRouteSnapshot;
-  segment: {
-    path: string;
-    resolved: string;
-  };
-  path: string;
-  link: string;
-};
 
 /**
  * @internal

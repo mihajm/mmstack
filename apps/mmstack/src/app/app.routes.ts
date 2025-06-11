@@ -1,7 +1,8 @@
 import { computed } from '@angular/core';
 import { Routes } from '@angular/router';
-import { createBreadcrumb } from '@mmstack/router-core';
+import { createBreadcrumb, createTitle } from '@mmstack/router-core';
 import { HomeComponent } from './home.component';
+
 export const routes: Routes = [
   {
     path: 'home',
@@ -12,11 +13,13 @@ export const routes: Routes = [
         label: computed(() => 'Home'),
       })),
     },
+    title: 'Home',
   },
   {
     path: 'about',
     loadComponent: () =>
       import('./about.component').then((c) => c.AboutComponent),
+    title: createTitle(() => 'About us'),
   },
   {
     path: 'quote',

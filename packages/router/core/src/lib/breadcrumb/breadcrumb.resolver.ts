@@ -1,4 +1,4 @@
-import { computed, DestroyRef, inject } from '@angular/core';
+import { computed, inject } from '@angular/core';
 import {
   createUrlTreeFromSnapshot,
   Router,
@@ -29,7 +29,7 @@ type CreateBreadcrumbOptions = {
 };
 
 import { until } from '@mmstack/primitives';
-import { url } from '../url';
+import { injectSnapshotPathResolver } from '../util';
 import { Breadcrumb, createInternalBreadcrumb } from './breadcrumb.type';
 
 /**
@@ -72,14 +72,9 @@ export function createBreadcrumb(
   return async (route) => {
     const router = inject(Router);
     const store = inject(BreadcrumbStore);
+    const resolver = injectSnapshotPathResolver();
 
-    const segments = route.pathFromRoot.flatMap(
-      (snap) => snap.routeConfig?.path ?? [],
-    );
-
-    const joinedSegments = segments.filter(Boolean).join('/');
-
-    const fp = router.serializeUrl(router.parseUrl(joinedSegments));
+    const fp = resolver(route);
     if (store.has(fp)) return Promise.resolve();
 
     const tree = createUrlTreeFromSnapshot(
@@ -90,8 +85,6 @@ export function createBreadcrumb(
     );
 
     const provided = factory();
-
-    const trigger = url();
 
     const link = computed(() => router.serializeUrl(tree));
 
@@ -108,14 +101,12 @@ export function createBreadcrumb(
       link,
     };
 
-    const deregister = store.register(
+    store.register(
       createInternalBreadcrumb(
         bc,
         computed(() => route.data?.['skipBreadcrumb'] !== true),
       ),
     );
-
-    inject(DestroyRef).onDestroy(deregister);
 
     if (provided.awaitValue) await until(bc.label, (v) => !!v);
 

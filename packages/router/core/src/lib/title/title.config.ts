@@ -10,7 +10,7 @@ export type TitleConfig = {
    * The title to be used when no title is set.
    * If not provided it defaults to an empty string
    */
-  prefix?: string;
+  prefix?: string | ((title: string) => string);
 };
 
 /**

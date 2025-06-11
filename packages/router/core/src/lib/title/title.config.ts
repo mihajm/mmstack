@@ -9,8 +9,14 @@ export type TitleConfig = {
   /**
    * The title to be used when no title is set.
    * If not provided it defaults to an empty string
+   * @default ''
    */
   prefix?: string | ((title: string) => string);
+  /**
+   * if false, the title will change to the url, otherwise default to true as that is standard behavior
+   * @default true
+   */
+  keepLastKnownTitle?: boolean;
 };
 
 /**
@@ -18,6 +24,7 @@ export type TitleConfig = {
  */
 export type InternalTitleConfig = {
   parser: (title: string) => string;
+  keepLastKnown: boolean;
 };
 
 const token = new InjectionToken<InternalTitleConfig>('MMSTACK_TITLE_CONFIG');
@@ -37,6 +44,7 @@ export function provideTitleConfig(config?: TitleConfig): Provider {
     provide: token,
     useValue: {
       parser: prefixFn,
+      keepLastKnown: config?.keepLastKnownTitle ?? true,
     },
   };
 }

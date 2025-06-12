@@ -277,23 +277,22 @@ export const appRoutes: Routes = [
   {
     path: 'about',
     // Example 1: Static title
-    title: createTitle(() => 'About Us'), // static
+    resolve: {
+      title: createTitle(() => 'About Us'), // static
+    },
     loadComponent: () => import('./about.component').then((m) => m.AboutComponent),
   },
   {
     path: 'products/:id',
     // Example 2: Dynamic, signal-based title from a store
-    title: createTitle(() => {
-      const productStore = inject(ProductStore);
-      // The inner function creates a computed signal under the hood
-      return () => `Product: ${productStore.product().name ?? 'Loading...'}`;
-    }),
+    resolve: {
+      title: createTitle(() => {
+        const productStore = inject(ProductStore);
+        // The inner function creates a computed signal under the hood
+        return () => `Product: ${productStore.product().name ?? 'Loading...'}`;
+      }),
+    },
     loadComponent: () => import('./product-detail.component').then((m) => m.ProductComponent),
-  },
-  {
-    path: 'home',
-    title: 'Home', // works normally
-    loadComponent: () => import('./home.component').then((m) => m.HomeComponent),
   },
 ];
 ```

@@ -75,7 +75,6 @@ export function createBreadcrumb(
     const resolver = injectSnapshotPathResolver();
 
     const fp = resolver(route);
-    if (store.has(fp)) return Promise.resolve();
 
     const tree = createUrlTreeFromSnapshot(
       route,

@@ -1,11 +1,4 @@
-import {
-  computed,
-  effect,
-  inject,
-  Injectable,
-  Signal,
-  untracked,
-} from '@angular/core';
+import { computed, inject, Injectable, Signal } from '@angular/core';
 import { mapArray, mutable } from '@mmstack/primitives';
 import { injectLeafRoutes, ResolvedLeafRoute } from '../util/leaf.store';
 import { injectBreadcrumbConfig } from './breadcrumb.config';
@@ -165,35 +158,8 @@ export class BreadcrumbStore {
 
   readonly unwrapped = computed(() => this.crumbs().map((c) => c()));
 
-  constructor() {
-    const activePaths = computed(() => this.leafRoutes().map((l) => l.path));
-
-    let firstNav = true;
-
-    effect(() => {
-      const paths = activePaths();
-
-      if (firstNav) {
-        firstNav = false;
-        return;
-      }
-
-      if (!paths.length) return this.map.inline((m) => m.clear());
-      this.map.inline((m) => {
-        for (const key of m.keys()) {
-          if (paths.includes(key)) continue;
-          m.delete(key);
-        }
-      });
-    });
-  }
-
   register(breadcrumb: InternalBreadcrumb) {
     this.map.inline((m) => m.set(breadcrumb.id, breadcrumb));
-  }
-
-  has(id: string): boolean {
-    return untracked(this.map).has(id);
   }
 }
 

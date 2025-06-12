@@ -20,25 +20,18 @@ export class TitleStore {
   private readonly title = inject(Title);
   private readonly map = mutable<Map<string, Signal<string>>>(new Map());
   private readonly leafRoutes = injectLeafRoutes();
-  private readonly activeLeafPath = computed(
-    () => this.leafRoutes().at(-1)?.path,
-  );
 
   constructor() {
-    const currentTitleSignal = computed(() => {
-      const path = this.activeLeafPath();
-      if (!path) return null;
-      return this.map().get(path) ?? null;
+    const reverseLeaves = computed(() => this.leafRoutes().toReversed());
+
+    const currentResolvedTitles = computed(() => {
+      const map = this.map();
+      return reverseLeaves()
+        .map((leaf) => map.get(leaf.path)?.() ?? leaf.route.title)
+        .filter((v): v is string => !!v);
     });
 
-    const fallback = computed(
-      () =>
-        this.leafRoutes()
-          .toReversed()
-          .find((leaf) => leaf.route.title)?.route.title ?? '',
-    );
-
-    const currentTitle = computed(() => currentTitleSignal()?.() ?? fallback());
+    const currentTitle = computed(() => currentResolvedTitles().at(0) ?? '');
 
     const heldTitle = injectTitleConfig().keepLastKnown
       ? linkedSignal<string, string>({
@@ -53,33 +46,10 @@ export class TitleStore {
     effect(() => {
       this.title.setTitle(heldTitle());
     });
-
-    let firstNav = true;
-    effect(() => {
-      const activeLeafPath = this.activeLeafPath();
-
-      if (firstNav) {
-        firstNav = false;
-        return;
-      }
-
-      if (!activeLeafPath) return this.map.inline((cur) => cur.clear());
-      this.map.inline((cur) => {
-        for (const key of cur.keys()) {
-          if (key === activeLeafPath) continue;
-          cur.delete(key);
-        }
-      });
-    });
   }
 
   register(id: string, titleFn: Signal<string>) {
     this.map.inline((m) => m.set(id, titleFn));
-  }
-
-  get(id: string) {
-    const found = untracked(this.map).get(id);
-    return found ? untracked(found) : null;
   }
 }
 
@@ -101,8 +71,6 @@ export function createTitle(
     const store = inject(TitleStore);
     const resolver = injectSnapshotPathResolver();
     const fp = resolver(route);
-    const found = store.get(fp);
-    if (found) return Promise.resolve(found);
 
     const { parser } = injectTitleConfig();
 

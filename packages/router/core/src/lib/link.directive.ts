@@ -3,9 +3,12 @@ import {
   computed,
   Directive,
   effect,
+  HostListener,
   inject,
+  InjectionToken,
   input,
   output,
+  Provider,
   untracked,
 } from '@angular/core';
 import {
@@ -77,6 +80,40 @@ export function injectTriggerPreload() {
   };
 }
 
+/**
+ * Configuration for the `mmLink` directive.
+ */
+type MMLinkConfig = {
+  /**
+   * The default preload behavior for links.
+   * Can be 'hover', 'visible', or null (no preloading).
+   * @default 'hover'
+   */
+  preloadOn: 'hover' | 'visible' | null;
+  /**
+   * Whether to use mouse down events for preloading.
+   * @default false
+   */
+  useMouseDown: boolean;
+};
+
+const configToken = new InjectionToken<MMLinkConfig>('MMSTACK_LINK_CONFIG');
+
+export function provideMMLinkDefaultConfig(
+  config: Partial<MMLinkConfig>,
+): Provider {
+  const cfg: MMLinkConfig = {
+    preloadOn: 'hover',
+    useMouseDown: false,
+    ...config,
+  };
+
+  return {
+    provide: configToken,
+    useValue: cfg,
+  };
+}
+
 @Directive({
   selector: '[mmLink]',
   exportAs: 'mmLink',
@@ -120,7 +157,12 @@ export class LinkDirective {
   readonly skipLocationChange = input(false, { transform: booleanAttribute });
   readonly replaceUrl = input(false, { transform: booleanAttribute });
   readonly mmLink = input<string | any[] | UrlTree | null>(null);
-  readonly preloadOn = input<'hover' | 'visible' | null>('hover');
+  readonly preloadOn = input<'hover' | 'visible' | null>(
+    inject(configToken).preloadOn,
+  );
+  readonly useMouseDown = input(inject(configToken).useMouseDown, {
+    transform: booleanAttribute,
+  });
 
   readonly preloading = output<void>();
 
@@ -145,6 +187,42 @@ export class LinkDirective {
     this.requestPreload();
   }
 
+  @HostListener('mousedown', [
+    '$event.button',
+    '$event.ctrlKey',
+    '$event.shiftKey',
+    '$event.altKey',
+    '$event.metaKey',
+  ])
+  onMouseDown(
+    button: number,
+    ctrlKey: boolean,
+    shiftKey: boolean,
+    altKey: boolean,
+    metaKey: boolean,
+  ) {
+    if (!untracked(this.useMouseDown)) return;
+    return this.trigger(button, ctrlKey, shiftKey, altKey, metaKey);
+  }
+
+  @HostListener('click', [
+    '$event.button',
+    '$event.ctrlKey',
+    '$event.shiftKey',
+    '$event.altKey',
+    '$event.metaKey',
+  ])
+  onClick(
+    button: number,
+    ctrlKey: boolean,
+    shiftKey: boolean,
+    altKey: boolean,
+    metaKey: boolean,
+  ) {
+    if (untracked(this.useMouseDown)) return;
+    return this.trigger(button, ctrlKey, shiftKey, altKey, metaKey);
+  }
+
   constructor() {
     const intersection = elementVisibility();
 
@@ -161,7 +239,7 @@ export class LinkDirective {
     this.preloading.emit();
   }
 
-  onClick(
+  private trigger(
     button: number,
     ctrlKey: boolean,
     shiftKey: boolean,

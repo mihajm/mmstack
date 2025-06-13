@@ -114,6 +114,15 @@ export function provideMMLinkDefaultConfig(
   };
 }
 
+function injectConfig() {
+  const cfg = inject(configToken, { optional: true });
+  return {
+    preloadOn: 'hover' as const,
+    useMouseDown: false,
+    ...cfg,
+  };
+}
+
 @Directive({
   selector: '[mmLink]',
   exportAs: 'mmLink',
@@ -158,9 +167,9 @@ export class LinkDirective {
   readonly replaceUrl = input(false, { transform: booleanAttribute });
   readonly mmLink = input<string | any[] | UrlTree | null>(null);
   readonly preloadOn = input<'hover' | 'visible' | null>(
-    inject(configToken).preloadOn,
+    injectConfig().preloadOn,
   );
-  readonly useMouseDown = input(inject(configToken).useMouseDown, {
+  readonly useMouseDown = input(injectConfig().useMouseDown, {
     transform: booleanAttribute,
   });
 

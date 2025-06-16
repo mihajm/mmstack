@@ -158,8 +158,6 @@ export function injectCreateTimeState() {
       return opt?.interval?.() ?? null;
     });
 
-    const oneOf = computed(() => {});
-
     return {
       ...state,
       options,

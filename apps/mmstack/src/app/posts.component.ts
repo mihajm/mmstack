@@ -10,7 +10,7 @@ export type Post = {
 };
 
 @Component({
-  selector: 'mm-posts',
+  selector: 'app-posts',
   imports: [RouterLink, RouterOutlet],
   template: `
     <div>

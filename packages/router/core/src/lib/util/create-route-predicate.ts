@@ -47,7 +47,7 @@ function createBasePredicate(path: string): (path: string) => boolean {
 
         return Object.entries(configMatrixParams).every(
           ([key, value]) =>
-            linkMatrixParams.hasOwnProperty(key) &&
+            Object.prototype.hasOwnProperty.call(linkMatrixParams, key) &&
             linkMatrixParams[key] === value,
         );
       };
@@ -78,7 +78,8 @@ function singleSegmentMatches(
   configSegment: ParsedSegment,
   linkSegment: ParsedSegment,
 ): boolean {
-  if (configSegment.pathPart.startsWith(':')) {
+  if (configSegment.pathPart === ':') {
+    return true;
   } else if (configSegment.pathPart !== linkSegment.pathPart) {
     return false;
   }
@@ -87,7 +88,7 @@ function singleSegmentMatches(
   const linkMatrix = linkSegment.matrixParams;
   for (const key in configMatrix) {
     if (
-      !linkMatrix.hasOwnProperty(key) ||
+      !Object.prototype.hasOwnProperty.call(linkMatrix, key) ||
       linkMatrix[key] !== configMatrix[key]
     ) {
       return false;

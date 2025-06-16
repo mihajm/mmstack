@@ -116,22 +116,8 @@ export const appConfig: ApplicationConfig = {
       withPreloading(PreloadStrategy),
     ),
     provideValidatorConfig(
-      (locale) => {
-        // switch (locale) {
-        //   case 'sl-SI':
-        //     return {
-        //       general: {
-        //         required: () => 'To polje je obvezno',
-        //       },
-        //     };
-        //   default: {
-        //     return {
-        //       general: {
-        //         required: (label) => `${label} is required`,
-        //       },
-        //     };
-        //   }
-        // }
+      () => {
+        // noop
       },
       // provide a custom toDate function if you're using non-date objects like Luxon's DateTime or Moment
       (date) => new Date(date),

@@ -9,7 +9,7 @@ export type Post = {
 };
 
 @Component({
-  selector: 'mm-post',
+  selector: 'app-post',
   template: ` Post: {{ post.value()?.title }} {{ id() }}`,
 })
 export class PostComponent {

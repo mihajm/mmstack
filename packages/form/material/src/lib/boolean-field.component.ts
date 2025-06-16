@@ -4,6 +4,7 @@ import {
   computed,
   effect,
   input,
+  numberAttribute,
   output,
   viewChild,
   ViewEncapsulation,
@@ -22,7 +23,15 @@ import { BooleanState, SignalErrorValidator } from './adapters';
     class: 'mm-boolean-field',
   },
   template: `
-    <div class="mm-checkbox-field-container" (click)="containerClicked.emit()">
+    <div
+      class="mm-checkbox-field-container"
+      (click)="
+        $event.target === $event.currentTarget && containerClicked.emit()
+      "
+      role="button"
+      [attr.tabindex]="tabIndex()"
+      (keydown.enter)="containerClicked.emit()"
+    >
       <mat-checkbox
         class="mm-checkbox-field"
         [class.readonly]="state().readonly()"
@@ -45,7 +54,6 @@ import { BooleanState, SignalErrorValidator } from './adapters';
           [matTooltip]="state().hintTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
-          (click)="$event.stopPropagation()"
           >{{ state().hint() }}</span
         >
       }
@@ -56,7 +64,6 @@ import { BooleanState, SignalErrorValidator } from './adapters';
           [matTooltip]="state().errorTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
-          (click)="$event.stopPropagation()"
           >{{ state().error() }}</span
         >
       }
@@ -124,6 +131,12 @@ import { BooleanState, SignalErrorValidator } from './adapters';
 export class BooleanFieldComponent<TParent = undefined> {
   readonly state = input.required<BooleanState<TParent>>();
   readonly containerClicked = output<void>();
+  /**
+   * The tabindex of the container.
+   * It's recommended to only use `0` (default) or `-1`.
+   * @see https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/tabindex
+   */
+  readonly tabIndex = input(0, { transform: numberAttribute });
 
   private readonly model = viewChild.required(NgModel);
 

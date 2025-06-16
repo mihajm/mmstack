@@ -1,5 +1,5 @@
 import { type HttpResourceRef } from '@angular/common/http';
-import { effect, ResourceStatus } from '@angular/core';
+import { effect } from '@angular/core';
 
 export type RetryOptions =
   | number
@@ -39,9 +39,9 @@ export function retryOnError<T>(
 
   const ref = effect(() => {
     switch (res.status()) {
-      case ResourceStatus.Error:
+      case 'error':
         return onError();
-      case ResourceStatus.Resolved:
+      case 'resolved':
         return onSuccess();
     }
   });

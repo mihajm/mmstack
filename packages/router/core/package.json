@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/router-core",
-  "version": "19.3.12",
+  "version": "20.0.0",
   "keywords": [
     "angular",
     "signals",
@@ -20,11 +20,11 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/router/core",
   "dependencies": {
-    "@mmstack/primitives": "^19.2.3"
+    "@mmstack/primitives": "^20.0.0"
   },
   "peerDependencies": {
-    "@angular/core": "^19.2.3",
-    "@angular/router": "^19.2.3",
+    "@angular/core": "~20.0.3",
+    "@angular/router": "~20.0.3",
     "rxjs": "~7.8.2"
   },
   "sideEffects": false

@@ -32,12 +32,14 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 
 ## Versioning
 
-The major version of @mmstack libraries (e.g., v18.x.x, v19.x.x) aligns with the major version of Angular they are designed for. This ensures clear compatibility.
+The major version of @mmstack libraries (e.g., v19.x.x, v20.x.x) aligns with the major version of Angular they are designed for. This ensures clear compatibility.
 
 Within a major version, minor and patch versions follow Semantic Versioning (SemVer):
 
 - Minor versions (X.y.0) introduce new, non-breaking features.
 - Patch versions (X.Y.z) provide backwards-compatible bug fixes.
+
+Bugfixes are guaranteed for 1 major version back (maybe more in the future, but that's all I can promise for now :) )
 
 ## Contributing
 

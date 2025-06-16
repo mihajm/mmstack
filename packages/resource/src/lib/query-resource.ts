@@ -14,7 +14,6 @@ import {
   inject,
   isDevMode,
   linkedSignal,
-  ResourceStatus,
   Signal,
   untracked,
 } from '@angular/core';
@@ -259,8 +258,8 @@ export function queryResource<TResult, TRaw = TResult>(
   // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
   const cbEffectRef = effect(() => {
     const status = resource.status();
-    if (status === ResourceStatus.Error) cb.fail();
-    else if (status === ResourceStatus.Resolved) cb.success();
+    if (status === 'error') cb.fail();
+    else if (status === 'resolved') cb.success();
   });
 
   const set = (value: TResult) => {

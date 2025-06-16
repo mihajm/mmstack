@@ -3,7 +3,6 @@ import {
   computed,
   DestroyRef,
   inject,
-  ResourceStatus,
   Signal,
   signal,
   ValueEqualityFn,
@@ -37,11 +36,11 @@ type NextRequest<
  */
 type StatusResult<TResult> =
   | {
-      status: ResourceStatus.Error;
+      status: 'error';
       error: unknown;
     }
   | {
-      status: ResourceStatus.Resolved;
+      status: 'resolved';
       value: TResult;
     };
 
@@ -211,16 +210,16 @@ export function mutationResource<
     .pipe(
       combineLatestWith(error$, value$),
       map(([status, error, value]): StatusResult<TResult> | null => {
-        if (status === ResourceStatus.Error && error) {
+        if (status === 'error' && error) {
           return {
-            status: ResourceStatus.Error,
+            status: 'error',
             error,
           };
         }
 
-        if (status === ResourceStatus.Resolved && value !== null) {
+        if (status === 'resolved' && value !== null) {
           return {
-            status: ResourceStatus.Resolved,
+            status: 'resolved',
             value,
           };
         }
@@ -231,7 +230,7 @@ export function mutationResource<
       takeUntilDestroyed(destroyRef),
     )
     .subscribe((result) => {
-      if (result.status === ResourceStatus.Error) onError?.(result.error, ctx);
+      if (result.status === 'error') onError?.(result.error, ctx);
       else onSuccess?.(result.value, ctx);
 
       onSettled?.(ctx);

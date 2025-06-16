@@ -2,9 +2,7 @@ import { httpResource } from '@angular/common/http';
 import { Component, computed } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressBar } from '@angular/material/progress-bar';
-import { faker } from '@faker-js/faker';
 import { queryResource } from '@mmstack/resource';
-import { createClientModel } from '@mmstack/table-client';
 import {
   ColumnDef,
   createColumnHelper,
@@ -12,7 +10,6 @@ import {
   createTableState,
   TableState,
 } from '@mmstack/table-core';
-import { TableComponent } from '@mmstack/table-material';
 
 type EventDef = {
   id: string;
@@ -69,25 +66,15 @@ function resolveSort({ sort }: TableState): string | null {
   return sort.direction === 'desc' ? `-${sort.name}` : sort.name;
 }
 
-const VALUES = Array.from({ length: 3000 }, (_, i): Post => {
-  return {
-    id: i,
-    title: faker.person.firstName(),
-    body: `Body ${i}`,
-  };
-});
-
 @Component({
   selector: 'app-table-demo',
-  imports: [MatProgressBar, TableComponent, MatCardModule],
+  imports: [MatProgressBar, MatCardModule],
   template: `
     <mat-progress-bar
       mode="indeterminate"
       [style.visibility]="events.isLoading() ? 'visible' : 'hidden'"
     />
-    <mat-card>
-      <mm-table [state]="todoTable" />
-    </mat-card>
+    <mat-card> </mat-card>
   `,
   styles: `
     mat-card {
@@ -134,18 +121,6 @@ export class TablePlaygroundComponent {
     },
   );
   readonly todoState = createTableState(todoColumns);
-
-  readonly todoTable = createTable({
-    data: () => VALUES,
-    model: createClientModel(),
-    columns: todoColumns,
-    state: this.todoState,
-    opt: {
-      rowSelect: {
-        enableRowSelection: true,
-      },
-    },
-  });
 
   readonly table = createTable({
     data: this.events.value,

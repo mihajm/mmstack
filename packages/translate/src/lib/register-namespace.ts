@@ -139,7 +139,6 @@ export function registerNamespace<
         translation.locale !== locale &&
         isDevMode()
       ) {
-        console.log('hre');
         return console.warn(
           `Expected locale to be ${locale} but got ${translation.locale}`,
         );

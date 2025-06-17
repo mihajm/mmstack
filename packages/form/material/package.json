@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-material",
-  "version": "20.0.1",
+  "version": "20.0.2",
   "keywords": [
     "angular",
     "signals",
@@ -18,7 +18,7 @@
     "@mmstack/form-adapters": "^20.0.1",
     "@mmstack/form-core": "^20.0.1",
     "@mmstack/form-validation": "^20.0.0",
-    "@mmstack/resource": "^20.0.0",
+    "@mmstack/resource": "^20.0.2",
     "@mmstack/primitives":"^20.0.1"
   },
   "peerDependencies": {

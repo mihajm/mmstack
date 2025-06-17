@@ -1,4 +1,5 @@
 export * from './cache';
+export * from './catch-value-error';
 export * from './circuit-breaker';
 export * from './dedupe.interceptor';
 export * from './equality';

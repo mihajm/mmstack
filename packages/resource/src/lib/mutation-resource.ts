@@ -8,7 +8,7 @@ import {
   ValueEqualityFn,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { combineLatestWith, filter, map } from 'rxjs';
+import { catchError, combineLatestWith, filter, map, of } from 'rxjs';
 import {
   queryResource,
   type QueryResourceOptions,
@@ -204,7 +204,7 @@ export function mutationResource<
     : inject(DestroyRef);
 
   const error$ = toObservable(resource.error);
-  const value$ = toObservable(resource.value);
+  const value$ = toObservable(resource.value).pipe(catchError(() => of(null)));
 
   const statusSub = toObservable(resource.status)
     .pipe(

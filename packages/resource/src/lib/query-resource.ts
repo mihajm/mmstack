@@ -20,6 +20,7 @@ import {
 import { toWritable } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
+  catchValueError,
   CircuitBreakerOptions,
   createCircuitBreaker,
   createEqualRequest,
@@ -207,6 +208,8 @@ export function queryResource<TResult, TRaw = TResult>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parse: options?.parse as any, // Not my favorite thing to do, but here it is completely safe.
   }) as HttpResourceRef<TResult>;
+
+  resource = catchValueError(resource, options?.defaultValue as TResult);
 
   // get full HttpResonse from Cache
   const cachedEvent = cache.get(cacheKey);

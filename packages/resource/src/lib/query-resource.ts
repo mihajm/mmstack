@@ -30,6 +30,7 @@ import {
   refresh,
   retryOnError,
   setCacheContext,
+  toResourceObject,
   urlWithParams,
   type RetryOptions,
 } from './util';
@@ -203,11 +204,13 @@ export function queryResource<TResult, TRaw = TResult>(
       })
     : stableRequest;
 
-  let resource = httpResource<TResult>(cachedRequest, {
-    ...options,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    parse: options?.parse as any, // Not my favorite thing to do, but here it is completely safe.
-  }) as HttpResourceRef<TResult>;
+  let resource = toResourceObject(
+    httpResource<TResult>(cachedRequest, {
+      ...options,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parse: options?.parse as any, // Not my favorite thing to do, but here it is completely safe.
+    }) as HttpResourceRef<TResult>,
+  );
 
   resource = catchValueError(resource, options?.defaultValue as TResult);
 

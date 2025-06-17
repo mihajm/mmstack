@@ -7,4 +7,5 @@ export * from './has-slow-connection';
 export * from './persist';
 export * from './refresh';
 export * from './retry-on-error';
+export * from './to-resource-object';
 export * from './url-with-params';

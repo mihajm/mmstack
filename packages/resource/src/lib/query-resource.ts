@@ -93,6 +93,11 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
    * Options for enabling and configuring caching for the resource.
    */
   cache?: ResourceCacheOptions;
+  /**
+   * Trigger a request every time the request function is triggered, even if the request parameters are the same.
+   * @default false
+   */
+  triggerOnSameRequest?: boolean;
 };
 
 /**
@@ -159,7 +164,9 @@ export function queryResource<TResult, TRaw = TResult>(
       return request() ?? undefined;
     },
     {
-      equal: createEqualRequest(options?.equal),
+      equal: options?.triggerOnSameRequest
+        ? undefined
+        : createEqualRequest(options?.equal),
     },
   );
 

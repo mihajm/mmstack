@@ -54,10 +54,10 @@ importers:
         specifier: ^4.1.0
         version: 4.1.0
       express:
-        specifier: 4.21.2
+        specifier: ^4.21.2
         version: 4.21.2
       rxjs:
-        specifier: 7.8.2
+        specifier: ^7.8.2
         version: 7.8.2
       uuid:
         specifier: ^11.1.0
@@ -6660,10 +6660,6 @@ packages:
   piscina@5.0.0:
     resolution: {integrity: sha512-R+arufwL7sZvGjAhSMK3TfH55YdGOqhpKXkcwQJr432AAnJX/xxX19PA4QisrmJ+BTTfZVggaz6HexbkQq1l1Q==}
     engines: {node: '>=18.x'}
-
-  piscina@5.1.0:
-    resolution: {integrity: sha512-dJrEDIyG0SlQNgl5iq2fWRLxvI8yH9ica4A7SEGBevlFUN9THvyJ+WwSO50cN92UVwAljMlu0SAPdqLYLB/ztQ==}
-    engines: {node: '>=20.x'}
 
   pkg-dir@4.2.0:
     resolution: {integrity: sha512-HRDzbaKjC+AOWVXxAU/x54COGeIv9eb+6CkDSQoNTt4XyWoIJvuPsXizxu/Fr23EiekbtZwmh1IcIG/l/a10GQ==}
@@ -16513,7 +16509,7 @@ snapshots:
       jsonc-parser: 3.3.1
       less: 4.3.0
       ora: 8.2.0
-      piscina: 5.1.0
+      piscina: 5.0.0
       postcss: 8.5.5
       rollup-plugin-dts: 6.2.1(rollup@4.43.0)(typescript@5.8.3)
       rxjs: 7.8.2
@@ -16954,10 +16950,6 @@ snapshots:
   pirates@4.0.7: {}
 
   piscina@5.0.0:
-    optionalDependencies:
-      '@napi-rs/nice': 1.0.1
-
-  piscina@5.1.0:
     optionalDependencies:
       '@napi-rs/nice': 1.0.1
 

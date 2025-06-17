@@ -3,9 +3,11 @@ import {
   CreateSignalOptions,
   signal,
   untracked,
+  ValueEqualityFn,
   type WritableSignal,
 } from '@angular/core';
 import type { UnknownObject } from '@mmstack/object';
+import { isMutable, MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 
 /**
@@ -127,39 +129,107 @@ export function derived<T extends any[]>(
   opt?: CreateSignalOptions<T[number]>,
 ): DerivedSignal<T, T[number]>;
 
+/**
+ * Creates a `DerivedSignal` that derives its value from another `MutableSignal`.
+ * Use mutuable signals with caution, but very useful for deeply nested structures.
+ *
+ * @typeParam T The type of the source signal's value.
+ * @typeParam U The type of the derived signal's value.
+ * @param source The source `WritableSignal`.
+ * @param options An object containing the `from` and `onChange` functions, and optional signal options.
+ * @returns A `DerivedSignal & MutableSignal` instance.
+ *
+ * @example
+ * ```ts
+ * const user = signal({ name: 'John', age: 30 });
+ * const name = derived(user, {
+ * from: (u) => u.name,
+ * onChange: (newName) => user.update((u) => ({ ...u, name: newName })),
+ * });
+ *
+ * name.set('Jane'); // Updates the original signal
+ * console.log(user().name); // Outputs: Jane
+ * ```
+ */
 export function derived<T, U>(
-  source: WritableSignal<T>,
+  source: MutableSignal<T>,
   optOrKey: CreateDerivedOptions<T, U> | keyof T,
   opt?: CreateSignalOptions<U>,
-): DerivedSignal<T, U> {
+): DerivedSignal<T, U> & MutableSignal<U>;
+
+export function derived<T, U>(
+  source: WritableSignal<T> | MutableSignal<T>,
+  optOrKey: CreateDerivedOptions<T, U> | keyof T,
+  opt?: CreateSignalOptions<U>,
+): DerivedSignal<T, U> | (DerivedSignal<T, U> & MutableSignal<U>) {
   const isArray =
     Array.isArray(untracked(source)) && typeof optOrKey === 'number';
 
   const from =
     typeof optOrKey === 'object' ? optOrKey.from : (v: T) => v[optOrKey] as U;
+
   const onChange =
     typeof optOrKey === 'object'
       ? optOrKey.onChange
       : isArray
-        ? (next: U) => {
-            source.update((cur) => {
-              const newArray = [...(cur as unknown as any[])];
-              newArray[optOrKey] = next;
-              return newArray as T;
-            });
-          }
-        : (next: U) => {
-            source.update((cur) => ({ ...cur, [optOrKey]: next }));
-          };
+        ? isMutable(source)
+          ? (next: U) => {
+              source.mutate((cur) => {
+                (cur as any[])[optOrKey] = next;
+                return cur as T;
+              });
+            }
+          : (next: U) => {
+              source.update((cur) => {
+                const newArray = [...(cur as unknown as any[])];
+                newArray[optOrKey] = next;
+                return newArray as T;
+              });
+            }
+        : isMutable(source)
+          ? (next: U) => {
+              source.mutate((cur) => {
+                (cur as UnknownObject)[optOrKey] = next as T[keyof T];
+                return cur;
+              });
+            }
+          : (next: U) => {
+              source.update((cur) => ({ ...cur, [optOrKey]: next }));
+            };
 
   const rest = typeof optOrKey === 'object' ? optOrKey : opt;
 
+  let baseEqual = rest?.equal ?? Object.is;
+  let trigger = false;
+
+  const equal: ValueEqualityFn<U> = isMutable(source)
+    ? (a: U, b: U) => {
+        if (trigger) return false;
+        return baseEqual(a, b);
+      }
+    : baseEqual;
+
   const sig = toWritable<U>(
-    computed(() => from(source()), rest),
+    computed(() => from(source()), { ...rest, equal }),
     (newVal) => onChange(newVal),
-  ) as DerivedSignal<T, U>;
+  ) as DerivedSignal<T, U> & MutableSignal<U>;
 
   sig.from = from;
+
+  if (isMutable(source)) {
+    sig.mutate = (updater) => {
+      trigger = true;
+      sig.update(updater);
+      trigger = false;
+    };
+
+    sig.inline = (updater) => {
+      sig.mutate((prev) => {
+        updater(prev);
+        return prev;
+      });
+    };
+  }
 
   return sig;
 }

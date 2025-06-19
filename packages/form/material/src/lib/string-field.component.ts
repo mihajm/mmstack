@@ -1,7 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  computed,
+  contentChild,
   effect,
   inject,
   input,
@@ -18,9 +18,9 @@ import {
   MatHint,
   MatLabel,
   MatPrefix,
+  MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
-import { MatIcon } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SignalErrorValidator, StringState } from './adapters';
@@ -36,7 +36,7 @@ import { SignalErrorValidator, StringState } from './adapters';
     MatHint,
     MatError,
     MatPrefix,
-    MatIcon,
+    MatSuffix,
     MatInput,
     MatTooltip,
     SignalErrorValidator,
@@ -53,8 +53,10 @@ import { SignalErrorValidator, StringState } from './adapters';
     >
       <mat-label>{{ state().label() }}</mat-label>
 
-      @if (prefixIcon()) {
-        <mat-icon matPrefix>{{ prefixIcon() }}</mat-icon>
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
       }
 
       <input
@@ -83,6 +85,12 @@ import { SignalErrorValidator, StringState } from './adapters';
           matTooltipClass="mm-multiline-tooltip"
           >{{ state().hint() }}</mat-hint
         >
+      }
+
+      @if (suffix()) {
+        <ng-container matSuffix>
+          <ng-content select="[matSuffix]" />
+        </ng-container>
       }
     </mat-form-field>
   `,
@@ -122,9 +130,9 @@ export class StringFieldComponent<TParent = undefined> {
 
   private readonly model = viewChild.required(NgModel);
 
-  protected readonly prefixIcon = computed(
-    () => this.state().prefixIcon?.() ?? '',
-  );
+  protected readonly prefix = contentChild(MatPrefix);
+
+  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

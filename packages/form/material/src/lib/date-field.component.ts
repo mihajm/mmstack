@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  contentChild,
   effect,
   inject,
   input,
@@ -21,6 +22,7 @@ import {
   MatFormFieldAppearance,
   MatHint,
   MatLabel,
+  MatPrefix,
   MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
@@ -39,6 +41,7 @@ import { DateState, SignalErrorValidator } from './adapters';
     MatHint,
     MatError,
     MatInput,
+    MatPrefix,
     MatSuffix,
     MatDatepicker,
     MatDatepickerToggle,
@@ -58,6 +61,12 @@ import { DateState, SignalErrorValidator } from './adapters';
     >
       <mat-label>{{ state().label() }}</mat-label>
 
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
+      }
+
       <input
         matInput
         [(ngModel)]="state().value"
@@ -72,11 +81,15 @@ import { DateState, SignalErrorValidator } from './adapters';
         (blur)="state().markAsTouched()"
       />
 
-      <mat-datepicker-toggle
-        matIconSuffix
-        [for]="picker"
-        [disabled]="state().disabled() || state().readonly()"
-      />
+      <ng-container matSuffix>
+        <ng-content select="[matSuffix]">
+          <mat-datepicker-toggle
+            [for]="picker"
+            [disabled]="state().disabled() || state().readonly()"
+          />
+        </ng-content>
+      </ng-container>
+
       <mat-datepicker #picker (closed)="state().markAsTouched()" />
 
       <mat-error
@@ -131,6 +144,8 @@ export class DateFieldComponent<TParent = undefined, TDate = Date> {
   );
 
   private readonly model = viewChild.required(NgModel);
+
+  protected readonly prefix = contentChild(MatPrefix);
 
   constructor() {
     effect(() => {

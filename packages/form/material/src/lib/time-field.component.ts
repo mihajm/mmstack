@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  contentChild,
   effect,
   inject,
   input,
@@ -17,6 +18,7 @@ import {
   MatFormFieldAppearance,
   MatHint,
   MatLabel,
+  MatPrefix,
   MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
@@ -40,6 +42,7 @@ import { SignalErrorValidator, TimeState } from './adapters';
     MatHint,
     MatError,
     MatInput,
+    MatPrefix,
     MatSuffix,
     MatTimepicker,
     MatTimepickerToggle,
@@ -59,6 +62,12 @@ import { SignalErrorValidator, TimeState } from './adapters';
     >
       <mat-label>{{ state().label() }}</mat-label>
 
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
+      }
+
       <input
         matInput
         [(ngModel)]="state().value"
@@ -73,11 +82,15 @@ import { SignalErrorValidator, TimeState } from './adapters';
         (blur)="state().markAsTouched()"
       />
 
-      <mat-timepicker-toggle
-        matIconSuffix
-        [for]="picker"
-        [disabled]="state().disabled() || state().readonly()"
-      />
+      <ng-container matSuffix>
+        <ng-content select="[matSuffix]">
+          <mat-timepicker-toggle
+            [for]="picker"
+            [disabled]="state().disabled() || state().readonly()"
+          />
+        </ng-content>
+      </ng-container>
+
       <mat-timepicker
         #picker
         [interval]="interval()"
@@ -142,6 +155,8 @@ export class TimeFieldComponent<TParent = undefined, TDate = Date> {
     () => this.state().interval?.() ?? null,
   );
   protected readonly options = computed(() => this.state().options?.() ?? null);
+
+  protected readonly prefix = contentChild(MatPrefix);
 
   constructor() {
     effect(() => {

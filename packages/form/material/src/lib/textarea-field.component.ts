@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  contentChild,
   effect,
   inject,
   input,
@@ -18,6 +19,8 @@ import {
   MatFormFieldAppearance,
   MatHint,
   MatLabel,
+  MatPrefix,
+  MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -35,6 +38,8 @@ import { SignalErrorValidator, TextareaState } from './adapters';
     MatHint,
     MatError,
     MatInput,
+    MatPrefix,
+    MatSuffix,
     MatTooltip,
     SignalErrorValidator,
     CdkTextareaAutosize,
@@ -50,6 +55,12 @@ import { SignalErrorValidator, TextareaState } from './adapters';
       [hideRequiredMarker]="hideRequiredMarker()"
     >
       <mat-label>{{ state().label() }}</mat-label>
+
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
+      }
 
       <textarea
         matInput
@@ -81,6 +92,12 @@ import { SignalErrorValidator, TextareaState } from './adapters';
           matTooltipClass="mm-multiline-tooltip"
           >{{ state().hint() }}</mat-hint
         >
+      }
+
+      @if (suffix()) {
+        <ng-container matSuffix>
+          <ng-content select="[matSuffix]" />
+        </ng-container>
       }
     </mat-form-field>
   `,
@@ -123,6 +140,10 @@ export class TextareaFieldComponent<TParent = undefined> {
   protected readonly autosize = computed(
     () => this.state().autosize?.() ?? true,
   );
+
+  protected readonly prefix = contentChild(MatPrefix);
+
+  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

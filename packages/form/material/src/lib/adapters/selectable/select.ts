@@ -12,7 +12,6 @@ export type MaterialSelectStateExtension = {
   disableOptionCentering?: Signal<boolean>;
   hideSingleSelectionIndicator?: Signal<boolean>;
   panelWidth?: Signal<string | number | null>;
-  prefixIcon?: Signal<string>;
 };
 
 export type SelectState<T, TParent = undefined> = GenericSelectState<
@@ -25,7 +24,6 @@ export type MaterialSelectStateOptionsExtension = {
   disableOptionCentering?: () => boolean;
   hideSingleSelectionIndicator?: () => boolean;
   panelWidth?: () => string | number | null;
-  prefixIcon?: () => string;
 };
 
 export type SelectStateOptions<T> = GenericSelectStateOptions<T> &
@@ -51,7 +49,6 @@ export function toMaterialSelectSpecifics<T>(
     hideSingleSelectionIndicator: computed(
       () => opt.hideSingleSelectionIndicator?.() ?? false,
     ),
-    prefixIcon: computed(() => opt.prefixIcon?.() ?? ''),
   };
 }
 

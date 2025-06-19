@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  contentChild,
   effect,
   inject,
   input,
@@ -34,6 +35,7 @@ import {
   MatHint,
   MatLabel,
   MatPrefix,
+  MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatIcon } from '@angular/material/icon';
@@ -54,6 +56,7 @@ import { ChipsState, SignalErrorValidator } from './adapters';
     MatLabel,
     MatHint,
     MatPrefix,
+    MatSuffix,
     MatIcon,
     MatError,
     MatInput,
@@ -77,8 +80,10 @@ import { ChipsState, SignalErrorValidator } from './adapters';
     >
       <mat-label>{{ state().label() }}</mat-label>
 
-      @if (prefixIcon()) {
-        <mat-icon matPrefix>{{ prefixIcon() }}</mat-icon>
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
       }
 
       <mat-chip-grid #chipGrid>
@@ -132,6 +137,12 @@ import { ChipsState, SignalErrorValidator } from './adapters';
           >{{ state().hint() }}</mat-hint
         >
       }
+
+      @if (suffix()) {
+        <ng-container matSuffix>
+          <ng-content select="[matSuffix]" />
+        </ng-container>
+      }
     </mat-form-field>
   `,
   styles: `
@@ -171,13 +182,13 @@ export class ChipsFieldComponent<TParent = undefined> {
   private readonly model = viewChild.required(NgModel);
   private readonly announcer = inject(LiveAnnouncer);
 
-  protected readonly prefixIcon = computed(
-    () => this.state().prefixIcon?.() ?? '',
-  );
-
   protected readonly panelWidth = computed(
     () => this.state().panelWidth?.() ?? 'auto',
   );
+
+  protected readonly prefix = contentChild(MatPrefix);
+
+  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

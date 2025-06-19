@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  contentChild,
   effect,
   inject,
   InjectionToken,
@@ -22,9 +23,9 @@ import {
   MatHint,
   MatLabel,
   MatPrefix,
+  MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
-import { MatIcon } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import {
@@ -71,8 +72,8 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
     MatSelect,
     MatOption,
     MatSelectTrigger,
-    MatIcon,
     MatPrefix,
+    MatSuffix,
     MatInput,
     MatProgressSpinner,
     SignalErrorValidator,
@@ -90,8 +91,10 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
     >
       <mat-label>{{ state().label() }}</mat-label>
 
-      @if (prefixIcon()) {
-        <mat-icon matPrefix>{{ prefixIcon() }}</mat-icon>
+      @if (prefix()) {
+        <ng-container matPrefix>
+          <ng-content select="[matPrefix]" />
+        </ng-container>
       }
 
       <mat-select
@@ -159,6 +162,12 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
           matTooltipClass="mm-multiline-tooltip"
           >{{ state().hint() }}</mat-hint
         >
+      }
+
+      @if (suffix()) {
+        <ng-container matSuffix>
+          <ng-content select="[matSuffix]" />
+        </ng-container>
       }
     </mat-form-field>
   `,
@@ -232,10 +241,6 @@ export class SearchFieldComponent<T, TParent = undefined> {
     () => this.state().searchPlaceholder?.() ?? '',
   );
 
-  protected readonly prefixIcon = computed(
-    () => this.state().prefixIcon?.() ?? '',
-  );
-
   protected readonly panelWidth = computed(
     () => this.state().panelWidth?.() ?? 'auto',
   );
@@ -298,6 +303,10 @@ export class SearchFieldComponent<T, TParent = undefined> {
       },
     ];
   });
+
+  protected readonly prefix = contentChild(MatPrefix);
+
+  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

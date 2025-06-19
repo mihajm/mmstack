@@ -1,4 +1,3 @@
-import { computed, type Signal } from '@angular/core';
 import {
   createNumberState as genericCreateNumberState,
   injectCreateNumberState as genericInjectCreateNumberState,
@@ -8,38 +7,17 @@ import {
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
 
-export type MaterialNumberStateExtension = {
-  prefixIcon?: Signal<string>;
-};
+export type NumberState<TParent = undefined> = GenericNumberState<TParent>;
 
-export type MaterialNumberStateOptionsExtension = {
-  prefixIcon?: () => string;
-};
+export type NumberStateOptions = GenericNumberStateOptions;
 
-export type NumberState<TParent = undefined> = GenericNumberState<TParent> &
-  MaterialNumberStateExtension;
-
-export type NumberStateOptions = GenericNumberStateOptions &
-  MaterialNumberStateOptionsExtension;
-
-export type InjectedNumberStateOptions = GenericInjectedNumberStateOptions &
-  MaterialNumberStateOptionsExtension;
-
-export function toMaterialNumberSpecifics<T>(
-  state: T,
-  opt?: MaterialNumberStateOptionsExtension,
-): T & MaterialNumberStateExtension {
-  return {
-    ...state,
-    prefixIcon: computed(() => opt?.prefixIcon?.() ?? ''),
-  };
-}
+export type InjectedNumberStateOptions = GenericInjectedNumberStateOptions;
 
 export function createNumberState<TParent>(
   value: number | null | DerivedSignal<TParent, number | null>,
   opt?: NumberStateOptions,
 ): NumberState<TParent> {
-  return toMaterialNumberSpecifics(genericCreateNumberState(value, opt), opt);
+  return genericCreateNumberState(value, opt);
 }
 
 export function injectCreateNumberState() {
@@ -49,6 +27,6 @@ export function injectCreateNumberState() {
     value: number | null | DerivedSignal<TParent, number | null>,
     opt?: InjectedNumberStateOptions,
   ): NumberState<TParent> => {
-    return toMaterialNumberSpecifics(factory(value, opt), opt);
+    return factory(value, opt);
   };
 }

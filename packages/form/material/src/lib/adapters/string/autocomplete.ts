@@ -7,35 +7,27 @@ import {
   type InjectedAutocompleteStateOptions as GenericInjectedAutocompleteStateOptions,
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
-import {
-  MaterialStringStateExtension,
-  MaterialStringStateOptionsExtension,
-  toMaterialStringSpecifics,
-} from './base-string';
 
 export type AutocompleteState<TParent = undefined> =
-  GenericAutocompleteState<TParent> &
-    MaterialStringStateExtension & {
-      panelWidth?: Signal<string | number>;
-    };
-
-export type AutocompleteStateOptions = GenericAutocompleteStateOptions &
-  MaterialStringStateOptionsExtension & {
-    panelWidth?: () => string | number;
+  GenericAutocompleteState<TParent> & {
+    panelWidth?: Signal<string | number>;
   };
 
+export type AutocompleteStateOptions = GenericAutocompleteStateOptions & {
+  panelWidth?: () => string | number;
+};
+
 export type InjectedAutocompleteStateOptions =
-  GenericInjectedAutocompleteStateOptions &
-    MaterialStringStateOptionsExtension & {
-      panelWidth?: () => string | number;
-    };
+  GenericInjectedAutocompleteStateOptions & {
+    panelWidth?: () => string | number;
+  };
 
 function toMaterialSpecifics<TParent = undefined>(
   state: GenericAutocompleteState<TParent>,
   opt?: AutocompleteStateOptions,
 ): AutocompleteState<TParent> {
   return {
-    ...toMaterialStringSpecifics(state, opt),
+    ...state,
     panelWidth: computed(() => opt?.panelWidth?.() ?? 'auto'),
   };
 }

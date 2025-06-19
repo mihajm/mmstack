@@ -1,4 +1,3 @@
-import { computed, type Signal } from '@angular/core';
 import {
   createStringState as genericCreateStringState,
   injectCreateStringState as genericInjectCreateStringState,
@@ -8,38 +7,16 @@ import {
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
 
-export type MaterialStringStateExtension = {
-  prefixIcon?: Signal<string>;
-};
+export type StringState<TParent = undefined> = GenericStringState<TParent>;
 
-export type MaterialStringStateOptionsExtension = {
-  prefixIcon?: () => string;
-};
-
-export type StringState<TParent = undefined> = GenericStringState<TParent> &
-  MaterialStringStateExtension;
-
-export type StringStateOptions = GenericStringStateOptions &
-  MaterialStringStateOptionsExtension;
-
-export type InjectedStringStateOptions = GenericInjectedStringStateOptions &
-  MaterialStringStateOptionsExtension;
-
-export function toMaterialStringSpecifics<T>(
-  state: T,
-  opt?: MaterialStringStateOptionsExtension,
-): T & MaterialStringStateExtension {
-  return {
-    ...state,
-    prefixIcon: computed(() => opt?.prefixIcon?.() ?? ''),
-  };
-}
+export type StringStateOptions = GenericStringStateOptions;
+export type InjectedStringStateOptions = GenericInjectedStringStateOptions;
 
 export function createStringState<TParent>(
   value: string | null | DerivedSignal<TParent, string | null>,
   opt?: StringStateOptions,
 ): StringState<TParent> {
-  return toMaterialStringSpecifics(genericCreateStringState(value, opt), opt);
+  return genericCreateStringState(value, opt);
 }
 
 export function injectCreateStringState() {
@@ -49,6 +26,6 @@ export function injectCreateStringState() {
     value: string | null | DerivedSignal<TParent, string | null>,
     opt?: InjectedStringStateOptions,
   ): StringState<TParent> => {
-    return toMaterialStringSpecifics(factory(value, opt), opt);
+    return factory(value, opt);
   };
 }

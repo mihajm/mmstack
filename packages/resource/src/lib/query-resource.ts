@@ -278,6 +278,7 @@ export function queryResource<TResult, TRaw = TResult>(
     : resource.value;
 
   const onError = options?.onError; // Put in own variable to ensure value remains even if options are somehow mutated in-line
+
   if (onError) {
     const onErrorRef = effect(() => {
       const err = resource.error();
@@ -295,7 +296,7 @@ export function queryResource<TResult, TRaw = TResult>(
   // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
   const cbEffectRef = effect(() => {
     const status = resource.status();
-    if (status === 'error') cb.fail();
+    if (status === 'error') cb.fail(untracked(resource.error));
     else if (status === 'resolved') cb.success();
   });
 

@@ -29,7 +29,7 @@ export type CircuitBreaker = {
   /**
    * Signals a failure to the circuit breaker.  This may cause the circuit breaker to open.
    */
-  fail: () => void;
+  fail: (err?: Error) => void;
   /**
    * Signals a success to the circuit breaker.  This may cause the circuit breaker to close.
    */
@@ -55,12 +55,19 @@ export type CircuitBreaker = {
 export type CircuitBreakerOptions =
   | false
   | CircuitBreaker
-  | { treshold?: number; timeout?: number };
+  | {
+      treshold?: number;
+      timeout?: number;
+      shouldFail?: (err?: Error) => boolean;
+      shouldFailForever?: (err?: Error) => boolean;
+    };
 
 /** @internal */
 function internalCeateCircuitBreaker(
   treshold = 5,
   resetTimeout = 30000,
+  shouldFail: (err?: Error) => boolean = () => true,
+  shouldFailForever: (err?: Error) => boolean = () => false,
 ): CircuitBreaker {
   const halfOpen = signal(false);
   const failureCount = signal(0);
@@ -84,17 +91,35 @@ function internalCeateCircuitBreaker(
     failureCount.set(treshold - 1);
   };
 
+  let failForeverResetId: ReturnType<typeof setTimeout> | null = null;
   const effectRef = effect((cleanup) => {
     if (!isOpen()) return;
 
     const timeout = setTimeout(tryOnce, resetTimeout);
-
-    return cleanup(() => clearTimeout(timeout));
+    failForeverResetId = timeout;
+    return cleanup(() => {
+      clearTimeout(timeout);
+      failForeverResetId = null;
+    });
   });
 
-  const fail = () => {
+  const failInternal = () => {
     failureCount.set(failureCount() + 1);
     halfOpen.set(false);
+  };
+
+  const failForever = () => {
+    if (failForeverResetId) clearTimeout(failForeverResetId);
+    effectRef.destroy();
+    failureCount.set(Infinity);
+    halfOpen.set(false);
+    return;
+  };
+
+  const fail = (err?: Error) => {
+    if (shouldFailForever(err)) return failForever();
+    if (shouldFail(err)) return failInternal();
+    // If the error does not trigger a failure, we do nothing.
   };
 
   return {
@@ -159,5 +184,10 @@ export function createCircuitBreaker(
 
   if (typeof opt === 'object' && 'isClosed' in opt) return opt;
 
-  return internalCeateCircuitBreaker(opt?.treshold, opt?.timeout);
+  return internalCeateCircuitBreaker(
+    opt?.treshold,
+    opt?.timeout,
+    opt?.shouldFail,
+    opt?.shouldFailForever,
+  );
 }

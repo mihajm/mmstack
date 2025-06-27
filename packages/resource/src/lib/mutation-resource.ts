@@ -24,10 +24,10 @@ type NextRequest<
   TMethod extends HttpResourceRequest['method'],
   TMutation,
 > = TMethod extends 'DELETE' | 'delete'
-  ? Omit<HttpResourceRequest, 'body' | 'method'> & { method?: TMethod }
+  ? Omit<HttpResourceRequest, 'body' | 'method'> & { method: TMethod }
   : Omit<HttpResourceRequest, 'body' | 'method'> & {
       body: TMutation;
-      method?: TMethod;
+      method: TMethod;
     };
 
 /**
@@ -98,7 +98,6 @@ export type MutationResourceRef<
   TResult,
   TMutation = TResult,
   TICTX = void,
-  TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 > = Omit<
   QueryResourceRef<TResult>,
   'prefetch' | 'value' | 'hasValue' | 'set' | 'update' // we don't allow manually viewing the returned data or updating it manually, prefetching a mutation also doesn't make any sense
@@ -106,19 +105,15 @@ export type MutationResourceRef<
   /**
    * Executes the mutation.
    *
-   * @param value The request body and any other request parameters to use for the mutation.  The `body` property is *required*.
+   * @param value The mutation value (usually the request body).
+   * @param ctx An optional initial context value that will be passed to the `onMutate` callback.
    */
-  mutate: (
-    value: Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string },
-    ctx?: TICTX,
-  ) => void;
+  mutate: (value: TMutation, ctx?: TICTX) => void;
   /**
    * A signal that holds the current mutation request, or `null` if no mutation is in progress.
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
-  current: Signal<
-    (Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string }) | null
-  >;
+  current: Signal<TMutation | null>;
 };
 
 /**
@@ -128,16 +123,15 @@ export type MutationResourceRef<
  * managing the mutation lifecycle (pending, error, success) and provides callbacks for handling
  * these states.
  *
- * @param request A function that returns the base `HttpResourceRequest` to be made.  This
- *               function is called reactively.  Unlike `queryResource`, the `body` property
- *               of the request is provided when `mutate` is called, *not* here.  If the
- *               function returns `undefined`, the mutation is considered "disabled." All properties,
- *               except the body, can be set here.
+ * @param request A function that returns the base `HttpResourceRequest` to be made. This function is called reactively. The parameter is the mutation value provided by the `mutate` method.
  * @param options Configuration options for the mutation resource.  This includes callbacks
  *               for `onMutate`, `onError`, `onSuccess`, and `onSettled`.
  * @typeParam TResult - The type of the expected result from the mutation.
  * @typeParam TRaw - The raw response type from the HTTP request (defaults to TResult).
+ * @typeParam TMutation - The type of the mutation value (the request body).
+ * @typeParam TICTX - The type of the initial context value passed to `onMutate`.
  * @typeParam TCTX - The type of the context value returned by `onMutate`.
+ * @typeParam TMethod - The HTTP method to be used for the mutation (defaults to `HttpResourceRequest['method']`).
  * @returns A `MutationResourceRef` instance, which provides methods for triggering the mutation
  *          and observing its status.
  */
@@ -149,19 +143,14 @@ export function mutationResource<
   TICTX = TCTX,
   TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 >(
-  request: () =>
-    | Omit<NextRequest<TMethod, TMutation>, 'body'>
-    | undefined
-    | void,
+  request: (
+    params: TMutation,
+  ) => Omit<NextRequest<TMethod, TMutation>, 'body'> | undefined | void,
   options: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
-): MutationResourceRef<TResult, TMutation, TICTX, TMethod> {
+): MutationResourceRef<TResult, TMutation, TICTX> {
   const { onMutate, onError, onSuccess, onSettled, equal, ...rest } = options;
 
   const requestEqual = createEqualRequest(equal);
-
-  const baseRequest = computed(() => request() ?? undefined, {
-    equal: requestEqual,
-  });
 
   const nextRequest = signal<
     (Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string }) | null
@@ -173,24 +162,26 @@ export function mutationResource<
     },
   });
 
-  const req = computed((): HttpResourceRequest | undefined => {
-    const nr = nextRequest();
-    if (!nr) return;
-
-    const base = baseRequest();
-
-    const url = nr.url ?? base?.url;
-    if (!url) return;
-
-    const method = nr.method ?? base?.method;
-
-    return {
-      ...base,
-      ...nr,
-      url,
-      method,
-    };
+  const eq = equal ?? Object.is;
+  const next = signal<TMutation | null>(null, {
+    equal: (a, b) => {
+      if (!a && !b) return true;
+      if (!a || !b) return false;
+      return eq(a, b);
+    },
   });
+
+  const req = computed(
+    (): HttpResourceRequest | undefined => {
+      const nr = next();
+      if (!nr) return;
+
+      return request(nr) ?? undefined;
+    },
+    {
+      equal: requestEqual,
+    },
+  );
 
   const resource = queryResource<TResult, TRaw>(req, {
     ...rest,
@@ -245,12 +236,9 @@ export function mutationResource<
       resource.destroy();
     },
     mutate: (value, ictx) => {
-      ctx = onMutate?.(
-        (value as unknown as HttpResourceRequest).body as TMutation,
-        ictx,
-      ) as TCTX;
-      nextRequest.set(value);
+      ctx = onMutate?.(value, ictx) as TCTX;
+      next.set(value);
     },
-    current: nextRequest,
+    current: next,
   };
 }

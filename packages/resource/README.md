@@ -79,9 +79,10 @@ export class PostsService {
   );
 
   private readonly createPostResource = mutationResource(
-    () => ({
+    (post: Post) => ({
       url: this.endpoint,
       method: 'POST',
+      body: post,
     }),
     {
       circuitBreaker: this.cb, // use shared circuit breaker use true if not sharing
@@ -101,7 +102,7 @@ export class PostsService {
   );
 
   createPost(post: Post) {
-    this.createPostResource.mutate({ body: post }); // send the request
+    this.createPostResource.mutate(post); // send the request
   }
 }
 ```

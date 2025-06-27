@@ -1,4 +1,14 @@
-import { computed, effect, Signal, signal, untracked } from '@angular/core';
+import {
+  computed,
+  effect,
+  inject,
+  InjectionToken,
+  Injector,
+  Provider,
+  Signal,
+  signal,
+  untracked,
+} from '@angular/core';
 
 /**
  * Represents the possible states of a circuit breaker.
@@ -47,6 +57,32 @@ export type CircuitBreaker = {
 
 /**
  * Options for creating a circuit breaker.
+ */
+type CreateCircuitBreakerOptions = {
+  /**
+   * The number of failures that will cause the circuit breaker to open.
+   * @default 5
+   */
+  treshold?: number;
+  /**
+   * The time in milliseconds after which the circuit breaker will reset and allow operations to proceed again.
+   * @default 30000 (30 seconds)
+   */
+  timeout?: number;
+  /**
+   * A function that determines whether an error should cause the circuit breaker to increment the failure count.
+   * @default Always returns true
+   */
+  shouldFail?: (err?: Error) => boolean;
+  /**
+   * A function that determines whether an error should cause the circuit breaker to be open forever.
+   * @default Always returns false
+   */
+  shouldFailForever?: (err?: Error) => boolean;
+};
+
+/**
+ * Options for creating a circuit breaker.
  *  - `false`: Disables circuit breaker functionality (always open).
  *  - true: Creates a new circuit breaker with default options.
  *  - `CircuitBreaker`: Provides an existing `CircuitBreaker` instance to use.
@@ -55,12 +91,15 @@ export type CircuitBreaker = {
 export type CircuitBreakerOptions =
   | false
   | CircuitBreaker
-  | {
-      treshold?: number;
-      timeout?: number;
-      shouldFail?: (err?: Error) => boolean;
-      shouldFailForever?: (err?: Error) => boolean;
-    };
+  | CreateCircuitBreakerOptions;
+
+/** @internal */
+const DEFAULT_OPTIONS: Required<CreateCircuitBreakerOptions> = {
+  treshold: 5,
+  timeout: 30000,
+  shouldFail: () => true,
+  shouldFailForever: () => false,
+};
 
 /** @internal */
 function internalCeateCircuitBreaker(
@@ -154,6 +193,30 @@ function createNeverBrokenCircuitBreaker(): CircuitBreaker {
   };
 }
 
+const CB_DEFAULT_OPTIONS = new InjectionToken<
+  Required<CreateCircuitBreakerOptions>
+>('MMSTACK_CIRCUIT_BREAKER_DEFAULT_OPTIONS');
+
+export function provideCircuitBreakerDefaultOptions(
+  options: CircuitBreakerOptions,
+): Provider {
+  return {
+    provide: CB_DEFAULT_OPTIONS,
+    useValue: {
+      ...DEFAULT_OPTIONS,
+      ...options,
+    },
+  };
+}
+
+function injectCircuitBreakerOptions(
+  injector = inject(Injector),
+): Required<CreateCircuitBreakerOptions> {
+  return injector.get(CB_DEFAULT_OPTIONS, DEFAULT_OPTIONS, {
+    optional: true,
+  });
+}
+
 /**
  * Creates a circuit breaker instance.
  *
@@ -179,15 +242,21 @@ function createNeverBrokenCircuitBreaker(): CircuitBreaker {
  */
 export function createCircuitBreaker(
   opt?: CircuitBreakerOptions,
+  injector?: Injector,
 ): CircuitBreaker {
   if (opt === false) return createNeverBrokenCircuitBreaker();
 
   if (typeof opt === 'object' && 'isClosed' in opt) return opt;
 
+  const { treshold, timeout, shouldFail, shouldFailForever } = {
+    ...injectCircuitBreakerOptions(injector),
+    ...opt,
+  };
+
   return internalCeateCircuitBreaker(
-    opt?.treshold,
-    opt?.timeout,
-    opt?.shouldFail,
-    opt?.shouldFailForever,
+    treshold,
+    timeout,
+    shouldFail,
+    shouldFailForever,
   );
 }

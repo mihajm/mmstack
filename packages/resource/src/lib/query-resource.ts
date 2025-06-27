@@ -172,6 +172,7 @@ export function queryResource<TResult, TRaw = TResult>(
     options?.circuitBreaker === true
       ? undefined
       : (options?.circuitBreaker ?? false),
+    options?.injector,
   );
 
   const stableRequest = computed(

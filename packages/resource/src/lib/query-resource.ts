@@ -176,7 +176,7 @@ export function queryResource<TResult, TRaw = TResult>(
 
   const stableRequest = computed(
     () => {
-      if (cb.isClosed()) return undefined;
+      if (cb.isOpen()) return undefined;
       return request() ?? undefined;
     },
     {
@@ -326,7 +326,7 @@ export function queryResource<TResult, TRaw = TResult>(
     value,
     set,
     update,
-    disabled: computed(() => cb.isClosed() || stableRequest() === undefined),
+    disabled: computed(() => cb.isOpen() || stableRequest() === undefined),
     reload: () => {
       cb.halfOpen(); // open the circuit for manual reload
       return resource.reload();
@@ -340,12 +340,13 @@ export function queryResource<TResult, TRaw = TResult>(
       if (!options?.cache || hasSlowConnection()) return Promise.resolve();
 
       const request = untracked(cachedRequest);
-      if (!request) return Promise.resolve();
 
       const prefetchRequest = {
         ...request,
         ...partial,
       };
+
+      if (!prefetchRequest.url) return Promise.resolve();
 
       try {
         await firstValueFrom(

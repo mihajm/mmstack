@@ -17,6 +17,12 @@ export type CircuitBreaker = {
    */
   isClosed: Signal<boolean>;
   /**
+   *  A signal indicating whether the circuit breaker is either open or in a half-open state.
+   * This is useful for checking if operations are blocked.
+   * If the circuit breaker is open, operations should not proceed.
+   */
+  isOpen: Signal<boolean>;
+  /**
    * A signal representing the current state of the circuit breaker.
    */
   status: Signal<CircuitBreakerState>;
@@ -60,11 +66,12 @@ function internalCeateCircuitBreaker(
   const failureCount = signal(0);
 
   const status = computed<CircuitBreakerState>(() => {
-    if (failureCount() >= treshold) return 'CLOSED';
-    return halfOpen() ? 'HALF_OPEN' : 'OPEN';
+    if (failureCount() >= treshold) return 'OPEN';
+    return halfOpen() ? 'HALF_OPEN' : 'CLOSED';
   });
 
-  const isClosed = computed(() => status() === 'CLOSED');
+  const isClosed = computed(() => status() !== 'OPEN');
+  const isOpen = computed(() => status() !== 'CLOSED');
 
   const success = () => {
     failureCount.set(0);
@@ -72,13 +79,13 @@ function internalCeateCircuitBreaker(
   };
 
   const tryOnce = () => {
-    if (!untracked(isClosed)) return;
+    if (!untracked(isOpen)) return;
     halfOpen.set(true);
     failureCount.set(treshold - 1);
   };
 
   const effectRef = effect((cleanup) => {
-    if (!isClosed()) return;
+    if (!isOpen()) return;
 
     const timeout = setTimeout(tryOnce, resetTimeout);
 
@@ -93,6 +100,7 @@ function internalCeateCircuitBreaker(
   return {
     status,
     isClosed,
+    isOpen,
     fail,
     success,
     halfOpen: tryOnce,
@@ -103,8 +111,9 @@ function internalCeateCircuitBreaker(
 /** @internal */
 function createNeverBrokenCircuitBreaker(): CircuitBreaker {
   return {
-    isClosed: computed(() => false),
-    status: signal('OPEN'),
+    isClosed: computed(() => true),
+    isOpen: computed(() => false),
+    status: signal('CLOSED'),
     fail: () => {
       // noop
     },

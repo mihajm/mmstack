@@ -1,5 +1,4 @@
-import { isPlatformBrowser } from '@angular/common';
-import { Component, inject, PLATFORM_ID, signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { queryResource } from '@mmstack/resource';
 import {
@@ -32,7 +31,7 @@ const columns = [
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, TableComponent],
-  template: `<button (click)="test.reload()">Refetch</button>`,
+  template: ``,
   styles: ``,
 })
 export class AppComponent {
@@ -42,26 +41,6 @@ export class AppComponent {
     }),
     {
       defaultValue: [],
-    },
-  );
-
-  private isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
-
-  test = queryResource(
-    () => {
-      if (!this.isBrowser) return;
-      return {
-        url: 'https://jsonplaceholder.typicode.com/posts/1',
-        params: {
-          yay: 'test',
-        },
-      };
-    },
-    {
-      cache: {
-        staleTime: 0,
-        bustBrowserCache: true,
-      },
     },
   );
 

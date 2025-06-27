@@ -68,7 +68,9 @@ import {
 export function mapArray<T, U>(
   source: () => T[],
   map: (value: Signal<T>, index: number) => U,
-  opt?: CreateSignalOptions<T>,
+  opt?: CreateSignalOptions<T> & {
+    onDestroy?: (value: U) => void;
+  },
 ): Signal<U[]> {
   const data = isSignal(source) ? source : computed(source);
   const len = computed(() => data().length);
@@ -87,7 +89,15 @@ export function mapArray<T, U>(
       if (len === prev.value.length) return prev.value;
 
       if (len < prev.value.length) {
-        return prev.value.slice(0, len);
+        const slice = prev.value.slice(0, len);
+
+        if (opt?.onDestroy) {
+          for (let i = len; i < prev.value.length; i++) {
+            opt.onDestroy?.(prev.value[i]);
+          }
+        }
+
+        return slice;
       } else {
         const next = [...prev.value];
         for (let i = prev.value.length; i < len; i++) {

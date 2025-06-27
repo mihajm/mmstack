@@ -15,6 +15,8 @@ type CacheEntryOptions = {
   ttl?: number;
   staleTime?: number;
   cache: boolean;
+  bustBrowserCache?: boolean;
+  ignoreCacheControl?: boolean;
 };
 
 const CACHE_CONTEXT = new HttpContextToken<CacheEntryOptions>(() => ({
@@ -45,7 +47,19 @@ type ResolvedCacheControl = {
 
 function parseCacheControlHeader(
   req: HttpResponse<unknown>,
+  ignoreCacheControl = false,
 ): ResolvedCacheControl {
+  if (ignoreCacheControl) {
+    return {
+      noStore: false,
+      noCache: false,
+      mustRevalidate: false,
+      immutable: false,
+      maxAge: null,
+      staleWhileRevalidate: null,
+    };
+  }
+
   const header = req.headers.get('Cache-Control');
 
   let sMaxAge: number | null = null;
@@ -127,13 +141,11 @@ function parseCacheControlHeader(
 
 function resolveTimings(
   cacheControl: ResolvedCacheControl,
-  staleTime?: number,
-  ttl?: number,
+  optStaleTime?: number,
+  optTTL?: number,
 ): { staleTime?: number; ttl?: number } {
-  const timings = {
-    staleTime,
-    ttl,
-  };
+  let staleTime = optStaleTime;
+  let ttl = optTTL;
 
   if (cacheControl.immutable)
     return {
@@ -141,23 +153,19 @@ function resolveTimings(
       ttl: Infinity,
     };
 
-  // if no-cache is set, we must always revalidate
-  if (cacheControl.noCache || cacheControl.mustRevalidate)
-    timings.staleTime = 0;
+  if (cacheControl.maxAge !== null) ttl = cacheControl.maxAge * 1000;
 
   if (cacheControl.staleWhileRevalidate !== null)
-    timings.staleTime = cacheControl.staleWhileRevalidate;
+    staleTime = cacheControl.staleWhileRevalidate * 1000;
 
-  if (cacheControl.maxAge !== null) timings.ttl = cacheControl.maxAge * 1000;
+  // if no-cache is set, we must always revalidate
+  if (cacheControl.noCache || cacheControl.mustRevalidate) staleTime = 0;
 
-  // if stale-while-revalidate is set, we must revalidate after that time at the latest, but we can still serve the stale data
-  if (cacheControl.staleWhileRevalidate !== null) {
-    const ms = cacheControl.staleWhileRevalidate * 1000;
-    if (timings.staleTime === undefined || timings.staleTime > ms)
-      timings.staleTime = ms;
+  if (ttl !== undefined && staleTime !== undefined && ttl < staleTime) {
+    staleTime = ttl;
   }
 
-  return timings;
+  return { staleTime, ttl };
 }
 
 /**
@@ -222,10 +230,20 @@ export function createCacheInterceptor(
       req = req.clone({ setHeaders: { 'If-Modified-Since': lastModified } });
     }
 
+    if (opt.bustBrowserCache) {
+      req = req.clone({
+        setParams: { _cb: Date.now().toString() },
+      });
+    }
+
     return next(req).pipe(
       tap((event) => {
         if (event instanceof HttpResponse && event.ok) {
-          const cacheControl = parseCacheControlHeader(event);
+          const cacheControl = parseCacheControlHeader(
+            event,
+            opt.ignoreCacheControl,
+          );
+
           if (cacheControl.noStore) return;
 
           const { staleTime, ttl } = resolveTimings(
@@ -233,6 +251,8 @@ export function createCacheInterceptor(
             opt.staleTime,
             opt.ttl,
           );
+
+          if (opt.ttl === 0) return; // no point
 
           cache.store(key, event, staleTime, ttl);
         }

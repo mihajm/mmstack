@@ -59,6 +59,20 @@ type ResourceCacheOptions =
        * for instance, to ignore certain query parameters or to use request body for the cache key.
        */
       hash?: (req: HttpResourceRequest) => string;
+      /**
+       * Whether to bust the browser cache by appending a unique query parameter to the request URL.
+       * This is useful for ensuring that the latest data is fetched from the server, bypassing any
+       * cached responses in the browser. The unique parameter is removed before calling the cache function, so it does not affect the cache key.
+       * @default false - By default, the resource will not bust the browser cache.
+       */
+      bustBrowserCache?: boolean;
+      /**
+       * Whether to ignore the `Cache-Control` headers from the server when caching responses.
+       * If set to `true`, the resource will not respect any cache directives from the server,
+       * allowing you to control caching behavior entirely through the resource options.
+       * @default false - By default the resource will respect `Cache-Control` headers.
+       */
+      ignoreCacheControl?: boolean;
     };
 
 /**
@@ -188,6 +202,14 @@ export function queryResource<TResult, TRaw = TResult>(
     return hashFn(r);
   });
 
+  const bustBrowserCache =
+    typeof options?.cache === 'object' &&
+    options.cache.bustBrowserCache === true;
+
+  const ignoreCacheControl =
+    typeof options?.cache === 'object' &&
+    options.cache.ignoreCacheControl === true;
+
   const cachedRequest = options?.cache
     ? computed(() => {
         const r = stableRequest();
@@ -199,6 +221,8 @@ export function queryResource<TResult, TRaw = TResult>(
             staleTime,
             ttl,
             key: cacheKey() ?? hashFn(r),
+            bustBrowserCache,
+            ignoreCacheControl,
           }),
         };
       })

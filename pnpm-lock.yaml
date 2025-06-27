@@ -154,7 +154,7 @@ importers:
         specifier: ^2.4.0
         version: 2.4.0
       ng-packagr:
-        specifier: ^19.2.2
+        specifier: ^19.2.0
         version: 19.2.2(@angular/compiler-cli@20.0.3(@angular/compiler@20.0.3)(typescript@5.8.3))(tslib@2.8.1)(typescript@5.8.3)
       nx:
         specifier: ^21.2.0

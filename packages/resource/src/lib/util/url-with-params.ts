@@ -17,6 +17,7 @@ function normalizeParams(
   }
 
   return Array.from(paramMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${value}`)
     .join('&');
 }

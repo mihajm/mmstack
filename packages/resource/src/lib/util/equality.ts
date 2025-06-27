@@ -1,4 +1,8 @@
-import { HttpResourceRequest } from '@angular/common/http';
+import {
+  HttpHeaders,
+  HttpParams,
+  HttpResourceRequest,
+} from '@angular/common/http';
 import { type ValueEqualityFn } from '@angular/core';
 import { hash, keys } from '@mmstack/object';
 
@@ -24,17 +28,79 @@ function equalTransferCache(
   return b.includeHeaders.every((header) => aSet.has(header));
 }
 
+function equalParamArray(
+  a: Array<string | number | boolean>,
+  b: Array<string | number | boolean>,
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+
+  return a.every((value) => b.includes(value));
+}
+
+function headersToObject(headerClass: HttpHeaders) {
+  const headers: Exclude<
+    Required<HttpResourceRequest['headers']>,
+    HttpHeaders | undefined
+  > = {};
+
+  headerClass.keys().forEach((key) => {
+    const value = headerClass.getAll(key);
+    if (value === null) return;
+    if (value.length === 1) {
+      headers[key] = value[0];
+    } else {
+      headers[key] = value;
+    }
+  });
+
+  return headers;
+}
+
+function paramToObject(paramsClass: HttpParams) {
+  const params: Exclude<
+    Required<HttpResourceRequest['params']>,
+    HttpParams | undefined
+  > = {};
+
+  paramsClass.keys().forEach((key) => {
+    const value = paramsClass.getAll(key);
+    if (value === null) return;
+    if (value.length === 1) {
+      params[key] = value[0];
+    } else {
+      params[key] = value;
+    }
+  });
+
+  return params;
+}
+
 function equalParams(
   a: HttpResourceRequest['params'],
   b: HttpResourceRequest['params'],
 ): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
-  const aKeys = keys(a);
-  const bKeys = keys(b);
+
+  const aObj = a instanceof HttpParams ? paramToObject(a) : a;
+  const bObj = b instanceof HttpParams ? paramToObject(b) : b;
+
+  const aKeys = keys(aObj);
+  const bKeys = keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
 
-  return aKeys.every((key) => a[key] === b[key]);
+  return aKeys.every((key) => {
+    if (Array.isArray(aObj[key]) || Array.isArray(bObj[key])) {
+      return equalParamArray(
+        Array.isArray(aObj[key]) ? aObj[key] : [aObj[key]],
+        Array.isArray(bObj[key]) ? bObj[key] : [bObj[key]],
+      );
+    }
+
+    return aObj[key] === bObj[key];
+  });
 }
 
 function equalBody(
@@ -53,10 +119,22 @@ function equalHeaders(
   if (!a && !b) return true;
   if (!a || !b) return false;
 
-  const aKeys = keys(a);
-  const bKeys = keys(b);
+  const aObj = a instanceof HttpHeaders ? headersToObject(a) : a;
+  const bObj = b instanceof HttpHeaders ? headersToObject(b) : b;
+
+  const aKeys = keys(aObj);
+  const bKeys = keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => a[key] === b[key]);
+  return aKeys.every((key) => {
+    if (Array.isArray(aObj[key]) || Array.isArray(bObj[key])) {
+      return equalParamArray(
+        Array.isArray(aObj[key]) ? aObj[key] : [aObj[key]],
+        Array.isArray(bObj[key]) ? bObj[key] : [bObj[key]],
+      );
+    }
+
+    return aObj[key] === bObj[key];
+  });
 }
 
 function equalContext(

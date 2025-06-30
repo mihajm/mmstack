@@ -152,16 +152,6 @@ export function mutationResource<
 
   const requestEqual = createEqualRequest(equal);
 
-  const nextRequest = signal<
-    (Omit<NextRequest<TMethod, TMutation>, 'url'> & { url?: string }) | null
-  >(null, {
-    equal: (a, b) => {
-      if (!a && !b) return true;
-      if (!a || !b) return false;
-      return requestEqual(a, b);
-    },
-  });
-
   const eq = equal ?? Object.is;
   const next = signal<TMutation | null>(null, {
     equal: (a, b) => {
@@ -226,7 +216,7 @@ export function mutationResource<
 
       onSettled?.(ctx);
       ctx = undefined as TCTX;
-      nextRequest.set(null);
+      next.set(null);
     });
 
   return {

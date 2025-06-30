@@ -172,6 +172,7 @@ export class LinkDirective {
   readonly useMouseDown = input(injectConfig().useMouseDown, {
     transform: booleanAttribute,
   });
+  readonly beforeNavigate = input<() => void>();
 
   readonly preloading = output<void>();
 
@@ -255,6 +256,7 @@ export class LinkDirective {
     altKey: boolean,
     metaKey: boolean,
   ) {
+    untracked(this.beforeNavigate)?.();
     return this.routerLink?.onClick(button, ctrlKey, shiftKey, altKey, metaKey);
   }
 }

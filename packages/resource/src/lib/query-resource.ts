@@ -16,6 +16,7 @@ import {
   linkedSignal,
   Signal,
   untracked,
+  WritableSignal,
 } from '@angular/core';
 import { toWritable } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
@@ -119,7 +120,18 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
 /**
  * Represents a resource created by `queryResource`. Extends `HttpResourceRef` with additional properties.
  */
-export type QueryResourceRef<TResult> = HttpResourceRef<TResult> & {
+export type QueryResourceRef<TResult> = Omit<
+  HttpResourceRef<TResult>,
+  'headers' | 'statusCode'
+> & {
+  /**
+   * Linkedsignal of the response headers, when available.
+   */
+  readonly headers: WritableSignal<HttpHeaders | undefined>;
+  /**
+   * Linkedsignal of the response status code, when available.
+   */
+  readonly statusCode: WritableSignal<number | undefined>;
   /**
    * A signal indicating whether the resource is currently disabled (due to circuit breaker or undefined request).
    */
@@ -328,6 +340,8 @@ export function queryResource<TResult, TRaw = TResult>(
     value,
     set,
     update,
+    statusCode: linkedSignal(resource.statusCode),
+    headers: linkedSignal(resource.headers),
     disabled: computed(() => cb.isOpen() || stableRequest() === undefined),
     reload: () => {
       cb.halfOpen(); // open the circuit for manual reload

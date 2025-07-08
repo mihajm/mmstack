@@ -50,13 +50,14 @@ type OldsetCleanupType = {
  * Represents an entry in the cache.
  * @internal
  */
-type CacheEntry<T> = {
+export type CacheEntry<T> = {
   value: T;
   created: number;
   stale: number;
   useCount: number;
   expiresAt: number;
   timeout: ReturnType<typeof setTimeout>;
+  key: string;
 };
 
 /**
@@ -173,6 +174,20 @@ export class Cache<T> {
   }
 
   /**
+   * Retrieves a cache entry or an object with the key if not found.
+   *
+   * @param key - A function that returns the cache key. The key is a signal, allowing for dynamic keys. If the function returns null the value is also null.
+   * @returns  A signal that holds the cache entry or an object with the key if not found. The signal
+   *          updates whenever the cache entry changes (e.g., due to revalidation or expiration).
+   */
+  getEntryOrKey(
+    key: () => string | null,
+  ): Signal<(CacheEntry<T> & { isStale: boolean }) | string | null> {
+    const valueSig = this.getInternal(key);
+    return computed(() => valueSig() ?? key());
+  }
+
+  /**
    * Stores a value in the cache.
    *
    * @param key - The key under which to store the value.
@@ -201,6 +216,7 @@ export class Cache<T> {
         stale: now + staleTime,
         expiresAt: now + ttl,
         timeout: setTimeout(() => this.invalidate(key), ttl),
+        key,
       });
       return map;
     });
@@ -328,9 +344,9 @@ class NoopCache<T> extends Cache<T> {
  *   }
  * }
  */
-export function injectQueryCache(
+export function injectQueryCache<TRaw = unknown>(
   injector?: Injector,
-): Cache<HttpResponse<unknown>> {
+): Cache<HttpResponse<TRaw>> {
   const cache = injector
     ? injector.get(CLIENT_CACHE_TOKEN, null, {
         optional: true,
@@ -347,5 +363,5 @@ export function injectQueryCache(
     else return new NoopCache();
   }
 
-  return cache;
+  return cache as Cache<HttpResponse<TRaw>>;
 }

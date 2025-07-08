@@ -35,6 +35,7 @@ import {
   urlWithParams,
   type RetryOptions,
 } from './util';
+import { CacheEntry } from './util/cache/cache';
 
 /**
  * Options for configuring caching behavior of a `queryResource`.
@@ -174,7 +175,7 @@ export function queryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | undefined | void,
   options?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
-  const cache = injectQueryCache(options?.injector);
+  const cache = injectQueryCache<TResult>(options?.injector);
 
   const destroyRef = options?.injector
     ? options.injector.get(DestroyRef)
@@ -223,6 +224,8 @@ export function queryResource<TResult, TRaw = TResult>(
     typeof options?.cache === 'object' &&
     options.cache.ignoreCacheControl === true;
 
+  const parse = options?.parse ?? ((val: TRaw) => val as unknown as TResult);
+
   const cachedRequest = options?.cache
     ? computed(() => {
         const r = stableRequest();
@@ -252,22 +255,34 @@ export function queryResource<TResult, TRaw = TResult>(
   resource = catchValueError(resource, options?.defaultValue as TResult);
 
   // get full HttpResonse from Cache
-  const cachedEvent = cache.get(cacheKey);
+  const cachedEvent = cache.getEntryOrKey(cacheKey);
 
-  const parse = options?.parse ?? ((val: TRaw) => val as unknown as TResult);
+  const cacheEntry = linkedSignal<
+    CacheEntry<HttpResponse<TResult>> | string | null,
+    { key: string; value: TResult | null } | null
+  >({
+    source: () => cachedEvent(),
+    computation: (entry, prev) => {
+      if (!entry) return null;
 
-  const actualCacheValue = computed((): TResult | undefined => {
-    const ce = cachedEvent();
-    if (!ce || !(ce.value instanceof HttpResponse)) return;
-    return parse(ce.value.body as TRaw);
-  });
+      if (
+        typeof entry === 'string' &&
+        prev &&
+        prev.value !== null &&
+        prev.value.key === entry
+      ) {
+        return prev.value;
+      }
 
-  // retains last cache value after it is invalidated for lifetime of resource
-  const cachedValue = linkedSignal<TResult | undefined, TResult | undefined>({
-    source: () => actualCacheValue(),
-    computation: (source, prev) => {
-      if (!source && prev) return prev.value;
-      return source;
+      if (typeof entry === 'string') return { key: entry, value: null };
+
+      if (!(entry.value instanceof HttpResponse))
+        return { key: entry.key, value: null };
+
+      return {
+        value: entry.value.body,
+        key: entry.key,
+      };
     },
   });
 
@@ -283,7 +298,7 @@ export function queryResource<TResult, TRaw = TResult>(
   const value = options?.cache
     ? toWritable(
         computed((): TResult => {
-          return cachedValue() ?? resource.value();
+          return cacheEntry()?.value ?? resource.value();
         }),
         resource.value.set,
         resource.value.update,
@@ -355,13 +370,12 @@ export function queryResource<TResult, TRaw = TResult>(
     prefetch: async (partial) => {
       if (!options?.cache || hasSlowConnection()) return Promise.resolve();
 
-      const request = untracked(cachedRequest);
+      const request = untracked(stableRequest);
 
       const prefetchRequest = {
         ...request,
         ...partial,
       };
-
       if (!prefetchRequest.url) return Promise.resolve();
 
       try {
@@ -371,6 +385,16 @@ export function queryResource<TResult, TRaw = TResult>(
             prefetchRequest.url,
             {
               ...prefetchRequest,
+              context: setCacheContext(prefetchRequest.context, {
+                staleTime,
+                ttl,
+                key: hashFn({
+                  ...prefetchRequest,
+                  url: prefetchRequest.url ?? '',
+                }),
+                bustBrowserCache,
+                ignoreCacheControl,
+              }),
               headers: prefetchRequest.headers as HttpHeaders,
               observe: 'response',
             },

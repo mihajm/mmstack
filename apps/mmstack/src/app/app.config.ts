@@ -1,4 +1,5 @@
 import {
+  HttpInterceptorFn,
   provideHttpClient,
   withFetch,
   withInterceptors,
@@ -28,7 +29,14 @@ import {
 } from '@mmstack/resource';
 import { PreloadStrategy, provideTitleConfig } from '@mmstack/router-core';
 import { enUS } from 'date-fns/locale';
+import { delay } from 'rxjs';
 import { routes } from './app.routes';
+
+function delayInterceptor(): HttpInterceptorFn {
+  return (req, next) => {
+    return next(req).pipe(delay(1000));
+  };
+}
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -108,6 +116,7 @@ export const appConfig: ApplicationConfig = {
       withInterceptors([
         createCacheInterceptor(),
         createDedupeRequestsInterceptor(),
+        delayInterceptor(),
       ]),
     ),
     provideRouter(

@@ -17,6 +17,7 @@ type CacheEntryOptions = {
   cache: boolean;
   bustBrowserCache?: boolean;
   ignoreCacheControl?: boolean;
+  parse?: (val: unknown) => unknown;
 };
 
 const CACHE_CONTEXT = new HttpContextToken<CacheEntryOptions>(() => ({
@@ -254,7 +255,17 @@ export function createCacheInterceptor(
 
           if (opt.ttl === 0) return; // no point
 
-          cache.store(key, event, staleTime, ttl);
+          const parsedResponse = opt.parse
+            ? new HttpResponse({
+                body: opt.parse(event.body),
+                headers: event.headers,
+                status: event.status,
+                statusText: event.statusText,
+                url: event.url ?? undefined,
+              })
+            : event;
+
+          cache.store(key, parsedResponse, staleTime, ttl);
         }
       }),
       map((event) => {

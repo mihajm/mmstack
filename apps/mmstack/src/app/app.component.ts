@@ -1,6 +1,6 @@
-import { Component, untracked } from '@angular/core';
+import { Component, effect, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { mutationResource, queryResource } from '@mmstack/resource';
+import { queryResource } from '@mmstack/resource';
 import { createColumnHelper } from '@mmstack/table-core';
 import { TableComponent } from '@mmstack/table-material';
 
@@ -27,46 +27,34 @@ const columns = [
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, TableComponent],
-  template: `<button (click)="test()">Test Mutation</button>
-    {{ data.value().length }}`,
+  template: `
+    <button (click)="id.set(id() - 1)" [disabled]="id() <= 1">prev</button>
+    <button (click)="id.set(id() + 1)">next</button>
+    {{ data.value()?.title }}
+  `,
   styles: ``,
 })
 export class AppComponent {
-  protected readonly data = queryResource<Post[]>(
+  protected readonly id = signal(1);
+  protected readonly data = queryResource<Post>(
     () => ({
-      url: 'https://jsonplaceholder.typicode.com/posts',
+      url: `https://jsonplaceholder.typicode.com/posts/${this.id()}`,
     }),
     {
-      defaultValue: [],
-    },
-  );
-
-  private readonly mutation = mutationResource(
-    (post: Post) => {
-      return {
-        url: 'https://jsonplaceholder.typicode.com/posts',
-        method: 'POST',
-        body: post,
-      };
-    },
-    {
-      onMutate: (post) => {
-        const prev = untracked(this.data.value);
-        this.data.update((prev) => [...prev, post]);
-        return prev;
-      },
-      onError: (err, ctx) => {
-        this.data.set(ctx);
+      keepPrevious: false,
+      cache: {
+        staleTime: 1000 * 60 * 5, // 5 minutes
+        ttl: 1000 * 60 * 60, // 1 hour
       },
     },
   );
 
-  test() {
-    this.mutation.mutate({
-      id: 1,
-      userId: 1,
-      title: 'Test Post',
-      body: 'This is a test post.',
+  constructor() {
+    effect(() => {
+      const id = this.id();
+      this.data.prefetch({
+        url: 'https://jsonplaceholder.typicode.com/posts/' + (id + 1),
+      });
     });
   }
 }

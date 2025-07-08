@@ -6,14 +6,14 @@ import {
   type WritableSignal,
 } from '@angular/core';
 
-function presist<T>(
+function persist<T>(
   value: WritableSignal<T>,
   equal?: ValueEqualityFn<T>,
 ): WritableSignal<T>;
 
-function presist<T>(value: Signal<T>, equal?: ValueEqualityFn<T>): Signal<T>;
+function persist<T>(value: Signal<T>, equal?: ValueEqualityFn<T>): Signal<T>;
 
-function presist<T>(
+function persist<T>(
   src: WritableSignal<T> | Signal<T>,
   equal?: ValueEqualityFn<T>,
 ): WritableSignal<T> | Signal<T> {
@@ -40,15 +40,15 @@ function presist<T>(
 
 export function persistResourceValues<T>(
   resource: HttpResourceRef<T>,
-  persist = false,
+  shouldPersist = false,
   equal?: ValueEqualityFn<T>,
 ): HttpResourceRef<T> {
-  if (!persist) return resource;
+  if (!shouldPersist) return resource;
 
   return {
     ...resource,
-    statusCode: presist<number | undefined>(resource.statusCode),
-    headers: presist<HttpHeaders | undefined>(resource.headers),
-    value: presist<T>(resource.value, equal),
+    statusCode: persist<number | undefined>(resource.statusCode),
+    headers: persist<HttpHeaders | undefined>(resource.headers),
+    value: persist<T>(resource.value, equal),
   };
 }

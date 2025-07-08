@@ -198,7 +198,6 @@ export class ChipsFieldComponent<TParent = undefined> {
   }
 
   protected add(e: MatChipInputEvent) {
-    console.log('hre');
     const value = e.value.trim();
 
     if (!value) return;
@@ -216,7 +215,6 @@ export class ChipsFieldComponent<TParent = undefined> {
   }
 
   protected selected(e: MatAutocompleteSelectedEvent) {
-    console.log(e.option.viewValue);
     const state = untracked(this.state);
     state.value.update((cur) => [...cur, e.option.viewValue]);
     e.option.deselect();

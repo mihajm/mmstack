@@ -378,6 +378,14 @@ export function queryResource<TResult, TRaw = TResult>(
       };
       if (!prefetchRequest.url) return Promise.resolve();
 
+      const key = hashFn({
+        ...prefetchRequest,
+        url: prefetchRequest.url ?? '',
+      });
+
+      const found = cache.getUntracked(key);
+      if (found && !found.isStale) return Promise.resolve();
+
       try {
         await firstValueFrom(
           client.request<TRaw>(

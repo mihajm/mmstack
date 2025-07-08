@@ -1,4 +1,4 @@
-import { Component, effect, signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { queryResource } from '@mmstack/resource';
 import { createColumnHelper } from '@mmstack/table-core';
@@ -48,13 +48,4 @@ export class AppComponent {
       },
     },
   );
-
-  constructor() {
-    effect(() => {
-      const id = this.id();
-      this.data.prefetch({
-        url: 'https://jsonplaceholder.typicode.com/posts/' + (id + 1),
-      });
-    });
-  }
 }

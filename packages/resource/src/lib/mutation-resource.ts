@@ -3,6 +3,7 @@ import {
   computed,
   DestroyRef,
   inject,
+  linkedSignal,
   Signal,
   signal,
   ValueEqualityFn,
@@ -14,7 +15,7 @@ import {
   type QueryResourceOptions,
   type QueryResourceRef,
 } from './query-resource';
-import { createEqualRequest } from './util';
+import { createCircuitBreaker, createEqualRequest } from './util';
 
 /**
  * @internal
@@ -173,8 +174,36 @@ export function mutationResource<
     },
   );
 
+  const lastValue = linkedSignal<TMutation | null, TMutation | null>({
+    source: next,
+    computation: (next, prev) => {
+      if (next === null && !!prev) return prev.value;
+      return next;
+    },
+  });
+
+  const lastValueRequest = computed(
+    (): HttpResourceRequest | undefined => {
+      const nr = lastValue();
+      if (!nr) return;
+
+      return request(nr) ?? undefined;
+    },
+    {
+      equal: requestEqual,
+    },
+  );
+
+  const cb = createCircuitBreaker(
+    options?.circuitBreaker === true
+      ? undefined
+      : (options?.circuitBreaker ?? false),
+    options?.injector,
+  );
+
   const resource = queryResource<TResult, TRaw>(req, {
     ...rest,
+    circuitBreaker: cb,
     defaultValue: null as unknown as TResult, // doesnt matter since .value is not accessible
   });
 
@@ -230,5 +259,7 @@ export function mutationResource<
       next.set(value);
     },
     current: next,
+    // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
+    disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
   };
 }

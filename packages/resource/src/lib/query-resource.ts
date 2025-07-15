@@ -386,13 +386,19 @@ export function queryResource<TResult, TRaw = TResult>(
       const found = cache.getUntracked(key);
       if (found && !found.isStale) return Promise.resolve();
 
+
       try {
         await firstValueFrom(
-          client.request<TRaw>(
+          client.request(
             prefetchRequest.method ?? 'GET',
             prefetchRequest.url,
             {
               ...prefetchRequest,
+              credentials: prefetchRequest.credentials as RequestCredentials | undefined,
+              priority: prefetchRequest.priority as RequestPriority | undefined,
+              cache: prefetchRequest.cache as RequestCache | undefined,
+              mode: prefetchRequest.mode as RequestMode | undefined,
+              redirect: prefetchRequest.redirect as RequestRedirect | undefined,
               context: setCacheContext(prefetchRequest.context, {
                 staleTime,
                 ttl,

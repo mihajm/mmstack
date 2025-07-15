@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/primitives",
-  "version": "20.0.1",
+  "version": "20.0.2",
   "keywords": [
     "angular",
     "signals",
@@ -18,8 +18,8 @@
     "@mmstack/object": "^20.0.0"
   },
   "peerDependencies": {
-    "@angular/core": "~20.0.3",
-    "@angular/common": "~20.0.3"
+    "@angular/core": "~20.1.0",
+    "@angular/common": "~20.1.0"
   },
   "sideEffects": false
 }

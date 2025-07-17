@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
 import { v7 } from 'uuid';
+import { CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
 
 type BaseSyncMessage<TEntry, TAction extends string> = {
   entry: TEntry;
@@ -118,6 +119,7 @@ const DEFAULT_CLEANUP_OPT = {
 export class Cache<T> {
   private readonly internal = mutable(new Map<string, CacheEntry<T>>());
   private readonly cleanupOpt: CleanupType;
+  private readonly id = v7();
 
   /**
    * Destroys the cache instance, cleaning up any resources used by the cache.
@@ -153,11 +155,16 @@ export class Cache<T> {
       serialize: (value: T) => string;
       deserialize: (value: string) => T | null;
     },
+
+    private readonly db: Promise<CacheDB<T>> = Promise.resolve(
+      createNoopDB<T>(),
+    ),
   ) {
     this.cleanupOpt = {
       ...DEFAULT_CLEANUP_OPT,
       ...cleanupOpt,
     };
+
     if (this.cleanupOpt.maxSize <= 0)
       throw new Error('maxSize must be greater than 0');
 
@@ -165,8 +172,6 @@ export class Cache<T> {
     const cleanupInterval = setInterval(() => {
       this.cleanup();
     }, cleanupOpt.checkInterval);
-
-    const cacheId = v7();
 
     let destroySyncTabs = () => {
       // noop
@@ -179,7 +184,7 @@ export class Cache<T> {
           return channel.postMessage({
             action: 'invalidate',
             entry: { key: msg.entry.key },
-            cacheId,
+            cacheId: this.id,
             type: 'cache-sync-message',
           } satisfies SyncMessage<string>);
 
@@ -189,7 +194,7 @@ export class Cache<T> {
             ...msg.entry,
             value: syncTabs.serialize(msg.entry.value),
           },
-          cacheId,
+          cacheId: this.id,
           type: 'cache-sync-message',
         } satisfies SyncMessage<string>);
       };
@@ -197,7 +202,7 @@ export class Cache<T> {
       channel.onmessage = (event) => {
         const msg = event.data;
         if (!isSyncMessage<string>(msg)) return;
-        if (msg.cacheId === cacheId) return; // ignore messages from this cache
+        if (msg.cacheId === this.id) return; // ignore messages from this cache
 
         if (msg.action === 'store') {
           const value = syncTabs.deserialize(msg.entry.value);
@@ -208,6 +213,7 @@ export class Cache<T> {
             msg.entry.stale - msg.entry.updated,
             msg.entry.expiresAt - msg.entry.updated,
             true,
+            false,
           );
         } else if (msg.action === 'invalidate') {
           this.invalidateInternal(msg.entry.key, true);
@@ -227,16 +233,38 @@ export class Cache<T> {
       destroySyncTabs();
     };
 
+    this.db
+      .then(async (db) => {
+        if (destroyed) return [];
+        return db.getAll();
+      })
+      .then((entries) => {
+        if (destroyed) return;
+        // load entries into the cache
+
+        const current = untracked(this.internal);
+        entries.forEach((entry) => {
+          if (current.has(entry.key)) return;
+          this.storeInternal(
+            entry.key,
+            entry.value,
+            entry.stale - entry.updated,
+            entry.expiresAt - entry.updated,
+            true, // like from sync because we dont want to trigger sync or db writes
+          );
+        });
+      });
+
     this.destroy = destroy;
 
     // cleanup if object is garbage collected, this is because the cache can be quite large from a memory standpoint & we dont want all that floating garbage
     const registry = new FinalizationRegistry((id: string) => {
-      if (id === cacheId) {
+      if (id === this.id) {
         destroy();
       }
     });
 
-    registry.register(this, cacheId);
+    registry.register(this, this.id);
   }
 
   /** @internal */
@@ -307,8 +335,14 @@ export class Cache<T> {
    * @param staleTime - (Optional) The stale time for this entry, in milliseconds. Overrides the default `staleTime`.
    * @param ttl - (Optional) The TTL for this entry, in milliseconds. Overrides the default `ttl`.
    */
-  store(key: string, value: T, staleTime = this.staleTime, ttl = this.ttl) {
-    this.storeInternal(key, value, staleTime, ttl);
+  store(
+    key: string,
+    value: T,
+    staleTime = this.staleTime,
+    ttl = this.ttl,
+    persist = false,
+  ) {
+    this.storeInternal(key, value, staleTime, ttl, false, persist);
   }
 
   private storeInternal(
@@ -317,6 +351,7 @@ export class Cache<T> {
     staleTime = this.staleTime,
     ttl = this.ttl,
     fromSync = false,
+    persist = false,
   ) {
     const entry = this.getUntracked(key);
     if (entry) {
@@ -348,11 +383,14 @@ export class Cache<T> {
       return map;
     });
 
-    if (!fromSync)
+    if (!fromSync) {
+      if (persist) this.db.then((db) => db.store(next));
+
       this.broadcast({
         action: 'store',
         entry: next,
       });
+    }
   }
 
   /**
@@ -372,7 +410,10 @@ export class Cache<T> {
       map.delete(key);
       return map;
     });
-    if (!fromSync) this.broadcast({ action: 'invalidate', entry: { key } });
+    if (!fromSync) {
+      this.db.then((db) => db.remove(key));
+      this.broadcast({ action: 'invalidate', entry: { key } });
+    }
   }
 
   /** @internal */
@@ -420,9 +461,22 @@ type CacheOptions = {
    */
   cleanup?: Partial<CleanupType>;
   /**
-   * Whether to synchronize cache across tabs. If provided, the cache will use a BroadcastChannel to send updates between tabs.
+   * Whether to synchronize cache across tabs. If true, the cache will use a BroadcastChannel to send updates between tabs.
    */
-  syncTabsId?: string;
+  syncTabs?: boolean;
+  /**
+   * Globally disable persistence of cache entries.
+   * If set to `false`, cache entries will not be persisted to the database.
+   * `true` means, cache entries can be persisted, they must still be opted into on the resource level & allowed by server headers.
+   * @default true
+   */
+  persist?: boolean;
+  /**
+   * Version of the caches database, increment this if the interfaces change, this will cause the old data to be deleted.
+   * Minimum value is 1, so first increment should be 2.
+   * @default 1
+   */
+  version?: number;
 };
 
 const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
@@ -452,57 +506,96 @@ const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
  * };
  */
 export function provideQueryCache(opt?: CacheOptions): Provider {
-  const syncTabsOpt = opt?.syncTabsId
+  const serialize = (value: HttpResponse<unknown>) => {
+    const headersRecord: Record<string, string[]> = {};
+
+    const headerKeys = value.headers.keys();
+    headerKeys.forEach((key) => {
+      const values = value.headers.getAll(key);
+      if (!values) return;
+      headersRecord[key] = values;
+    });
+
+    return JSON.stringify({
+      body: value.body,
+      status: value.status,
+      statusText: value.statusText,
+      headers: headerKeys.length > 0 ? headersRecord : undefined,
+      url: value.url,
+    });
+  };
+
+  const deserialize = (value: string) => {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (!parsed || typeof parsed !== 'object' || !('body' in parsed))
+        throw new Error('Invalid cache entry format');
+
+      const headers = parsed.headers
+        ? new HttpHeaders(parsed.headers)
+        : undefined;
+
+      return new HttpResponse({
+        body: parsed.body,
+        status: parsed.status,
+        statusText: parsed.statusText,
+        headers: headers,
+        url: parsed.url,
+      });
+    } catch (err) {
+      if (isDevMode()) console.error('Failed to deserialize cache entry:', err);
+      return null;
+    }
+  };
+
+  const syncTabsOpt = opt?.syncTabs
     ? {
-        id: opt.syncTabsId,
-        serialize: (value: HttpResponse<unknown>) => {
-          const headersRecord: Record<string, string[]> = {};
-
-          const headerKeys = value.headers.keys();
-          headerKeys.forEach((key) => {
-            const values = value.headers.getAll(key);
-            if (!values) return;
-            headersRecord[key] = values;
-          });
-
-          return JSON.stringify({
-            body: value.body,
-            status: value.status,
-            statusText: value.statusText,
-            headers: headerKeys.length > 0 ? headersRecord : undefined,
-            url: value.url,
-          });
-        },
-        deserialize: (value: string) => {
-          try {
-            const parsed = JSON.parse(value);
-
-            if (!parsed || typeof parsed !== 'object' || !('body' in parsed))
-              throw new Error('Invalid cache entry format');
-
-            const headers = parsed.headers
-              ? new HttpHeaders(parsed.headers)
-              : undefined;
-
-            return new HttpResponse({
-              body: parsed.body,
-              status: parsed.status,
-              statusText: parsed.statusText,
-              headers: headers,
-              url: parsed.url,
-            });
-          } catch (err) {
-            if (isDevMode())
-              console.error('Failed to deserialize cache entry:', err);
-            return null;
-          }
-        },
+        id: 'mmstack-query-cache-sync',
+        serialize,
+        deserialize,
       }
     : undefined;
 
+  let db =
+    opt?.persist === false
+      ? undefined
+      : createSingleStoreDB<string>(
+          'mmstack-query-cache-db',
+          (version) => `query-store_v${version}`,
+          opt?.version,
+        ).then((db): CacheDB<HttpResponse<unknown>> => {
+          return {
+            getAll: () => {
+              return db.getAll().then((entries) => {
+                return entries
+                  .map((entry) => {
+                    const value = deserialize(entry.value);
+                    if (value === null) return null;
+                    return {
+                      ...entry,
+                      value,
+                    };
+                  })
+                  .filter((e) => e !== null);
+              });
+            },
+            store: (entry) => {
+              return db.store({ ...entry, value: serialize(entry.value) });
+            },
+            remove: db.remove,
+          };
+        });
+
   return {
     provide: CLIENT_CACHE_TOKEN,
-    useValue: new Cache(opt?.ttl, opt?.staleTime, opt?.cleanup, syncTabsOpt),
+    useValue: new Cache(
+      opt?.ttl,
+      opt?.staleTime,
+      opt?.cleanup,
+      syncTabsOpt,
+      db,
+    ),
   };
 }
 

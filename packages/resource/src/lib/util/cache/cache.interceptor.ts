@@ -18,6 +18,7 @@ type CacheEntryOptions = {
   bustBrowserCache?: boolean;
   ignoreCacheControl?: boolean;
   parse?: (val: unknown) => unknown;
+  persist?: boolean;
 };
 
 const CACHE_CONTEXT = new HttpContextToken<CacheEntryOptions>(() => ({
@@ -48,19 +49,7 @@ type ResolvedCacheControl = {
 
 function parseCacheControlHeader(
   req: HttpResponse<unknown>,
-  ignoreCacheControl = false,
 ): ResolvedCacheControl {
-  if (ignoreCacheControl) {
-    return {
-      noStore: false,
-      noCache: false,
-      mustRevalidate: false,
-      immutable: false,
-      maxAge: null,
-      staleWhileRevalidate: null,
-    };
-  }
-
   const header = req.headers.get('Cache-Control');
 
   let sMaxAge: number | null = null;
@@ -240,18 +229,13 @@ export function createCacheInterceptor(
     return next(req).pipe(
       tap((event) => {
         if (event instanceof HttpResponse && event.ok) {
-          const cacheControl = parseCacheControlHeader(
-            event,
-            opt.ignoreCacheControl,
-          );
+          const cacheControl = parseCacheControlHeader(event);
 
-          if (cacheControl.noStore) return;
+          if (cacheControl.noStore && !opt.ignoreCacheControl) return;
 
-          const { staleTime, ttl } = resolveTimings(
-            cacheControl,
-            opt.staleTime,
-            opt.ttl,
-          );
+          const { staleTime, ttl } = opt.ignoreCacheControl
+            ? opt
+            : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
 
           if (opt.ttl === 0) return; // no point
 
@@ -265,7 +249,7 @@ export function createCacheInterceptor(
               })
             : event;
 
-          cache.store(key, parsedResponse, staleTime, ttl);
+          cache.store(key, parsedResponse, staleTime, ttl, opt.persist);
         }
       }),
       map((event) => {

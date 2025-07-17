@@ -75,6 +75,11 @@ type ResourceCacheOptions =
        * @default false - By default the resource will respect `Cache-Control` headers.
        */
       ignoreCacheControl?: boolean;
+      /**
+       * Whether to persist the cache entry in the local DB instance.
+       * @default false - By default, the cache entry is not persisted.
+       */
+      persist?: boolean;
     };
 
 /**
@@ -224,7 +229,8 @@ export function queryResource<TResult, TRaw = TResult>(
     typeof options?.cache === 'object' &&
     options.cache.ignoreCacheControl === true;
 
-  const parse = options?.parse ?? ((val: TRaw) => val as unknown as TResult);
+  const persist =
+    typeof options?.cache === 'object' && options.cache.persist === true;
 
   const cachedRequest = options?.cache
     ? computed(() => {
@@ -239,6 +245,7 @@ export function queryResource<TResult, TRaw = TResult>(
             key: cacheKey() ?? hashFn(r),
             bustBrowserCache,
             ignoreCacheControl,
+            persist,
           }),
         };
       })
@@ -339,6 +346,9 @@ export function queryResource<TResult, TRaw = TResult>(
           status: 200,
           statusText: 'OK',
         }),
+        staleTime,
+        ttl,
+        persist,
       );
   };
 
@@ -386,33 +396,31 @@ export function queryResource<TResult, TRaw = TResult>(
       const found = cache.getUntracked(key);
       if (found && !found.isStale) return Promise.resolve();
 
-
       try {
         await firstValueFrom(
-          client.request(
-            prefetchRequest.method ?? 'GET',
-            prefetchRequest.url,
-            {
-              ...prefetchRequest,
-              credentials: prefetchRequest.credentials as RequestCredentials | undefined,
-              priority: prefetchRequest.priority as RequestPriority | undefined,
-              cache: prefetchRequest.cache as RequestCache | undefined,
-              mode: prefetchRequest.mode as RequestMode | undefined,
-              redirect: prefetchRequest.redirect as RequestRedirect | undefined,
-              context: setCacheContext(prefetchRequest.context, {
-                staleTime,
-                ttl,
-                key: hashFn({
-                  ...prefetchRequest,
-                  url: prefetchRequest.url ?? '',
-                }),
-                bustBrowserCache,
-                ignoreCacheControl,
+          client.request(prefetchRequest.method ?? 'GET', prefetchRequest.url, {
+            ...prefetchRequest,
+            credentials: prefetchRequest.credentials as
+              | RequestCredentials
+              | undefined,
+            priority: prefetchRequest.priority as RequestPriority | undefined,
+            cache: prefetchRequest.cache as RequestCache | undefined,
+            mode: prefetchRequest.mode as RequestMode | undefined,
+            redirect: prefetchRequest.redirect as RequestRedirect | undefined,
+            context: setCacheContext(prefetchRequest.context, {
+              staleTime,
+              ttl,
+              key: hashFn({
+                ...prefetchRequest,
+                url: prefetchRequest.url ?? '',
               }),
-              headers: prefetchRequest.headers as HttpHeaders,
-              observe: 'response',
-            },
-          ),
+              bustBrowserCache,
+              ignoreCacheControl,
+              persist,
+            }),
+            headers: prefetchRequest.headers as HttpHeaders,
+            observe: 'response',
+          }),
         );
 
         return;

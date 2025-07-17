@@ -37,6 +37,14 @@ export const appConfig: ApplicationConfig = {
   providers: [
     // ..other providers
     provideQueryCache(),
+
+    // --- Example of a more advanced setup ---
+    // provideQueryCache({
+    //   persist: true, // Enable IndexedDB persistence
+    //   version: 1,    // Version for the cache schema
+    //   syncTabs: true // enable BroadcastChannel
+    // }),
+
     provideHttpClient(withInterceptors([createCacheInterceptor(), createDedupeRequestsInterceptor()])),
   ],
 };

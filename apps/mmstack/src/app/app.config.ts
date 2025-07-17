@@ -111,7 +111,8 @@ export const appConfig: ApplicationConfig = {
     },
     provideZonelessChangeDetection(),
     provideQueryCache({
-      syncTabsId: 'mmstack-app',
+      syncTabs: true,
+      persist: true,
     }),
     provideHttpClient(
       withFetch(),

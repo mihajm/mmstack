@@ -7,7 +7,6 @@ import {
   linkedSignal,
   Signal,
   signal,
-  untracked,
   ValueEqualityFn,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
@@ -17,11 +16,7 @@ import {
   type QueryResourceOptions,
   type QueryResourceRef,
 } from './query-resource';
-import {
-  createCircuitBreaker,
-  createEqualRequest,
-  injectNetworkStatus,
-} from './util';
+import { createCircuitBreaker, createEqualRequest } from './util';
 
 /**
  * @internal
@@ -93,12 +88,10 @@ export type MutationResourceOptions<
    */
   onSettled?: (ctx: NoInfer<TCTX>) => void;
   /**
-   * Whether to queue the mutation request if the network is unavailable.
-   * If `true`, the mutations will be queued and executed in-series when the network becomes available.
-   * If `false`, the mutation will run when network is available, but only the most recent one will be executed.
+   * Whether to queue the mutation requests and execute them in series. For example if network is unavailable or circuit breaker is open.
    * @default false
    */
-  queueIfNetworkUnavailable?: boolean;
+  queue?: boolean;
   equal?: ValueEqualityFn<TMutation>;
 };
 
@@ -272,8 +265,8 @@ export function mutationResource<
       next.set(null);
     });
 
-  const shouldQueue = options.queueIfNetworkUnavailable ?? false;
-  const networkAvailable = injectNetworkStatus();
+  const shouldQueue = options.queue ?? false;
+
   return {
     ...resource,
     destroy: () => {
@@ -282,7 +275,7 @@ export function mutationResource<
       queueRef.destroy();
     },
     mutate: (value, ictx) => {
-      if (shouldQueue && !untracked(networkAvailable)) {
+      if (shouldQueue) {
         return queue.update((q) => [...q, [value, ictx]]);
       } else {
         ctx = onMutate?.(value, ictx) as TCTX;

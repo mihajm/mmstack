@@ -15,11 +15,11 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/material",
   "dependencies": {
-    "@mmstack/form-adapters": "^20.0.2",
-    "@mmstack/form-core": "^20.0.2",
+    "@mmstack/form-adapters": "^20.0.3",
+    "@mmstack/form-core": "^20.0.3",
     "@mmstack/form-validation": "^20.0.1",
-    "@mmstack/resource": "^20.2.7",
-    "@mmstack/primitives":"^20.0.2"
+    "@mmstack/resource": "^20.2.8",
+    "@mmstack/primitives":"^20.0.3"
   },
   "peerDependencies": {
     "@angular/core": "~20.1.0",

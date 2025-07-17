@@ -110,14 +110,18 @@ export function scrollPosition(
         y: 0,
       }),
       {
-        debugName: opt?.debugName,
+        debugName: opt?.debugName ?? 'scrollPosition',
       },
     ) as InternalScrollPositionSignal;
     base.unthrottled = base;
     return base;
   }
 
-  const { target = window, throttle = 100, debugName } = opt || {};
+  const {
+    target = window,
+    throttle = 100,
+    debugName = 'scrollPosition',
+  } = opt || {};
 
   let element: Window | HTMLElement;
 

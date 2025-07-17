@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/resource",
-  "version": "20.2.7",
+  "version": "20.2.8",
   "keywords": [
     "angular",
     "signals",
@@ -18,7 +18,7 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/resource",
   "dependencies": {
     "uuid": "~11.1.0",
-    "@mmstack/primitives": "^20.0.2",
+    "@mmstack/primitives": "^20.0.3",
     "@mmstack/object": "^20.0.0"
   },
   "peerDependencies": {

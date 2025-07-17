@@ -45,7 +45,7 @@ import {
  * ```
  */
 export function pageVisibility(
-  debugName?: string,
+  debugName: string = 'pageVisibility',
 ): Signal<DocumentVisibilityState> {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     return computed(() => 'visible', { debugName });

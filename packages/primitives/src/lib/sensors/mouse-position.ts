@@ -105,7 +105,7 @@ export function mousePosition(opt?: MousePositionOptions): MousePositionSignal {
         y: 0,
       }),
       {
-        debugName: opt?.debugName,
+        debugName: opt?.debugName ?? 'mousePosition',
       },
     ) as InternalMousePositionSignal;
     base.unthrottled = base;
@@ -116,7 +116,7 @@ export function mousePosition(opt?: MousePositionOptions): MousePositionSignal {
     target = window,
     coordinateSpace = 'client',
     touch = false,
-    debugName,
+    debugName = 'mousePosition',
     throttle = 100,
   } = opt ?? {};
 

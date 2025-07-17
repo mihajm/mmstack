@@ -98,7 +98,7 @@ export function windowSize(opt?: WindowSizeOptions): WindowSizeSignal {
         width: 1024,
         height: 768,
       }),
-      { debugName: opt?.debugName },
+      { debugName: opt?.debugName ?? 'windowSize' },
     ) as InternalWindowSizeSignal;
 
     base.unthrottled = base;
@@ -108,7 +108,7 @@ export function windowSize(opt?: WindowSizeOptions): WindowSizeSignal {
   const sizeSignal = throttled<WindowSize>(
     { width: window.innerWidth, height: window.innerHeight },
     {
-      debugName: opt?.debugName,
+      debugName: opt?.debugName ?? 'windowSize',
       equal: (a, b) => a.width === b.width && a.height === b.height,
       ms: opt?.throttle ?? 100,
     },

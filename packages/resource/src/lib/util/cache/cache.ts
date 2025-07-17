@@ -1,4 +1,4 @@
-import type { HttpResponse } from '@angular/common/http';
+import { HttpHeaders, HttpResponse } from '@angular/common/http';
 import {
   computed,
   inject,
@@ -11,6 +11,39 @@ import {
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
 import { v7 } from 'uuid';
+
+type BaseSyncMessage<TEntry, TAction extends string> = {
+  entry: TEntry;
+  action: TAction;
+};
+
+type InvalidateMessage<T> = BaseSyncMessage<
+  Pick<CacheEntry<T>, 'key'>,
+  'invalidate'
+>;
+
+type StoreMessage<T> = BaseSyncMessage<Omit<CacheEntry<T>, 'timeout'>, 'store'>;
+
+type InternalSyncMessage<T> = InvalidateMessage<T> | StoreMessage<T>;
+
+/**
+ * A message type used for synchronizing cache updates across tabs.
+ * @internal
+ * @template T - The type of data being cached.
+ */
+type SyncMessage<T> = InternalSyncMessage<T> & {
+  cacheId: string;
+  type: 'cache-sync-message';
+};
+
+function isSyncMessage<T>(msg: unknown): msg is SyncMessage<T> {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'type' in msg &&
+    (msg as SyncMessage<T>).type === 'cache-sync-message'
+  );
+}
 
 /**
  * Options for configuring the Least Recently Used (LRU) cache cleanup strategy.
@@ -53,6 +86,7 @@ type OldsetCleanupType = {
 export type CacheEntry<T> = {
   value: T;
   created: number;
+  updated: number;
   stale: number;
   useCount: number;
   expiresAt: number;
@@ -86,6 +120,16 @@ export class Cache<T> {
   private readonly cleanupOpt: CleanupType;
 
   /**
+   * Destroys the cache instance, cleaning up any resources used by the cache.
+   * This method is called automatically when the cache instance is garbage collected.
+   */
+  readonly destroy: () => void;
+
+  private readonly broadcast: (msg: InternalSyncMessage<T>) => void = () => {
+    // noop
+  };
+
+  /**
    * Creates a new `Cache` instance.
    *
    * @param ttl - The default Time To Live (TTL) for cache entries, in milliseconds.  Defaults to one day.
@@ -93,6 +137,8 @@ export class Cache<T> {
    *                    stale but can still be used while revalidation occurs in the background. Defaults to 1 hour.
    * @param cleanupOpt - Options for configuring the cache cleanup strategy.  Defaults to LRU with a
    *                     `maxSize` of 200 and a `checkInterval` of one hour.
+   * @param syncTabs - If provided, the cache will use the options a BroadcastChannel to send updates between tabs.
+   *                   Defaults to `undefined`, meaning no synchronization across tabs.
    */
   constructor(
     protected readonly ttl: number = ONE_DAY,
@@ -101,6 +147,11 @@ export class Cache<T> {
       type: 'lru',
       maxSize: 1000,
       checkInterval: ONE_HOUR,
+    },
+    syncTabs?: {
+      id: string;
+      serialize: (value: T) => string;
+      deserialize: (value: string) => T | null;
     },
   ) {
     this.cleanupOpt = {
@@ -115,16 +166,77 @@ export class Cache<T> {
       this.cleanup();
     }, cleanupOpt.checkInterval);
 
-    const destroyId = v7();
+    const cacheId = v7();
+
+    let destroySyncTabs = () => {
+      // noop
+    };
+
+    if (syncTabs) {
+      const channel = new BroadcastChannel(syncTabs.id);
+      this.broadcast = (msg: InternalSyncMessage<T>) => {
+        if (msg.action === 'invalidate')
+          return channel.postMessage({
+            action: 'invalidate',
+            entry: { key: msg.entry.key },
+            cacheId,
+            type: 'cache-sync-message',
+          } satisfies SyncMessage<string>);
+
+        return channel.postMessage({
+          ...msg,
+          entry: {
+            ...msg.entry,
+            value: syncTabs.serialize(msg.entry.value),
+          },
+          cacheId,
+          type: 'cache-sync-message',
+        } satisfies SyncMessage<string>);
+      };
+
+      channel.onmessage = (event) => {
+        const msg = event.data;
+        if (!isSyncMessage<string>(msg)) return;
+        if (msg.cacheId === cacheId) return; // ignore messages from this cache
+
+        if (msg.action === 'store') {
+          const value = syncTabs.deserialize(msg.entry.value);
+          if (value === null) return;
+          this.storeInternal(
+            msg.entry.key,
+            value,
+            msg.entry.stale - msg.entry.updated,
+            msg.entry.expiresAt - msg.entry.updated,
+            true,
+          );
+        } else if (msg.action === 'invalidate') {
+          this.invalidateInternal(msg.entry.key, true);
+        }
+      };
+
+      destroySyncTabs = () => {
+        channel.close();
+      };
+    }
+
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      clearInterval(cleanupInterval);
+      destroySyncTabs();
+    };
+
+    this.destroy = destroy;
 
     // cleanup if object is garbage collected, this is because the cache can be quite large from a memory standpoint & we dont want all that floating garbage
     const registry = new FinalizationRegistry((id: string) => {
-      if (id === destroyId) {
-        clearInterval(cleanupInterval);
+      if (id === cacheId) {
+        destroy();
       }
     });
 
-    registry.register(this, destroyId);
+    registry.register(this, cacheId);
   }
 
   /** @internal */
@@ -196,6 +308,16 @@ export class Cache<T> {
    * @param ttl - (Optional) The TTL for this entry, in milliseconds. Overrides the default `ttl`.
    */
   store(key: string, value: T, staleTime = this.staleTime, ttl = this.ttl) {
+    this.storeInternal(key, value, staleTime, ttl);
+  }
+
+  private storeInternal(
+    key: string,
+    value: T,
+    staleTime = this.staleTime,
+    ttl = this.ttl,
+    fromSync = false,
+  ) {
     const entry = this.getUntracked(key);
     if (entry) {
       clearTimeout(entry.timeout); // stop invalidation
@@ -208,18 +330,29 @@ export class Cache<T> {
 
     const now = Date.now();
 
+    const next: Omit<CacheEntry<T>, 'timeout'> = {
+      value,
+      created: entry?.created ?? now,
+      updated: now,
+      useCount: prevCount + 1,
+      stale: now + staleTime,
+      expiresAt: now + ttl,
+      key,
+    };
+
     this.internal.mutate((map) => {
       map.set(key, {
-        value,
-        created: entry?.created ?? now,
-        useCount: prevCount + 1,
-        stale: now + staleTime,
-        expiresAt: now + ttl,
+        ...next,
         timeout: setTimeout(() => this.invalidate(key), ttl),
-        key,
       });
       return map;
     });
+
+    if (!fromSync)
+      this.broadcast({
+        action: 'store',
+        entry: next,
+      });
   }
 
   /**
@@ -228,6 +361,10 @@ export class Cache<T> {
    * @param key - The key of the entry to invalidate.
    */
   invalidate(key: string) {
+    this.invalidateInternal(key);
+  }
+
+  private invalidateInternal(key: string, fromSync = false) {
     const entry = this.getUntracked(key);
     if (!entry) return;
     clearTimeout(entry.timeout);
@@ -235,6 +372,7 @@ export class Cache<T> {
       map.delete(key);
       return map;
     });
+    if (!fromSync) this.broadcast({ action: 'invalidate', entry: { key } });
   }
 
   /** @internal */
@@ -281,6 +419,10 @@ type CacheOptions = {
    * Options for configuring the cache cleanup strategy.
    */
   cleanup?: Partial<CleanupType>;
+  /**
+   * Whether to synchronize cache across tabs. If provided, the cache will use a BroadcastChannel to send updates between tabs.
+   */
+  syncTabsId?: string;
 };
 
 const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
@@ -310,9 +452,57 @@ const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
  * };
  */
 export function provideQueryCache(opt?: CacheOptions): Provider {
+  const syncTabsOpt = opt?.syncTabsId
+    ? {
+        id: opt.syncTabsId,
+        serialize: (value: HttpResponse<unknown>) => {
+          const headersRecord: Record<string, string[]> = {};
+
+          const headerKeys = value.headers.keys();
+          headerKeys.forEach((key) => {
+            const values = value.headers.getAll(key);
+            if (!values) return;
+            headersRecord[key] = values;
+          });
+
+          return JSON.stringify({
+            body: value.body,
+            status: value.status,
+            statusText: value.statusText,
+            headers: headerKeys.length > 0 ? headersRecord : undefined,
+            url: value.url,
+          });
+        },
+        deserialize: (value: string) => {
+          try {
+            const parsed = JSON.parse(value);
+
+            if (!parsed || typeof parsed !== 'object' || !('body' in parsed))
+              throw new Error('Invalid cache entry format');
+
+            const headers = parsed.headers
+              ? new HttpHeaders(parsed.headers)
+              : undefined;
+
+            return new HttpResponse({
+              body: parsed.body,
+              status: parsed.status,
+              statusText: parsed.statusText,
+              headers: headers,
+              url: parsed.url,
+            });
+          } catch (err) {
+            if (isDevMode())
+              console.error('Failed to deserialize cache entry:', err);
+            return null;
+          }
+        },
+      }
+    : undefined;
+
   return {
     provide: CLIENT_CACHE_TOKEN,
-    useValue: new Cache(opt?.ttl, opt?.staleTime, opt?.cleanup),
+    useValue: new Cache(opt?.ttl, opt?.staleTime, opt?.cleanup, syncTabsOpt),
   };
 }
 

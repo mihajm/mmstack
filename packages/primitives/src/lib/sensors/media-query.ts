@@ -52,13 +52,16 @@ import {
  * }
  * ```
  */
-export function mediaQuery(query: string, debugName?: string): Signal<boolean> {
+export function mediaQuery(
+  query: string,
+  debugName: string = 'mediaQuery',
+): Signal<boolean> {
   if (isPlatformServer(inject(PLATFORM_ID)))
     return computed(() => false, { debugName });
 
   const mediaQueryList = window.matchMedia(query);
 
-  const state = signal(mediaQueryList.matches, { debugName });
+  const state = signal(mediaQueryList.matches, { debugName: debugName });
 
   const handleChange = (event: MediaQueryListEvent) => {
     state.set(event.matches);

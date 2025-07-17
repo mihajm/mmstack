@@ -36,7 +36,9 @@ const serverDate = new Date();
  * @param debugName Optional debug name for the signal.
  * @returns A `NetworkStatusSignal` instance.
  */
-export function networkStatus(debugName?: string): NetworkStatusSignal {
+export function networkStatus(
+  debugName: string = 'networkStatus',
+): NetworkStatusSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const sig = computed(() => true, {
       debugName,

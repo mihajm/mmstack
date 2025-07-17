@@ -26,6 +26,7 @@ import {
   createCircuitBreaker,
   createEqualRequest,
   hasSlowConnection,
+  injectNetworkStatus,
   injectQueryCache,
   persistResourceValues,
   refresh,
@@ -193,15 +194,22 @@ export function queryResource<TResult, TRaw = TResult>(
     options?.injector,
   );
 
+  const networkAvailable = injectNetworkStatus();
+
+  const eq = options?.triggerOnSameRequest
+    ? undefined
+    : createEqualRequest(options?.equal);
+
   const stableRequest = computed(
     () => {
-      if (cb.isOpen()) return undefined;
+      if (!networkAvailable() || cb.isOpen()) return undefined;
       return request() ?? undefined;
     },
     {
-      equal: options?.triggerOnSameRequest
-        ? undefined
-        : createEqualRequest(options?.equal),
+      equal: (a, b) => {
+        if (eq) return eq(a, b);
+        return a === b;
+      },
     },
   );
 
@@ -305,6 +313,7 @@ export function queryResource<TResult, TRaw = TResult>(
   const value = options?.cache
     ? toWritable(
         computed((): TResult => {
+          resource.value();
           return cacheEntry()?.value ?? resource.value();
         }),
         resource.value.set,

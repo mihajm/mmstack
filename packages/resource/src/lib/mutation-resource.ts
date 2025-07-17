@@ -2,10 +2,12 @@ import { type HttpResourceRequest } from '@angular/common/http';
 import {
   computed,
   DestroyRef,
+  effect,
   inject,
   linkedSignal,
   Signal,
   signal,
+  untracked,
   ValueEqualityFn,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
@@ -15,7 +17,11 @@ import {
   type QueryResourceOptions,
   type QueryResourceRef,
 } from './query-resource';
-import { createCircuitBreaker, createEqualRequest } from './util';
+import {
+  createCircuitBreaker,
+  createEqualRequest,
+  injectNetworkStatus,
+} from './util';
 
 /**
  * @internal
@@ -86,6 +92,13 @@ export type MutationResourceOptions<
    * @param ctx The context value returned by the `onMutate` callback (or `undefined` if `onMutate` was not provided or returned `undefined`).
    */
   onSettled?: (ctx: NoInfer<TCTX>) => void;
+  /**
+   * Whether to queue the mutation request if the network is unavailable.
+   * If `true`, the mutations will be queued and executed in-series when the network becomes available.
+   * If `false`, the mutation will run when network is available, but only the most recent one will be executed.
+   * @default false
+   */
+  queueIfNetworkUnavailable?: boolean;
   equal?: ValueEqualityFn<TMutation>;
 };
 
@@ -162,6 +175,19 @@ export function mutationResource<
     },
   });
 
+  const queue = signal<[TMutation, TICTX | undefined][]>([]);
+
+  let ctx: TCTX = undefined as TCTX;
+
+  const queueRef = effect(() => {
+    const nextInQueue = queue().at(0);
+    if (!nextInQueue || next() !== null) return;
+    queue.update((q) => q.slice(1));
+    const [value, ictx] = nextInQueue;
+    ctx = onMutate?.(value, ictx) as TCTX;
+    next.set(value);
+  });
+
   const req = computed(
     (): HttpResourceRequest | undefined => {
       const nr = next();
@@ -207,8 +233,6 @@ export function mutationResource<
     defaultValue: null as unknown as TResult, // doesnt matter since .value is not accessible
   });
 
-  let ctx: TCTX = undefined as TCTX;
-
   const destroyRef = options.injector
     ? options.injector.get(DestroyRef)
     : inject(DestroyRef);
@@ -248,15 +272,22 @@ export function mutationResource<
       next.set(null);
     });
 
+  const shouldQueue = options.queueIfNetworkUnavailable ?? false;
+  const networkAvailable = injectNetworkStatus();
   return {
     ...resource,
     destroy: () => {
       statusSub.unsubscribe();
       resource.destroy();
+      queueRef.destroy();
     },
     mutate: (value, ictx) => {
-      ctx = onMutate?.(value, ictx) as TCTX;
-      next.set(value);
+      if (shouldQueue && !untracked(networkAvailable)) {
+        return queue.update((q) => [...q, [value, ictx]]);
+      } else {
+        ctx = onMutate?.(value, ictx) as TCTX;
+        next.set(value);
+      }
     },
     current: next,
     // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic

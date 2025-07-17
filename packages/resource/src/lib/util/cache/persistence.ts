@@ -1,5 +1,4 @@
-import { isPlatformBrowser } from '@angular/common';
-import { inject, isDevMode, PLATFORM_ID } from '@angular/core';
+import { isDevMode } from '@angular/core';
 import { CacheEntry } from './cache';
 
 type StoredEntry<T> = Omit<CacheEntry<T>, 'timeout'>;
@@ -81,10 +80,9 @@ export function createSingleStoreDB<T>(
   getStoreName: (version: number) => string,
   version = 1,
 ): Promise<CacheDB<T>> {
-  const isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
   const storeName = getStoreName(version);
 
-  if (!isBrowser) return Promise.resolve(createNoopDB());
+  if (!globalThis.indexedDB) return Promise.resolve(createNoopDB());
 
   return new Promise<IDBDatabase>((res, rej) => {
     if (version < 1) rej(new Error('Version must be 1 or greater'));

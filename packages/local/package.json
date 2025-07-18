@@ -1,0 +1,27 @@
+{
+  "name": "@mmstack/local",
+  "version": "20.0.0",
+    "keywords": [
+    "angular",
+    "signals",
+    "indexedDB",
+    "local",
+    "local-first",
+    "offline",
+    "database"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mihajm/mmstack"
+  },
+    "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/primitives",
+  "dependencies": {
+    "@mmstack/object": "^20.0.1",
+    "@mmstack/primitives": "^20.0.3"
+  },
+  "peerDependencies": {
+    "@angular/core": "~20.1.0"
+  },
+  "sideEffects": false
+}

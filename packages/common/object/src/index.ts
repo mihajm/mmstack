@@ -1,3 +1,4 @@
+export type * from './lib/any-object.type';
 export type * from './lib/empty-object.type';
 export * from './lib/entries';
 export * from './lib/hash';

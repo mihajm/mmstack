@@ -15,6 +15,7 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
+      "@mmstack/db": ["packages/db/src/index.ts"],
       "@mmstack/form-adapters": ["packages/form/adapters/src/index.ts"],
       "@mmstack/form-core": ["packages/form/core/src/index.ts"],
       "@mmstack/form-material": ["packages/form/material/src/index.ts"],

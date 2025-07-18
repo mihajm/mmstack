@@ -1,7 +1,7 @@
-# db
+# local
 
 This library was generated with [Nx](https://nx.dev).
 
 ## Running unit tests
 
-Run `nx test db` to execute the unit tests.
+Run `nx test local` to execute the unit tests.

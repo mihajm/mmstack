@@ -1,8 +1,8 @@
 export default {
-  displayName: 'db',
+  displayName: 'local',
   preset: '../../jest.preset.js',
   setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
-  coverageDirectory: '../../coverage/packages/db',
+  coverageDirectory: '../../coverage/packages/local',
   transform: {
     '^.+\\.(ts|mjs|js|html)$': [
       'jest-preset-angular',

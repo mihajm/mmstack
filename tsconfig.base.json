@@ -15,11 +15,11 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@mmstack/db": ["packages/db/src/index.ts"],
       "@mmstack/form-adapters": ["packages/form/adapters/src/index.ts"],
       "@mmstack/form-core": ["packages/form/core/src/index.ts"],
       "@mmstack/form-material": ["packages/form/material/src/index.ts"],
       "@mmstack/form-validation": ["packages/form/validation/src/index.ts"],
+      "@mmstack/local": ["packages/local/src/index.ts"],
       "@mmstack/object": ["packages/common/object/src/index.ts"],
       "@mmstack/primitives": ["packages/primitives/src/index.ts"],
       "@mmstack/resource": ["packages/resource/src/index.ts"],

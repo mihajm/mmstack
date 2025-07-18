@@ -1,7 +1,7 @@
 {
-  "name": "db",
+  "name": "local",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/db/src",
+  "sourceRoot": "packages/local/src",
   "prefix": "mm",
   "projectType": "library",
   "tags": [],
@@ -10,7 +10,7 @@
       "executor": "@nx/jest:jest",
       "outputs": ["{workspaceRoot}/coverage/{projectRoot}"],
       "options": {
-        "jestConfig": "packages/db/jest.config.ts"
+        "jestConfig": "packages/local/jest.config.ts"
       }
     },
     "lint": {

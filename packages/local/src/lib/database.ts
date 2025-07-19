@@ -1,5 +1,16 @@
-import { type ResourceRef } from '@angular/core';
+import {
+  computed,
+  Injector,
+  isDevMode,
+  Resource,
+  resource,
+  untracked,
+  ValueEqualityFn,
+  type ResourceRef,
+} from '@angular/core';
 import { type AnyObject } from '@mmstack/object';
+import { toWritable } from '@mmstack/primitives';
+import { toResourceObject, transactionMutation } from './util';
 
 /**
  * A reactive slice of data from the store, representing a single record.
@@ -57,6 +68,18 @@ export type Database<T extends AnyObject> = {
    * If not provided, an empty array will be used.
    */
   getCollection(fallback?: T[]): DatabaseCollectionRef<T>;
+  /**
+   * The status of the database resource as a whole.
+   */
+  status: Resource<unknown>['status'];
+  /**
+   * If the database is still instantiating
+   */
+  isLoading: Resource<unknown>['isLoading'];
+  /**
+   * If the database creation is in an error state.
+   */
+  error: Resource<unknown>['error'];
 };
 
 type StringOr<T extends PropertyKey> = T | Omit<string, T>;
@@ -101,11 +124,107 @@ export type CreateDatabaseOptions<T extends AnyObject> = {
     number,
     (transaction: IDBTransaction, db: IDBDatabase) => void
   >;
+  /**
+   * The equality function to use when comparing values in the store.
+   */
+  equal?: ValueEqualityFn<T>;
+  /**
+   * An optional injector to use for dependency injection within the database.
+   */
+  injector?: Injector;
 };
 
 function createNoopDB<T extends AnyObject>(): Database<T> {
   return {} as unknown as Database<T>; // todo
 }
+
+function createAllSliceFactory<T extends AnyObject>(
+  dbResource: ResourceRef<IDBDatabase | undefined>,
+  storeName: string,
+  equal: ValueEqualityFn<T>,
+  injector: Injector,
+): Database<T>['getCollection'] {
+  const arrayEqual: ValueEqualityFn<T[]> = (a, b) => {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    if (!a.length) return true; // both are empty arrays
+    return a.every((item, index) => equal(item, b[index]));
+  };
+
+  return (fallback = []) => {
+    const allResource = toResourceObject(
+      resource({
+        params: () => dbResource.value(),
+        loader: ({ params: db }) => {
+          if (!db) return Promise.resolve(fallback);
+          return new Promise<T[]>((res, rej) => {
+            const store = db
+              .transaction(storeName, 'readonly')
+              .objectStore(storeName);
+
+            const request = store.getAll();
+
+            request.onsuccess = () => res(request.result);
+            request.onerror = () => rej(request.error);
+          });
+        },
+        defaultValue: fallback,
+      }),
+    );
+
+    const setMutation = transactionMutation(
+      dbResource.value,
+      (store, values: T[]) => {
+        store.clear();
+        values.forEach((v) => store.add(v));
+        return values;
+      },
+      'readwrite',
+      storeName,
+      {
+        onMutate: (values) => {
+          const prev = untracked(allResource.value);
+          allResource.set(values);
+          return prev;
+        },
+        onError: (err, prev) => {
+          if (isDevMode()) console.error('Database mutation error:', err);
+          return allResource.set(prev);
+        },
+        onSuccess: () => {
+          // TODO: fire broadcast channel event
+        },
+      },
+    );
+
+    const addMutation = transactionMutation(
+      dbResource.value,
+      (store, value: T) => {
+        const key = store.add(value);
+        return value;
+      },
+      'readwrite',
+      storeName,
+    );
+
+    const value = toWritable(
+      computed(() => {
+        try {
+          return allResource.value();
+        } catch {
+          return fallback;
+        }
+      }),
+      (v) => setMutation.mutate(v),
+    );
+
+    return {} as any; // todo
+  };
+}
+
+function createSliceFactory<T extends AnyObject>(
+  dbResource: ResourceRef<IDBDatabase | undefined>,
+) {}
 
 export function database<T extends AnyObject>({
   dbName,
@@ -114,6 +233,7 @@ export function database<T extends AnyObject>({
   indexes = [],
   migrations = {},
   keyPath,
+  equal = Object.is,
 }: CreateDatabaseOptions<T>): Database<T> {
   if (!globalThis.indexedDB) return createNoopDB<T>();
 
@@ -150,12 +270,44 @@ export function database<T extends AnyObject>({
         } else {
           pending.forEach((migration) => migration(req.transaction!, db));
         }
+
+        const store = db.createObjectStore(storeName, {
+          keyPath: keyPath.toString(),
+        });
+
+        indexes.forEach(({ name, keyPath, options }) => {
+          if (!store.indexNames.contains(name)) {
+            store.createIndex(name, keyPath, options);
+          }
+        });
       }
     };
 
     req.onerror = () => rej(req.error);
     req.onsuccess = () => res(req.result);
   });
+
+  let dbResource = toResourceObject(
+    resource({
+      loader: () => dbPromise,
+    }),
+  );
+
+  const value = dbResource.value;
+
+  dbResource = {
+    ...dbResource,
+    value: toWritable(
+      computed(() => {
+        try {
+          return value();
+        } catch {
+          return undefined;
+        }
+      }),
+      (v) => value.set(v),
+    ),
+  };
 
   return {} as unknown as Database<T>; // todo
 }

@@ -25,6 +25,38 @@ export type UntilOptions = {
 };
 
 /**
+ * Creates a Promise that resolves when a signal's value satisfies a type predicate.
+ *
+ * This overload is used when the predicate function is a type guard (e.g., `(v): v is MyType`).
+ * The returned promise will resolve with the narrowed type.
+ *
+ * @template T The base type of the signal's value.
+ * @template U The narrowed type asserted by the predicate.
+ * @param sourceSignal The signal to observe.
+ * @param predicate A type guard function that returns `true` if the value is of type `U`.
+ * @param options Optional configuration for timeout and explicit destruction.
+ * @returns A Promise that resolves with the signal's value, narrowed to type `U`.
+ *
+ * @example
+ * ```ts
+ * const event = signal<Event | null>(null);
+ *
+ * // The returned promise is `Promise<MouseEvent>`
+ * const mouseEventPromise = until(event, (e): e is MouseEvent => e instanceof MouseEvent);
+ *
+ * async function logMouseEvent() {
+ * const me = await mouseEventPromise;
+ * console.log(me.clientX); // `me` is correctly typed as MouseEvent
+ * }
+ * ```
+ */
+export function until<T, U extends T>(
+  sourceSignal: Signal<T>,
+  predicate: (value: T) => value is U,
+  options?: UntilOptions,
+): Promise<U>;
+
+/**
  * Creates a Promise that resolves when a signal's value satisfies a given predicate.
  *
  * This is useful for imperatively waiting for a reactive state to change,
@@ -36,29 +68,12 @@ export type UntilOptions = {
  * @param options Optional configuration for timeout and explicit destruction.
  * @returns A Promise that resolves with the signal's value when the predicate is true,
  * or rejects on timeout or context destruction.
- *
- * @example
- * ```ts
- * const count = signal(0);
- *
- * async function waitForCount() {
- * console.log('Waiting for count to be >= 3...');
- * try {
- * const finalCount = await until(count, c => c >= 3, { timeout: 5000 });
- * console.log(`Count reached: ${finalCount}`);
- * } catch (e: any) { // Ensure 'e' is typed if you access properties like e.message
- * console.error(e.message); // e.g., "until: Timeout after 5000ms."
- * }
- * }
- *
- * // Simulate updates
- * setTimeout(() => count.set(1), 500);
- * setTimeout(() => count.set(2), 1000);
- * setTimeout(() => count.set(3), 1500);
- *
- * waitForCount();
- * ```
  */
+export function until<T>(
+  sourceSignal: Signal<T>,
+  predicate: (value: T) => boolean,
+  options?: UntilOptions,
+): Promise<T>;
 export function until<T>(
   sourceSignal: Signal<T>,
   predicate: (value: T) => boolean,

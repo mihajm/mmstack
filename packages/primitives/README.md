@@ -217,7 +217,7 @@ Reactive map helper that stabilizes a source array Signal by length. It provides
 
 ```typescript
 import { Component, signal } from '@angular/core';
-import { mapArray } from '@mmstack/primitives';
+import { mapArray, mutable } from '@mmstack/primitives';
 
 @Component({
   selector: 'app-map-demo',
@@ -225,14 +225,16 @@ import { mapArray } from '@mmstack/primitives';
     <ul>
       @for (item of displayItems(); track item) {
         <li>{{ item() }}</li>
+        @if ($first) {
+            <button (click)="updateFirst(item)">Update First</button>
+        }
       }
     </ul>
     <button (click)="addItem()">Add</button>
-    <button (click)="updateFirst()">Update First</button>
   `,
 })
 export class ListComponent {
-  sourceItems = signal([
+  readonly sourceItems = signal([
     { id: 1, name: 'A' },
     { id: 2, name: 'B' },
   ]);
@@ -249,6 +251,41 @@ export class ListComponent {
       return [...items]; // New array, but mapArray keeps stable signals
     });
   }
+
+  // since the underlying source is a signal we can also create updaters in the mapper
+  readonly updatableItems = mapArray(this.sourceItems, (child, index) => {
+
+    return {
+      value: computed(() => `Item ${index}: ${child().name}`))
+      updateName: () => child.update((cur) => ({...cur, name: cur.name + '+'}))
+    };
+  });
+
+
+  // since the underlying source is a WritableSignal we can also create updaters in the mapper
+  readonly writableItems = mapArray(this.sourceItems, (child, index) => {
+
+    return {
+      value: computed(() => `Item ${index}: ${child().name}`))
+      updateName: () => child.update((cur) => ({...cur, name: cur.name + '+'}))
+    };
+  });
+
+  // if the source is a mutable signal we can even update them inline
+  readonly sourceItems = mutable([
+    { id: 1, name: 'A' },
+    { id: 2, name: 'B' },
+  ]);
+
+  readonly mutableItems = mapArray(this.sourceItems, (child, index) => {
+
+    return {
+      value: computed(() => `Item ${index}: ${child().name}`))
+      updateName: () => child.inline((cur) => {
+        cur.name += '+';
+      })
+    };
+  });
 }
 ```
 

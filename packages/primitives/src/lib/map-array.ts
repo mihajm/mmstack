@@ -66,7 +66,7 @@ import {
  * API from Angular, which allows for efficient memoization and reuse of array items.
  */
 export function mapArray<T, U>(
-  source: () => T[],
+  source: Signal<T[]> | (() => T[]),
   map: (value: Signal<T>, index: number) => U,
   opt?: CreateSignalOptions<T> & {
     onDestroy?: (value: U) => void;
@@ -81,7 +81,7 @@ export function mapArray<T, U>(
       if (!prev)
         return Array.from({ length: len }, (_, i) =>
           map(
-            computed(() => source()[i], opt),
+            computed(() => data()[i], opt),
             i,
           ),
         );

@@ -146,7 +146,7 @@ function injectConfig() {
     },
   ],
 })
-export class Link {
+export class LinkDirective {
   private readonly routerLink =
     inject(RouterLink, {
       self: true,

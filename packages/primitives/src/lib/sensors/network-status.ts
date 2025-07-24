@@ -37,7 +37,7 @@ const serverDate = new Date();
  * @returns A `NetworkStatusSignal` instance.
  */
 export function networkStatus(
-  debugName: string = 'networkStatus',
+  debugName = 'networkStatus',
 ): NetworkStatusSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const sig = computed(() => true, {

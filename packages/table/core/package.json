@@ -6,7 +6,7 @@
     "@mmstack/form-adapters": "^20.4.0"
   },
   "peerDependencies": {
-    "@angular/core": "~20.0.3"
+    "@angular/core": "~20.1.0"
   },
   "sideEffects": false
 }

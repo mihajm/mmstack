@@ -162,7 +162,8 @@ export function withHistory<T>(
     if (historyStack.length === 0) return;
 
     const valueForRedo = untracked(source);
-    const valueToRestore = historyStack.at(-1)!;
+    const valueToRestore = historyStack.at(-1);
+    if (valueToRestore === undefined) return;
 
     originalSet.call(source, valueToRestore);
 
@@ -175,7 +176,8 @@ export function withHistory<T>(
     if (redoStack.length === 0) return;
 
     const valueForUndo = untracked(source);
-    const valueToRestore = redoStack.at(-1)!;
+    const valueToRestore = redoStack.at(-1);
+    if (valueToRestore === undefined) return;
 
     originalSet.call(source, valueToRestore);
 

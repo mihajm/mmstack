@@ -563,7 +563,7 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
       }
     : undefined;
 
-  let db =
+  const db =
     opt?.persist === false
       ? undefined
       : createSingleStoreDB<string>(

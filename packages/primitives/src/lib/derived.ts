@@ -200,7 +200,7 @@ export function derived<T, U>(
 
   const rest = typeof optOrKey === 'object' ? optOrKey : opt;
 
-  let baseEqual = rest?.equal ?? Object.is;
+  const baseEqual = rest?.equal ?? Object.is;
   let trigger = false;
 
   const equal: ValueEqualityFn<U> = isMutable(source)

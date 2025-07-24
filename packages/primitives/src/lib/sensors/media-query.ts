@@ -54,7 +54,7 @@ import {
  */
 export function mediaQuery(
   query: string,
-  debugName: string = 'mediaQuery',
+  debugName = 'mediaQuery',
 ): Signal<boolean> {
   if (isPlatformServer(inject(PLATFORM_ID)))
     return computed(() => false, { debugName });

@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   contentChild,
   effect,
   inject,
@@ -9,6 +10,11 @@ import {
   ViewEncapsulation,
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
+import {
+  MatAutocomplete,
+  MatAutocompleteTrigger,
+  MatOption,
+} from '@angular/material/autocomplete';
 import {
   FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
@@ -23,10 +29,10 @@ import {
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SignalErrorValidator, StringState } from './adapters';
+import { AutocompleteState, SignalErrorValidator } from './adapters';
 
 @Component({
-  selector: 'mm-string-field',
+  selector: 'mm-autocomplete-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
@@ -34,15 +40,18 @@ import { SignalErrorValidator, StringState } from './adapters';
     MatFormField,
     MatLabel,
     MatHint,
-    MatError,
     MatPrefix,
     MatSuffix,
+    MatError,
     MatInput,
     MatTooltip,
+    MatAutocomplete,
+    MatAutocompleteTrigger,
+    MatOption,
     SignalErrorValidator,
   ],
   host: {
-    class: 'mm-string-field',
+    class: 'mm-autocomplete-field',
   },
   template: `
     <mat-form-field
@@ -68,8 +77,15 @@ import { SignalErrorValidator, StringState } from './adapters';
         [required]="state().required()"
         [placeholder]="state().placeholder()"
         [mmSignalError]="state().error()"
+        [matAutocomplete]="auto"
         (blur)="state().markAsTouched()"
       />
+
+      <mat-autocomplete #auto [panelWidth]="panelWidth()">
+        @for (opt of state().options(); track opt.value) {
+          <mat-option [value]="opt.value">{{ opt.label() }}</mat-option>
+        }
+      </mat-autocomplete>
 
       <mat-error
         [matTooltip]="state().errorTooltip()"
@@ -95,7 +111,7 @@ import { SignalErrorValidator, StringState } from './adapters';
     </mat-form-field>
   `,
   styles: `
-    .mm-string-field {
+    .mm-autocomplete-field {
       display: contents;
 
       mat-form-field {
@@ -108,8 +124,8 @@ import { SignalErrorValidator, StringState } from './adapters';
     }
   `,
 })
-export class StringFieldComponent<TParent = undefined> {
-  readonly state = input.required<StringState<TParent>>();
+export class AutocompleteField<TParent = undefined> {
+  readonly state = input.required<AutocompleteState<TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })?.appearance ??
@@ -129,6 +145,10 @@ export class StringFieldComponent<TParent = undefined> {
   );
 
   private readonly model = viewChild.required(NgModel);
+
+  protected readonly panelWidth = computed(
+    () => this.state().panelWidth?.() ?? 'auto',
+  );
 
   protected readonly prefix = contentChild(MatPrefix);
 

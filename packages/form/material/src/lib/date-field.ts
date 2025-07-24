@@ -123,7 +123,7 @@ import { DateState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class DateFieldComponent<TParent = undefined, TDate = Date> {
+export class DateField<TParent = undefined, TDate = Date> {
   readonly state = input.required<DateState<TParent, TDate>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

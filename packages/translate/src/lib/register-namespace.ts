@@ -9,7 +9,7 @@ import {
 import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { replaceWithDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';
-import { TranslationStore } from './translation.store';
+import { TranslationStore } from './translation-store';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyStringRecord = Record<string, any>;

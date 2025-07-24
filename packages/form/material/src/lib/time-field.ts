@@ -11,11 +11,6 @@ import {
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
 import {
-  MatAutocomplete,
-  MatAutocompleteTrigger,
-  MatOption,
-} from '@angular/material/autocomplete';
-import {
   FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
@@ -28,11 +23,16 @@ import {
   SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
+import {
+  MatTimepicker,
+  MatTimepickerInput,
+  MatTimepickerToggle,
+} from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
-import { AutocompleteState, SignalErrorValidator } from './adapters';
+import { SignalErrorValidator, TimeState } from './adapters';
 
 @Component({
-  selector: 'mm-autocomplete-field',
+  selector: 'mm-time-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
@@ -40,18 +40,18 @@ import { AutocompleteState, SignalErrorValidator } from './adapters';
     MatFormField,
     MatLabel,
     MatHint,
-    MatPrefix,
-    MatSuffix,
     MatError,
     MatInput,
+    MatPrefix,
+    MatSuffix,
+    MatTimepicker,
+    MatTimepickerToggle,
+    MatTimepickerInput,
     MatTooltip,
-    MatAutocomplete,
-    MatAutocompleteTrigger,
-    MatOption,
     SignalErrorValidator,
   ],
   host: {
-    class: 'mm-autocomplete-field',
+    class: 'mm-time-field',
   },
   template: `
     <mat-form-field
@@ -71,21 +71,32 @@ import { AutocompleteState, SignalErrorValidator } from './adapters';
       <input
         matInput
         [(ngModel)]="state().value"
-        [autocomplete]="state().autocomplete()"
         [disabled]="state().disabled()"
         [readonly]="state().readonly()"
         [required]="state().required()"
         [placeholder]="state().placeholder()"
+        [matTimepicker]="picker"
+        [min]="state().min()"
+        [max]="state().max()"
         [mmSignalError]="state().error()"
-        [matAutocomplete]="auto"
         (blur)="state().markAsTouched()"
       />
 
-      <mat-autocomplete #auto [panelWidth]="panelWidth()">
-        @for (opt of state().options(); track opt.value) {
-          <mat-option [value]="opt.value">{{ opt.label() }}</mat-option>
-        }
-      </mat-autocomplete>
+      <ng-container matSuffix>
+        <ng-content select="[matSuffix]">
+          <mat-timepicker-toggle
+            [for]="picker"
+            [disabled]="state().disabled() || state().readonly()"
+          />
+        </ng-content>
+      </ng-container>
+
+      <mat-timepicker
+        #picker
+        [interval]="interval()"
+        [options]="options()"
+        (closed)="state().markAsTouched()"
+      />
 
       <mat-error
         [matTooltip]="state().errorTooltip()"
@@ -102,16 +113,10 @@ import { AutocompleteState, SignalErrorValidator } from './adapters';
           >{{ state().hint() }}</mat-hint
         >
       }
-
-      @if (suffix()) {
-        <ng-container matSuffix>
-          <ng-content select="[matSuffix]" />
-        </ng-container>
-      }
     </mat-form-field>
   `,
   styles: `
-    .mm-autocomplete-field {
+    .mm-time-field {
       display: contents;
 
       mat-form-field {
@@ -124,8 +129,8 @@ import { AutocompleteState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class AutocompleteFieldComponent<TParent = undefined> {
-  readonly state = input.required<AutocompleteState<TParent>>();
+export class TimeField<TParent = undefined, TDate = Date> {
+  readonly state = input.required<TimeState<TParent, TDate>>();
 
   readonly appearance = input<MatFormFieldAppearance>(
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })?.appearance ??
@@ -146,13 +151,12 @@ export class AutocompleteFieldComponent<TParent = undefined> {
 
   private readonly model = viewChild.required(NgModel);
 
-  protected readonly panelWidth = computed(
-    () => this.state().panelWidth?.() ?? 'auto',
+  protected readonly interval = computed(
+    () => this.state().interval?.() ?? null,
   );
+  protected readonly options = computed(() => this.state().options?.() ?? null);
 
   protected readonly prefix = contentChild(MatPrefix);
-
-  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

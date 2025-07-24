@@ -115,7 +115,7 @@ import { SignalErrorValidator, TextareaState } from './adapters';
     }
   `,
 })
-export class TextareaFieldComponent<TParent = undefined> {
+export class TextareaField<TParent = undefined> {
   readonly state = input.required<TextareaState<TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

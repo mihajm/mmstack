@@ -4,42 +4,53 @@ import {
   computed,
   effect,
   input,
+  numberAttribute,
+  output,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
-import { MatSlideToggle } from '@angular/material/slide-toggle';
+import { MatCheckbox } from '@angular/material/checkbox';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SignalErrorValidator, ToggleState } from './adapters';
+import { BooleanState, SignalErrorValidator } from './adapters';
 
 @Component({
-  selector: 'mm-toggle',
+  selector: 'mm-boolean-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [FormsModule, MatSlideToggle, SignalErrorValidator, MatTooltip],
+  imports: [FormsModule, MatCheckbox, SignalErrorValidator, MatTooltip],
   host: {
-    class: 'mm-toggle',
+    class: 'mm-boolean-field',
   },
   template: `
-    <div class="mm-toggle-container">
-      <mat-slide-toggle
-        class="mm-toggle"
+    <div
+      class="mm-checkbox-field-container"
+      (click)="
+        $event.target === $event.currentTarget && containerClicked.emit()
+      "
+      role="button"
+      [attr.tabindex]="tabIndex()"
+      (keydown.enter)="containerClicked.emit()"
+    >
+      <mat-checkbox
+        class="mm-checkbox-field"
         [class.readonly]="state().readonly()"
         [class.error]="!!state().error()"
-        [labelPosition]="labelPosition()"
         [disabled]="state().disabled()"
         [required]="state().required()"
+        [labelPosition]="labelPosition()"
         [(ngModel)]="state().value"
         (ngModelChange)="state().markAsTouched()"
         [mmSignalError]="state().error()"
-        >{{ state().label() }}</mat-slide-toggle
+        (click)="$event.stopPropagation()"
+        >{{ state().label() }}</mat-checkbox
       >
 
       @let showError = state().error() && state().touched();
 
       @if (state().hint() && !showError) {
         <span
-          class="mm-toggle-hint"
+          class="mm-checkbox-field-hint"
           [matTooltip]="state().hintTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
@@ -49,7 +60,7 @@ import { SignalErrorValidator, ToggleState } from './adapters';
 
       @if (showError) {
         <span
-          class="mm-toggle-error"
+          class="mm-checkbox-field-error"
           [matTooltip]="state().errorTooltip()"
           matTooltipPositionAtOrigin
           matTooltipClass="mm-multiline-tooltip"
@@ -59,21 +70,21 @@ import { SignalErrorValidator, ToggleState } from './adapters';
     </div>
   `,
   styles: `
-    .mm-toggle {
+    .mm-boolean-field {
       display: contents;
 
-      .mm-toggle-container {
+      .mm-checkbox-field-container {
         display: contents;
 
-        &:has(span.mm-toggle-hint),
-        &:has(span.mm-toggle-error) {
+        &:has(span.mm-checkbox-field-hint),
+        &:has(span.mm-checkbox-field-error) {
           display: flex;
           flex-direction: column;
           align-items: flex-start;
         }
 
-        span.mm-toggle-error,
-        span.mm-toggle-hint {
+        span.mm-checkbox-field-error,
+        span.mm-checkbox-field-hint {
           font-family: var(
             --mat-form-field-subscript-text-font,
             var(--mat-sys-body-small-font)
@@ -94,29 +105,38 @@ import { SignalErrorValidator, ToggleState } from './adapters';
             --mat-form-field-subscript-text-weight,
             var(--mat-sys-body-small-weight)
           );
+
+          padding-left: 2rem;
+          padding-top: 2px;
         }
 
-        span.mm-toggle-error {
+        span.mm-checkbox-field-error {
           color: var(--mat-sys-error);
         }
 
-        .mm-toggle {
+        .mm-checkbox-field {
           &.readonly {
             pointer-events: none;
             user-select: none;
             touch-action: none;
           }
           &.error {
-            --mat-slide-toggle-bar-error-color: var(--mat-sys-error);
-            --mat-slide-toggle-thumb-error-color: var(--mat-sys-error);
+            --mdc-checkbox-selected-icon-color: var(--mat-sys-error);
           }
         }
       }
     }
   `,
 })
-export class ToggleFieldComponent<TParent = undefined> {
-  readonly state = input.required<ToggleState<TParent>>();
+export class BooleanField<TParent = undefined> {
+  readonly state = input.required<BooleanState<TParent>>();
+  readonly containerClicked = output<void>();
+  /**
+   * The tabindex of the container.
+   * It's recommended to only use `0` (default) or `-1`.
+   * @see https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/tabindex
+   */
+  readonly tabIndex = input(0, { transform: numberAttribute });
 
   private readonly model = viewChild.required(NgModel);
 

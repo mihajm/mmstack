@@ -27,7 +27,7 @@ It uses the robust **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message 
 - ✨ **Reactive API:** Includes `t.asSignal()` for creating computed translation signals based on signal parameters.
 - 🌍 **ICU Message Syntax:** Uses FormatJS runtime for robust support of variables (`{name}`), `plural`, `select`, and `selectordinal`. (Note: Complex inline date/number formats are not the focus; use Angular's built in Pipes/format functions & use the result as variables in your translation.)
 - 🔗 **Shared Namespace Support:** Define common translations (e.g., 'Save', 'Cancel') in one namespace and make them type-safely accessible from others.
-- 🛠️ **Template Helpers:** Includes abstract `BaseTranslatePipe` and `BaseTranslateDirective` for easy, type-safe templating.
+- 🛠️ **Template Helpers:** Includes abstract `Translator` pipe and `Translate` directive for easy, type-safe templating.
 
 ### Comparison
 
@@ -206,19 +206,19 @@ export const QUOTE_ROUTES: Routes = [
 
 ```typescript
 import { Pipe, Directive } from '@angular/core';
-import { BaseTranslatePipe, BaseTranslateDirective } from '@mmstack/translate';
+import { Translator, Translate } from '@mmstack/translate';
 import { type QuoteLocale } from './quote.namespace';
 
 @Pipe({
   name: 'translate',
 })
-export class QuoteTranslatePipe extends BaseTranslatePipe<QuoteLocale> {}
+export class QuoteTranslator extends Translator<QuoteLocale> {}
 
 @Directive({
-  selector: '[translate]', // input in BaseTranslateDirective is named 'translate'
+  selector: '[translate]', // input in Translate is named 'translate'
 })
 // TInput is necessary to correctly infer the variables to the key
-export class QuoteTranslateDirective<TInput extends string> extends BaseTranslateDirective<TInput, QuoteLocale> {}
+export class QuoteTranslate<TInput extends string> extends Translate<TInput, QuoteLocale> {}
 ```
 
 ### 3. Have fun :)
@@ -226,7 +226,7 @@ export class QuoteTranslateDirective<TInput extends string> extends BaseTranslat
 ```typescript
 @Component({
   selector: 'app-quote',
-  imports: [QuoteTranslatePipe, QuoteTranslateDirective],
+  imports: [QuoteTranslator, QuoteTranslate],
   template: `
     <!-- Pipe validates key & variables match -->
     <h1>{{ 'quote.pageTitle' | translate }}</h1>

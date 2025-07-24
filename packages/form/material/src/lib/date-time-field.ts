@@ -169,7 +169,7 @@ import { DateTimeState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class DateTimeFieldComponent<TParent = undefined, TDate = Date> {
+export class DateTimeField<TParent = undefined, TDate = Date> {
   readonly state = input.required<DateTimeState<TParent, TDate>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

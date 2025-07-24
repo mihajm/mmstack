@@ -3,7 +3,7 @@
   "version": "20.0.0",
   "dependencies": {
     "@mmstack/table-core": "^20.0.0",
-    "@mmstack/primitives": "^20.0.0"
+    "@mmstack/primitives": "^20.4.0"
   },
   "peerDependencies": {
     "@angular/core": "~20.0.3"

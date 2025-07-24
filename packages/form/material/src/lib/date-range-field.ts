@@ -135,7 +135,7 @@ import { DateRangeState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class DateRangeFieldComponent<TParent = undefined, TDate = Date> {
+export class DateRangeField<TParent = undefined, TDate = Date> {
   readonly state = input.required<DateRangeState<TParent, TDate>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

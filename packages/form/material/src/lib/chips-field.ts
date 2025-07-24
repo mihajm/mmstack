@@ -1,3 +1,4 @@
+import { LiveAnnouncer } from '@angular/cdk/a11y';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -12,6 +13,20 @@ import {
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
 import {
+  MatAutocomplete,
+  MatAutocompleteSelectedEvent,
+  MatAutocompleteTrigger,
+  MatOption,
+} from '@angular/material/autocomplete';
+import {
+  MatChipGrid,
+  MatChipInput,
+  MatChipInputEvent,
+  MatChipRemove,
+  MatChipRow,
+  MatChipsModule,
+} from '@angular/material/chips';
+import {
   FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
@@ -23,30 +38,39 @@ import {
   MatSuffix,
   SubscriptSizing,
 } from '@angular/material/form-field';
+import { MatIcon } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
-import { toWritable } from '@mmstack/primitives';
-import { NumberState, SignalErrorValidator } from './adapters';
+import { ChipsState, SignalErrorValidator } from './adapters';
 
 @Component({
-  selector: 'mm-number-field',
+  selector: 'mm-chips-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  host: {
+    class: 'mm-chips-field',
+  },
   imports: [
     FormsModule,
     MatFormField,
     MatLabel,
     MatHint,
-    MatError,
-    MatInput,
     MatPrefix,
     MatSuffix,
+    MatIcon,
+    MatError,
+    MatInput,
     MatTooltip,
+    MatAutocomplete,
+    MatAutocompleteTrigger,
+    MatOption,
     SignalErrorValidator,
+    MatChipGrid,
+    MatChipRow,
+    MatChipRemove,
+    MatChipInput,
+    MatChipsModule,
   ],
-  host: {
-    class: 'mm-number-field',
-  },
   template: `
     <mat-form-field
       [appearance]="appearance()"
@@ -62,19 +86,41 @@ import { NumberState, SignalErrorValidator } from './adapters';
         </ng-container>
       }
 
+      <mat-chip-grid #chipGrid>
+        @for (opt of state().labeledValue(); track opt.value) {
+          <mat-chip-row (removed)="remove(opt)">
+            {{ opt.label }}
+            <button matChipRemove>
+              <mat-icon>cancel</mat-icon>
+            </button>
+          </mat-chip-row>
+        }
+      </mat-chip-grid>
+
       <input
         matInput
-        [type]="state().inputType()"
-        [(ngModel)]="value"
+        [(ngModel)]="state().query"
         [disabled]="state().disabled()"
         [readonly]="state().readonly()"
         [required]="state().required()"
         [placeholder]="state().placeholder()"
         [mmSignalError]="state().error()"
-        [step]="state().step()"
+        [matAutocomplete]="auto"
+        [matChipInputFor]="chipGrid"
+        [matChipInputSeparatorKeyCodes]="state().separatorCodes()"
+        (matChipInputTokenEnd)="add($event)"
         (blur)="state().markAsTouched()"
-        (keydown)="state().keydownHandler()($event)"
       />
+
+      <mat-autocomplete
+        #auto
+        [panelWidth]="panelWidth()"
+        (optionSelected)="selected($event)"
+      >
+        @for (opt of state().options(); track opt.value) {
+          <mat-option [value]="opt.value">{{ opt.label() }}</mat-option>
+        }
+      </mat-autocomplete>
 
       <mat-error
         [matTooltip]="state().errorTooltip()"
@@ -82,6 +128,7 @@ import { NumberState, SignalErrorValidator } from './adapters';
         matTooltipClass="mm-multiline-tooltip"
         >{{ state().error() }}</mat-error
       >
+
       @if (state().hint()) {
         <mat-hint
           [matTooltip]="state().hintTooltip()"
@@ -99,7 +146,7 @@ import { NumberState, SignalErrorValidator } from './adapters';
     </mat-form-field>
   `,
   styles: `
-    .mm-number-field {
+    .mm-chips-field {
       display: contents;
 
       mat-form-field {
@@ -112,8 +159,8 @@ import { NumberState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class NumberFieldComponent<TParent = undefined> {
-  readonly state = input.required<NumberState<TParent>>();
+export class ChipsField<TParent = undefined> {
+  readonly state = input.required<ChipsState<TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })?.appearance ??
@@ -123,7 +170,6 @@ export class NumberFieldComponent<TParent = undefined> {
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })?.floatLabel ??
       'auto',
   );
-
   readonly subscriptSizing = input<SubscriptSizing>(
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })
       ?.subscriptSizing ?? 'fixed',
@@ -134,10 +180,10 @@ export class NumberFieldComponent<TParent = undefined> {
   );
 
   private readonly model = viewChild.required(NgModel);
+  private readonly announcer = inject(LiveAnnouncer);
 
-  protected readonly value = toWritable(
-    computed(() => this.state().localizedValue()),
-    (next) => untracked(this.state).setLocalizedValue(next),
+  protected readonly panelWidth = computed(
+    () => this.state().panelWidth?.() ?? 'auto',
   );
 
   protected readonly prefix = contentChild(MatPrefix);
@@ -149,5 +195,30 @@ export class NumberFieldComponent<TParent = undefined> {
       if (this.state().touched()) this.model().control.markAsTouched();
       else this.model().control.markAsUntouched();
     });
+  }
+
+  protected add(e: MatChipInputEvent) {
+    const value = e.value.trim();
+
+    if (!value) return;
+    const state = untracked(this.state);
+    state.value.update((cur) => [...cur, value]);
+    state.query.set('');
+    state.markAsTouched();
+  }
+
+  protected remove({ value, label }: { value: string; label: string }) {
+    const state = untracked(this.state);
+    state.value.update((cur) => cur.filter((v) => v !== value));
+    this.announcer.announce(`Removed ${label}`);
+    state.markAsTouched();
+  }
+
+  protected selected(e: MatAutocompleteSelectedEvent) {
+    const state = untracked(this.state);
+    state.value.update((cur) => [...cur, e.option.viewValue]);
+    e.option.deselect();
+    state.query.set('');
+    state.markAsTouched();
   }
 }

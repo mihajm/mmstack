@@ -10,10 +10,10 @@ import {
 import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { createT } from './register-namespace';
 import { UnknownStringKeyObject } from './string-key-object.type';
-import { TranslationStore } from './translation.store';
+import { TranslationStore } from './translation-store';
 
 @Directive()
-export abstract class BaseTranslateDirective<
+export abstract class Translate<
   TInput extends string,
   T extends CompiledTranslation<UnknownStringKeyObject, string>,
   TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,

@@ -96,7 +96,7 @@ The validation library provides a way to generate type-safe & consisten error me
 ```typescript
 import { injectValidators } from '@mmstack/form-material';
 
-export class DemoComponent {
+export class Demo {
   private readonly validators = injectValidators();
 
   demo1 = validators.general.required(); // validator which returns "Field is required" when called with null/undefined/empty value
@@ -170,7 +170,7 @@ By defining these common state shapes, UI integration libraries (like `@mmstack/
 template: `
   <mm-string-field [state]="state" />
 `;
-export class DemoComponent {
+export class Demo {
   state = createStringState('hello world!', {
     label: () => 'Greeting',
   });
@@ -203,7 +203,7 @@ function injectDemoState() {
 template: `
   <mm-string-field [state]="state" />
 `;
-export class DemoComponent {
+export class Demo {
   state = injectDemoState();
 }
 ```
@@ -233,16 +233,16 @@ Here's a summary of the core form state adapters provided by `@mmstack/form-adap
 
 ```typescript
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { createStringState, StringFieldComponent } from '@mmstack/form-material';
+import { createStringState, StringFiel } from '@mmstack/form-material';
 
 @Component({
   selector: 'app-input-demo',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [StringFieldComponent],
+  imports: [StringField],
   template: ` <mm-string-field [state]="state" /> `,
   styles: ``,
 })
-export class FormComponent {
+export class Form {
   protected readonly state = createStringState('hello world!', {
     label: () => 'Greeting',
     required: () => true,
@@ -258,7 +258,7 @@ No body likes 1 giant form component :) `@mmstack/form-material` & related libra
 ```typescript
 import { ChangeDetectionStrategy, Component, input, isSignal, signal } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
-import { derived, DerivedSignal, formGroup, FormGroupSignal, injectCreateStringState, injectCreateTextareaState, StringFieldComponent, StringState, TextareaFieldComponent, TextareaState } from '@mmstack/form-material';
+import { derived, DerivedSignal, formGroup, FormGroupSignal, injectCreateStringState, injectCreateTextareaState, StringField, StringState, TextareaField, TextareaState } from '@mmstack/form-material';
 
 export type Note = {
   title: string;
@@ -309,7 +309,7 @@ export function injectCreateNoteState() {
 @Component({
   selector: 'app-note',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatCardModule, StringFieldComponent, TextareaFieldComponent],
+  imports: [MatCardModule, StringField, TextareaField],
   template: `
     <mat-card>
       <mat-card-header>
@@ -323,7 +323,7 @@ export function injectCreateNoteState() {
   `,
   styles: ``,
 })
-export class NoteComponent<TParent = undefined> {
+export class Note<TParent = undefined> {
   readonly state = input.required<NoteState<TParent>>();
 }
 ```

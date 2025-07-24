@@ -1,7 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  computed,
   contentChild,
   effect,
   inject,
@@ -23,16 +22,11 @@ import {
   SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
-import {
-  MatTimepicker,
-  MatTimepickerInput,
-  MatTimepickerToggle,
-} from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SignalErrorValidator, TimeState } from './adapters';
+import { SignalErrorValidator, StringState } from './adapters';
 
 @Component({
-  selector: 'mm-time-field',
+  selector: 'mm-string-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
@@ -41,17 +35,14 @@ import { SignalErrorValidator, TimeState } from './adapters';
     MatLabel,
     MatHint,
     MatError,
-    MatInput,
     MatPrefix,
     MatSuffix,
-    MatTimepicker,
-    MatTimepickerToggle,
-    MatTimepickerInput,
+    MatInput,
     MatTooltip,
     SignalErrorValidator,
   ],
   host: {
-    class: 'mm-time-field',
+    class: 'mm-string-field',
   },
   template: `
     <mat-form-field
@@ -71,31 +62,13 @@ import { SignalErrorValidator, TimeState } from './adapters';
       <input
         matInput
         [(ngModel)]="state().value"
+        [autocomplete]="state().autocomplete()"
         [disabled]="state().disabled()"
         [readonly]="state().readonly()"
         [required]="state().required()"
         [placeholder]="state().placeholder()"
-        [matTimepicker]="picker"
-        [min]="state().min()"
-        [max]="state().max()"
         [mmSignalError]="state().error()"
         (blur)="state().markAsTouched()"
-      />
-
-      <ng-container matSuffix>
-        <ng-content select="[matSuffix]">
-          <mat-timepicker-toggle
-            [for]="picker"
-            [disabled]="state().disabled() || state().readonly()"
-          />
-        </ng-content>
-      </ng-container>
-
-      <mat-timepicker
-        #picker
-        [interval]="interval()"
-        [options]="options()"
-        (closed)="state().markAsTouched()"
       />
 
       <mat-error
@@ -113,10 +86,16 @@ import { SignalErrorValidator, TimeState } from './adapters';
           >{{ state().hint() }}</mat-hint
         >
       }
+
+      @if (suffix()) {
+        <ng-container matSuffix>
+          <ng-content select="[matSuffix]" />
+        </ng-container>
+      }
     </mat-form-field>
   `,
   styles: `
-    .mm-time-field {
+    .mm-string-field {
       display: contents;
 
       mat-form-field {
@@ -129,8 +108,8 @@ import { SignalErrorValidator, TimeState } from './adapters';
     }
   `,
 })
-export class TimeFieldComponent<TParent = undefined, TDate = Date> {
-  readonly state = input.required<TimeState<TParent, TDate>>();
+export class StringField<TParent = undefined> {
+  readonly state = input.required<StringState<TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })?.appearance ??
@@ -151,12 +130,9 @@ export class TimeFieldComponent<TParent = undefined, TDate = Date> {
 
   private readonly model = viewChild.required(NgModel);
 
-  protected readonly interval = computed(
-    () => this.state().interval?.() ?? null,
-  );
-  protected readonly options = computed(() => this.state().options?.() ?? null);
-
   protected readonly prefix = contentChild(MatPrefix);
+
+  protected readonly suffix = contentChild(MatSuffix);
 
   constructor() {
     effect(() => {

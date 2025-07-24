@@ -6,4 +6,4 @@ export {
 export {
   createDedupeRequestsInterceptor,
   noDedupe,
-} from './dedupe.interceptor';
+} from './dedupe-interceptor';

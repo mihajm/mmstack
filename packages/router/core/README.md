@@ -86,11 +86,11 @@ Enhance your application's performance by preloading Angular modules. This libra
 
 ### PreloadStrategy
 
-This is a custom Angular PreloadingStrategy that works in tandem with the mmstack `LinkDirective` (via an internal `PreloadService`) to intelligently preload lazy-loaded modules.
+This is a custom Angular PreloadingStrategy that works in tandem with the mmstack `Link` (via an internal `PreloadService`) to intelligently preload lazy-loaded modules.
 
 **Features**:
 
-- Listens for preload requests triggered by the `LinkDirective`.
+- Listens for preload requests triggered by the `Link` directive.
 - Uses advanced path matching to identify the correct route to preload, even with route parameters and matrix parameters.
 - Avoids preloading if the connection is slow (e.g., '2g' effective type) or if the user has data-saving enabled in their browser.
 - Respects a `data: { preload: false }` flag in route configurations to explicitly disable preloading for specific routes.
@@ -112,9 +112,9 @@ export const appConfig: ApplicationConfig = {
 };
 ```
 
-### LinkDirective (mmLink)
+### Link (mmLink)
 
-The `LinkDirective` directive (used with the `mmLink` attribute) is an enhancement for Angular's standard `RouterLink` directive. It adds the capability to preload the JavaScript modules associated with the linked route, based on user interaction or visibility. Other than the added `preloadOn` input & `preloading` output it directly proxies `RouterLink`.
+The `Link` directive (used with the `mmLink` attribute) is an enhancement for Angular's standard `RouterLink` directive. It adds the capability to preload the JavaScript modules associated with the linked route, based on user interaction or visibility. Other than the added `preloadOn` input & `preloading` output it directly proxies `RouterLink`.
 
 - `preloadOn`: `input<'hover' | 'visible' | null>()` [default: 'hover'] specifies when to preload, `null` disables preloading
 - `preloading` - `output<void>()` fires when route is registered for preloading (before load)
@@ -122,13 +122,13 @@ The `LinkDirective` directive (used with the `mmLink` attribute) is an enhanceme
 To use it simply replace any exiting routerLinks that you would like to enable preloading on with the mmLink, you can keep all existing inputs the same. And add the mmstack `PreloadStrategy` in your configuration
 
 ```typescript
-import { LinkDirective } from '@mmstack/router-core';
+import { Link } from '@mmstack/router-core';
 import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-navigation',
   standalone: true,
-  imports: [LinkDirective, RouterLink],
+  imports: [Link, RouterLink],
   template: `
     <nav>
       <!-- preload on hover -->

@@ -2,9 +2,9 @@ import { inject } from '@angular/core';
 import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { createT } from './register-namespace';
 import { UnknownStringKeyObject } from './string-key-object.type';
-import { TranslationStore } from './translation.store';
+import { TranslationStore } from './translation-store';
 
-export abstract class BaseTranslatePipe<
+export abstract class Translator<
   T extends CompiledTranslation<UnknownStringKeyObject, string>,
   TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,
 > {

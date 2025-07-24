@@ -1,5 +1,13 @@
 # @mmstack/object
 
+⚠️ DEPRECATED ⚠️
+
+This library is deprecated and is no longer maintained.
+
+Reason: Some of the primary features of this library (e.g., providing typed wrappers for Object.keys, Object.values) are now handled correctly by modern TypeScript versions out of the box. The rest are simple utility functions, that were only needed internally in 1-2 places. If you we're depending on a function like hash or mergeArray you can find a branch named `deprecate-object-utils` in the mmstack repository.
+
+Action: You should remove this package from your dependencies and use native TypeScript functionality or copy the specific helper from the repo to your internal codebase.
+
 A collection of lightweight, type-safe object and data structure utility functions written in TypeScript.
 
 [![npm version](https://badge.fury.io/js/%40mmstack%2Fobject.svg)](https://badge.fury.io/js/%40mmstack%2Fobject)
@@ -91,4 +99,4 @@ For detailed descriptions, exact type signatures, and more specific examples, pl
 
 ## Contributing
 
-While primarily extracted for internal use, improvements and bug fixes are welcome. Please feel free to open an issue or submit a pull request if you find a problem or have a suggestion.
+This library is deprecated and is no longer accepting contributions or pull requests.

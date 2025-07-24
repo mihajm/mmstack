@@ -62,7 +62,7 @@ export class AppComponent {
       onSuccess: (data) => {
         console.log('Post created:', data);
       },
-      queueIfNetworkUnavailable: true,
+      queue: true,
     },
   );
 

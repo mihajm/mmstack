@@ -6,7 +6,6 @@
   },
   "allowedNonPeerDependencies": [
     "@mmstack/primitives",
-    "@mmstack/form-adapters",
-    "uuid"
+    "@mmstack/form-adapters"
   ]
 }

@@ -1,5 +1,4 @@
 import { HttpParams, HttpResourceRequest } from '@angular/common/http';
-import { entries } from '@mmstack/object';
 
 function normalizeParams(
   params: Required<HttpResourceRequest>['params'],
@@ -8,7 +7,7 @@ function normalizeParams(
 
   const paramMap = new Map<string, string>();
 
-  for (const [key, value] of entries(params)) {
+  for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) {
       paramMap.set(key, value.map(encodeURIComponent).join(','));
     } else {

@@ -1,2 +1,2 @@
-export * from './preload.service';
-export * from './preload.strategy';
+export * from './preload-requester';
+export * from './preload-strategy';

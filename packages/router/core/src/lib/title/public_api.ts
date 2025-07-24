@@ -1,2 +1,2 @@
-export { provideTitleConfig, TitleConfig } from './title.config';
-export { createTitle } from './title.store';
+export { provideTitleConfig, TitleConfig } from './title-config';
+export { createTitle } from './title-store';

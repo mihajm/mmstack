@@ -1,10 +1,90 @@
 import {
+  HttpContext,
   HttpHeaders,
   HttpParams,
   HttpResourceRequest,
 } from '@angular/common/http';
 import { type ValueEqualityFn } from '@angular/core';
-import { hash, keys } from '@mmstack/object';
+
+type UnknownObject = Record<PropertyKey, unknown>;
+
+/**
+ * Checks if `value` is a plain JavaScript object (e.g., `{}` or `new Object()`).
+ * Distinguishes from arrays, null, and class instances. Acts as a type predicate,
+ * narrowing `value` to `UnknownObject` if `true`.
+ *
+ * @param value The value to check.
+ * @returns {value is UnknownObject} `true` if `value` is a plain object, otherwise `false`.
+ * @example
+ * isPlainObject({}) // => true
+ * isPlainObject([]) // => false
+ * isPlainObject(null) // => false
+ * isPlainObject(new Date()) // => false
+ */
+function isPlainObject(value: unknown): value is UnknownObject {
+  return (
+    typeof value === 'object' && value !== null && value.constructor === Object
+  );
+}
+
+/**
+ * Internal helper to generate a stable JSON string from an array.
+ * Sorts keys of plain objects within the array alphabetically before serialization
+ * to ensure hash stability regardless of key order.
+ *
+ * @param queryKey The array of values to serialize.
+ * @returns A stable JSON string representation.
+ * @internal
+ */
+function hashKey(queryKey: unknown[]): string {
+  return JSON.stringify(queryKey, (_, val) =>
+    isPlainObject(val)
+      ? Object.keys(val)
+          .toSorted()
+          .reduce((result, key) => {
+            result[key] = val[key];
+            return result;
+          }, {} as UnknownObject)
+      : val,
+  );
+}
+
+/**
+ * Generates a stable, unique string hash from one or more arguments.
+ * Useful for creating cache keys or identifiers where object key order shouldn't matter.
+ *
+ * How it works:
+ * - Plain objects within the arguments have their keys sorted alphabetically before hashing.
+ * This ensures that `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` produce the same hash.
+ * - Uses `JSON.stringify` internally with custom sorting for plain objects via `hashKey`.
+ * - Non-plain objects (arrays, Dates, etc.) and primitives are serialized naturally.
+ *
+ * @param {...unknown} args Values to include in the hash.
+ * @returns A stable string hash representing the input arguments.
+ * @example
+ * const userQuery = (id: number) => ['user', { id, timestamp: Date.now() }];
+ *
+ * const obj1 = { a: 1, b: 2 };
+ * const obj2 = { b: 2, a: 1 }; // Same keys/values, different order
+ *
+ * hash('posts', 10);
+ * // => '["posts",10]'
+ *
+ * hash('config', obj1);
+ * // => '["config",{"a":1,"b":2}]'
+ *
+ * hash('config', obj2);
+ * // => '["config",{"a":1,"b":2}]' (Same as above due to key sorting)
+ *
+ * hash(['todos', { status: 'done', owner: obj1 }]);
+ * // => '[["todos",{"owner":{"a":1,"b":2},"status":"done"}]]'
+ *
+ * // Be mindful of values JSON.stringify cannot handle (functions, undefined, Symbols)
+ * // hash('a', undefined, function() {}) => '["a",null,null]'
+ */
+function hash(...args: unknown[]): string {
+  return hashKey(args);
+}
 
 function equalTransferCache(
   a: HttpResourceRequest['transferCache'],
@@ -87,8 +167,8 @@ function equalParams(
   const aObj = a instanceof HttpParams ? paramToObject(a) : a;
   const bObj = b instanceof HttpParams ? paramToObject(b) : b;
 
-  const aKeys = keys(aObj);
-  const bKeys = keys(bObj);
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
 
   return aKeys.every((key) => {
@@ -122,8 +202,8 @@ function equalHeaders(
   const aObj = a instanceof HttpHeaders ? headersToObject(a) : a;
   const bObj = b instanceof HttpHeaders ? headersToObject(b) : b;
 
-  const aKeys = keys(aObj);
-  const bKeys = keys(bObj);
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
   return aKeys.every((key) => {
     if (Array.isArray(aObj[key]) || Array.isArray(bObj[key])) {
@@ -137,6 +217,21 @@ function equalHeaders(
   });
 }
 
+function toHttpContextEntries(ctx: HttpResourceRequest['context']) {
+  if (!ctx) return [];
+
+  if (ctx instanceof HttpContext) {
+    const tokens = Array.from(ctx.keys());
+    return tokens.map((key) => [key.toString(), ctx.get(key)] as const);
+  }
+
+  if (typeof ctx === 'object') {
+    return Object.entries(ctx) as Array<[string, unknown]>;
+  }
+
+  return [];
+}
+
 function equalContext(
   a: HttpResourceRequest['context'],
   b: HttpResourceRequest['context'],
@@ -144,10 +239,12 @@ function equalContext(
   if (!a && !b) return true;
   if (!a || !b) return false;
 
-  const aKeys = keys(a);
-  const bKeys = keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => a[key] === b[key]);
+  const aEntries = toHttpContextEntries(a);
+  const bEntries = toHttpContextEntries(b);
+  if (aEntries.length !== bEntries.length) return false;
+  if (aEntries.length === 0) return true;
+  const bMap = new Map(bEntries);
+  return aEntries.every(([key, value]) => value === bMap.get(key));
 }
 
 export function createEqualRequest<TResult>(

@@ -1,5 +1,4 @@
 import { computed, Signal } from '@angular/core';
-import { v7 } from 'uuid';
 import {
   Cell,
   createCell,
@@ -59,7 +58,7 @@ export function createRow<T, TColumnName extends string>(
   );
 
   return {
-    id: v7(),
+    id: crypto.randomUUID(),
     source,
     cells,
     visibleCells,
@@ -80,7 +79,7 @@ export function createHeaderRow<T, TColumnName extends string>(
     features.columnOrder.state().map((name) => cellMap().get(name)!),
   );
   return {
-    id: v7(),
+    id: crypto.randomUUID(),
     cells,
     visibleCells: computed(() =>
       cells().filter((c) =>
@@ -104,7 +103,7 @@ export function createFooterRow<T, TColumnName extends string>(
       .filter((c) => c !== null),
   );
   return {
-    id: v7(),
+    id: crypto.randomUUID(),
     cells,
     visibleCells: computed(() =>
       cells().filter((c) =>

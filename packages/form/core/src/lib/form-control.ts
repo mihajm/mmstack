@@ -9,7 +9,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { type DerivedSignal } from '@mmstack/primitives';
-import { v7 } from 'uuid';
+import { generateID } from './util';
 
 /**
  * Represents the type of a form control.
@@ -212,7 +212,7 @@ export function formControl<
   const pending = computed(() => opt?.pending?.() ?? false);
 
   return {
-    id: opt?.id?.() ?? v7(),
+    id: opt?.id?.() ?? generateID(),
     value,
     dirty,
     touched,

@@ -6,9 +6,10 @@ import {
   ValueEqualityFn,
   type WritableSignal,
 } from '@angular/core';
-import type { UnknownObject } from '@mmstack/object';
 import { isMutable, MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
+
+type UnknownObject = Record<PropertyKey, unknown>;
 
 /**
  * Options for creating a derived signal using the full `derived` function signature.

@@ -6,7 +6,6 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { entries, mergeIfObject, values } from '@mmstack/object';
 import {
   isDerivation,
   toFakeSignalDerivation,
@@ -18,6 +17,9 @@ import {
   type FormControlSignal,
 } from './form-control';
 import { type SignalValue } from './signal-value.type';
+import { mergeIfObject } from './util';
+
+type AnyObject = Record<PropertyKey, any>;
 
 /**
  * Extracts the partial value types from a record of `FormControlSignal` instances.
@@ -151,7 +153,7 @@ export function formGroup<
       : computed(() => providedChildren);
 
   // array allows for easier handling
-  const derivationsArray = computed(() => values(children()));
+  const derivationsArray = computed(() => Object.values(children()));
 
   const childrenDirty = computed(
     () =>
@@ -258,11 +260,11 @@ export function formGroup<
 
     if (!ctrl.dirty()) return obj;
 
-    for (const [key, ctrl] of entries(children())) {
+    for (const [key, ctrl] of Object.entries(children())) {
       const pv = ctrl.partialValue();
 
       if (pv === undefined) continue;
-      obj[key] = pv;
+      (obj as AnyObject)[key] = pv;
     }
 
     return obj;

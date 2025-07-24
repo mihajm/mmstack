@@ -20,7 +20,7 @@ import {
   UrlTree,
 } from '@angular/router';
 import { elementVisibility } from '@mmstack/primitives';
-import { PreloadService } from './preloading';
+import { PreloadRequester } from './preloading';
 
 function inputToUrlTree(
   router: Router,
@@ -55,7 +55,7 @@ function treeToSerializedUrl(
 }
 
 export function injectTriggerPreload() {
-  const svc = inject(PreloadService);
+  const req = inject(PreloadRequester);
   const router = inject(Router);
 
   return (
@@ -76,7 +76,7 @@ export function injectTriggerPreload() {
     const fullPath = treeToSerializedUrl(router, urlTree);
     if (!fullPath) return;
 
-    svc.startPreload(fullPath);
+    req.startPreload(fullPath);
   };
 }
 
@@ -146,14 +146,14 @@ function injectConfig() {
     },
   ],
 })
-export class LinkDirective {
+export class Link {
   private readonly routerLink =
     inject(RouterLink, {
       self: true,
       optional: true,
     }) ?? inject(RouterLinkWithHref, { self: true, optional: true });
 
-  private readonly svc = inject(PreloadService);
+  private readonly req = inject(PreloadRequester);
   private readonly router = inject(Router);
 
   readonly target = input<string>();
@@ -245,7 +245,7 @@ export class LinkDirective {
   private requestPreload() {
     const fp = untracked(this.fullPath);
     if (!this.routerLink || !fp) return;
-    this.svc.startPreload(fp);
+    this.req.startPreload(fp);
     this.preloading.emit();
   }
 

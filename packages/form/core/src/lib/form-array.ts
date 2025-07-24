@@ -5,7 +5,6 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { mergeArray } from '@mmstack/object';
 import { derived, type DerivedSignal } from '@mmstack/primitives';
 import {
   formControl,
@@ -13,6 +12,7 @@ import {
   type FormControlSignal,
 } from './form-control';
 import { type SignalValue } from './signal-value.type';
+import { mergeArray } from './util';
 
 export type FormArraySignal<
   T,

@@ -1,5 +1,4 @@
 import { Signal } from '@angular/core';
-import { v7 } from 'uuid';
 import { Column } from './column';
 
 export type Row<T> = {
@@ -16,7 +15,7 @@ export function createRow<T>(
   opt: CreateRowOptions<T>,
 ): Row<T> {
   return {
-    id: v7(),
+    id: crypto.randomUUID(),
     source,
   };
 }

@@ -10,8 +10,14 @@ import {
   untracked,
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
-import { v7 } from 'uuid';
 import { CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
+
+function generateID() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2);
+}
 
 type BaseSyncMessage<TEntry, TAction extends string> = {
   entry: TEntry;
@@ -119,7 +125,7 @@ const DEFAULT_CLEANUP_OPT = {
 export class Cache<T> {
   private readonly internal = mutable(new Map<string, CacheEntry<T>>());
   private readonly cleanupOpt: CleanupType;
-  private readonly id = v7();
+  private readonly id = generateID();
 
   /**
    * Destroys the cache instance, cleaning up any resources used by the cache.

@@ -1,1 +1,1 @@
-export { PreloadStrategy } from './preload.strategy';
+export { PreloadStrategy } from './preload-strategy';

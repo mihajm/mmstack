@@ -2,7 +2,7 @@ import { inject, Injectable } from '@angular/core';
 import { PreloadingStrategy, type Route, Router } from '@angular/router';
 import { EMPTY, filter, finalize, Observable, switchMap, take } from 'rxjs';
 import { createRoutePredicate, findPath } from '../util';
-import { PreloadService } from './preload.service';
+import { PreloadRequester } from './preload-requester';
 
 function hasSlowConnection() {
   if (
@@ -39,7 +39,7 @@ function noPreload(route: Route) {
 export class PreloadStrategy implements PreloadingStrategy {
   private readonly loading = new Set<string>();
   private readonly router = inject(Router);
-  private readonly svc = inject(PreloadService);
+  private readonly req = inject(PreloadRequester);
 
   preload(route: Route, load: () => Observable<any>): Observable<any> {
     if (noPreload(route) || hasSlowConnection()) return EMPTY;
@@ -49,7 +49,7 @@ export class PreloadStrategy implements PreloadingStrategy {
     if (this.loading.has(fp)) return EMPTY;
 
     const predicate = createRoutePredicate(fp);
-    return this.svc.preloadRequested$.pipe(
+    return this.req.preloadRequested$.pipe(
       filter((path) => path === fp || predicate(path)),
       take(1),
       switchMap(() => load()),

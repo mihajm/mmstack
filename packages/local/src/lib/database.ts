@@ -8,9 +8,10 @@ import {
   ValueEqualityFn,
   type ResourceRef,
 } from '@angular/core';
-import { type AnyObject } from '@mmstack/object';
 import { toWritable } from '@mmstack/primitives';
 import { toResourceObject, transactionMutation } from './util';
+
+type AnyObject = Record<PropertyKey, any>;
 
 /**
  * A reactive slice of data from the store, representing a single record.

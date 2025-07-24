@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/primitives",
-  "version": "20.0.4",
+  "version": "20.1.0",
   "keywords": [
     "angular",
     "signals",
@@ -14,9 +14,6 @@
     "url": "https://github.com/mihajm/mmstack"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/primitives",
-  "dependencies": {
-    "@mmstack/object": "^20.0.0"
-  },
   "peerDependencies": {
     "@angular/core": "~20.1.0",
     "@angular/common": "~20.1.0"

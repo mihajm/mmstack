@@ -11,7 +11,7 @@ import { Title } from '@angular/platform-browser';
 import { ResolveFn } from '@angular/router';
 import { mutable, until } from '@mmstack/primitives';
 import { injectLeafRoutes, injectSnapshotPathResolver } from '../util';
-import { injectTitleConfig } from './title.config';
+import { injectTitleConfig } from './title-config';
 
 @Injectable({
   providedIn: 'root',

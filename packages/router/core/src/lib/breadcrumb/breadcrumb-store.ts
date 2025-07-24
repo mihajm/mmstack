@@ -1,14 +1,14 @@
 import { computed, inject, Injectable, Signal } from '@angular/core';
 import { mapArray, mutable } from '@mmstack/primitives';
 import { injectLeafRoutes, ResolvedLeafRoute } from '../util/leaf.store';
-import { injectBreadcrumbConfig } from './breadcrumb.config';
 import {
   Breadcrumb,
   createInternalBreadcrumb,
   getBreadcrumbInternals,
   InternalBreadcrumb,
   isInternalBreadcrumb,
-} from './breadcrumb.type';
+} from './breadcrumb';
+import { injectBreadcrumbConfig } from './breadcrumb-config';
 
 function uppercaseFirst(str: string): string {
   const lcs = str.toLowerCase();

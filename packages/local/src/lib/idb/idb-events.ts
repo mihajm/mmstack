@@ -30,7 +30,7 @@ export class IDBEventBus {
   readonly events$ = new Subject<IDBChangeEvent<any, any>>();
 }
 
-function generateID() {
+export function generateID() {
   if (globalThis.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
   }

@@ -21,6 +21,7 @@ import {
   withPreloading,
 } from '@angular/router';
 import { provideValidatorConfig } from '@mmstack/form-material';
+import { provideDBConfig } from '@mmstack/local';
 import {
   createCacheInterceptor,
   createDedupeRequestsInterceptor,
@@ -36,6 +37,20 @@ export const appConfig: ApplicationConfig = {
       provide: LOCALE_ID,
       useValue: 'en-US',
     },
+    provideDBConfig({
+      dbName: 'my-todo-app',
+      version: 1,
+      syncTabs: false, // Enable cross-tab synchronization
+      schema: {
+        tasks: {
+          primaryKey: 'id',
+          autoIncrement: true,
+          // indexes: {
+          //   byStatus: { keyPath: 'status' },
+          // },
+        },
+      },
+    }),
     provideClientHydration(
       withEventReplay(),
       withHttpTransferCacheOptions({

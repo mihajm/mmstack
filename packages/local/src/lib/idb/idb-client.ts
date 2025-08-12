@@ -44,10 +44,13 @@ export type IDBClient = ResourceRef<IDBConnection> & {
    * @param opt Options for creating the table handler.
    * @returns An IDBTable handler for the specified table.
    */
-  useTable: <T extends Record<PropertyKey, any>>(
+  useTable: <
+    T extends Record<PropertyKey, any>,
+    TKey extends keyof T = keyof T,
+  >(
     tableName: string,
-    opt: CreateIDBTableOptions<T>,
-  ) => IDBTable<T>;
+    opt?: CreateIDBTableOptions<T>,
+  ) => IDBTable<T, TKey>;
 };
 
 /** Options for creating the IDBClient */
@@ -116,7 +119,7 @@ export function createIDBClient(
 
   const { onBlocked, onVersionChange, onClose } = lifeCycle ?? {};
 
-  const registry = new Map<string, IDBTable<any>>();
+  const registry = new Map<string, IDBTable<any, any>>();
 
   const events$ = dbEvents(dbName, version, injector);
 
@@ -127,12 +130,15 @@ export function createIDBClient(
   const base = {
     name: dbName,
     version,
-    useTable: <T extends Record<PropertyKey, any>>(
+    useTable: <
+      T extends Record<PropertyKey, any>,
+      TKey extends keyof T = keyof T,
+    >(
       tableName: string,
-      options: CreateIDBTableOptions<T>,
-    ) => {
+      options?: CreateIDBTableOptions<T>,
+    ): IDBTable<T, TKey> => {
       const found = registry.get(tableName);
-      if (found) return found;
+      if (found) return found as IDBTable<T, TKey>;
 
       const tableSchema = schema[tableName];
 
@@ -144,7 +150,7 @@ export function createIDBClient(
             ).join(', ')}`,
           );
 
-        return createNoopTable<T>(tableName);
+        return createNoopTable<T, TKey>(tableName);
       }
 
       const eventFactory = createEventFactory<T, IDBValidKey>(
@@ -153,9 +159,9 @@ export function createIDBClient(
         tableName,
       );
 
-      const newTable = createNewTable<T>(tableName, {
+      const newTable = createNewTable<T, TKey>(tableName, {
         ...options,
-        injector: options.injector ?? injector,
+        injector: options?.injector ?? injector,
         schema: tableSchema as IDBTableSchema<T>,
         client: client,
         fireEvent: (e) => {

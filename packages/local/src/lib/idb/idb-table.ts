@@ -9,7 +9,7 @@ import {
 import { filter, Observable } from 'rxjs';
 import type { IDBClient } from './idb-client';
 import type { IDBConnection } from './idb-connection';
-import type { FireEvent, IDBChangeEvent } from './idb-events';
+import { generateID, type FireEvent, type IDBChangeEvent } from './idb-events';
 import type { IDBTableSchema } from './idb-schema';
 import { toResourceObject } from './to-resource-object';
 
@@ -26,6 +26,10 @@ export type CreateIDBTableOptions<T extends Record<PropertyKey, any>> = {
   equal?: ValueEqualityFn<T>;
 };
 
+type AddValue<T, TKey extends keyof T> = Omit<T, TKey> & {
+  [K in TKey]?: IDBValidKey;
+};
+
 /**
  * Represents a table handler for IndexedDB.
  * It provides methods to add, update, and remove items,
@@ -33,10 +37,10 @@ export type CreateIDBTableOptions<T extends Record<PropertyKey, any>> = {
  * It extends ResourceRef to provide reactive data handling.
  * All updates happen optimistcally and are reverted in case of an error.
  */
-export type IDBTable<T extends Record<PropertyKey, any>> = Omit<
-  ResourceRef<T[]>,
-  'set' | 'update'
-> & {
+export type IDBTable<
+  T extends Record<PropertyKey, any>,
+  TKey extends keyof T,
+> = Omit<ResourceRef<T[]>, 'set' | 'update'> & {
   /**
    * The name of the table.
    */
@@ -46,26 +50,26 @@ export type IDBTable<T extends Record<PropertyKey, any>> = Omit<
    * @param value The item to add.
    * @returns A promise that resolves when the add operation is complete.
    */
-  add: (value: T) => Promise<void>;
+  add: (value: AddValue<T, TKey>) => Promise<T[TKey]>;
   /**
    *
    * @param key The key of the item to update.
    * @param itemOrUpdater The new item or a function that takes the previous item and returns the new item.
    * @returns A promise that resolves when the update is complete.
    */
-  update: (
-    key: IDBValidKey,
-    itemOrUpdater: T | ((prev: T) => T),
-  ) => Promise<void>;
+  update: (key: T[TKey], itemOrUpdater: T | ((prev: T) => T)) => Promise<void>;
   /**
    * Removes an item from the table by its key.
    * @param key The key of the item to remove.
    * @returns A promise that resolves when the remove operation is complete.
    */
-  remove: (key: IDBValidKey) => Promise<void>;
+  remove: (key: T[TKey]) => Promise<void>;
 };
 
-export function createNewTable<T extends Record<PropertyKey, any>>(
+export function createNewTable<
+  T extends Record<PropertyKey, any>,
+  TKey extends keyof T,
+>(
   tableName: string,
   {
     client,
@@ -79,7 +83,7 @@ export function createNewTable<T extends Record<PropertyKey, any>>(
     fireEvent: FireEvent<T, IDBValidKey>;
     events$: Observable<IDBChangeEvent<T, IDBValidKey>>;
   },
-): IDBTable<T> {
+): IDBTable<T, TKey> {
   const rawTableData = toResourceObject(
     resource<T[], IDBConnection>({
       params: () => client.value(),
@@ -123,17 +127,35 @@ export function createNewTable<T extends Record<PropertyKey, any>>(
     },
   };
 
-  const add = async (item: T, fromEvent = false): Promise<void> => {
+  const add = async (
+    item: AddValue<T, TKey>,
+    fromEvent = false,
+  ): Promise<T[TKey]> => {
     const prev = untracked(tableData.value);
 
+    let tempKey = (item as any)[schema.primaryKey] as T[TKey] | undefined;
+
+    if (schema.autoIncrement && tempKey === undefined && prev.length > 0) {
+      const isString = typeof prev[0]?.[schema.primaryKey] === 'string';
+      const isNumber = typeof prev[0]?.[schema.primaryKey] === 'number';
+      if (isString) {
+        tempKey = generateID() as T[TKey];
+      } else if (isNumber) {
+        tempKey = (Math.max(
+          ...prev.map((v) => v[schema.primaryKey] as number),
+        ) + 1) as T[TKey];
+      }
+    }
+
     try {
-      const tempKey = item[schema.primaryKey];
-      tableData.update((cur) => [...cur, item]);
-      let payload = item;
+      tableData.update((cur) => [...cur, item as T]);
+
+      let payload = item as T;
+
       if (!fromEvent) {
         const key = await untracked(client.value).add<T>(
           tableName,
-          item,
+          item as T,
           controller.signal,
         );
         if (key !== tempKey) {
@@ -146,11 +168,14 @@ export function createNewTable<T extends Record<PropertyKey, any>>(
           type: 'add',
           payload,
         });
+        return key as T[TKey];
       }
+      return tempKey as T[TKey];
     } catch (err) {
       if (isDevMode())
         console.error(`Error adding value to table ${tableName}:`, err);
       tableData.set(prev);
+      return tempKey as T[TKey];
     }
   };
 
@@ -225,9 +250,10 @@ export function createNewTable<T extends Record<PropertyKey, any>>(
   };
 }
 
-export function createNoopTable<T extends Record<PropertyKey, any>>(
-  tableName: string,
-): IDBTable<T> {
+export function createNoopTable<
+  T extends Record<PropertyKey, any>,
+  TKey extends keyof T,
+>(tableName: string): IDBTable<T, TKey> {
   const data = toResourceObject<T[]>(
     resource({
       loader: () => Promise.resolve([]),
@@ -239,7 +265,7 @@ export function createNoopTable<T extends Record<PropertyKey, any>>(
   return {
     ...data,
     name: tableName,
-    add: () => Promise.resolve(),
+    add: () => Promise.resolve(Math.random() as T[TKey]),
     update: () => Promise.resolve(),
     remove: () => Promise.resolve(),
   };

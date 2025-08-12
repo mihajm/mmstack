@@ -65,11 +65,11 @@ Use the `idb` helper function in any component or service to get a reactive hand
 ```typescript
 // task-list.component.ts
 
-type Task {
+type Task = {
   id?: number;
   title: string;
-  status: 'pending' | 'completed'
-}
+  status: 'pending' | 'completed';
+};
 
 @Component({
   selector: 'app-task-list',
@@ -85,9 +85,9 @@ type Task {
     <button (click)="addTask()">Add New Task</button>
   `,
 })
-export class TaskListComponent {
-   // a call to 'tasks' will always return the same instance, so updates happen across the entire application
-  tasks = idb<Task>('tasks');
+export class TaskList {
+  // a call to 'tasks' will always return the same instance, so updates happen across the entire application
+  tasks = idb<Task, 'id'>('tasks');
 
   constructor() {
     effect(() => {

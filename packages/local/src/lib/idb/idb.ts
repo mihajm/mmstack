@@ -110,13 +110,13 @@ export type CreateIDBOptions<T extends Record<PropertyKey, any>> = Omit<
  *  users.add({ name: 'John Doe' });
  *```
  */
-export function idb<T extends Record<PropertyKey, any>>(
-  tableName: string,
-  opt: CreateIDBTableOptions<T>,
-): IDBTable<T> {
+export function idb<
+  T extends Record<PropertyKey, any>,
+  TKey extends keyof T = keyof T,
+>(tableName: string, opt?: CreateIDBTableOptions<T>): IDBTable<T, TKey> {
   const client =
-    opt.client ??
-    (opt.injector
+    opt?.client ??
+    (opt?.injector
       ? opt.injector.get(DefaultConnection).client
       : inject(DefaultConnection).client);
 

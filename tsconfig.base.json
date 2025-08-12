@@ -7,6 +7,7 @@
     "moduleResolution": "node",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
+    "noUncheckedIndexedAccess": true,
     "importHelpers": true,
     "target": "es2015",
     "module": "esnext",
@@ -23,9 +24,6 @@
       "@mmstack/primitives": ["packages/primitives/src/index.ts"],
       "@mmstack/resource": ["packages/resource/src/index.ts"],
       "@mmstack/router-core": ["packages/router/core/src/index.ts"],
-      "@mmstack/table-client": ["packages/table/client/src/index.ts"],
-      "@mmstack/table-core": ["packages/table/core/src/index.ts"],
-      "@mmstack/table-material": ["packages/table/material/src/index.ts"],
       "@mmstack/translate": ["packages/translate/src/index.ts"]
     }
   },

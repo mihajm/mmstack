@@ -22,6 +22,7 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 - **[`@mmstack/form-adapters`](./packages/form/adapters/README.md):** Headless, reusable state adapters for common form field types, bridging form logic and UI components.
 - **[`@mmstack/form-material`](./packages/form/material/README.md):** A set of Angular Material components that directly consume state adapters from `@mmstack/form-adapters` for easy form building.
 - **[`@mmstack/translate`](./packages/translate/README.md):** A modular & type safe solution to localization.
+- **[`@mmstack/local`](./packages/local/README.md):** Local data management helpers, starting with a reactive, type-safe IndexedDB wrapper for managing local client-side storage with optimistic updates and cross-tab syncing.
 
 **Upcoming Libraries:**
 

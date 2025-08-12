@@ -7,3 +7,8 @@ import { Component } from '@angular/core';
   styles: ``,
 })
 export class App {}
+
+
+export function test() {
+  return 'yay'
+}

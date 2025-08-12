@@ -15,12 +15,10 @@
     "type": "git",
     "url": "https://github.com/mihajm/mmstack"
   },
-    "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/primitives",
-  "dependencies": {
-    "@mmstack/primitives": "^20.4.0"
-  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/local",
   "peerDependencies": {
-    "@angular/core": "~20.1.0"
+    "@angular/core": "~20.1.0",
+    "rxjs": "~7.8.0"
   },
   "sideEffects": false
 }

@@ -1,11 +1,15 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
+  Directive,
   effect,
   inject,
   input,
+  Signal,
+  TemplateRef,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
@@ -30,6 +34,27 @@ import {
 import { MatTooltip } from '@angular/material/tooltip';
 import { SelectState, SignalErrorValidator } from './adapters';
 
+@Directive({
+  selector: '[mmSelectOptionContent]',
+})
+export class SelectOptionContent {
+  readonly template = inject(TemplateRef, { optional: true });
+
+  static ngTemplateGuard_mmSelectOptionContent<T>(
+    _: SelectOptionContent,
+    state: unknown,
+  ): state is {
+    $implicit: {
+      id: string;
+      value: T;
+      label: Signal<string>;
+      disabled: Signal<boolean>;
+    };
+  } {
+    return true;
+  }
+}
+
 @Component({
   selector: 'mm-select-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -47,6 +72,7 @@ import { SelectState, SignalErrorValidator } from './adapters';
     MatSelectTrigger,
     SignalErrorValidator,
     MatTooltip,
+    NgTemplateOutlet,
   ],
   host: {
     class: 'mm-select-field',
@@ -84,7 +110,10 @@ import { SelectState, SignalErrorValidator } from './adapters';
 
         @for (opt of state().options(); track opt.id) {
           <mat-option [value]="opt.value" [disabled]="opt.disabled()">
-            {{ opt.label() }}
+            <ng-container
+              [ngTemplateOutlet]="optionTemplate()?.template ?? fallback"
+              [ngTemplateOutletContext]="{ $implicit: opt }"
+            />
           </mat-option>
         }
       </mat-select>
@@ -111,6 +140,8 @@ import { SelectState, SignalErrorValidator } from './adapters';
         </ng-container>
       }
     </mat-form-field>
+
+    <ng-template #fallback let-opt>{{ opt.label() }}</ng-template>
   `,
   styles: `
     .mm-select-field {
@@ -145,6 +176,8 @@ export class SelectFieldComponent<T, TParent = undefined> {
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })
       ?.hideRequiredMarker ?? false,
   );
+
+  protected readonly optionTemplate = contentChild(SelectOptionContent);
 
   private readonly model = viewChild.required(NgModel);
 

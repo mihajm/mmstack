@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isPlatformServer, NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -36,6 +36,7 @@ import {
 import { MatTooltip } from '@angular/material/tooltip';
 import { queryResource, QueryResourceOptions } from '@mmstack/resource';
 import { SearchState, SignalErrorValidator } from './adapters';
+import { SelectOptionContent } from './select-field';
 
 const SEARCH_QUERY_RESOURCE_OPTIONS = new InjectionToken<
   QueryResourceOptions<any>
@@ -78,6 +79,7 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
     MatProgressSpinner,
     SignalErrorValidator,
     MatTooltip,
+    NgTemplateOutlet,
   ],
   host: {
     class: 'mm-search-field',
@@ -143,7 +145,10 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
               $event.isUserInput && state().onSelected(opt.value)
             "
           >
-            {{ opt.label() }}
+            <ng-container
+              [ngTemplateOutlet]="optionTemplate()?.template ?? fallback"
+              [ngTemplateOutletContext]="{ $implicit: opt }"
+            />
           </mat-option>
         }
       </mat-select>
@@ -170,6 +175,8 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
         </ng-container>
       }
     </mat-form-field>
+
+    <ng-template #fallback let-opt>{{ opt.label() }}</ng-template>
   `,
   styles: `
     .mm-search-field {
@@ -236,6 +243,8 @@ export class SearchFieldComponent<T, TParent = undefined> {
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })
       ?.hideRequiredMarker ?? false,
   );
+
+  protected readonly optionTemplate = contentChild(SelectOptionContent);
 
   protected readonly searchPlaceholder = computed(
     () => this.state().searchPlaceholder?.() ?? '',

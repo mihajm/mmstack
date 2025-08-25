@@ -57,7 +57,7 @@ import { ButtonGroupState } from './adapters';
     }
   `,
 })
-export class ReactiveButtonGroupComponent<T, TParent = undefined> {
+export class ButtonGroup<T, TParent = undefined> {
   readonly appearance = input<MatButtonToggleAppearance>(
     inject(MAT_BUTTON_TOGGLE_DEFAULT_OPTIONS).appearance ?? 'standard',
   );

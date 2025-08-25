@@ -135,7 +135,7 @@ import { SelectOptionContent } from './select-field';
     }
   `,
 })
-export class MultiSelectFieldComponent<T extends any[], TParent = undefined> {
+export class MultiSelectField<T extends any[], TParent = undefined> {
   readonly state = input.required<MultiSelectState<T, TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

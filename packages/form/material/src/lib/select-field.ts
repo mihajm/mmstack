@@ -42,8 +42,8 @@ export class SelectOptionContent {
 
   static ngTemplateGuard_mmSelectOptionContent<T>(
     _: SelectOptionContent,
-    state: unknown,
-  ): state is {
+    __: unknown,
+  ): __ is {
     $implicit: {
       id: string;
       value: T;
@@ -157,7 +157,7 @@ export class SelectOptionContent {
     }
   `,
 })
-export class SelectFieldComponent<T, TParent = undefined> {
+export class SelectField<T, TParent = undefined> {
   readonly state = input.required<SelectState<T, TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(

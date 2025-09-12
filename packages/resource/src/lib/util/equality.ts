@@ -23,7 +23,9 @@ type UnknownObject = Record<PropertyKey, unknown>;
  */
 function isPlainObject(value: unknown): value is UnknownObject {
   if (value === null || typeof value !== 'object') return false;
-  return Object.getPrototypeOf(value) === Object.prototype;
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null) return false; // remove Object.create(null);
+  return proto === Object.prototype;
 }
 
 /**

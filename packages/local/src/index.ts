@@ -1,1 +1,1 @@
-export * from './lib/database';
+export * from './lib/idb/public_api';

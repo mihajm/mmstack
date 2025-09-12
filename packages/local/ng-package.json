@@ -3,6 +3,5 @@
   "dest": "../../dist/packages/local",
   "lib": {
     "entryFile": "src/index.ts"
-  },
-  "allowedNonPeerDependencies": ["@mmstack/object", "@mmstack/primitives"]
+  }
 }

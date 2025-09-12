@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -29,6 +30,7 @@ import {
 } from '@angular/material/select';
 import { MatTooltip } from '@angular/material/tooltip';
 import { MultiSelectState, SignalErrorValidator } from './adapters';
+import { SelectOptionContent } from './select-field';
 
 @Component({
   selector: 'mm-multi-select-field',
@@ -47,6 +49,7 @@ import { MultiSelectState, SignalErrorValidator } from './adapters';
     MatSelectTrigger,
     MatTooltip,
     SignalErrorValidator,
+    NgTemplateOutlet,
   ],
   host: {
     class: 'mm-multi-select-field',
@@ -85,7 +88,10 @@ import { MultiSelectState, SignalErrorValidator } from './adapters';
 
         @for (opt of state().options(); track opt.id) {
           <mat-option [value]="opt.value" [disabled]="opt.disabled()">
-            {{ opt.label() }}
+            <ng-container
+              [ngTemplateOutlet]="optionTemplate()?.template ?? fallback"
+              [ngTemplateOutletContext]="{ $implicit: opt }"
+            />
           </mat-option>
         }
       </mat-select>
@@ -112,6 +118,8 @@ import { MultiSelectState, SignalErrorValidator } from './adapters';
         </ng-container>
       }
     </mat-form-field>
+
+    <ng-template #fallback let-opt>{{ opt.label() }}</ng-template>
   `,
   styles: `
     .mm-multi-select-field {
@@ -127,7 +135,7 @@ import { MultiSelectState, SignalErrorValidator } from './adapters';
     }
   `,
 })
-export class MultiSelectFieldComponent<T extends any[], TParent = undefined> {
+export class MultiSelectField<T extends any[], TParent = undefined> {
   readonly state = input.required<MultiSelectState<T, TParent>>();
 
   readonly appearance = input<MatFormFieldAppearance>(
@@ -146,6 +154,8 @@ export class MultiSelectFieldComponent<T extends any[], TParent = undefined> {
     inject(MAT_FORM_FIELD_DEFAULT_OPTIONS, { optional: true })
       ?.hideRequiredMarker ?? false,
   );
+
+  protected readonly optionTemplate = contentChild(SelectOptionContent);
 
   private readonly model = viewChild.required(NgModel);
 

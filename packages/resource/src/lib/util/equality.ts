@@ -22,9 +22,8 @@ type UnknownObject = Record<PropertyKey, unknown>;
  * isPlainObject(new Date()) // => false
  */
 function isPlainObject(value: unknown): value is UnknownObject {
-  return (
-    typeof value === 'object' && value !== null && value.constructor === Object
-  );
+  if (value === null || typeof value !== 'object') return false;
+  return Object.getPrototypeOf(value) === Object.prototype;
 }
 
 /**

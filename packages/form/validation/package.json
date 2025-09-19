@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-validation",
-  "version": "20.4.0",
+  "version": "20.4.1",
   "keywords": [
     "angular",
     "signals",
@@ -15,8 +15,8 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/validation",
   "peerDependencies": {
-    "@angular/core": "~20.1.0",
-    "@angular/common": "~20.1.0"
+    "@angular/core": ">=20 <21",
+    "@angular/common": ">=20 <21"
   },
   "sideEffects": false
 }

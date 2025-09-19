@@ -1,14 +1,13 @@
 import { Component } from '@angular/core';
-import { MatOption } from '@angular/material/autocomplete';
 import {
   createSelectState,
-  SelectFieldComponent,
+  SelectField,
   SelectOptionContent,
 } from '@mmstack/form-material';
 
 @Component({
   selector: 'app-root',
-  imports: [SelectFieldComponent, MatOption, SelectOptionContent],
+  imports: [SelectField, SelectOptionContent],
   template: `
     <mm-select-field [state]="demo">
       <div *mmSelectOptionContent="let opt">{{ opt.label() }} zaz</div>

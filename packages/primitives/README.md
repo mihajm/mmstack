@@ -19,6 +19,7 @@ This library provides the following primitives:
 - `throttled` - Creates a writable signal whose value updates are rate-limited.
 - `mutable` - A signal variant allowing in-place mutations while triggering updates.
 - `stored` - Creates a signal synchronized with persistent storage (e.g., localStorage).
+- `piped` – Creates a signal with a chainable & typesafe `.pipe(...)` method, which returns a pipable computed.
 - `withHistory` - Enhances a signal with a complete undo/redo history stack.
 - `mapArray` - Maps a reactive array efficently into an array of stable derivations.
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
@@ -209,6 +210,44 @@ export class ThemeSelectorComponent {
     });
   }
 }
+```
+
+### piped
+
+Adds a chainable .pipe(...) method to signals, allowing you to compose pure, synchronous transforms into reactive pipelines. Each .pipe(...) call returns a computed signal that is itself pipeable, so you can keep chaining.
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { piped, pipeable } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-pipeable',
+  template: `<button (click)="increment()">Increment</button>`,
+})
+export class PipeableComponent {
+  count = piped(1);
+
+  // Create a derived pipeline
+  label = this.count.pipe(
+    (n) => n * 2, // number -> number
+    (n) => `#${n}`, // number -> string
+  );
+
+  constructor() {
+    effect(() => {
+      console.log('Label:', this.label()); // e.g., "#2"
+    });
+  }
+
+  increment() {
+    this.count.update((n) => n + 1);
+  }
+}
+
+// You can also transform existing signals into pipable versions
+const example = pipeable(computed(() => 1)); // PipeableSignal<number> (a readonly signal + pipe)
+const example2 = pipeable(signal(1)); // PipeableSignal<number, WritableSignal<number>> (a writable signal + pipe)
+const example3 = pipeable(mutable({ name: 'john' })); // This returns a pipeable mutable signal (you get the point :) )
 ```
 
 ### mapArray

@@ -214,40 +214,30 @@ export class ThemeSelectorComponent {
 
 ### piped
 
-Adds a chainable .pipe(...) method to signals, allowing you to compose pure, synchronous transforms into reactive pipelines. Each .pipe(...) call returns a computed signal that is itself pipeable, so you can keep chaining.
+Adds two fluent APIs to signals:
+
+- **`.map(...transforms, [options])`** – compose pure, synchronous value→value transforms. Returns a computed signal that remains pipeable.
+- **`.pipe(...operators)`** – compose operators (signal→signal), useful for combining signals or reusable projections.
 
 ```typescript
-import { Component, effect } from '@angular/core';
-import { piped, pipeable } from '@mmstack/primitives';
+import { piped, pipeable, select, combineWith } from '@mmstack/primitives';
+import { signal } from '@angular/core';
 
-@Component({
-  selector: 'app-pipeable',
-  template: `<button (click)="increment()">Increment</button>`,
-})
-export class PipeableComponent {
-  count = piped(1);
+const count = piped(1);
 
-  // Create a derived pipeline
-  label = this.count.pipe(
-    (n) => n * 2, // number -> number
-    (n) => `#${n}`, // number -> string
-  );
+// Map: value -> value
+const label = count.map(
+  (n) => n * 2,
+  (n) => (num: n),
+  { equal: (a, b) => a.num === b.num },
+);
 
-  constructor() {
-    effect(() => {
-      console.log('Label:', this.label()); // e.g., "#2"
-    });
-  }
+// Pipe: signal -> signal
+const base = pipeable(signal(10));
+const total = count.pipe(select((n) => n * 3)).pipe(combineWith(count, (a, b) => a + b));
 
-  increment() {
-    this.count.update((n) => n + 1);
-  }
-}
-
-// You can also transform existing signals into pipable versions
-const example = pipeable(computed(() => 1)); // PipeableSignal<number> (a readonly signal + pipe)
-const example2 = pipeable(signal(1)); // PipeableSignal<number, WritableSignal<number>> (a writable signal + pipe)
-const example3 = pipeable(mutable({ name: 'john' })); // This returns a pipeable mutable signal (you get the point :) )
+label(); // e.g., "#2"
+total(); // reactive sum
 ```
 
 ### mapArray

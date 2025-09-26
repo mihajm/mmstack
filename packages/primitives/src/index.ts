@@ -3,6 +3,7 @@ export * from './lib/derived';
 export * from './lib/element-visibility';
 export * from './lib/map-array';
 export * from './lib/mutable';
+export * from './lib/pipeable/public_api';
 export * from './lib/sensors';
 export * from './lib/stored';
 export * from './lib/throttled';

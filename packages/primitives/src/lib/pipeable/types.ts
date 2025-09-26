@@ -1,30 +1,15 @@
-import {
-  computed,
-  signal,
-  type CreateSignalOptions,
-  type Signal,
-  type WritableSignal,
-} from '@angular/core';
+import type { CreateSignalOptions, Signal } from '@angular/core';
 
 /**
  * A pure, synchronous transform from I -> O.
  * Prefer transforms without side effects to keep derivations predictable.
  */
+export type UnaryFunction<I, O> = (a: I) => O;
 
-type UnaryFunction<I, O> = (a: I) => O;
+/** An Operator transforms a source Signal<I> into a derived Signal<O>. */
+export type Operator<I, O> = (src: Signal<I>) => Signal<O>;
 
-/**
- * A strongly-typed `.pipe(...)` method specialized to an input type `In`.
- *
- * Each overload composes the provided transforms left-to-right and returns a
- * **computed** signal that is itself "pipable", so you can continue chaining.
- *
- * Notes:
- * - No-arg form returns the same pipable signal (no extra computed layer).
- * - Transforms must be synchronous (Promises are not awaited inside `computed`).
- * - Keep transforms pure—no side effects inside derivations.
- */
-type SignalPipe<In> = {
+type SignalMap<In> = {
   (): PipeableSignal<In>;
   <A>(
     fn1: UnaryFunction<In, A>,
@@ -100,6 +85,70 @@ type SignalPipe<In> = {
   ): PipeableSignal<unknown>;
 };
 
+/** `.pipe(...)` — compose operators (Signal -> Signal). */
+type SignalPipe<In> = {
+  (): PipeableSignal<In>;
+  <A>(op1: Operator<In, A>): PipeableSignal<A>;
+  <A, B>(op1: Operator<In, A>, op2: Operator<A, B>): PipeableSignal<B>;
+  <A, B, C>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+  ): PipeableSignal<C>;
+  <A, B, C, D>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+  ): PipeableSignal<D>;
+  <A, B, C, D, E>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+    op5: Operator<D, E>,
+  ): PipeableSignal<E>;
+  <A, B, C, D, E, F>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+    op5: Operator<D, E>,
+    op6: Operator<E, F>,
+  ): PipeableSignal<F>;
+  <A, B, C, D, E, F, G>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+    op5: Operator<D, E>,
+    op6: Operator<E, F>,
+    op7: Operator<F, G>,
+  ): PipeableSignal<G>;
+  <A, B, C, D, E, F, G, H>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+    op5: Operator<D, E>,
+    op6: Operator<E, F>,
+    op7: Operator<F, G>,
+    op8: Operator<G, H>,
+  ): PipeableSignal<H>;
+  <A, B, C, D, E, F, G, H, I>(
+    op1: Operator<In, A>,
+    op2: Operator<A, B>,
+    op3: Operator<B, C>,
+    op4: Operator<C, D>,
+    op5: Operator<D, E>,
+    op6: Operator<E, F>,
+    op7: Operator<F, G>,
+    op8: Operator<G, H>,
+    op9: Operator<H, I>,
+    ...rest: Operator<any, any>[]
+  ): PipeableSignal<unknown>;
+};
+
 /**
  * A `Signal<T>` augmented with a chainable `.pipe(...)` method.
  *
@@ -119,74 +168,14 @@ type SignalPipe<In> = {
  * ```
  */
 export type PipeableSignal<T, TSig extends Signal<T> = Signal<T>> = TSig & {
-  /** Chain pure transforms to derive new signals. See {@link SignalPipe}. */
   pipe: SignalPipe<T>;
+  /** Chain pure transforms to derive new signals. See {@link SignalMap}. */
+  map: SignalMap<T>;
 };
 
 /**
  * Helper type to infer the value type of a signal.
  * @internal
  */
-type SignalValue<TSig extends Signal<any>> =
+export type SignalValue<TSig extends Signal<any>> =
   TSig extends Signal<infer V> ? V : never;
-
-/**
- * Decorate any `Signal<T>` with a chainable `.pipe(...)` method.
- *
- * @example
- * const s = pipeable(signal(1)); // WritableSignal<number> (+ pipe)
- * const label = s.pipe(n => n * 2, n => `#${n}`); // Signal<string> (+ pipe)
- * label(); // "#2"
- */
-export function pipeable<TSig extends Signal<any>>(
-  signal: TSig,
-): PipeableSignal<SignalValue<TSig>, TSig> {
-  const internal = signal as PipeableSignal<SignalValue<TSig>, TSig>;
-
-  const pipeImpl = (...fns: UnaryFunction<any, any>[]) => {
-    const last = fns.at(-1);
-    let opt: CreateSignalOptions<any> | undefined;
-    if (last && typeof last !== 'function') {
-      fns = fns.slice(0, -1);
-      opt = last;
-    }
-
-    if (fns.length === 0) return internal;
-
-    if (fns.length === 1) {
-      const fn = fns[0];
-      return pipeable(computed(() => fn(internal()), opt));
-    }
-
-    const transformer = (input: any) => fns.reduce((acc, fn) => fn(acc), input);
-
-    return pipeable(computed(() => transformer(internal()), opt));
-  };
-
-  Object.defineProperty(internal, 'pipe', {
-    value: pipeImpl,
-    configurable: true,
-    enumerable: false,
-    writable: false,
-  });
-
-  return internal;
-}
-
-/**
- * Create a new **writable** signal and return it as a `PipableSignal`.
- *
- * The returned value is a `WritableSignal<T>` with `.set`, `.update`, `.asReadonly`
- * still available (via intersection type), plus a chainable `.pipe(...)`.
- *
- * @example
- * const count = piped(1); // WritableSignal<number> (+ pipe)
- * const even = count.pipe(n => n % 2 === 0); // Signal<boolean> (+ pipe)
- * count.update(n => n + 1);
- */
-export function piped<T>(
-  initial: T,
-  opt?: CreateSignalOptions<T>,
-): PipeableSignal<T, WritableSignal<T>> {
-  return pipeable(signal(initial, opt));
-}

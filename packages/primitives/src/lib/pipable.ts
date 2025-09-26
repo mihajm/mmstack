@@ -190,10 +190,3 @@ export function piped<T>(
 ): PipeableSignal<T, WritableSignal<T>> {
   return pipeable(signal(initial, opt));
 }
-
-const demo = pipeable(signal(1));
-
-const example1 = demo.pipe(
-  (x) => x + 1,
-  (x) => `#${x}`,
-); // PipeableSignal<string>

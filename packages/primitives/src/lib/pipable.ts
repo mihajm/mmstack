@@ -25,22 +25,28 @@ type UnaryFunction<I, O> = (a: I) => O;
  * - Keep transforms pure—no side effects inside derivations.
  */
 type SignalPipe<In> = {
-  (): PipeableSignal<PipeableSignal<In>>;
-  <A>(fn1: UnaryFunction<In, A>): PipeableSignal<A>;
+  (): PipeableSignal<In>;
+  <A>(
+    fn1: UnaryFunction<In, A>,
+    opt?: CreateSignalOptions<A>,
+  ): PipeableSignal<A>;
   <A, B>(
     fn1: UnaryFunction<In, A>,
     fn2: UnaryFunction<A, B>,
+    opt?: CreateSignalOptions<B>,
   ): PipeableSignal<B>;
   <A, B, C>(
     fn1: UnaryFunction<In, A>,
     fn2: UnaryFunction<A, B>,
     fn3: UnaryFunction<B, C>,
+    opt?: CreateSignalOptions<C>,
   ): PipeableSignal<C>;
   <A, B, C, D>(
     fn1: UnaryFunction<In, A>,
     fn2: UnaryFunction<A, B>,
     fn3: UnaryFunction<B, C>,
     fn4: UnaryFunction<C, D>,
+    opt?: CreateSignalOptions<D>,
   ): PipeableSignal<D>;
   <A, B, C, D, E>(
     fn1: UnaryFunction<In, A>,
@@ -48,6 +54,7 @@ type SignalPipe<In> = {
     fn3: UnaryFunction<B, C>,
     fn4: UnaryFunction<C, D>,
     fn5: UnaryFunction<D, E>,
+    opt?: CreateSignalOptions<E>,
   ): PipeableSignal<E>;
   <A, B, C, D, E, F>(
     fn1: UnaryFunction<In, A>,
@@ -56,6 +63,7 @@ type SignalPipe<In> = {
     fn4: UnaryFunction<C, D>,
     fn5: UnaryFunction<D, E>,
     fn6: UnaryFunction<E, F>,
+    opt?: CreateSignalOptions<F>,
   ): PipeableSignal<F>;
   <A, B, C, D, E, F, G>(
     fn1: UnaryFunction<In, A>,
@@ -65,6 +73,7 @@ type SignalPipe<In> = {
     fn5: UnaryFunction<D, E>,
     fn6: UnaryFunction<E, F>,
     fn7: UnaryFunction<F, G>,
+    opt?: CreateSignalOptions<G>,
   ): PipeableSignal<G>;
   <A, B, C, D, E, F, G, H>(
     fn1: UnaryFunction<In, A>,
@@ -75,6 +84,7 @@ type SignalPipe<In> = {
     fn6: UnaryFunction<E, F>,
     fn7: UnaryFunction<F, G>,
     fn8: UnaryFunction<G, H>,
+    opt?: CreateSignalOptions<H>,
   ): PipeableSignal<H>;
   <A, B, C, D, E, F, G, H, I>(
     fn1: UnaryFunction<In, A>,
@@ -134,16 +144,23 @@ export function pipeable<TSig extends Signal<any>>(
   const internal = signal as PipeableSignal<SignalValue<TSig>, TSig>;
 
   const pipeImpl = (...fns: UnaryFunction<any, any>[]) => {
+    const last = fns.at(-1);
+    let opt: CreateSignalOptions<any> | undefined;
+    if (last && typeof last !== 'function') {
+      fns = fns.slice(0, -1);
+      opt = last;
+    }
+
     if (fns.length === 0) return internal;
 
     if (fns.length === 1) {
       const fn = fns[0];
-      return pipeable(computed(() => fn(internal())));
+      return pipeable(computed(() => fn(internal()), opt));
     }
 
     const transformer = (input: any) => fns.reduce((acc, fn) => fn(acc), input);
 
-    return pipeable(computed(() => transformer(internal())));
+    return pipeable(computed(() => transformer(internal()), opt));
   };
 
   Object.defineProperty(internal, 'pipe', {
@@ -173,3 +190,10 @@ export function piped<T>(
 ): PipeableSignal<T, WritableSignal<T>> {
   return pipeable(signal(initial, opt));
 }
+
+const demo = pipeable(signal(1));
+
+const example1 = demo.pipe(
+  (x) => x + 1,
+  (x) => `#${x}`,
+); // PipeableSignal<string>

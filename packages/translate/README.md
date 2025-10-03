@@ -329,6 +329,21 @@ export class LanguageSwitcher {
 }
 ```
 
+_Note:_ Due to Angular memo-izing the transform function, custom Pipe's used will not update on dynamic local switches automatically. To resolve this you can:
+
+```typescript
+
+// Add the locale as the last parameter when calling the pipe
+{{'common.yes' | translate : locale()}}
+
+// or set pure to false (not recommended)
+@Pipe({
+  name: 'translate',
+  pure: false
+})
+export class QuoteTranslator extends Translator<QuoteLocale> {}
+```
+
 ## Contributing
 
 Contributions, issues, and feature requests are welcome!

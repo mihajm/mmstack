@@ -1,7 +1,7 @@
 import {
+  afterRenderEffect,
   computed,
   Directive,
-  effect,
   ElementRef,
   inject,
   input,
@@ -60,8 +60,10 @@ export abstract class Translate<
     const renderer = inject(Renderer2);
     const el = inject<ElementRef<HTMLElement>>(ElementRef);
 
-    effect(() =>
-      renderer.setProperty(el.nativeElement, 'textContent', translation()),
-    );
+    afterRenderEffect({
+      write: () => {
+        renderer.setProperty(el.nativeElement, 'textContent', translation());
+      },
+    });
   }
 }

@@ -45,6 +45,7 @@ export function injectDefaultLocale() {
 export class TranslationStore {
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
+  readonly loadQueue = signal<string[]>([]);
   readonly locale = signal(inject(LOCALE_ID));
   private readonly defaultLocale = injectDefaultLocale();
   private readonly translations = signal<
@@ -73,18 +74,8 @@ export class TranslationStore {
       {},
   );
 
-  private isInit = true;
-  private readonly skipInitLocale = computed(() => {
-    // should load new loaders if switched back to initial locale, so we do it like this
-    if (this.isInit) {
-      this.isInit = false;
-      return null;
-    }
-    return this.locale();
-  });
-
   readonly dynamicLocaleLoader = resource({
-    params: () => this.skipInitLocale(),
+    params: computed(() => this.loadQueue().at(0) ?? null),
     loader: async ({ params: newLocale, abortSignal }) => {
       if (!newLocale) return;
 
@@ -159,12 +150,17 @@ export class TranslationStore {
       )
         return;
       const dynamicLocales = this.dynamicLocaleLoader.value();
+
       if (!dynamicLocales) return;
       for (const locale of dynamicLocales.locales) {
         this.register(locale.namespace, {
           [dynamicLocales.locale]: locale.flat,
         });
       }
+      this.loadQueue.update((q) =>
+        q.filter((l) => l !== dynamicLocales.locale),
+      );
+      this.locale.set(dynamicLocales.locale);
     });
   }
 
@@ -250,22 +246,25 @@ export function injectDynamicLocale(): WritableSignal<string> & {
 } {
   const store = inject(TranslationStore);
 
-  const source = store.locale as WritableSignal<string> & {
+  const source = computed(() => store.locale()) as WritableSignal<string> & {
     isLoading: Signal<boolean>;
   };
 
-  const originalSet = source.set;
-
-  source.set = (value: string) => {
-    if (value === untracked(source) || !store.hasLocaleLoaders(value)) return;
-
-    originalSet(value);
+  const set = (value: string) => {
+    if (
+      value === untracked(source) ||
+      !store.hasLocaleLoaders(value) ||
+      untracked(store.loadQueue).includes(value)
+    )
+      return;
+    store.loadQueue.update((q) => [...q, value]);
   };
-
+  source.set = set;
   source.update = (updater: (value: string) => string) => {
     const next = updater(untracked(source));
     source.set(next);
   };
+  source.asReadonly = () => source;
 
   source.isLoading = store.dynamicLocaleLoader.isLoading;
 

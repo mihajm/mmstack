@@ -174,11 +174,12 @@ export default createQuoteTranslation('sl-SI', {
 Use registerNamespace to prepare your namespace definition and obtain the injectNamespaceT function and the resolveNamespaceTranslation resolver function. Use the resolver in your Angular routes.
 
 ```typescript
-import q from './quote.namespace';
+import { registerNamespace } from '@mmstack/translate';
 
 // Register the namespace
 // Example: packages/quote/src/lib/quote.t.ts
 const r = registerNamespace(
+  // you can also fetch from a server if you prefer, as long as the shape is the same
   () => import('./quote.namespace').then((m) => m.default), // Default locale's compiled translation (functions as fallback if no locale of type provided)
   {
     // Map other locales to promise factories (dynamic imports)

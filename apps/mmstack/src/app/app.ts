@@ -1,18 +1,11 @@
 import { Component } from '@angular/core';
-import {
-  createSelectState,
-  SelectField,
-  SelectOptionContent,
-} from '@mmstack/form-material';
+import { RouterOutlet } from '@angular/router';
+import { createSelectState } from '@mmstack/form-material';
 
 @Component({
   selector: 'app-root',
-  imports: [SelectField, SelectOptionContent],
-  template: `
-    <mm-select-field [state]="demo">
-      <div *mmSelectOptionContent="let opt">{{ opt.label() }} zaz</div>
-    </mm-select-field>
-  `,
+  imports: [RouterOutlet],
+  template: ` <router-outlet /> `,
   styles: ``,
 })
 export class App {

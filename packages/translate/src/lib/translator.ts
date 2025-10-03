@@ -22,8 +22,14 @@ export abstract class Translator<
 
   transform<K extends keyof TMap & string>(
     key: K,
-    ...args: TMap[K] extends void ? [] : [TMap[K]]
+    ...args: TMap[K] extends void
+      ? [locale?: string]
+      : [TMap[K], locale?: string]
   ): string {
-    return this.t(key, ...args);
+    const actualArgs = args.filter(
+      (a) => typeof a === 'object',
+    ) as TMap[K] extends void ? [] : [TMap[K]];
+
+    return this.t(key, ...actualArgs);
   }
 }

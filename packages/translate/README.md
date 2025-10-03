@@ -34,18 +34,18 @@ It uses the robust **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message 
 
 While Angular offers excellent i18n solutions like `@angular/localize` and `transloco`, `@mmstack/translate` aims to fill a specific niche.
 
-| Feature                  |        `@mmstack/translate`         |   `@angular/localize`    |          `transloco`          |      `ngx-translate`       |
-| :----------------------- | :---------------------------------: | :----------------------: | :---------------------------: | :------------------------: |
-| **Build Process**        |           ✅ Single Build           | ❌ Multi-Build (Typical) |        ✅ Single Build        |      ✅ Single Build       |
-| **Translation Timing**   |               Runtime               |       Compile Time       |            Runtime            |          Runtime           |
-| **Type Safety (Keys)**   | ✅ Strong (Inferred from structure) |    🟡 via extraction     |      🟡 Tooling/TS Files      |    🟡 OK Manual/Tooling    |
-| **Type Safety (Params)** |    ✅ Strong (Inferred from ICU)    |         ❌ None          |           🟡 Manual           |         🟡 Manual          |
-| **Locale Switching**     |      🔄 Page Refresh Required       | 🔄 Page Refresh Required |     ✅ Dynamic (Runtime)      |    ✅ Dynamic (Runtime)    |
-| **Lazy Loading**         | ✅ Built-in (Namespaces/Resolvers)  |    N/A (Compile Time)    |     ✅ Built-in (Scopes)      |  ✅ Yes (Custom Loaders)   |
-| **Namespacing/Scopes**   |             ✅ Built-in             |         ❌ None          |     ✅ Built-in (Scopes)      | 🟡 Manual (File Structure) |
-| **ICU Support**          |  ✅ Subset (via FormatJS Runtime)   |  ✅ Yes (Compile Time)   | ✅ Yes (Runtime Intl/Plugins) |     🟡 Via Extensions      |
-| **Signal Integration**   |      ✅ Good (`t.asSignal()`)       |           N/A            | ✅ Good (`translateSignal()`) |      ❌ Minimal/None       |
-| **Maturity / Community** |               ✨ New                |       Core Angular       |      ✅ Mature / Active       |         ✅ Mature          |
+| Feature                  |         `@mmstack/translate`         |   `@angular/localize`    |          `transloco`          |      `ngx-translate`       |
+| :----------------------- | :----------------------------------: | :----------------------: | :---------------------------: | :------------------------: |
+| **Build Process**        |           ✅ Single Build            | ❌ Multi-Build (Typical) |        ✅ Single Build        |      ✅ Single Build       |
+| **Translation Timing**   |               Runtime                |       Compile Time       |            Runtime            |          Runtime           |
+| **Type Safety (Keys)**   | ✅ Strong (Inferred from structure)  |    🟡 via extraction     |      🟡 Tooling/TS Files      |    🟡 OK Manual/Tooling    |
+| **Type Safety (Params)** |    ✅ Strong (Inferred from ICU)     |         ❌ None          |           🟡 Manual           |         🟡 Manual          |
+| **Locale Switching**     | ✅ Dynamic (Runtime) or Page refresh | 🔄 Page Refresh Required |     ✅ Dynamic (Runtime)      |    ✅ Dynamic (Runtime)    |
+| **Lazy Loading**         |  ✅ Built-in (Namespaces/Resolvers)  |    N/A (Compile Time)    |     ✅ Built-in (Scopes)      |  ✅ Yes (Custom Loaders)   |
+| **Namespacing/Scopes**   |             ✅ Built-in              |         ❌ None          |     ✅ Built-in (Scopes)      | 🟡 Manual (File Structure) |
+| **ICU Support**          |   ✅ Subset (via FormatJS Runtime)   |  ✅ Yes (Compile Time)   | ✅ Yes (Runtime Intl/Plugins) |     🟡 Via Extensions      |
+| **Signal Integration**   |       ✅ Good (`t.asSignal()`)       |           N/A            | ✅ Good (`translateSignal()`) |      ❌ Minimal/None       |
+| **Maturity / Community** |                ✨ New                |       Core Angular       |      ✅ Mature / Active       |         ✅ Mature          |
 
 ## Installation & Configuration
 

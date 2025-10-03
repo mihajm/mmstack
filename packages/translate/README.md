@@ -23,6 +23,7 @@ It uses the robust **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message 
   - Structural consistency check when defining non-default locales.
 - 🚀 **Single Build Artifact:** Runtime translation loading.
 - 📦 **Namespacing:** Organize translations by feature/library (e.g., 'quotes', 'userProfile', 'common').
+- 🔄 **Dynamic Language Switching:** Change locales at runtime with automatic translation loading.
 - ⏳ **Lazy Loading:** Load namespaced translations on demand using Route Resolvers.
 - ✨ **Reactive API:** Includes `t.asSignal()` for creating computed translation signals based on signal parameters.
 - 🌍 **ICU Message Syntax:** Uses FormatJS runtime for robust support of variables (`{name}`), `plural`, `select`, and `selectordinal`. (Note: Complex inline date/number formats are not the focus; use Angular's built in Pipes/format functions & use the result as variables in your translation.)
@@ -114,7 +115,9 @@ export const routes: Routes = [
 ];
 ```
 
-_Note:_ `@mmstack/translate` relies on Angular's `LOCALE_ID` provider. You must provide a value for it. How you determine this value (e.g., hardcoded, from server config, from URL segment via a factory provider) is up to your application's architecture. The library assumes this `LOCALE_ID` is static for the duration of the application session and requires a page refresh to change.
+_Note:_ `@mmstack/translate` relies on Angular's `LOCALE_ID` provider for its default. You should provide a value for it. How you determine this value (e.g., hardcoded, from server config, from URL segment via a factory provider) is up to your application's architecture.
+
+By default the library assumes this `LOCALE_ID` is static for the duration of the application session and requires a page refresh to change. You can however opt in to dynamic locale switching via `injectDynamicLocale`. see usage note 5 for details :)
 
 ## Usage
 
@@ -300,6 +303,28 @@ export class QuoteComponent {
 
   // quote translations also work the same
   private readonly author = this.t('quote.detail.authorLabel');
+}
+```
+
+### 5 [OPTIONAl] - Add dynamic language switching
+
+`LOCALE_ID` is always used as the initial value, but you can dynamically switch that & `@mmstack/translate` will load the new translations on demand, updating as necessary.
+
+```typescript
+import { injectDynamicLocale } from '@mmstack/translate';
+
+@Component({...})
+export class LanguageSwitcher {
+  private readonly locale = injectDynamicLocale();
+
+  switchToSlovene() {
+    this.locale.set('sl-SI'); // Automatically loads missing translations
+  }
+
+  // Template can react to loading state
+  @if (locale.isLoading()) {
+    <div>Loading translations...</div>
+  }
 }
 ```
 

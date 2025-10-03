@@ -3,8 +3,8 @@ import {
   inject,
   isDevMode,
   isSignal,
-  LOCALE_ID,
   Signal,
+  untracked,
 } from '@angular/core';
 import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { replaceWithDelim } from './delim';
@@ -71,7 +71,7 @@ function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
 
     const flatPath = replaceWithDelim(stringKey);
 
-    const varsFn = variables === undefined ? () => undefined : variables;
+    const varsFn = variables ?? (() => undefined);
     const varsSignal = isSignal(varsFn)
       ? varsFn
       : computed(varsFn, {
@@ -119,9 +119,8 @@ export function registerNamespace<
 
   let defaultTranslationLoaded = false;
   const resolver = async () => {
-    const locale = inject(LOCALE_ID);
     const store = inject(TranslationStore);
-
+    const locale = untracked(store.locale);
     const tPromise = other[locale] as (() => Promise<TOther>) | undefined;
 
     const promise = tPromise ?? defaultTranslation;
@@ -144,13 +143,11 @@ export function registerNamespace<
         );
       }
 
-      store.register(
-        translation.namespace,
-        {
-          [locale]: translation.flat,
-        },
-        locale,
-      );
+      store.registerOnDemandLoaders(translation.namespace, other);
+
+      store.register(translation.namespace, {
+        [locale]: translation.flat,
+      });
       if (promise === defaultTranslation) {
         defaultTranslationLoaded = true;
       }

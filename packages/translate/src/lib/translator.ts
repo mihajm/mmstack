@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { ChangeDetectorRef, effect, inject } from '@angular/core';
 import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
 import { createT } from './register-namespace';
 import { UnknownStringKeyObject } from './string-key-object.type';
@@ -8,7 +8,17 @@ export abstract class Translator<
   T extends CompiledTranslation<UnknownStringKeyObject, string>,
   TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,
 > {
-  private readonly t = createT<TMap>(inject(TranslationStore));
+  private readonly store = inject(TranslationStore);
+  private readonly t = createT<TMap>(this.store);
+
+  constructor() {
+    const cdr = inject(ChangeDetectorRef);
+
+    effect(() => {
+      this.store.locale();
+      cdr.markForCheck();
+    });
+  }
 
   transform<K extends keyof TMap & string>(
     key: K,

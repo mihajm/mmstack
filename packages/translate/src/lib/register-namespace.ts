@@ -6,7 +6,11 @@ import {
   Signal,
   untracked,
 } from '@angular/core';
-import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
+import {
+  CompiledTranslation,
+  inferCompiledTranslationMap,
+  inferCompiledTranslationNamespace,
+} from './compile';
 import { replaceWithDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';
 import { TranslationStore } from './translation-store';
@@ -102,10 +106,18 @@ export function createT<TMap extends AnyStringRecord>(
 
 export function registerNamespace<
   TDefault extends CompiledTranslation<UnknownStringKeyObject, string>,
-  TOther extends CompiledTranslation<UnknownStringKeyObject, string>,
 >(
   defaultTranslation: () => Promise<TDefault>,
-  other: Record<string, () => Promise<TOther>>,
+  other: Record<
+    string,
+    () => Promise<
+      CompiledTranslation<
+        UnknownStringKeyObject,
+        inferCompiledTranslationNamespace<TDefault>,
+        string
+      >
+    >
+  >,
 ) {
   type $Map = inferCompiledTranslationMap<TDefault>;
   type $BaseTFN = TFunction<$Map>;
@@ -121,7 +133,7 @@ export function registerNamespace<
   const resolver = async () => {
     const store = inject(TranslationStore);
     const locale = untracked(store.locale);
-    const tPromise = other[locale] as (() => Promise<TOther>) | undefined;
+    const tPromise = other[locale] as (typeof other)[string] | undefined;
 
     const promise = tPromise ?? defaultTranslation;
     if (!promise && isDevMode()) {

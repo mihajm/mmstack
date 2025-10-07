@@ -12,6 +12,7 @@ import { injectTestT } from './locale/test.register';
     <div>Pipe: {{ 'test.name' | translate: { name: 'yay' } : dynamic() }}</div>
     <div translate="test.hello">Hello</div>
     <button (click)="switchToSlovenian()">Switch to Slovenian</button>
+    <button (click)="switchToEnglish()">Switch to English</button>
     {{ dynamic() }}
   `,
 })
@@ -21,5 +22,9 @@ export class DemoComponent {
 
   protected switchToSlovenian() {
     this.dynamic.set('sl-SI');
+  }
+
+  protected switchToEnglish() {
+    this.dynamic.set('en-US');
   }
 }

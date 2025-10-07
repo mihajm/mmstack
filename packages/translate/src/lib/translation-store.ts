@@ -244,6 +244,7 @@ export function injectIntl() {
 export function injectDynamicLocale(): WritableSignal<string> & {
   isLoading: Signal<boolean>;
 } {
+  const defaultLocale = injectDefaultLocale();
   const store = inject(TranslationStore);
 
   const source = computed(() => store.locale()) as WritableSignal<string> & {
@@ -251,9 +252,12 @@ export function injectDynamicLocale(): WritableSignal<string> & {
   };
 
   const set = (value: string) => {
+    const isDefaultOrHasLoaders =
+      value === defaultLocale || store.hasLocaleLoaders(value);
+
     if (
       value === untracked(source) ||
-      !store.hasLocaleLoaders(value) ||
+      !isDefaultOrHasLoaders ||
       untracked(store.loadQueue).includes(value)
     )
       return;

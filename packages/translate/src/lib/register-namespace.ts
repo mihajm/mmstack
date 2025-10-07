@@ -13,7 +13,7 @@ import {
 } from './compile';
 import { replaceWithDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';
-import { TranslationStore } from './translation-store';
+import { injectDefaultLocale, TranslationStore } from './translation-store';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyStringRecord = Record<string, any>;
@@ -133,6 +133,7 @@ export function registerNamespace<
   const resolver = async () => {
     const store = inject(TranslationStore);
     const locale = untracked(store.locale);
+    const defaultLocale = injectDefaultLocale();
     const tPromise = other[locale] as (typeof other)[string] | undefined;
 
     const promise = tPromise ?? defaultTranslation;
@@ -155,7 +156,10 @@ export function registerNamespace<
         );
       }
 
-      store.registerOnDemandLoaders(translation.namespace, other);
+      store.registerOnDemandLoaders(translation.namespace, {
+        ...other,
+        [defaultLocale]: defaultTranslation,
+      });
 
       store.register(translation.namespace, {
         [locale]: translation.flat,

@@ -6,6 +6,7 @@ export * from './lib/mutable';
 export * from './lib/pipeable/public_api';
 export * from './lib/sensors';
 export * from './lib/stored';
+export { tabSync } from './lib/tabSync';
 export * from './lib/throttled';
 export * from './lib/to-writable';
 export * from './lib/until';

@@ -22,6 +22,7 @@ This library provides the following primitives:
 - `piped` – Creates a signal with a chainable & typesafe `.pipe(...)` method, which returns a pipable computed.
 - `withHistory` - Enhances a signal with a complete undo/redo history stack.
 - `mapArray` - Maps a reactive array efficently into an array of stable derivations.
+- `nestedEffect` - Creates an effect with a hierarchical lifetime, enabling fine-grained, conditional side-effects.
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
 - `derived` - Creates a signal with two-way binding to a source signal.
 - `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This was the suggestion from before; it just reads a little smoother and more accurately reflects what the facade creates directly).
@@ -315,6 +316,95 @@ export class ListComponent {
       })
     };
   });
+}
+```
+
+### nestedEffect
+
+Creates an effect that can be nested, similar to SolidJS's `createEffect`.
+
+This primitive enables true hierarchical reactivity. A `nestedEffect` created within another `nestedEffect` is **automatically destroyed and recreated** when the parent re-runs.
+
+It automatically handles injector propagation and lifetime management, allowing you to create fine-grained, conditional side-effects that only track dependencies when they are "live". This is a powerful optimization for scenarios where a "hot" signal (which changes often) should only be tracked when a "cold" signal (a condition that changes rarely) is true.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { nestedEffect } from '@mmstack/primitives';
+
+@Component({ selector: 'app-nested-demo' })
+export class NestedDemoComponent {
+  // `coldGuard` changes rarely
+  readonly coldGuard = signal(false);
+  // `hotSignal` changes very often
+  readonly hotSignal = signal(0);
+
+  constructor() {
+    // A standard effect would track *both* signals and run
+    // every time `hotSignal` changes, even if `coldGuard` is false.
+    // effect(() => {
+    //   if (this.coldGuard()) {
+    //     console.log('Hot signal is:', this.hotSignal());
+    //   }
+    // });
+
+    // `nestedEffect` solves this:
+    nestedEffect(() => {
+      // This outer effect ONLY tracks `coldGuard`.
+      // It does not track `hotSignal`.
+      if (this.coldGuard()) {
+        // This inner effect is CREATED when coldGuard is true
+        // and DESTROYED when it becomes false.
+        nestedEffect(() => {
+          // It only tracks `hotSignal` while it exists.
+          console.log('Hot signal is:', this.hotSignal());
+        });
+      }
+    });
+  }
+}
+```
+
+#### Advanced Example: Fine-grained Lists
+
+`nestedEffect` can be composed with `mapArray` to create truly fine-grained reactive lists, where each item can manage its own side-effects (like external library integrations) that are automatically cleaned up when the item is removed.
+
+```ts
+import { Component, signal, computed } from '@angular/core';
+import { mapArray, nestedEffect } from '@mmstack/primitives';
+
+@Component({ selector: 'app-list-demo' })
+export class ListDemoComponent {
+  readonly users = signal([
+    { id: 1, name: 'Alice' },
+    { id: 2, name: 'Bob' },
+  ]);
+
+  // mapArray creates stable signals for each item
+  readonly mappedUsers = mapArray(
+    this.users,
+    (userSignal, index) => {
+      // Create a side-effect tied to THIS item's lifetime
+      const effectRef = nestedEffect(() => {
+        // This only runs if `userSignal` (this specific user) changes.
+        console.log(`User ${index} updated:`, userSignal().name);
+
+        // e.g., updateAGGridRow(index, userSignal());
+      });
+
+      // Return the data and the cleanup logic
+      return {
+        label: computed(() => `User: ${userSignal().name}`),
+        // This function will be called by `onDestroy`
+        _destroy: () => effectRef.destroy(),
+      };
+    },
+    {
+      // When mapArray removes an item, it calls `onDestroy`
+      onDestroy: (mappedItem) => {
+        mappedItem._destroy(); // Manually destroy the nested effect
+      },
+    },
+  );
 }
 ```
 

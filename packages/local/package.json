@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/local",
-  "version": "20.4.1",
+  "version": "21.0.0",
     "keywords": [
     "angular",
     "signals",
@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/local",
   "peerDependencies": {
-    "@angular/core": ">=20 <21",
+    "@angular/core": ">=21 <22",
     "rxjs": "~7.8.0"
   },
   "sideEffects": false

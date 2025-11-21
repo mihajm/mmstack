@@ -408,6 +408,9 @@ export function queryResource<TResult, TRaw = TResult>(
         await firstValueFrom(
           client.request(prefetchRequest.method ?? 'GET', prefetchRequest.url, {
             ...prefetchRequest,
+            referrerPolicy: prefetchRequest.referrerPolicy as
+              | ReferrerPolicy
+              | undefined,
             credentials: prefetchRequest.credentials as
               | RequestCredentials
               | undefined,

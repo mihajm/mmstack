@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/translate",
-  "version": "20.5.4",
+  "version": "21.0.0",
   "keywords": [
     "angular",
     "localize",
@@ -14,8 +14,8 @@
     "url": "https://github.com/mihajm/mmstack"
   },
   "peerDependencies": {
-    "@angular/core": ">=20 <21",
-    "@formatjs/intl": "~3.1.6"
+    "@angular/core": ">=21 <22",
+    "@formatjs/intl": "~3.1.8"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/translate",
   "sideEffects": false

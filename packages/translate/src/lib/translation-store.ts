@@ -13,7 +13,7 @@ import {
   untracked,
   WritableSignal,
 } from '@angular/core';
-import { createIntl, createIntlCache, IntlConfig } from '@formatjs/intl';
+import { createIntl, createIntlCache, type IntlConfig } from '@formatjs/intl';
 import { CompiledTranslation } from './compile';
 import { prependDelim } from './delim';
 import { UnknownStringKeyObject } from './string-key-object.type';

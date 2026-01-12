@@ -1,4 +1,10 @@
-import { Signal, untracked, WritableSignal } from '@angular/core';
+import {
+  computed,
+  CreateSignalOptions,
+  Signal,
+  untracked,
+  WritableSignal,
+} from '@angular/core';
 
 /**
  * Converts a read-only `Signal` into a `WritableSignal` by providing custom `set` and, optionally, `update` functions.
@@ -29,12 +35,17 @@ import { Signal, untracked, WritableSignal } from '@angular/core';
  * writableSignal.set(5); // sets value of originalValue.a to 5 & triggers all signals
  */
 export function toWritable<T>(
-  signal: Signal<T>,
+  source: Signal<T>,
   set: (value: T) => void,
   update?: (updater: (value: T) => T) => void,
+  opt?: CreateSignalOptions<T> & {
+    pure?: boolean;
+  },
 ): WritableSignal<T> {
-  const internal = signal as WritableSignal<T>;
-  internal.asReadonly = () => signal;
+  const internal = (
+    opt?.pure !== false ? computed(source) : source
+  ) as WritableSignal<T>;
+  internal.asReadonly = () => source;
   internal.set = set;
   internal.update = update ?? ((updater) => set(updater(untracked(internal))));
 

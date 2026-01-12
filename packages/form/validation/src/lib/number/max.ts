@@ -10,7 +10,7 @@ export function createMaxValidator(
   return (max) => {
     const msg = createMsg(max);
     return (value) => {
-      if (value === null) return '';
+      if (value === null || value === undefined) return '';
       if (value > max) return msg;
       return '';
     };

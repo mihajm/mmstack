@@ -11,7 +11,7 @@ export function createMultipleOfValidator(
     const msg = createMsg(multipleOf);
 
     return (value) => {
-      if (value === null) return '';
+      if (value === null || value === undefined) return '';
       if (value % multipleOf !== 0) return msg;
       return '';
     };

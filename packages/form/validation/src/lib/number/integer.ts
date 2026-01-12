@@ -10,7 +10,7 @@ export function createIntegerValidator(
   return () => {
     const msg = createMsg();
     return (value) => {
-      if (value === null) return '';
+      if (value === null || value === undefined) return '';
       if (!Number.isInteger(value)) return msg;
       return '';
     };

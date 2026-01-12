@@ -10,7 +10,7 @@ export function createMinValidator(
   return (min) => {
     const msg = createMsg(min);
     return (value) => {
-      if (value === null) return '';
+      if (value === null || value === undefined) return '';
       if (value < min) return msg;
       return '';
     };

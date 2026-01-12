@@ -10,7 +10,7 @@ export function createIsNumberValidator(
   return () => {
     const msg = createMsg();
     return (value) => {
-      if (value === null) return '';
+      if (value === null || value === undefined) return '';
       if (typeof value !== 'number' || isNaN(value)) return msg;
       return '';
     };

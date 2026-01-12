@@ -4,8 +4,8 @@ export function defaultRequiredMessageFactory(label = 'Field') {
   return `${label} is required`;
 }
 
-function requiredNumber(value: number) {
-  return value !== null && value !== undefined;
+function noNumber(value: number) {
+  return value === null || value === undefined;
 }
 
 export function createRequiredValidator(
@@ -15,7 +15,7 @@ export function createRequiredValidator(
     const msg = createMsg(label);
 
     return (value) => {
-      if (typeof value === 'number' && !requiredNumber(value)) return msg;
+      if (typeof value === 'number' && noNumber(value)) return msg;
       if (!value) return msg;
       return '';
     };

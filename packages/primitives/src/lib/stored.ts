@@ -89,6 +89,10 @@ export type CreateStoredOptions<T> = CreateSignalOptions<T> & {
    * If 'true', the signal will remove the old key from storage when the key changes, defaults to `false`.
    */
   cleanupOldKey?: boolean;
+  /**
+   * Optional validator, which is called on load of value. Store will be set to fallback if value is false
+   */
+  validate?: (value: T) => boolean;
 };
 
 /**
@@ -173,6 +177,7 @@ export function stored<T>(
     equal = Object.is,
     onKeyChange = 'load',
     cleanupOldKey = false,
+    validate = () => true,
     ...rest
   }: CreateStoredOptions<T>,
 ): StoredSignal<T> {
@@ -192,7 +197,9 @@ export function stored<T>(
     const found = store.getItem(key);
     if (found === null) return null;
     try {
-      return deserialize(found);
+      const deserialized = deserialize(found);
+      if (!validate(deserialized)) return null;
+      return deserialized;
     } catch (err) {
       if (isDevMode())
         console.error(`Failed to parse stored value for key "${key}":`, err);

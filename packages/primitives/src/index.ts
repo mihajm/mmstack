@@ -5,6 +5,7 @@ export * from './lib/mutable';
 export { nestedEffect } from './lib/nested-effect';
 export * from './lib/pipeable/public_api';
 export * from './lib/sensors';
+export * from './lib/store';
 export * from './lib/stored';
 export { tabSync } from './lib/tabSync';
 export * from './lib/throttled';

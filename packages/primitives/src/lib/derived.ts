@@ -198,7 +198,7 @@ export function derived<T, U>(
               source.update((cur) => ({ ...cur, [optOrKey]: next }));
             };
 
-  const rest = typeof optOrKey === 'object' ? optOrKey : opt;
+  const rest = typeof optOrKey === 'object' ? { ...optOrKey, ...opt } : opt;
 
   const baseEqual = rest?.equal ?? Object.is;
   let trigger = false;

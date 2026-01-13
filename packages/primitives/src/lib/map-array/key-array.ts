@@ -144,7 +144,7 @@ export function keyArray<T, U>(
         nextValues.push(record.computation);
 
         if (untracked(record.source.idx) !== i) {
-          record.source.idx.set(i);
+          untracked(() => record.source.idx.set(i));
           changed = true;
         }
       }

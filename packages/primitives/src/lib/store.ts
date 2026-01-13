@@ -3,6 +3,8 @@
 
 import {
   CreateSignalOptions,
+  inject,
+  Injector,
   isDevMode,
   isSignal,
   signal,
@@ -10,8 +12,9 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { derived } from './derived';
+import { derived, DerivedSignal } from './derived';
 import { mutable, type MutableSignal } from './mutable';
+import { nestedEffect } from './nested-effect';
 
 type AnyRecord = Record<PropertyKey, any>;
 
@@ -25,7 +28,9 @@ type NonRecord =
   | RegExp
   | ArrayBuffer
   | DataView
-  | Function;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  | Function
+  | Array<any>;
 
 export type IsRecord<T> = T extends object
   ? T extends NonRecord
@@ -61,10 +66,9 @@ const TREAT_AS_VALUE = new Set([
   WeakMap,
   WeakRef,
   Promise,
-  Iterator,
+  typeof Iterator !== 'undefined' ? Iterator : class {},
+  Array,
 ]);
-
-export type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 export type SignalStore<T> = Signal<T> &
   (IsKnownRecord<T> extends true
@@ -120,17 +124,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const STORE = Symbol(isDevMode() ? 'SIGNAL_STORE' : '');
+const STORE_PROXY = Symbol(isDevMode() ? 'SIGNAL_STORE_PROXY' : '');
 
 export function toStore<T extends AnyRecord>(
   source: MutableSignal<inferValid<T>>,
+  injector?: Injector,
 ): MutableSignalStore<T>;
 
 export function toStore<T extends AnyRecord>(
   source: WritableSignal<inferValid<T>>,
+  injector?: Injector,
 ): WritableSignalStore<T>;
 
 export function toStore<T extends AnyRecord>(
   source: Signal<inferValid<T>>,
+  injector?: Injector,
 ): SignalStore<T>;
 
 export function toStore<T extends AnyRecord>(
@@ -138,10 +146,11 @@ export function toStore<T extends AnyRecord>(
     | Signal<inferValid<T>>
     | WritableSignal<inferValid<T>>
     | MutableSignal<inferValid<T>>,
+  injector = inject(Injector),
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
   return new Proxy(source, {
-    has(target: any, prop) {
-      return !!this.get!(target, prop, undefined);
+    has(_: any, prop) {
+      return Reflect.has(untracked(source), prop);
     },
     get(target: any, prop) {
       const value = untracked(target);
@@ -153,15 +162,34 @@ export function toStore<T extends AnyRecord>(
         return target[prop];
       }
 
+      if ((target[prop] as any)[STORE_PROXY]) {
+        return (target[prop] as any)[STORE_PROXY];
+      }
+
+      let computation: DerivedSignal<typeof target, typeof prop>;
       if (!isSignal(target[prop])) {
+        computation = derived(target, prop);
+
         Object.defineProperty(target, prop, {
-          value: derived(target, prop),
+          value: computation,
           configurable: true,
         });
         target[prop][STORE] = true;
       }
 
-      return toStore(target[prop]);
+      const proxy = toStore(target[prop], injector);
+
+      const cleanupRef = nestedEffect(
+        () => {
+          if (Reflect.has(source(), prop)) return;
+          delete target[prop];
+          cleanupRef.destroy();
+        },
+        { injector },
+      );
+
+      (target[prop] as any)[STORE_PROXY] = proxy;
+      return proxy;
     },
   });
 }

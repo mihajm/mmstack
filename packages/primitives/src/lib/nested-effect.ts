@@ -17,8 +17,8 @@ type Frame = {
 
 const frameStack: Frame[] = [];
 
-function current(frameAt = -1) {
-  return frameStack.at(frameAt) ?? null;
+function current() {
+  return frameStack.at(-1) ?? null;
 }
 
 function clearFrame(frame: Frame, userCleanups: (() => void)[]) {
@@ -115,9 +115,12 @@ const mappedUsers = mapArray(
  */
 export function nestedEffect(
   effectFn: (registerCleanup: EffectCleanupRegisterFn) => void,
-  options?: CreateEffectOptions & { bindToFrame?: number },
+  options?: CreateEffectOptions & {
+    bindToFrame?: (parent: Frame | null) => Frame | null;
+  },
 ) {
-  const parent = current(options?.bindToFrame);
+  const bindToFrame = options?.bindToFrame ?? ((parent) => parent);
+  const parent = bindToFrame(current());
   const injector = options?.injector ?? parent?.injector ?? inject(Injector);
 
   const srcRef = untracked(() => {

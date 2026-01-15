@@ -11,16 +11,18 @@ import {
 
 type Frame = {
   injector: Injector;
+  parent: Frame | null;
   children: Set<EffectRef>;
 };
 
 const frameStack: Frame[] = [];
 
-function current() {
-  return frameStack.at(-1) ?? null;
+function current(frameAt = -1) {
+  return frameStack.at(frameAt) ?? null;
 }
 
 function clearFrame(frame: Frame, userCleanups: (() => void)[]) {
+  frame.parent = null;
   for (const child of frame.children) {
     try {
       child.destroy();
@@ -113,9 +115,9 @@ const mappedUsers = mapArray(
  */
 export function nestedEffect(
   effectFn: (registerCleanup: EffectCleanupRegisterFn) => void,
-  options?: CreateEffectOptions,
+  options?: CreateEffectOptions & { bindToFrame?: number },
 ) {
-  const parent = current();
+  const parent = current(options?.bindToFrame);
   const injector = options?.injector ?? parent?.injector ?? inject(Injector);
 
   const srcRef = untracked(() => {
@@ -123,6 +125,7 @@ export function nestedEffect(
       (cleanup) => {
         const frame: Frame = {
           injector,
+          parent,
           children: new Set<EffectRef>(),
         };
 

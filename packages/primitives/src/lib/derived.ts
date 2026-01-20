@@ -96,10 +96,68 @@ export function derived<T, U>(
  * ```
  */
 export function derived<T extends UnknownObject, TKey extends keyof T>(
+  source: MutableSignal<T>,
+  key: TKey,
+  opt?: CreateSignalOptions<T[TKey]>,
+): DerivedSignal<T, T[TKey]> & MutableSignal<T[TKey]>;
+
+/**
+ * Creates a `DerivedSignal` that derives a property from an object held by the source signal.
+ * This overload is a convenient shorthand for accessing object properties.
+ *
+ * @typeParam T The type of the source signal's value (must be an object).
+ * @typeParam TKey The key of the property to derive.
+ * @param source The source `WritableSignal` (holding an object).
+ * @param key The key of the property to derive.
+ * @param options Optional signal options for the derived signal.
+ * @returns A `DerivedSignal` instance.
+ *
+ * @example
+ * ```ts
+ * const user = signal({ name: 'John', age: 30 });
+ * const name = derived(user, 'name');
+ *
+ * console.log(name()); // Outputs: John
+ *
+ * // Update the derived signal, which also updates the source
+ * name.set('Jane');
+ *
+ * console.log(user().name); // Outputs: Jane
+ * ```
+ */
+export function derived<T extends UnknownObject, TKey extends keyof T>(
   source: WritableSignal<T>,
   key: TKey,
   opt?: CreateSignalOptions<T[TKey]>,
 ): DerivedSignal<T, T[TKey]>;
+
+/**
+ * Creates a `DerivedSignal` that derives its value from another `MutableSignal`.
+ * Use mutuable signals with caution, but very useful for deeply nested structures.
+ *
+ * @typeParam T The type of the source signal's value.
+ * @typeParam U The type of the derived signal's value.
+ * @param source The source `WritableSignal`.
+ * @param options An object containing the `from` and `onChange` functions, and optional signal options.
+ * @returns A `DerivedSignal & MutableSignal` instance.
+ *
+ * @example
+ * ```ts
+ * const user = signal({ name: 'John', age: 30 });
+ * const name = derived(user, {
+ * from: (u) => u.name,
+ * onChange: (newName) => user.update((u) => ({ ...u, name: newName })),
+ * });
+ *
+ * name.set('Jane'); // Updates the original signal
+ * console.log(user().name); // Outputs: Jane
+ * ```
+ */
+export function derived<T, U>(
+  source: MutableSignal<T>,
+  optOrKey: CreateDerivedOptions<T, U> | keyof T,
+  opt?: CreateSignalOptions<U>,
+): DerivedSignal<T, U> & MutableSignal<U>;
 
 /**
  * Creates a `DerivedSignal` from an array, deriving an element by its index.
@@ -129,34 +187,6 @@ export function derived<T extends any[]>(
   index: number,
   opt?: CreateSignalOptions<T[number]>,
 ): DerivedSignal<T, T[number]>;
-
-/**
- * Creates a `DerivedSignal` that derives its value from another `MutableSignal`.
- * Use mutuable signals with caution, but very useful for deeply nested structures.
- *
- * @typeParam T The type of the source signal's value.
- * @typeParam U The type of the derived signal's value.
- * @param source The source `WritableSignal`.
- * @param options An object containing the `from` and `onChange` functions, and optional signal options.
- * @returns A `DerivedSignal & MutableSignal` instance.
- *
- * @example
- * ```ts
- * const user = signal({ name: 'John', age: 30 });
- * const name = derived(user, {
- * from: (u) => u.name,
- * onChange: (newName) => user.update((u) => ({ ...u, name: newName })),
- * });
- *
- * name.set('Jane'); // Updates the original signal
- * console.log(user().name); // Outputs: Jane
- * ```
- */
-export function derived<T, U>(
-  source: MutableSignal<T>,
-  optOrKey: CreateDerivedOptions<T, U> | keyof T,
-  opt?: CreateSignalOptions<U>,
-): DerivedSignal<T, U> & MutableSignal<U>;
 
 export function derived<T, U>(
   source: WritableSignal<T> | MutableSignal<T>,
@@ -213,6 +243,8 @@ export function derived<T, U>(
   const sig = toWritable<U>(
     computed(() => from(source()), { ...rest, equal }),
     (newVal) => onChange(newVal),
+    undefined,
+    { pure: false },
   ) as DerivedSignal<T, U> & MutableSignal<U>;
 
   sig.from = from;

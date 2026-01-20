@@ -9,8 +9,7 @@ import {
 import { derived } from '../derived';
 import { isMutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
-import { createSetter } from './create-setter';
-import { isWritableSignal } from './is-writable';
+import { createSetter, isWritableSignal } from './util';
 
 /**
  * Helper to create the derived signal for a specific index.
@@ -136,7 +135,11 @@ export function indexArray<T, U>(
       if (len === prev.value.length) return prev.value;
 
       if (len < prev.value.length) {
-        if (opt.onDestroy) prev.value.forEach((v) => opt.onDestroy?.(v));
+        if (opt.onDestroy) {
+          for (let i = len; i < prev.value.length; i++) {
+            opt.onDestroy(prev.value[i]);
+          }
+        }
 
         return prev.value.slice(0, len);
       }

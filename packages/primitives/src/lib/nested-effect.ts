@@ -79,38 +79,38 @@ function clearFrame(frame: Frame, userCleanups: (() => void)[]) {
  * @example
  * ```ts
  * const users = signal([
-  { id: 1, name: 'Alice' },
-  { id: 2, name: 'Bob' }
-]);
-
-// The fine-grained mapped list
-const mappedUsers = mapArray(
-  users,
-  (userSignal, index) => {
-    // 1. Create a fine-grained SIDE EFFECT for *this item*
-    // This effect's lifetime is now tied to this specific item. created once on init of this index.
-    const effectRef = nestedEffect(() => {
-      // This only runs if *this* userSignal changes,
-      // not if the whole list changes.
-      console.log(`User ${index} updated:`, userSignal().name);
-    });
-
-    // 2. Return the data AND the cleanup logic
-    return {
-      // The mapped data
-      label: computed(() => `User: ${userSignal().name}`),
-      
-      // The cleanup function
-      destroyEffect: () => effectRef.destroy()
-    };
-  },
-  {
-    // 3. Tell mapArray HOW to clean up when an item is removed, this needs to be manual as it's not a nestedEffect itself
-    onDestroy: (mappedItem) => {
-      mappedItem.destroyEffect();
-    }
-  }
-);
+ *   { id: 1, name: 'Alice' },
+ *   { id: 2, name: 'Bob' }
+ * ]);
+ *
+ * // The fine-grained mapped list
+ * const mappedUsers = mapArray(
+ *   users,
+ *   (userSignal, index) => {
+ *     // 1. Create a fine-grained SIDE EFFECT for *this item*
+ *     // This effect's lifetime is now tied to this specific item. created once on init of this index.
+ *     const effectRef = nestedEffect(() => {
+ *       // This only runs if *this* userSignal changes,
+ *       // not if the whole list changes.
+ *       console.log(`User ${index} updated:`, userSignal().name);
+ *     });
+ *
+ *     // 2. Return the data AND the cleanup logic
+ *     return {
+ *       // The mapped data
+ *       label: computed(() => `User: ${userSignal().name}`),
+ *
+ *       // The cleanup function
+ *       destroyEffect: () => effectRef.destroy()
+ *     };
+ *   },
+ *   {
+ *     // 3. Tell mapArray HOW to clean up when an item is removed, this needs to be manual as it's not a nestedEffect itself
+ *     onDestroy: (mappedItem) => {
+ *       mappedItem.destroyEffect();
+ *     }
+ *   }
+ * );
  * ```
  */
 export function nestedEffect(

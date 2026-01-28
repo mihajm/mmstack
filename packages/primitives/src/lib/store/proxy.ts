@@ -27,15 +27,17 @@ export type SignalStore<T> = Signal<T> &
     ? unknown
     : Readonly<{ [K in keyof Required<T>]: SignalStore<NonNullable<T>[K]> }>);
 
-export type WritableSignalStore<T> = WritableSignal<T> &
-  (NonNullable<T> extends BaseType
+export type WritableSignalStore<T> = WritableSignal<T> & {
+  readonly asReadonlyStore: () => SignalStore<T>;
+} & (NonNullable<T> extends BaseType
     ? unknown
     : Readonly<{
         [K in keyof Required<T>]: WritableSignalStore<NonNullable<T>[K]>;
       }>);
 
-export type MutableSignalStore<T> = MutableSignal<T> &
-  (NonNullable<T> extends BaseType
+export type MutableSignalStore<T> = MutableSignal<T> & {
+  readonly asReadonlyStore: () => SignalStore<T>;
+} & (NonNullable<T> extends BaseType
     ? unknown
     : Readonly<{
         [K in keyof Required<T>]: MutableSignalStore<NonNullable<T>[K]>;
@@ -92,7 +94,7 @@ export function toStore<T extends AnyRecord>(
 
   const isMutableSource = isMutable(writableSource);
 
-  return new Proxy(writableSource, {
+  const s = new Proxy(writableSource, {
     has(_: any, prop) {
       return Reflect.has(untracked(source), prop);
     },
@@ -110,6 +112,11 @@ export function toStore<T extends AnyRecord>(
     },
     get(target: any, prop) {
       if (prop === IS_STORE) return true;
+      if (prop === 'asReadonlyStore')
+        return () => {
+          if (!isWritableSignal(source)) return s;
+          return untracked(() => toStore(source.asReadonly(), injector));
+        };
       if (typeof prop === 'symbol' || SIGNAL_FN_PROP.has(prop))
         return target[prop];
 
@@ -158,6 +165,8 @@ export function toStore<T extends AnyRecord>(
       return proxy;
     },
   });
+
+  return s;
 }
 
 export function store<T extends AnyRecord>(

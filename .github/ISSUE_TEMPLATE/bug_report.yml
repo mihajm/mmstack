@@ -15,7 +15,7 @@ body:
       label: Which package is affected?
       description: Select the package where you encountered the bug. If unsure, select 'Other / Not Sure'.
       options:
-        - '@mmstack/object'
+        - '@mmstack/di'
         - '@mmstack/primitives'
         - '@mmstack/resource'
         - '@mmstack/router-core'

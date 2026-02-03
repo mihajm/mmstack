@@ -1,4 +1,4 @@
-import { HttpParams, HttpResourceRequest } from '@angular/common/http';
+import { HttpParams, type HttpResourceRequest } from '@angular/common/http';
 
 function normalizeParams(
   params: Required<HttpResourceRequest>['params'],

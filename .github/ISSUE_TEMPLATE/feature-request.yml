@@ -15,7 +15,7 @@ body:
       label: Which package(s) does this relate to?
       description: Select the package(s) this feature would affect or enhance. If it's a new package idea, choose 'New Package Idea'.
       options:
-        - '@mmstack/object'
+        - '@mmstack/di'
         - '@mmstack/primitives'
         - '@mmstack/resource'
         - '@mmstack/router-core'

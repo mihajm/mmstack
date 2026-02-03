@@ -23,7 +23,8 @@
       "@mmstack/primitives": ["packages/primitives/src/index.ts"],
       "@mmstack/resource": ["packages/resource/src/index.ts"],
       "@mmstack/router-core": ["packages/router/core/src/index.ts"],
-      "@mmstack/translate": ["packages/translate/src/index.ts"]
+      "@mmstack/translate": ["packages/translate/src/index.ts"],
+      "@mmstack/di": ["packages/di/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

@@ -3,5 +3,6 @@
   "dest": "../../dist/packages/translate",
   "lib": {
     "entryFile": "src/index.ts"
-  }
+  },
+  "allowedNonPeerDependencies": ["@mmstack/di"]
 }

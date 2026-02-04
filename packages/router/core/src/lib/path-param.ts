@@ -2,6 +2,13 @@ import { computed, inject, type Signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, type ParamMap, Router } from '@angular/router';
 
+/**
+ * Creates a read-only Signal that tracks a specific route path parameter.
+ *
+ * Returns the parameter's current value (string) or null if absent. Reacts to navigation
+ * changes and traverses parent routes to find the parameter. Supports static or dynamic
+ * (function/signal) keys.
+ */
 export function pathParam(
   key: string | (() => string),
   route = inject(ActivatedRoute),

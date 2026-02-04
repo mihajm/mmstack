@@ -18,6 +18,41 @@ This library includes helpers to interact with router state reactively using Ang
 
 ---
 
+### pathParam
+
+Creates a read-only Signal that tracks a specific route path parameter (e.g., `:id` in `/users/:id`).
+
+- Reading the signal returns the parameter's current value (string) or null if absent.
+- Reacts to navigation changes affecting the parameter.
+- Traverses parent routes to find the parameter.
+- Supports static or dynamic (function/signal) keys.
+
+```typescript
+import { Component, effect } from '@angular/core';
+import { pathParam } from '@mmstack/router-core';
+
+@Component({
+  selector: 'app-user-profile',
+  standalone: true,
+  template: `
+    <h1>User Profile</h1>
+    <p>User ID: {{ userId() ?? 'Unknown' }}</p>
+  `,
+})
+export class UserProfileComponent {
+  // Track the ':userId' path parameter from the route
+  protected readonly userId = pathParam('id');
+
+  constructor() {
+    effect(() => {
+      const id = this.userId();
+      console.log('User ID changed:', id);
+      // Load user data, update UI, etc. based on id
+    });
+  }
+}
+```
+
 ### queryParam
 
 Creates a WritableSignal that synchronizes with a specific URL query parameter, enabling two-way binding between the signal's state and the URL.

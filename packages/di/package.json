@@ -1,6 +1,20 @@
 {
   "name": "@mmstack/di",
-  "version": "21.0.0",
+  "version": "21.0.1",
+  "keywords": [
+    "angular",
+    "dependency injection",
+    "di",
+    "singleton",
+    "provider",
+    "inject"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mihajm/mmstack"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/di",
   "peerDependencies": {
     "@angular/core": ">=21 <22"
   },

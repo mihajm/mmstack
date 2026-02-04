@@ -205,7 +205,7 @@ export function registerNamespace<
       const ns = t?.namespace ?? defaultT?.namespace;
       if (!ns) throw new Error('No namespace found in translation');
 
-      if (isDevMode() && t && t.locale !== locale && t.locale !== defaultLocale)
+      if (isDevMode() && t && t.locale !== locale && t.locale)
         console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
 
       store.registerOnDemandLoaders(ns, {

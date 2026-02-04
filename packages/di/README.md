@@ -22,13 +22,14 @@ This library provides the following utilities:
 
 ## injectable
 
-Creates a typed InjectionToken with convenient inject and provide helper functions, eliminating boilerplate and ensuring type safety throughout your dependency injection flow. It returns a tuple of `[injectFn, provideFn]` that work together seamlessly.
+Creates a typed InjectionToken with convenient, type-safe inject and provider functions, eliminating boilerplate and ensuring type safety throughout your dependency injection flow. It returns a tuple of `[injectFn, provideFn]` that work together seamlessly.
 
 The `injectable` function supports three patterns:
 
 1. **Basic** - Returns `T | null` when not provided
-2. **With Fallback** - Returns a default value when not provided
-3. **With Error** - Throws a custom error message when not provided
+2. **With Fallback** - Returns a default value when not provided, can be either
+3. **With Lazy Fallback** - Same as with fallback, but the fallback iz lazily evaluated, useful for expensive fallbacks or ones that require injection
+4. **With Error** - Throws a custom error message when not provided
 
 ### Basic Usage
 
@@ -107,6 +108,16 @@ const [injectTheme, provideTheme] = injectable<Theme>('Theme', {
     primary: '#007bff',
     secondary: '#6c757d',
   },
+});
+
+// or if you need inject/lazy evaluation
+const [injectTheme, provideTheme] = injectable<Theme>('Theme', {
+  lazyFallback: () => {
+    return {
+      primary: inject(APP_PRIMARY),
+      secondary: '#6c757d',
+    },
+  }
 });
 
 @Injectable()
@@ -279,7 +290,7 @@ interface ApiClient {
 }
 
 const injectApiClient = rootInjectable<ApiClient>((injector) => {
-  const http = injector.get(HttpClient);
+  const http = injector.get(HttpClient); // or just inject(HttpClient)
 
   return {
     get: (url) => fetch(url).then((r) => r.json()),
@@ -366,118 +377,6 @@ export class NavbarComponent {
     this.authStore.logout();
   }
 }
-```
-
-### Browser API Wrapper
-
-Wrap browser APIs in a testable, injectable way:
-
-```typescript
-import { rootInjectable } from '@mmstack/di';
-
-interface StorageService {
-  get: (key: string) => string | null;
-  set: (key: string, value: string) => void;
-  remove: (key: string) => void;
-  clear: () => void;
-}
-
-const injectStorage = rootInjectable<StorageService>(() => {
-  // SSR-safe check
-  if (typeof localStorage === 'undefined') {
-    return {
-      get: () => null,
-      set: () => {},
-      remove: () => {},
-      clear: () => {},
-    };
-  }
-
-  return {
-    get: (key) => localStorage.getItem(key),
-    set: (key, value) => localStorage.setItem(key, value),
-    remove: (key) => localStorage.removeItem(key),
-    clear: () => localStorage.clear(),
-  };
-});
-
-@Injectable()
-export class PreferencesService {
-  private storage = injectStorage();
-
-  saveTheme(theme: string) {
-    this.storage.set('theme', theme);
-  }
-
-  loadTheme(): string {
-    return this.storage.get('theme') ?? 'light';
-  }
-}
-```
-
----
-
-## Best Practices
-
-### When to use `injectable`
-
-- ✅ Creating flexible, reusable dependencies
-- ✅ Building context-based injection patterns
-- ✅ Need different implementations in different parts of the app
-- ✅ Testing with mock providers
-
-### When to use `rootInjectable`
-
-- ✅ Application-wide singletons (logger, analytics, etc.)
-- ✅ Global state management
-- ✅ Browser API wrappers
-- ✅ Performance-critical singleton services
-- ❌ Avoid for services that need different instances per scope
-
-### Testing
-
-Both utilities work seamlessly with Angular's testing utilities:
-
-```typescript
-import { TestBed } from '@angular/core/testing';
-import { injectable } from '@mmstack/di';
-
-const [injectConfig, provideConfig] = injectable<{ apiUrl: string }>('Config');
-
-describe('DataService', () => {
-  beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [provideConfig({ apiUrl: 'https://test-api.example.com' }), DataService],
-    });
-  });
-
-  it('should use test configuration', () => {
-    const service = TestBed.inject(DataService);
-    expect(service.getApiUrl()).toBe('https://test-api.example.com');
-  });
-});
-```
-
----
-
-## Type Safety
-
-Both utilities provide full type safety:
-
-```typescript
-const [injectConfig, provideConfig] = injectable<{ port: number }>('Config');
-
-// ✅ Type-safe
-provideConfig({ port: 3000 });
-
-// ❌ TypeScript error: missing property
-provideConfig({});
-
-// ❌ TypeScript error: wrong type
-provideConfig({ port: '3000' });
-
-// Inject function returns correct type
-const config = injectConfig(); // { port: number } | null
 ```
 
 ---

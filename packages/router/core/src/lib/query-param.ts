@@ -87,8 +87,8 @@ import { toWritable } from '@mmstack/primitives';
  */
 export function queryParam(
   key: string | (() => string),
+  route = inject(ActivatedRoute),
 ): WritableSignal<string | null> {
-  const route = inject(ActivatedRoute);
   const router = inject(Router);
 
   const keySignal =

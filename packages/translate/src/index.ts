@@ -5,6 +5,7 @@ export { Translate } from './lib/translate';
 export {
   injectDynamicLocale,
   injectIntl,
+  injectSupportedLocales,
   provideIntlConfig,
 } from './lib/translation-store';
 export { Translator } from './lib/translator';

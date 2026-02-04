@@ -3,17 +3,26 @@ import {
   inject,
   isDevMode,
   isSignal,
-  Signal,
+  type Signal,
   untracked,
 } from '@angular/core';
 import {
-  CompiledTranslation,
-  inferCompiledTranslationMap,
-  inferCompiledTranslationNamespace,
+  type ActivatedRouteSnapshot,
+  ResolveFn,
+  Router,
+} from '@angular/router';
+import {
+  type CompiledTranslation,
+  type inferCompiledTranslationMap,
+  type inferCompiledTranslationNamespace,
 } from './compile';
 import { replaceWithDelim } from './delim';
-import { UnknownStringKeyObject } from './string-key-object.type';
-import { injectDefaultLocale, TranslationStore } from './translation-store';
+import { type UnknownStringKeyObject } from './string-key-object.type';
+import {
+  injectDefaultLocale,
+  injectIntlConfig,
+  TranslationStore,
+} from './translation-store';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyStringRecord = Record<string, any>;
@@ -130,10 +139,39 @@ export function registerNamespace<
   };
 
   let defaultTranslationLoaded = false;
-  const resolver = async () => {
+  const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
-    const locale = untracked(store.locale);
+
+    let locale: string | null = null;
+
+    const paramName = injectIntlConfig()?.localeParamName;
+
+    const routerConfig = inject(Router)['options'];
+    const alwaysInheritParams =
+      typeof routerConfig === 'object' &&
+      !!routerConfig &&
+      routerConfig.paramsInheritanceStrategy === 'always';
+
+    if (paramName) {
+      locale = snapshot.paramMap.get(paramName);
+
+      if (!locale && !alwaysInheritParams) {
+        let currentRoute: ActivatedRouteSnapshot | null = snapshot;
+        while (currentRoute && !locale) {
+          locale = currentRoute.paramMap.get('locale');
+          currentRoute = currentRoute.parent;
+        }
+      }
+    }
+
+    if (!locale) {
+      locale = untracked(store.locale);
+    }
+
     const defaultLocale = injectDefaultLocale();
+    const shouldPreloadDefault =
+      injectIntlConfig()?.preloadDefaultLocale ?? false;
+
     const tPromise = other[locale] as (typeof other)[string] | undefined;
 
     const promise = tPromise ?? defaultTranslation;
@@ -144,33 +182,51 @@ export function registerNamespace<
     if (promise === defaultTranslation && defaultTranslationLoaded) return;
 
     try {
-      const translation = await promise();
+      const promises = [promise()];
 
       if (
-        promise !== defaultTranslation &&
-        translation.locale !== locale &&
-        isDevMode()
-      ) {
-        return console.warn(
-          `Expected locale to be ${locale} but got ${translation.locale}`,
-        );
-      }
+        shouldPreloadDefault &&
+        !defaultTranslationLoaded &&
+        promise !== defaultTranslation
+      )
+        promises.push(defaultTranslation());
 
-      store.registerOnDemandLoaders(translation.namespace, {
+      const translations = await Promise.allSettled(promises);
+
+      const fullfilled = translations.map((t) =>
+        t.status === 'fulfilled' ? t.value : null,
+      );
+
+      if (fullfilled.at(0) === null && fullfilled.at(1) === null)
+        throw new Error('Failed to load translations');
+
+      const [t, defaultT] = fullfilled;
+
+      const ns = t?.namespace ?? defaultT?.namespace;
+      if (!ns) throw new Error('No namespace found in translation');
+
+      if (isDevMode() && t && t.locale !== locale && t.locale !== defaultLocale)
+        console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
+
+      store.registerOnDemandLoaders(ns, {
         ...other,
         [defaultLocale]: defaultTranslation,
       });
 
-      store.register(translation.namespace, {
-        [locale]: translation.flat,
-      });
-      if (promise === defaultTranslation) {
+      const toRegister: Record<string, Record<string, string>> = {};
+      if (t) toRegister[locale] = t.flat;
+      if (defaultT) toRegister[defaultLocale] = defaultT.flat;
+
+      store.register(ns, toRegister);
+
+      if (promise === defaultTranslation || defaultT)
         defaultTranslationLoaded = true;
-      }
     } catch {
       if (isDevMode()) {
         console.warn(`Failed to load translation for locale: ${locale}`);
       }
+    } finally {
+      if (locale !== untracked(store.locale)) store.locale.set(locale);
     }
   };
 

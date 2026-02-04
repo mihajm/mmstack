@@ -7,9 +7,12 @@ import {
   input,
   Renderer2,
 } from '@angular/core';
-import { CompiledTranslation, inferCompiledTranslationMap } from './compile';
+import {
+  type CompiledTranslation,
+  type inferCompiledTranslationMap,
+} from './compile';
 import { createT } from './register-namespace';
-import { UnknownStringKeyObject } from './string-key-object.type';
+import { type UnknownStringKeyObject } from './string-key-object.type';
 import { TranslationStore } from './translation-store';
 
 @Directive()

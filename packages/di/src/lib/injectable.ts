@@ -38,6 +38,11 @@ type FallbackInjectableOptions<T> = {
   fallback: T;
 };
 
+type LazyFallbackInjectableOptions<T> = {
+  /** Function that returns a default value when the injectable is not provided. Useful for expensive defaults. */
+  lazyFallback: () => T;
+};
+
 type ErrorMessageInjectableOptions = {
   /** Error message thrown when the injectable is not provided */
   errorMessage: string;
@@ -45,6 +50,7 @@ type ErrorMessageInjectableOptions = {
 
 type InjectableOptions<T> =
   | FallbackInjectableOptions<T>
+  | LazyFallbackInjectableOptions<T>
   | ErrorMessageInjectableOptions;
 
 /**
@@ -70,6 +76,19 @@ export function injectable<T>(
 ): InjectFns<T>;
 
 /**
+ *
+ * Creates a typed InjectionToken with inject and provide helper functions.
+ * Returns a lazily evaluated fallback value when the injectable is not provided.
+ *
+ * @param token
+ * @param opt
+ */
+export function injectable<T>(
+  token: string,
+  opt: LazyFallbackInjectableOptions<T>,
+): InjectFns<T>;
+
+/**
  * Creates a typed InjectionToken with inject and provide helper functions.
  * Throws an error with a custom message when the injectable is not provided.
  *
@@ -89,17 +108,29 @@ export function injectable<T>(
   const injectionToken = new InjectionToken<T>(token);
 
   const options = opt as
-    | Partial<FallbackInjectableOptions<T> & ErrorMessageInjectableOptions>
+    | Partial<
+        FallbackInjectableOptions<T> &
+          LazyFallbackInjectableOptions<T> &
+          ErrorMessageInjectableOptions
+      >
     | undefined;
+
+  let fallback: T | undefined | null = options?.fallback;
+
+  const initFallback =
+    options?.lazyFallback ?? (() => options?.fallback ?? null);
+
+  const fallbackFn = () => {
+    if (fallback === undefined) fallback = initFallback();
+    return fallback;
+  };
 
   const injectFn = (iOpt?: Omit<InjectOptions, 'optional'>) => {
     const injected =
       inject(injectionToken, {
         ...iOpt,
         optional: true,
-      }) ??
-      options?.fallback ??
-      null;
+      }) ?? fallbackFn();
 
     if (injected === null && options?.errorMessage)
       throw new Error(options.errorMessage);

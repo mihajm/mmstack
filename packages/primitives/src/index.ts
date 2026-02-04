@@ -1,6 +1,6 @@
 export * from './lib/debounced';
 export * from './lib/derived';
-export { nestedEffect, renderEffect } from './lib/effect';
+export { batch, nestedEffect, renderEffect } from './lib/effect';
 export * from './lib/mappers';
 export * from './lib/mutable';
 export * from './lib/pipeable/public_api';

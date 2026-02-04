@@ -1,9 +1,6 @@
 {
   "name": "@mmstack/di",
   "version": "21.0.0",
-  "dependencies": {
-    "@mmstack/primitives": "^21.0.0"
-  },
   "peerDependencies": {
     "@angular/core": ">=21 <22"
   },

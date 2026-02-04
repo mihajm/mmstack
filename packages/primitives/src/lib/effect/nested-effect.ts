@@ -1,45 +1,20 @@
 import {
   type CreateEffectOptions,
+  DestroyRef,
   effect,
   type EffectCleanupRegisterFn,
   type EffectRef,
   inject,
   Injector,
-  isDevMode,
   untracked,
 } from '@angular/core';
-
-type Frame = {
-  injector: Injector;
-  parent: Frame | null;
-  children: Set<EffectRef>;
-};
-
-const frameStack: Frame[] = [];
-
-function current() {
-  return frameStack.at(-1) ?? null;
-}
-
-function clearFrame(frame: Frame, userCleanups: (() => void)[]) {
-  frame.parent = null;
-  for (const child of frame.children) {
-    try {
-      child.destroy();
-    } catch (e) {
-      if (isDevMode()) console.error('Error destroying nested effect:', e);
-    }
-  }
-  frame.children.clear();
-  for (const fn of userCleanups) {
-    try {
-      fn();
-    } catch (e) {
-      if (isDevMode()) console.error('Error destroying nested effect:', e);
-    }
-  }
-  userCleanups.length = 0;
-}
+import {
+  clearFrame,
+  currentFrame,
+  type Frame,
+  popFrame,
+  pushFrame,
+} from './frame-stack';
 
 /**
  * Creates an effect that can be nested, similar to SolidJS's `createEffect`.
@@ -120,12 +95,14 @@ export function nestedEffect(
   },
 ) {
   const bindToFrame = options?.bindToFrame ?? ((parent) => parent);
-  const parent = bindToFrame(current());
+  const parent = bindToFrame(currentFrame());
   const injector = options?.injector ?? parent?.injector ?? inject(Injector);
+  let isDestroyed = false;
 
   const srcRef = untracked(() => {
     return effect(
       (cleanup) => {
+        if (isDestroyed) return;
         const frame: Frame = {
           injector,
           parent,
@@ -134,14 +111,13 @@ export function nestedEffect(
 
         const userCleanups: (() => void)[] = [];
 
-        frameStack.push(frame);
-
+        pushFrame(frame);
         try {
           effectFn((fn) => {
             userCleanups.push(fn);
           });
         } finally {
-          frameStack.pop();
+          popFrame();
         }
 
         return cleanup(() => clearFrame(frame, userCleanups));
@@ -157,11 +133,15 @@ export function nestedEffect(
   const ref = {
     ...srcRef,
     destroy: () => {
+      if (isDestroyed) return;
+      isDestroyed = true;
       parent?.children.delete(ref);
       srcRef.destroy();
     },
   };
   parent?.children.add(ref);
+
+  if (parent === null) injector.get(DestroyRef).onDestroy(() => ref.destroy());
 
   return ref;
 }

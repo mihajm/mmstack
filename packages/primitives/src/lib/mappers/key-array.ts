@@ -83,7 +83,6 @@ export function keyArray<T, U, K>(
         return mapped;
       }
 
-      // Fast path for new create (init)
       if (len === 0) {
         for (j = 0; j < newLen; j++) {
           item = newItems[j];
@@ -98,7 +97,6 @@ export function keyArray<T, U, K>(
         tempIndexes.length = 0;
         newIndicesNext.length = 0;
 
-        // Skip common prefix
         for (
           start = 0, end = Math.min(len, newLen);
           start < end && getKey(items[start]) === getKey(newItems[start]);
@@ -108,7 +106,6 @@ export function keyArray<T, U, K>(
           newIndexes[start] = indexes[start];
         }
 
-        // Common suffix
         for (
           end = len - 1, newEnd = newLen - 1;
           end >= start &&
@@ -120,7 +117,6 @@ export function keyArray<T, U, K>(
           tempIndexes[newEnd] = indexes[end];
         }
 
-        // 0) Prepare a map of all indices in newItems, scanning backwards
         for (j = newEnd; j >= start; j--) {
           item = newItems[j];
           key = getKey(item);
@@ -129,7 +125,6 @@ export function keyArray<T, U, K>(
           newIndices.set(key, j);
         }
 
-        // 1) Step through old items: check if they are in new set
         for (i = start; i <= end; i++) {
           item = items[i];
           key = getKey(item);
@@ -146,10 +141,10 @@ export function keyArray<T, U, K>(
 
         // 2) Set all new values
         for (j = start; j < newLen; j++) {
-          if (j in temp) {
+          if (temp[j] !== undefined) {
             newMapped[j] = temp[j];
             newIndexes[j] = tempIndexes[j];
-            untracked(() => newIndexes[j].set(j)); // Update index signal
+            newIndexes[j].set(j);
           } else {
             const indexSignal = signal(j);
             newIndexes[j] = indexSignal;
@@ -157,7 +152,6 @@ export function keyArray<T, U, K>(
           }
         }
 
-        // 4) Save items for next update
         items.length = newLen;
         for (let k = 0; k < newLen; k++) items[k] = newItems[k];
       }

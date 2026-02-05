@@ -50,9 +50,13 @@ const ALWAYS_FALSE: ValueEqualityFn<any> = () => false;
  */
 export function renderEffect(
   effectFn: (onCleanup: (fn: () => void) => void) => void,
-  options?: { injector?: Injector },
+  options?: {
+    injector?: Injector;
+    bindToFrame?: (parent: Frame | null) => Frame | null;
+  },
 ) {
-  const parent = currentFrame();
+  const bindToFrame = options?.bindToFrame ?? ((parent) => parent);
+  const parent = bindToFrame(currentFrame());
   const injector = options?.injector ?? parent?.injector ?? inject(Injector);
 
   let cleanupFn: (() => void) | undefined;

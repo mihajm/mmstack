@@ -57,6 +57,17 @@ const SIGNAL_FN_PROP = new Set([
   'asReadonly',
 ]);
 
+/**
+ * Validates whether a value is a Signal Store.
+ */
+export function isStore<T>(value: unknown): value is SignalStore<T> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as any)[IS_STORE] === true
+  );
+}
+
 export function toStore<T extends AnyRecord>(
   source: MutableSignal<T>,
   injector?: Injector,
@@ -82,7 +93,7 @@ export function toStore<T extends AnyRecord>(
   source: Signal<T> | WritableSignal<T> | MutableSignal<T>,
   injector?: Injector,
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
-  if ((source as any)[IS_STORE]) return source as any;
+  if (isStore<T>(source)) return source;
 
   if (!injector) injector = inject(Injector);
 

@@ -110,12 +110,10 @@ export function nestedEffect(
         };
 
         const userCleanups: (() => void)[] = [];
-
         pushFrame(frame);
+
         try {
-          effectFn((fn) => {
-            userCleanups.push(fn);
-          });
+          effectFn((fn) => userCleanups.push(fn));
         } finally {
           popFrame();
         }
@@ -125,13 +123,12 @@ export function nestedEffect(
       {
         ...options,
         injector,
-        manualCleanup: !!parent,
+        manualCleanup: options?.manualCleanup ?? !!parent,
       },
     );
   });
 
-  const ref = {
-    ...srcRef,
+  const ref: EffectRef = {
     destroy: () => {
       if (isDestroyed) return;
       isDestroyed = true;
@@ -139,9 +136,10 @@ export function nestedEffect(
       srcRef.destroy();
     },
   };
+
   parent?.children.add(ref);
 
-  if (parent === null) injector.get(DestroyRef).onDestroy(() => ref.destroy());
+  injector.get(DestroyRef).onDestroy(() => ref.destroy());
 
   return ref;
 }

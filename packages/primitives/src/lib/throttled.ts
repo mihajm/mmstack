@@ -112,8 +112,7 @@ export function throttle<T>(
     // not in injection context & no destroyRef provided opting out of cleanup
   }
 
-  const triggerFn = (next: T) => {
-    source.set(next);
+  const tick = () => {
     if (timeout) return;
 
     timeout = setTimeout(() => {
@@ -123,11 +122,13 @@ export function throttle<T>(
   };
 
   const set = (value: T) => {
-    triggerFn(value);
+    source.set(value);
+    tick();
   };
 
   const update = (fn: (prev: T) => T) => {
-    triggerFn(fn(untracked(source)));
+    source.update(fn);
+    tick();
   };
 
   const writable = toWritable(

@@ -135,20 +135,20 @@ export function debounce<T>(
     // not in injection context & no destroyRef provided opting out of cleanup
   }
 
-  const triggerFn = (afterClean: () => void) => {
+  const triggerFn = (next: T) => {
     if (timeout) clearTimeout(timeout);
-    afterClean();
+    source.set(next);
     timeout = setTimeout(() => {
       trigger.update((c) => !c);
     }, ms);
   };
 
   const set = (value: T) => {
-    triggerFn(() => source.set(value));
+    triggerFn(value);
   };
 
   const update = (fn: (prev: T) => T) => {
-    triggerFn(() => source.update(fn));
+    triggerFn(fn(untracked(source)));
   };
 
   const writable = toWritable(

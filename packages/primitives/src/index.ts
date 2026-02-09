@@ -1,3 +1,4 @@
+export * from './lib/chunked';
 export * from './lib/debounced';
 export * from './lib/derived';
 export { nestedEffect } from './lib/effect';

@@ -39,6 +39,11 @@ export function toWritable<T>(
   set: (value: T) => void,
   update?: (updater: (value: T) => T) => void,
   opt?: CreateSignalOptions<T> & {
+    /**
+     * If `true` (the default), the returned signal will be a computed signal that depends on the source signal.
+     * If `false`, the returned signal will be a direct wrapper around the source signal without creating a new computed signal.
+     * @default true
+     */
     pure?: boolean;
   },
 ): WritableSignal<T> {

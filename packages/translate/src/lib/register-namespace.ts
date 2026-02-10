@@ -6,17 +6,14 @@ import {
   type Signal,
   untracked,
 } from '@angular/core';
-import {
-  type ActivatedRouteSnapshot,
-  ResolveFn,
-  Router,
-} from '@angular/router';
+import { ResolveFn } from '@angular/router';
 import {
   type CompiledTranslation,
   type inferCompiledTranslationMap,
   type inferCompiledTranslationNamespace,
 } from './compile';
 import { replaceWithDelim } from './delim';
+import { injectResolveParamLocale } from './resovler-locale';
 import { type UnknownStringKeyObject } from './string-key-object.type';
 import {
   injectDefaultLocale,
@@ -142,31 +139,7 @@ export function registerNamespace<
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
 
-    let locale: string | null = null;
-
-    const paramName = injectIntlConfig()?.localeParamName;
-
-    const routerConfig = inject(Router)['options'];
-    const alwaysInheritParams =
-      typeof routerConfig === 'object' &&
-      !!routerConfig &&
-      routerConfig.paramsInheritanceStrategy === 'always';
-
-    if (paramName) {
-      locale = snapshot.paramMap.get(paramName);
-
-      if (!locale && !alwaysInheritParams) {
-        let currentRoute: ActivatedRouteSnapshot | null = snapshot;
-        while (currentRoute && !locale) {
-          locale = currentRoute.paramMap.get('locale');
-          currentRoute = currentRoute.parent;
-        }
-      }
-    }
-
-    if (!locale) {
-      locale = untracked(store.locale);
-    }
+    const locale = injectResolveParamLocale(snapshot);
 
     const defaultLocale = injectDefaultLocale();
     const shouldPreloadDefault =

@@ -62,7 +62,7 @@ const SIGNAL_FN_PROP = new Set([
  */
 export function isStore<T>(value: unknown): value is SignalStore<T> {
   return (
-    typeof value === 'object' &&
+    typeof value === 'function' &&
     value !== null &&
     (value as any)[IS_STORE] === true
   );

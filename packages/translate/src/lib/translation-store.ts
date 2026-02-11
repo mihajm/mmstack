@@ -92,11 +92,7 @@ export function injectSupportedLocales() {
 const STORE_LOCALE = signal('en-US');
 
 export function injectLocaleInternal() {
-  try {
-    return injectDynamicLocale();
-  } catch {
-    return STORE_LOCALE;
-  }
+  return STORE_LOCALE;
 }
 
 @Injectable({

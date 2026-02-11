@@ -1,6 +1,10 @@
 export * from './lib/compile';
 export { createNamespace } from './lib/create-namespace';
-export { registerNamespace } from './lib/register-namespace';
+export * from './lib/format';
+export {
+  registerNamespace,
+  registerRemoteNamespace,
+} from './lib/register-namespace';
 export { injectResolveParamLocale } from './lib/resovler-locale';
 export * from './lib/route-helpers';
 export { Translate } from './lib/translate';

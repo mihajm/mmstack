@@ -516,6 +516,62 @@ When switching locales dynamically, the library:
 3. Updates all reactive outputs automatically
 4. Falls back to the default locale if unavailable
 
+## Remote / Unsafe Namespaces
+
+For cases where you need to load translations from a remote API (where keys aren't known at compile-time), use `registerRemoteNamespace`. This provides an untyped experience but allows you to integrate dynamic content into the same system.
+
+```typescript
+import { registerRemoteNamespace } from '@mmstack/translate';
+
+// Returns an untyped t function: t('any.key')
+const { injectNamespaceT: injectRemoteT } = registerRemoteNamespace('remote', () => fetch('/api/en').then((r) => r.json()), {
+  'sl-SI': () => fetch('/api/sl').then((r) => r.json()),
+});
+
+// usage
+const t = injectRemoteT();
+
+// .asSignal variants also work
+const value = t('remote.myKey');
+const valueThatNeedsProps = t('remote.myOtherKey', {
+  name: 'John',
+});
+```
+
+## Formatters
+
+The library includes a set of reactive formatters that automatically adapt to the current locale. They are standalone functions that do not require dependency injection, making them easy to use anywhere.
+
+**Note:** For reactivity, wrap them in a `computed()` if the input signals change or if you want them to react to dynamic locale changes.
+
+Available formatters:
+
+- **`formatDate`**: Wraps `Intl.DateTimeFormat`
+- **`formatNumber`**: Wraps `Intl.NumberFormat`
+- **`formatCurrency`**: Wraps `Intl.NumberFormat` (currency style)
+- **`formatPercent`**: Wraps `Intl.NumberFormat` (percent style)
+- **`formatList`**: Wraps `Intl.ListFormat`
+- **`formatRelativeTime`**: Wraps `Intl.RelativeTimeFormat`
+- **`formatDisplayName`**: Wraps `Intl.DisplayNames`
+
+**Example:**
+
+```typescript
+import { computed, signal } from '@angular/core';
+import { formatCurrency, formatDate } from '@mmstack/translate';
+
+export class MyComponent {
+  readonly price = signal(1234.56);
+  readonly date = new Date();
+
+  // Reacts to price changes OR locale changes
+  readonly displayPrice = computed(() => formatCurrency(this.price(), 'EUR'));
+
+  // Reacts to locale changes
+  readonly displayDate = computed(() => formatDate(this.date));
+}
+```
+
 ## Migration from Other Libraries
 
 ### From @angular/localize

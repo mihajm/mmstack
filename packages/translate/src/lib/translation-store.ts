@@ -85,6 +85,20 @@ export function injectSupportedLocales() {
   return injectIntlConfig()?.supportedLocales ?? [injectDefaultLocale()];
 }
 
+/**
+ * @internal
+ * the actual locale signal used to store the current locale string
+ */
+const STORE_LOCALE = signal('en-US');
+
+export function injectLocaleInternal() {
+  try {
+    return injectDynamicLocale();
+  } catch {
+    return STORE_LOCALE;
+  }
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -92,7 +106,7 @@ export class TranslationStore {
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
   readonly loadQueue = signal<string[]>([]);
-  readonly locale = signal(injectDefaultLocale());
+  readonly locale: WritableSignal<string>;
   private readonly defaultLocale = injectDefaultLocale();
   private readonly translations = signal<
     Record<string, Record<string, string>>
@@ -189,6 +203,8 @@ export class TranslationStore {
   );
 
   constructor() {
+    this.locale = STORE_LOCALE;
+    this.locale.set(injectDefaultLocale());
     const paramName = this.config?.localeParamName;
     if (paramName) {
       const param = pathParam(paramName);

@@ -135,8 +135,14 @@ function toArrayStore<T extends any[]>(
     ownKeys() {
       const v = untracked(source);
       if (!Array.isArray(v)) return [];
-      const arr = v.map((_, i) => String(i));
-      arr.push('length');
+
+      const len = v.length;
+      const arr = new Array(len + 1);
+      for (let i = 0; i < len; i++) {
+        arr[i] = String(i);
+      }
+      arr[len] = 'length';
+
       return arr;
     },
     getPrototypeOf() {

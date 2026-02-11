@@ -182,14 +182,18 @@ export function toStore<T extends AnyRecord>(
 
 export function store<T extends AnyRecord>(
   value: T,
-  opt?: CreateSignalOptions<T>,
+  opt?: CreateSignalOptions<T> & {
+    injector?: Injector;
+  },
 ): WritableSignalStore<T> {
-  return toStore(signal(value, opt));
+  return toStore(signal(value, opt), opt?.injector);
 }
 
 export function mutableStore<T extends AnyRecord>(
   value: T,
-  opt?: CreateSignalOptions<T>,
+  opt?: CreateSignalOptions<T> & {
+    injector?: Injector;
+  },
 ): MutableSignalStore<T> {
-  return toStore(mutable(value, opt));
+  return toStore(mutable(value, opt), opt?.injector);
 }

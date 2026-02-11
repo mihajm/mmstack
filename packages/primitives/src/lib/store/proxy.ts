@@ -57,6 +57,14 @@ const SIGNAL_FN_PROP = new Set([
   'asReadonly',
 ]);
 
+const PROXY_CLEANUP = new FinalizationRegistry<{
+  target: object;
+  prop: PropertyKey;
+}>(({ target, prop }) => {
+  const storeCache = PROXY_CACHE.get(target);
+  if (storeCache) storeCache.delete(prop);
+});
+
 /**
  * Validates whether a value is a Signal Store.
  */
@@ -142,6 +150,7 @@ export function toStore<T extends AnyRecord>(
         const cached = cachedRef.deref();
         if (cached) return cached;
         storeCache.delete(prop);
+        PROXY_CLEANUP.unregister(cachedRef);
       }
 
       const value = untracked(target);
@@ -172,7 +181,9 @@ export function toStore<T extends AnyRecord>(
           });
 
       const proxy = toStore(computation, injector);
-      storeCache.set(prop, new WeakRef(proxy));
+      const ref = new WeakRef(proxy);
+      storeCache.set(prop, ref);
+      PROXY_CLEANUP.register(proxy, { target, prop }, ref);
       return proxy;
     },
   });
@@ -180,6 +191,10 @@ export function toStore<T extends AnyRecord>(
   return s;
 }
 
+/**
+ * Creates a WritableSignalStore from a value.
+ * @see {@link toStore}
+ */
 export function store<T extends AnyRecord>(
   value: T,
   opt?: CreateSignalOptions<T> & {
@@ -189,6 +204,10 @@ export function store<T extends AnyRecord>(
   return toStore(signal(value, opt), opt?.injector);
 }
 
+/**
+ * Creates a MutableSignalStore from a value.
+ * @see {@link toStore}
+ */
 export function mutableStore<T extends AnyRecord>(
   value: T,
   opt?: CreateSignalOptions<T> & {

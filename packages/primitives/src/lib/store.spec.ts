@@ -1,6 +1,6 @@
 import { Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { mutableStore, store } from './proxy';
+import { mutableStore, store } from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -89,5 +89,42 @@ describe('store', () => {
     // setter exists but is noop
     (readonly.a as any).set(2);
     expect(readonly.a()).toBe(1);
+  });
+
+  it('should support arrays as leaves, array access', () => {
+    const src = { a: [1, 2, 3] };
+    const s = store(src, { injector });
+    expect(s().a).toEqual([1, 2, 3]);
+    s.a.set([1, 2, 3, 4]);
+    expect(s().a).toEqual([1, 2, 3, 4]);
+  });
+
+  it('should support deep array signals', () => {
+    const src = { a: [{ id: 1 }, { id: 2 }] };
+    const s = store(src, { injector });
+
+    // Access index signal
+    const first = s.a[0];
+    expect(isSignal(first)).toBe(true);
+    expect(first()).toEqual({ id: 1 });
+
+    // Access nested property signal
+    expect(s.a[0].id()).toBe(1);
+
+    // Reactivity
+    s.a.update((arr) => [...arr, { id: 3 }]);
+    expect(s.a[2].id()).toBe(3);
+  });
+
+  it('should support array iteration', () => {
+    const src = { a: [1, 2, 3] };
+
+    const s = store(src, { injector });
+
+    let i = 0;
+    for (const val of s.a) {
+      expect(isSignal(val)).toBe(true);
+      expect(val()).toBe(src.a[i++]);
+    }
   });
 });

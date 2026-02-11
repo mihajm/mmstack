@@ -283,7 +283,6 @@ export function toStore<T extends AnyRecord>(
 ): SignalStore<T>;
 
 /**
- * @experimental This API is experimental and may change or be removed in future releases.
  * Converts a Signal into a deep-observable Store.
  * Accessing nested properties returns a derived Signal of that path.
  * @example

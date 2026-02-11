@@ -20,15 +20,27 @@ This library provides the following primitives:
 - `mutable` - A signal variant allowing in-place mutations while triggering updates.
 - `stored` - Creates a signal synchronized with persistent storage (e.g., localStorage).
 - `piped` – Creates a signal with a chainable & typesafe `.pipe(...)` method, which returns a pipable computed.
+- `store` - A deep-reactivity proxy, with Array & Record support.
 - `withHistory` - Enhances a signal with a complete undo/redo history stack.
-- `mapArray` - Maps a reactive array efficently into an array of stable derivations.
+- `indexArray` - Maps a reactive array by index into an array of stable derivations.
+- `keyArray` - Maps a reactive array by key (track by) into an array of stable derivations.
+- `mapObject` - Maps a reactive object by key (track by) into an object of stable derivations.
 - `nestedEffect` - Creates an effect with a hierarchical lifetime, enabling fine-grained, conditional side-effects.
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
 - `derived` - Creates a signal with two-way binding to a source signal.
+- `chunked` - Creates a signal that time-slices an array into chunked values & emits thats array based on the provided options.
+- `tabSync` - Low level primitive to "share" the value of a WritableSignal accross tabs via the BroadcastChannel api.
 - `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This was the suggestion from before; it just reads a little smoother and more accurately reflects what the facade creates directly).
+  - `mediaQuery` - A generic primitive that tracks a CSS media query (forms the basis for `prefersDarkMode` and `prefersReducedMotion`).
+  - `elementVisibility` - Tracks if an element is intersecting the viewport using IntersectionObserver.
+  - `elementSize` - Tracks the size of the DOM element
+  - `mediaQuery` - Creates a signal that reacts to changes based on the provided media queries "truthyness". Additional helpers such as `prefersDarkMode` and `prefersReducedMotion` available
+  - `mousePosition` - Throttled signal that reacts to the mouses position within a given element
+  - `networkStatus` - A signal of the current network status, used my @mmstack/resource
+  - `pageVisibility` - A signal useful when reacting to the user switching tabs
+  - `scrollPosition` - A throttled signal of the current scroll position within a given element
+  - `windowSize` - A throttled signal useful to reacting to window resize events
 - `until` - Creates a Promise that resolves when a signal's value meets a specific condition.
-- `mediaQuery` - A generic primitive that tracks a CSS media query (forms the basis for `prefersDarkMode` and `prefersReducedMotion`).
-- `elementVisibility` - Tracks if an element is intersecting the viewport using IntersectionObserver.
 
 ---
 
@@ -241,13 +253,122 @@ label(); // e.g., "#2"
 total(); // reactive sum
 ```
 
-### mapArray
+### store / mutableStore / toStore
+
+Provides "Deep Reactivity" by creating a proxy around a source object or array. Instead of reading raw values, accessing a property on a store returns a Signal representing that specific property.
+This allows you to pass specific slices of a large state object to child components as Input() signals, or bind directly to nested properties without manually creating computed or derived selectors.
+Propagates mutablity/writability down the chain so if the source is a WritableSignal all children are WritableSignal derivations.
+
+#### Features:
+
+- Lazy Generation: Sub-signals are created only when accessed.
+- Caching: Accessed signals are cached (via WeakRef), so accessing state.user.name multiple times returns the exact same signal instance.
+- Array Support: Array signals provide reactive access to indices (e.g., state.users[0])
+
+```ts
+import { Component, effect } from '@angular/core';
+import { store, mutableStore } from '@mmstack/primitives';
+import { FormsModule } from '@angular/forms';
+import { JsonPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-store-demo',
+  standalone: true,
+  imports: [FormsModule, JsonPipe],
+  template: `
+    <h3>User Profile</h3>
+    <p>Name: {{ state.user.name() }}</p>
+
+    <input [ngModel]="state.user.name()" (ngModelChange)="state.user.name.set($event)" />
+
+    <h3>Settings (Mutable)</h3>
+    <label>
+      <input type="checkbox" [checked]="settings.notifications.email()" (change)="toggleEmail()" />
+      Email Notifications
+    </label>
+
+    <pre>{{ state() | json }}</pre>
+  `,
+})
+export class StoreDemoComponent {
+  // 1. Standard Store
+  state = store({
+    user: {
+      name: 'Alice',
+      address: { city: 'New York', zip: 10001 },
+    },
+    tags: ['admin', 'editor'],
+  });
+
+  // 2. Mutable Store (allows .mutate/.inline)
+  settings = mutableStore({
+    theme: 'dark',
+    notifications: { email: true, sms: false },
+  });
+
+  constructor() {
+    // Effect tracks only the specific slice accessed
+    effect(() => {
+      console.log('City changed to:', this.state.user.address.city());
+    });
+
+    // Array access returns a signal for that index
+    const firstTag = this.state.tags[0];
+    console.log('First tag:', firstTag()); // 'admin'
+  }
+
+  updateZip() {
+    // You can set deep properties directly
+    this.state.user.address.zip.set(90210);
+  }
+
+  toggleEmail() {
+    // With mutableStore, you can use .mutate on the root or sub-signals
+    this.settings.notifications.mutate((n) => {
+      n.email = !n.email;
+    });
+  }
+}
+```
+
+### Array Stores
+
+When a store holds an array, the array itself is a signal, but you can also access indices as signals. Additionally Array stores also expose a `.length` signal & support Symbol.Iterator.
+Currently the array store function isn't exposed, but they are automatically created when a given property within the store is an array. Hit me up, if you need top-level array support, though in those cases you're probably looking for `indexArray` / `keyArray`
+
+```ts
+const state = store({
+  todos: [
+    { id: 1, text: 'Buy Milk', done: false },
+    { id: 2, text: 'Walk Dog', done: true },
+  ],
+});
+
+const firstTodo = state.todos[0]; // Signal<{ text: string, ... }>
+const firstTodoText = state.todos[0].text; // Signal<string>
+
+// Update specific item property without replacing the whole array
+state.todos[0].done.set(true);
+
+const len = state.todos.length(); // reacts to length changes
+
+for (const todo of state.todos) {
+  const t = todo(); // iteration returns proxied children
+  const id = todo.id();
+}
+```
+
+### indexArray/keyArray
 
 Reactive map helper that stabilizes a source array Signal by length. It provides stability by giving the mapping function a stable Signal<T> for each item based on its index. Sub signals are not re-created, rather they propagate value updates through. This is particularly useful for rendering lists (@for) as it minimizes DOM changes when array items change identity but represent the same conceptual entity.
 
+`keyArray` is similar, but stabilizes/reconciles via a provided track by function instead of the index. This is computationally more expensive, so use it when "identity" stability is more important than simply data pass-through
+
+Both utilize memory pooling to "ease" GC pressure.
+
 ```typescript
 import { Component, signal } from '@angular/core';
-import { mapArray, mutable } from '@mmstack/primitives';
+import { indexArray, keyArray, mutable } from '@mmstack/primitives';
 
 @Component({
   selector: 'app-map-demo',
@@ -269,7 +390,13 @@ export class ListComponent {
     { id: 2, name: 'B' },
   ]);
 
-  readonly displayItems = mapArray(this.sourceItems, (child, index) => computed(() => `Item ${index}: ${child().name}`));
+  readonly displayItems = indexArray(this.sourceItems, (child, index) => computed(() => `Item ${index}: ${child().name}`));
+
+  // keyArray is similar, but the index becomes dynamic & the child object is static
+  readonly keyed = keyArray(this.sourceItems, (child, index) => computed(() => `Item ${index()}: ${child.name}}`), {
+    key: (item) => item.id
+  });
+
 
   addItem() {
     this.sourceItems.update((items) => [...items, { id: Date.now(), name: String.fromCharCode(67 + items.length - 2) }]);
@@ -278,12 +405,12 @@ export class ListComponent {
   updateFirst() {
     this.sourceItems.update((items) => {
       items[0] = { ...items[0], name: items[0].name + '+' };
-      return [...items]; // New array, but mapArray keeps stable signals
+      return [...items]; // New array, but indexArray keeps stable signals
     });
   }
 
   // since the underlying source is a signal we can also create updaters in the mapper
-  readonly updatableItems = mapArray(this.sourceItems, (child, index) => {
+  readonly updatableItems = indexArray(this.sourceItems, (child, index) => {
 
     return {
       value: computed(() => `Item ${index}: ${child().name}`))
@@ -293,7 +420,7 @@ export class ListComponent {
 
 
   // since the underlying source is a WritableSignal we can also create updaters in the mapper
-  readonly writableItems = mapArray(this.sourceItems, (child, index) => {
+  readonly writableItems = indexArray(this.sourceItems, (child, index) => {
 
     return {
       value: computed(() => `Item ${index}: ${child().name}`))
@@ -307,7 +434,7 @@ export class ListComponent {
     { id: 2, name: 'B' },
   ]);
 
-  readonly mutableItems = mapArray(this.sourceItems, (child, index) => {
+  readonly mutableItems = indexArray(this.sourceItems, (child, index) => {
 
     return {
       value: computed(() => `Item ${index}: ${child().name}`))
@@ -316,6 +443,62 @@ export class ListComponent {
       })
     };
   });
+}
+```
+
+### mapObject
+
+Projects a reactive object (Record<string, T>) into a new object (Record<string, U>), maintaining referential stability for values associated with unchanged keys. This is the Object-equivalent of keyArray.
+
+The projection function receives the key and a value Signal. If the source is a WritableSignal or MutableSignal, the provided value signal is also writable (via derived), allowing child components or logic to update the specific property in the source object directly.
+
+```ts
+import { Component, signal, computed } from '@angular/core';
+import { mapObject } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-settings',
+  template: `
+    @for (key of objectKeys(controls()); track key) {
+      <div class="setting">
+        <span>{{ controls()[key].label }}</span>
+        <button (click)="controls()[key].toggle()">
+          {{ controls()[key].isActive() ? 'ON' : 'OFF' }}
+        </button>
+      </div>
+    }
+  `,
+})
+export class SettingsComponent {
+  objectKeys = Object.keys;
+
+  // Source state
+  readonly settings = signal<Record<string, boolean>>({
+    wifi: true,
+    bluetooth: false,
+  });
+
+  // Mapped object: { [key]: { label, isActive, toggle } }
+  readonly controls = mapObject(
+    this.settings,
+    (key, value) => {
+      // 'value' is a WritableSignal linked to this specific property
+      return {
+        label: key.toUpperCase(),
+        isActive: value, // Expose as ReadOnly for template
+        toggle: () => value.update((v) => !v),
+        destroy: () => console.log(`Cleanup logic for ${key}`),
+      };
+    },
+    {
+      // Optional cleanup hook when a key is removed from the source
+      onDestroy: (mappedItem) => mappedItem.destroy(),
+    },
+  );
+
+  addSetting() {
+    this.settings.update((s) => ({ ...s, airdrop: false }));
+  }
 }
 ```
 
@@ -366,11 +549,11 @@ export class NestedDemoComponent {
 
 #### Advanced Example: Fine-grained Lists
 
-`nestedEffect` can be composed with `mapArray` to create truly fine-grained reactive lists, where each item can manage its own side-effects (like external library integrations) that are automatically cleaned up when the item is removed.
+`nestedEffect` can be composed with `indexArray` to create truly fine-grained reactive lists, where each item can manage its own side-effects (like external library integrations) that are automatically cleaned up when the item is removed.
 
 ```ts
 import { Component, signal, computed } from '@angular/core';
-import { mapArray, nestedEffect } from '@mmstack/primitives';
+import { indexArray, nestedEffect } from '@mmstack/primitives';
 
 @Component({ selector: 'app-list-demo' })
 export class ListDemoComponent {
@@ -379,8 +562,8 @@ export class ListDemoComponent {
     { id: 2, name: 'Bob' },
   ]);
 
-  // mapArray creates stable signals for each item
-  readonly mappedUsers = mapArray(
+  // indexArray creates stable signals for each item
+  readonly mappedUsers = indexArray(
     this.users,
     (userSignal, index) => {
       // Create a side-effect tied to THIS item's lifetime
@@ -399,7 +582,7 @@ export class ListDemoComponent {
       };
     },
     {
-      // When mapArray removes an item, it calls `onDestroy`
+      // When indexArray removes an item, it calls `onDestroy`
       onDestroy: (mappedItem) => {
         mappedItem._destroy(); // Manually destroy the nested effect
       },
@@ -438,6 +621,84 @@ const name2 = derived(user, {
   from: (u) => u.name,
   onChange: (name) => user.update((prev) => ({ ...prev, name })),
 });
+```
+
+### chunked
+
+Creates a Signal that progressively emits segments of a source array, chunk by chunk. This is a time-slicing primitive designed to keep the main thread responsive when rendering large lists or processing heavy data sets.
+
+Instead of rendering 10,000 items at once (which would freeze the UI), chunked emits the first batch immediately, then schedules the next batch to be added in the next frame (or after a delay), repeating until the full list is visible. If the source array changes, the process resets and starts over from the first chunk.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { chunked } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-heavy-list',
+  template: `
+    <div class="status-bar">Loaded: {{ visibleItems().length }} / {{ allItems().length }}</div>
+
+    <ul>
+      @for (item of visibleItems(); track item.id) {
+        <li>{{ item.label }}</li>
+      }
+    </ul>
+  `,
+})
+export class HeavyListComponent {
+  // A heavy source with 10,000 items
+  readonly allItems = signal(Array.from({ length: 10000 }, (_, i) => ({ id: i, label: `Item #${i}` })));
+
+  // Process 100 items per animation frame to prevent UI blocking
+  readonly visibleItems = chunked(this.allItems, {
+    chunkSize: 100,
+    delay: 'frame', // 'frame' | 'microtask' | number (ms)
+  });
+}
+```
+
+### tabSync
+
+A low-level primitive that synchronizes a WritableSignal across multiple browser tabs or windows of the same application using the BroadcastChannel API. Used by the cache in @mmstack/resource & the stored signal.
+
+When the signal is updated in one tab, the new value is broadcast and automatically set in the corresponding signal in all other open tabs. This is ideal for synchronizing global state like user sessions, theme preferences, or shopping cart data.
+
+#### Key Features:
+
+- SSR Safe: Gracefully degrades to a standard signal on the server.
+- Automatic Cleanup: Handles event listeners and disconnects when the injection context is destroyed.
+- Smart ID Generation: Can auto-generate IDs for rapid prototyping, but supports explicit IDs for production stability.
+
+Note: While tabSync attempts to generate a deterministic ID based on the call site, it is highly recommended to provide a manual id string in production to ensure stability across different builds and minification processes.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { tabSync } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-sync-demo',
+  template: `
+    <p>Open this page in two tabs!</p>
+
+    <button (click)="counter.update(n => n + 1)">Count: {{ counter() }}</button>
+
+    <select [ngModel]="theme()" (ngModelChange)="theme.set($event)">
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  `,
+})
+export class SyncDemoComponent {
+  // 1. Quick usage (Auto-ID)
+  // Good for dev, but ID might change if code moves lines/files
+  readonly counter = tabSync(signal(0));
+
+  // 2. Production usage (Explicit ID)
+  // Recommended: Ensures tabs always find each other regardless of minification
+  readonly theme = tabSync(signal('light'), {
+    id: 'global-app-theme',
+  });
+}
 ```
 
 ### withHistory

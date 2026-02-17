@@ -24,12 +24,6 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 - **[`@mmstack/translate`](./packages/translate/README.md):** A modular & type safe solution to localization.
 - **[`@mmstack/local`](./packages/local/README.md):** Local data management helpers, starting with a reactive, type-safe IndexedDB wrapper for managing local client-side storage with optimistic updates and cross-tab syncing.
 
-**Upcoming Libraries:**
-
-- **`@mmstack/table-core`**: (Upcoming) Headless core logic for a high-performance, signal-based data table/grid.
-- **`@mmstack/table-client`**: (Upcoming) Client-side data handler (sorting, filtering, pagination etc.) for `@mmstack/table-core`.
-- **`@mmstack/table-material`**: (Upcoming) Angular Material components for rendering the `@mmstack/table-core` state.
-
 ## Versioning
 
 The major version of @mmstack libraries (e.g., v19.x.x, v20.x.x) aligns with the major version of Angular they are designed for. This ensures clear compatibility.

@@ -153,6 +153,17 @@ export type QueryResourceRef<TResult> = Omit<
   prefetch: (req?: Partial<HttpResourceRequest> | string) => Promise<void>;
 };
 
+/**
+ * Creates an HTTP resource with features like caching, retries, refresh intervals, circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
+ * This overload is for when a `defaultValue` is provided, ensuring that the resource's value is always defined.
+ * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
+ *               is called reactively, so the request can change over time.  If the function
+ *              returns `undefined`, the resource is considered "disabled" and no request will be made.
+ * @param options Configuration options for the resource.  These options extend the basic
+ *               `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
+ *                `onError`, `circuitBreaker`, and `cache`.  Additionally, when a `defaultValue` is provided, the resource's value will always be defined, even if the underlying HTTP request fails or is disabled.
+ * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
+ */
 export function queryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | string | undefined | void,
   options: QueryResourceOptions<TResult, TRaw> & {

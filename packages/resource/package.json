@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/resource",
   "dependencies": {
-    "@mmstack/primitives": "^21.0.0"
+    "@mmstack/primitives": "^21.0.17"
   },
   "peerDependencies": {
     "@angular/common": ">=21 <22",

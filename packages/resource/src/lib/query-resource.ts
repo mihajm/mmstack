@@ -150,11 +150,11 @@ export type QueryResourceRef<TResult> = Omit<
    * @param req - Optional partial request parameters to use for the prefetch.  This allows you
    *              to prefetch data with different parameters than the main resource request.
    */
-  prefetch: (req?: Partial<HttpResourceRequest>) => Promise<void>;
+  prefetch: (req?: Partial<HttpResourceRequest> | string) => Promise<void>;
 };
 
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | undefined | void,
+  request: () => HttpResourceRequest | string | undefined | void,
   options: QueryResourceOptions<TResult, TRaw> & {
     defaultValue: NoInfer<TResult>;
   },
@@ -164,7 +164,7 @@ export function queryResource<TResult, TRaw = TResult>(
  * Creates an extended HTTP resource with features like caching, retries, refresh intervals,
  * circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
  *
- * @param request A function that returns the `HttpResourceRequest` to be made.  This function
+ * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
  *                is called reactively, so the request can change over time.  If the function
  *                returns `undefined`, the resource is considered "disabled" and no request will be made.
  * @param options Configuration options for the resource.  These options extend the basic
@@ -173,12 +173,12 @@ export function queryResource<TResult, TRaw = TResult>(
  * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
  */
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | undefined | void,
+  request: () => HttpResourceRequest | string | undefined | void,
   options?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined>;
 
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | undefined | void,
+  request: () => HttpResourceRequest | string | undefined | void,
   options?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
   const cache = injectQueryCache<TResult>(options?.injector);
@@ -201,9 +201,12 @@ export function queryResource<TResult, TRaw = TResult>(
     : createEqualRequest(options?.equal);
 
   const stableRequest = computed(
-    () => {
+    (): HttpResourceRequest | undefined => {
       if (!networkAvailable() || cb.isOpen()) return undefined;
-      return request() ?? undefined;
+      const req = request();
+      if (!req) return undefined;
+      if (typeof req === 'string') return { method: 'GET', url: req };
+      return req;
     },
     {
       equal: (a, b) => {
@@ -390,9 +393,12 @@ export function queryResource<TResult, TRaw = TResult>(
 
       const request = untracked(stableRequest);
 
+      const partialReq =
+        typeof partial === 'string' ? { method: 'GET', url: partial } : partial;
+
       const prefetchRequest = {
         ...request,
-        ...partial,
+        ...partialReq,
       };
       if (!prefetchRequest.url) return Promise.resolve();
 

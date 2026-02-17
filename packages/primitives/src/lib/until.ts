@@ -1,11 +1,11 @@
 import {
   DestroyRef,
   effect,
-  EffectRef,
+  type EffectRef,
   inject,
   Injector,
   runInInjectionContext,
-  Signal,
+  type Signal,
   untracked,
 } from '@angular/core';
 

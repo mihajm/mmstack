@@ -1,9 +1,9 @@
 import {
   computed,
-  CreateSignalOptions,
-  Signal,
+  type CreateSignalOptions,
+  type Signal,
   untracked,
-  WritableSignal,
+  type WritableSignal,
 } from '@angular/core';
 
 /**

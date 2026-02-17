@@ -7,7 +7,7 @@ import {
   isSignal,
   PLATFORM_ID,
   signal,
-  Signal,
+  type Signal,
 } from '@angular/core';
 
 /**

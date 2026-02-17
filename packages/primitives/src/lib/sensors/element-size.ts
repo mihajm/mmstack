@@ -7,7 +7,7 @@ import {
   isSignal,
   PLATFORM_ID,
   signal,
-  Signal,
+  type Signal,
   untracked,
 } from '@angular/core';
 
@@ -58,8 +58,6 @@ export function elementSize(
     | Signal<ElementRef<Element> | Element | null> = inject(ElementRef),
   opt?: ElementSizeOptions,
 ): ElementSizeSignal {
-
-
   const getElement = (): Element | null => {
     if (isSignal(target)) {
       try {
@@ -89,22 +87,25 @@ export function elementSize(
     });
   }
 
-  const state = signal<ElementSize | undefined>(untracked(resolveInitialValue), {
-    debugName: opt?.debugName,
-    equal: (a, b) => a?.width === b?.width && a?.height === b?.height,
-  });
+  const state = signal<ElementSize | undefined>(
+    untracked(resolveInitialValue),
+    {
+      debugName: opt?.debugName,
+      equal: (a, b) => a?.width === b?.width && a?.height === b?.height,
+    },
+  );
 
   const targetSignal = isSignal(target) ? target : computed(() => target);
 
   effect((cleanup) => {
     const el = targetSignal();
     if (el) {
-       const nativeEl = el instanceof ElementRef ? el.nativeElement : el;
-       const rect = nativeEl.getBoundingClientRect();
-       untracked(() => state.set({ width: rect.width, height: rect.height }));
+      const nativeEl = el instanceof ElementRef ? el.nativeElement : el;
+      const rect = nativeEl.getBoundingClientRect();
+      untracked(() => state.set({ width: rect.width, height: rect.height }));
     } else {
-       untracked(() => state.set(undefined));
-       return;
+      untracked(() => state.set(undefined));
+      return;
     }
 
     if (!observerSupported()) return;
@@ -120,7 +121,10 @@ export function elementSize(
         const size = entry.borderBoxSize[0];
         width = size.inlineSize;
         height = size.blockSize;
-      } else if (boxOption === 'content-box' && entry.contentBoxSize?.length > 0) {
+      } else if (
+        boxOption === 'content-box' &&
+        entry.contentBoxSize?.length > 0
+      ) {
         width = entry.contentBoxSize[0].inlineSize;
         height = entry.contentBoxSize[0].blockSize;
       } else {

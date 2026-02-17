@@ -7,7 +7,7 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { DebouncedSignal } from './debounced';
+import { type DebouncedSignal } from './debounced';
 import { toWritable } from './to-writable';
 
 /**

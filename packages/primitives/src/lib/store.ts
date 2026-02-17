@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { derived } from './derived';
 import { isWritableSignal } from './mappers/util';
-import { isMutable, mutable, MutableSignal } from './mutable';
+import { isMutable, mutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 
 type BaseType =

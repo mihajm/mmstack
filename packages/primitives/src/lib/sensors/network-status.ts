@@ -4,7 +4,7 @@ import {
   DestroyRef,
   inject,
   PLATFORM_ID,
-  Signal,
+  type Signal,
   signal,
 } from '@angular/core';
 

@@ -1,11 +1,11 @@
 import {
   computed,
-  CreateSignalOptions,
+  type CreateSignalOptions,
   effect,
   linkedSignal,
-  Signal,
+  type Signal,
 } from '@angular/core';
-import { Operator } from './types';
+import { type Operator } from './types';
 
 /** Project with optional equality. Pure & sync. */
 export const select =

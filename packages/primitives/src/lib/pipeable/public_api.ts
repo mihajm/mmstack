@@ -1,3 +1,3 @@
 export * from './operators';
 export * from './pipeble';
-export { PipeableSignal } from './types';
+export { type PipeableSignal } from './types';

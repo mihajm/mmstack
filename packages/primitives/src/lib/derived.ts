@@ -1,12 +1,12 @@
 import {
   computed,
-  CreateSignalOptions,
+  type CreateSignalOptions,
   signal,
   untracked,
-  ValueEqualityFn,
+  type ValueEqualityFn,
   type WritableSignal,
 } from '@angular/core';
-import { isMutable, MutableSignal } from './mutable';
+import { isMutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 
 type UnknownObject = Record<PropertyKey, unknown>;

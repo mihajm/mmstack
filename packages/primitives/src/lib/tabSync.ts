@@ -5,7 +5,7 @@ import {
   inject,
   Injectable,
   PLATFORM_ID,
-  WritableSignal,
+  type WritableSignal,
 } from '@angular/core';
 
 @Injectable({

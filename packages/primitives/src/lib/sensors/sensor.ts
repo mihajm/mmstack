@@ -1,4 +1,4 @@
-import { ElementRef, type Signal } from '@angular/core';
+import { type ElementRef, type Signal } from '@angular/core';
 import {
   type ElementSizeOptions as BaseElementSizeOptions,
   type ElementSizeSignal,
@@ -9,7 +9,11 @@ import {
   type ElementVisibilitySignal,
   elementVisibility,
 } from './element-visibility';
-import { mediaQuery, prefersDarkMode, prefersReducedMotion } from './media-query';
+import {
+  mediaQuery,
+  prefersDarkMode,
+  prefersReducedMotion,
+} from './media-query';
 import {
   type MousePositionOptions,
   type MousePositionSignal,
@@ -28,7 +32,6 @@ import {
   windowSize,
 } from './window-size';
 
-
 type SensorTypedOptions = {
   elementVisibility: {
     opt: BaseElementVisibilityOptions & {
@@ -36,23 +39,23 @@ type SensorTypedOptions = {
         | ElementRef<Element>
         | Element
         | Signal<ElementRef<Element> | Element | null>;
-    },
-    returnType: ElementVisibilitySignal
+    };
+    returnType: ElementVisibilitySignal;
   };
   elementSize: {
     opt: BaseElementSizeOptions & {
-    target?:
-      | ElementRef<Element>
-      | Element
-      | Signal<ElementRef<Element> | Element | null>;
-    },
-    returnType: ElementSizeSignal
+      target?:
+        | ElementRef<Element>
+        | Element
+        | Signal<ElementRef<Element> | Element | null>;
+    };
+    returnType: ElementSizeSignal;
   };
   mousePosition: {
     opt: MousePositionOptions;
     returnType: MousePositionSignal;
   };
-  networkStatus: {  
+  networkStatus: {
     opt: { debugName?: string };
     returnType: NetworkStatusSignal;
   };
@@ -80,8 +83,7 @@ type SensorTypedOptions = {
     opt: { query: string; debugName?: string };
     returnType: Signal<boolean>;
   };
-}
-
+};
 
 /**
  * Creates a sensor signal that the elements visiblity within the viewport
@@ -93,7 +95,7 @@ type SensorTypedOptions = {
  */
 export function sensor(
   type: 'elementVisibility',
-  options?: SensorTypedOptions['elementVisibility']['opt'] ,
+  options?: SensorTypedOptions['elementVisibility']['opt'],
 ): ElementVisibilitySignal;
 
 /**
@@ -236,7 +238,7 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
     case 'reduced-motion':
       return prefersReducedMotion(options?.debugName);
     case 'mediaQuery': {
-      const opt = options as SensorTypedOptions['mediaQuery']['opt']
+      const opt = options as SensorTypedOptions['mediaQuery']['opt'];
       return mediaQuery(opt.query, opt.debugName);
     }
     case 'windowSize':
@@ -258,18 +260,18 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
 
 type SensorsOptions<TKey extends keyof SensorTypedOptions> = {
   [K in TKey]: SensorTypedOptions[K]['opt'];
-}
+};
 
 type Sensors<TKey extends keyof SensorTypedOptions> = {
   [K in TKey]: SensorTypedOptions[K]['returnType'];
-}
+};
 
 export function sensors<const TType extends keyof SensorTypedOptions>(
   track: TType[],
-  opt?: SensorsOptions<TType>
+  opt?: SensorsOptions<TType>,
 ): Sensors<TType> {
   return track.reduce((result, key) => {
-    result[key] = sensor(key as any, opt?.[key])
-    return result
-  }, {} as Sensors<TType>)
+    result[key] = sensor(key as any, opt?.[key]);
+    return result;
+  }, {} as Sensors<TType>);
 }

@@ -7,10 +7,10 @@ import {
   isDevMode,
   isSignal,
   PLATFORM_ID,
-  Signal,
   signal,
   untracked,
   type CreateSignalOptions,
+  type Signal,
   type WritableSignal,
 } from '@angular/core';
 import { toWritable } from './to-writable';

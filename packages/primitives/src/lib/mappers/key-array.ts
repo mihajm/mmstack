@@ -59,7 +59,7 @@ export function keyArray<T, U, K>(
       let i: number;
       let j: number;
       const newLen = newItems.length;
-      let len = items.length;
+      const len = items.length;
       const newMapped = new Array<U>(newLen);
       const newIndexes = newIndexesCache;
       newIndexes.length = 0;

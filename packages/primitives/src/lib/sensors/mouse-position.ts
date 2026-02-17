@@ -6,7 +6,7 @@ import {
   inject,
   isDevMode,
   PLATFORM_ID,
-  Signal,
+  type Signal,
 } from '@angular/core';
 import { throttled } from '../throttled';
 

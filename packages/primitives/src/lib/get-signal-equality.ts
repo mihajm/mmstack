@@ -1,4 +1,4 @@
-import { Signal, ValueEqualityFn } from '@angular/core';
+import { type Signal, type ValueEqualityFn } from '@angular/core';
 import { SIGNAL } from '@angular/core/primitives/signals';
 
 /**

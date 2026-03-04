@@ -160,7 +160,7 @@ export class Link {
   readonly queryParams = input<Params>();
   readonly fragment = input<string>();
   readonly queryParamsHandling = input<'merge' | 'preserve' | ''>();
-  readonly state = input<Record<string, any>>();
+  readonly state = input<object>();
   readonly info = input<unknown>();
   readonly relativeTo = input<ActivatedRoute>();
   readonly skipLocationChange = input(false, { transform: booleanAttribute });

@@ -10,7 +10,7 @@ const cache = new Map<string, Intl.NumberFormat>();
 
 function unwrapValue(
   value: SupportedNumberValue | Signal<SupportedNumberValue>,
-  fallbackToZero: boolean = false,
+  fallbackToZero = false,
 ): number | null {
   const unwrapped = unwrap(value);
 
@@ -143,7 +143,7 @@ export function formatPercent(
 ): string {
   const unwrappedOpt = unwrap(opt);
 
-  let unwrappedNumber = unwrapValue(value, unwrappedOpt?.fallbackToZero);
+  const unwrappedNumber = unwrapValue(value, unwrappedOpt?.fallbackToZero);
 
   if (unwrappedNumber === null) return '';
 

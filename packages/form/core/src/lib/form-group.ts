@@ -19,8 +19,6 @@ import {
 import { type SignalValue } from './signal-value.type';
 import { mergeIfObject } from './util';
 
-type AnyObject = Record<PropertyKey, any>;
-
 /**
  * Extracts the partial value types from a record of `FormControlSignal` instances.
  * This is used to construct the `partialValue` type for `FormGroupSignal`.
@@ -264,7 +262,7 @@ export function formGroup<
       const pv = ctrl.partialValue();
 
       if (pv === undefined) continue;
-      (obj as AnyObject)[key] = pv;
+      (obj as Record<PropertyKey, any>)[key] = pv;
     }
 
     return obj;

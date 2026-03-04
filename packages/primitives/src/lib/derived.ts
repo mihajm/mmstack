@@ -9,8 +9,6 @@ import {
 import { isMutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 
-type UnknownObject = Record<PropertyKey, unknown>;
-
 /**
  * Options for creating a derived signal using the full `derived` function signature.
  * @typeParam T - The type of the source signal's value (parent).
@@ -95,7 +93,7 @@ export function derived<T, U>(
  * console.log(user().name); // Outputs: Jane
  * ```
  */
-export function derived<T extends UnknownObject, TKey extends keyof T>(
+export function derived<T extends object, TKey extends keyof T>(
   source: MutableSignal<T>,
   key: TKey,
   opt?: CreateSignalOptions<T[TKey]>,
@@ -125,7 +123,7 @@ export function derived<T extends UnknownObject, TKey extends keyof T>(
  * console.log(user().name); // Outputs: Jane
  * ```
  */
-export function derived<T extends UnknownObject, TKey extends keyof T>(
+export function derived<T extends object, TKey extends keyof T>(
   source: WritableSignal<T>,
   key: TKey,
   opt?: CreateSignalOptions<T[TKey]>,
@@ -220,7 +218,8 @@ export function derived<T, U>(
         : isMutable(source)
           ? (next: U) => {
               source.mutate((cur) => {
-                (cur as UnknownObject)[optOrKey] = next as T[keyof T];
+                (cur as Record<PropertyKey, unknown>)[optOrKey] =
+                  next as T[keyof T];
                 return cur;
               });
             }

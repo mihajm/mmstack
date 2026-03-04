@@ -228,8 +228,8 @@ function toArrayStore<T extends any[]>(
             });
 
         const proxy = Array.isArray(untracked(computation))
-          ? toArrayStore(computation, injector)
-          : toStore(computation, injector);
+          ? toArrayStore(computation as any, injector)
+          : toStore(computation as any, injector);
 
         const ref = new WeakRef(proxy);
         storeCache.set(idx, ref);
@@ -381,8 +381,8 @@ export function toStore<T extends AnyRecord>(
           });
 
       const proxy = Array.isArray(untracked(computation))
-        ? toArrayStore(computation, injector)
-        : toStore(computation, injector);
+        ? toArrayStore(computation as any, injector)
+        : toStore(computation as any, injector);
       const ref = new WeakRef(proxy);
       storeCache.set(prop, ref);
       PROXY_CLEANUP.register(proxy, { target, prop }, ref);

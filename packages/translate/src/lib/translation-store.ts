@@ -132,8 +132,8 @@ export class TranslationStore {
   );
 
   readonly dynamicLocaleLoader = resource({
-    params: computed(() => this.loadQueue().at(0) ?? null),
-    loader: async ({ params: newLocale, abortSignal }) => {
+    request: computed(() => this.loadQueue().at(0) ?? null),
+    loader: async ({ request: newLocale, abortSignal }) => {
       if (!newLocale) return;
 
       const currentTranslations = untracked(this.translations);

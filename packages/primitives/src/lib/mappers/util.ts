@@ -1,14 +1,10 @@
-import {
-  type Signal,
-  type WritableSignal,
-  isWritableSignal as assertion,
-} from '@angular/core';
+import { type Signal, type WritableSignal } from '@angular/core';
 import { isMutable } from '../mutable';
 
 export function isWritableSignal<T>(
   value: Signal<T>,
 ): value is WritableSignal<T> {
-  return assertion(value);
+  return 'set' in value && typeof value.set === 'function';
 }
 
 /**

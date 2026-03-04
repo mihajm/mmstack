@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/resource",
-  "version": "21.0.3",
+  "version": "19.3.0",
   "keywords": [
     "angular",
     "signals",
@@ -17,11 +17,11 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/resource",
   "dependencies": {
-    "@mmstack/primitives": "^21.0.17"
+    "@mmstack/primitives": "^19.3.0"
   },
   "peerDependencies": {
-    "@angular/common": ">=21 <22",
-    "@angular/core": ">=21 <22",
+    "@angular/common": ">=19 <20",
+    "@angular/core": ">=19 <20",
     "rxjs": "~7.8.2"
   },
   "sideEffects": false

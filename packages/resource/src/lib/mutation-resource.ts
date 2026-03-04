@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   linkedSignal,
+  ResourceStatus,
   Signal,
   signal,
   ValueEqualityFn,
@@ -237,14 +238,14 @@ export function mutationResource<
     .pipe(
       combineLatestWith(error$, value$),
       map(([status, error, value]): StatusResult<TResult> | null => {
-        if (status === 'error' && error) {
+        if (status === ResourceStatus.Error && error) {
           return {
             status: 'error',
             error,
           };
         }
 
-        if (status === 'resolved' && value !== null) {
+        if (status === ResourceStatus.Resolved && value !== null) {
           return {
             status: 'resolved',
             value,

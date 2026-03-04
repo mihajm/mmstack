@@ -37,11 +37,11 @@ function pooledKeys<T extends Record<string, any>>(
   });
 }
 
-type MappedObject<T extends Record<string, any>, U> = {
+type MappedObject<T extends object, U> = {
   [K in keyof T]: U;
 };
 
-export function mapObject<T extends Record<string, any>, U>(
+export function mapObject<T extends object, U>(
   source: MutableSignal<T>,
   mapFn: <K extends keyof T>(key: K, value: MutableSignal<T[K]>) => U,
   options?: {
@@ -49,7 +49,7 @@ export function mapObject<T extends Record<string, any>, U>(
   },
 ): Signal<MappedObject<T, U>>;
 
-export function mapObject<T extends Record<string, any>, U>(
+export function mapObject<T extends object, U>(
   source: WritableSignal<T>,
   mapFn: <K extends keyof T>(key: K, value: WritableSignal<T[K]>) => U,
   options?: {
@@ -57,7 +57,7 @@ export function mapObject<T extends Record<string, any>, U>(
   },
 ): Signal<MappedObject<T, U>>;
 
-export function mapObject<T extends Record<string, any>, U>(
+export function mapObject<T extends object, U>(
   source: (() => T) | Signal<T>,
   mapFn: <K extends keyof T>(key: K, value: Signal<T[K]>) => U,
   options?: {
@@ -65,7 +65,7 @@ export function mapObject<T extends Record<string, any>, U>(
   },
 ): Signal<MappedObject<T, U>>;
 
-export function mapObject<T extends Record<string, any>, U>(
+export function mapObject<T extends object, U>(
   source: (() => T) | Signal<T> | WritableSignal<T> | MutableSignal<T>,
   mapFn: <K extends keyof T>(key: K, value: any) => U,
   options: {

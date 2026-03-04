@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/di",
-  "version": "19.3.0",
+  "version": "20.5.0",
   "keywords": [
     "angular",
     "dependency injection",
@@ -16,7 +16,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/di",
   "peerDependencies": {
-    "@angular/core": ">=19 <20"
+    "@angular/core": ">=20 <21"
   },
   "sideEffects": false
 }

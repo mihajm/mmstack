@@ -86,8 +86,8 @@ export function createNewTable<
 ): IDBTable<T, TKey> {
   const rawTableData = toResourceObject(
     resource<T[], IDBConnection>({
-      request: () => client.value(),
-      loader: ({ request }) => request.getAll(tableName),
+      params: () => client.value(),
+      loader: ({ params }) => params.getAll(tableName),
       defaultValue: [],
       equal: (a, b) => {
         if (a.length !== b.length) return false;

@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-adapters",
-  "version": "19.3.0",
+  "version": "20.5.0",
   "keywords": [
     "angular",
     "signals",
@@ -15,14 +15,14 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/adapters",
   "dependencies": {
-    "@mmstack/form-core": "^19.3.0",
-    "@mmstack/form-validation": "^19.3.0",
-    "@mmstack/primitives": "^19.3.0"
+    "@mmstack/form-core": "^20.5.0",
+    "@mmstack/form-validation": "^20.5.0",
+    "@mmstack/primitives": "^20.5.0"
   },
   "peerDependencies": {
-    "@angular/core": ">=19 <20",
-    "@angular/common": ">=19 <20",
-    "@angular/forms": ">=19 <20"
+    "@angular/core": ">=20 <21",
+    "@angular/common": ">=20 <21",
+    "@angular/forms": ">=20 <21"
   },
   "sideEffects": false
 }

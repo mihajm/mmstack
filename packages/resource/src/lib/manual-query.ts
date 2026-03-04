@@ -1,12 +1,5 @@
 import { HttpResourceRequest } from '@angular/common/http';
-import {
-  computed,
-  inject,
-  Injector,
-  ResourceStatus,
-  signal,
-  untracked,
-} from '@angular/core';
+import { computed, inject, Injector, signal, untracked } from '@angular/core';
 import { nestedEffect } from '@mmstack/primitives';
 import {
   queryResource,
@@ -105,10 +98,10 @@ export function manualQueryResource<TResult, TRaw = TResult>(
           () => {
             const status = resource.status();
 
-            if (status === ResourceStatus.Resolved) {
+            if (status === 'resolved') {
               watcher.destroy();
               res(untracked(resource.value) as TResult);
-            } else if (status === ResourceStatus.Error) {
+            } else if (status === 'error') {
               watcher.destroy();
               rej(untracked(resource.error));
             }

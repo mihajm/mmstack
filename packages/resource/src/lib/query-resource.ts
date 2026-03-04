@@ -14,7 +14,6 @@ import {
   inject,
   isDevMode,
   linkedSignal,
-  ResourceStatus,
   Signal,
   untracked,
   WritableSignal,
@@ -354,9 +353,9 @@ export function queryResource<TResult, TRaw = TResult>(
   // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
   const cbEffectRef = effect(() => {
     const status = resource.status();
-    if (status === ResourceStatus.Error)
+    if (status === 'error')
       cb.fail(untracked(resource.error) as Error | undefined);
-    else if (status === ResourceStatus.Resolved) cb.success();
+    else if (status === 'resolved') cb.success();
   });
 
   const set = (value: TResult) => {
@@ -427,6 +426,13 @@ export function queryResource<TResult, TRaw = TResult>(
         await firstValueFrom(
           client.request(prefetchRequest.method ?? 'GET', prefetchRequest.url, {
             ...prefetchRequest,
+            credentials: prefetchRequest.credentials as
+              | RequestCredentials
+              | undefined,
+            priority: prefetchRequest.priority as RequestPriority | undefined,
+            cache: prefetchRequest.cache as RequestCache | undefined,
+            mode: prefetchRequest.mode as RequestMode | undefined,
+            redirect: prefetchRequest.redirect as RequestRedirect | undefined,
             context: setCacheContext(prefetchRequest.context, {
               staleTime,
               ttl,

@@ -4,6 +4,7 @@ export function toResourceObject<T>(
   res: HttpResourceRef<T>,
 ): HttpResourceRef<T> {
   return {
+    snapshot: res.snapshot,
     asReadonly: () => res.asReadonly(),
     destroy: () => res.destroy(),
     error: res.error,

@@ -27,6 +27,7 @@ export function toResourceObject<T>(
   const update: ResourceRef<T>['update'] = (u) => res.update(u);
 
   return {
+    snapshot: res.snapshot,
     asReadonly: () => res.asReadonly(),
     destroy: () => res.destroy(),
     error: res.error,

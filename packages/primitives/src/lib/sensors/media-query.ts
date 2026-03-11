@@ -56,7 +56,11 @@ export function mediaQuery(
   query: string,
   debugName = 'mediaQuery',
 ): Signal<boolean> {
-  if (isPlatformServer(inject(PLATFORM_ID)))
+  if (
+    isPlatformServer(inject(PLATFORM_ID)) ||
+    typeof window === 'undefined' ||
+    typeof window.matchMedia !== 'function' // jsdom doesn't implement matchMedia
+  )
     return computed(() => false, { debugName });
 
   const mediaQueryList = window.matchMedia(query);

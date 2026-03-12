@@ -23,11 +23,7 @@
       "defaultConfiguration": "production"
     },
     "test": {
-      "executor": "@nx/jest:jest",
-      "outputs": ["{workspaceRoot}/coverage/{projectRoot}"],
-      "options": {
-        "jestConfig": "packages/translate/jest.config.ts"
-      }
+      "executor": "@nx/angular:unit-test"
     }
   }
 }

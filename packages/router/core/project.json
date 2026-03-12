@@ -28,9 +28,6 @@
       "options": {
         "jestConfig": "packages/router/core/jest.config.ts"
       }
-    },
-    "lint": {
-      "executor": "@nx/eslint:lint"
     }
   }
 }

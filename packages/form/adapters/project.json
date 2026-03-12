@@ -28,9 +28,6 @@
       "options": {
         "jestConfig": "packages/form/adapters/jest.config.ts"
       }
-    },
-    "lint": {
-      "executor": "@nx/eslint:lint"
     }
   }
 }

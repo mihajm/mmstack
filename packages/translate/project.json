@@ -4,15 +4,6 @@
   "sourceRoot": "packages/translate/src",
   "prefix": "mm",
   "projectType": "library",
-  "release": {
-    "version": {
-      "generatorOptions": {
-        "packageRoot": "dist/{projectRoot}",
-        "currentVersionResolver": "git-tag",
-        "fallbackCurrentVersionResolver": "disk"
-      }
-    }
-  },
   "tags": [],
   "targets": {
     "build": {
@@ -30,11 +21,6 @@
         }
       },
       "defaultConfiguration": "production"
-    },
-    "nx-release-publish": {
-      "options": {
-        "packageRoot": "dist/{projectRoot}"
-      }
     },
     "test": {
       "executor": "@nx/jest:jest",

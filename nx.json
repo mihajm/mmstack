@@ -13,11 +13,11 @@
       "!{projectRoot}/src/test-setup.[jt]s",
       "!{projectRoot}/test-setup.[jt]s"
     ],
-    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"]
+    "sharedGlobals": []
   },
   "nxCloudId": "67e0fa0bd158442904e10d69",
   "targetDefaults": {
-    "@angular-devkit/build-angular:application": {
+    "@angular/build:application": {
       "cache": true,
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
@@ -31,18 +31,13 @@
         "{workspaceRoot}/eslint.config.mjs"
       ]
     },
-    "@nx/jest:jest": {
+    "@angular/build:unit-test": {
       "cache": true,
-      "inputs": ["default", "^production", "{workspaceRoot}/jest.preset.js"],
-      "options": {
-        "passWithNoTests": true
-      },
-      "configurations": {
-        "ci": {
-          "ci": true,
-          "codeCoverage": true
-        }
-      }
+      "inputs": ["default", "^production"]
+    },
+    "@nx/angular:unit-test": {
+      "cache": true,
+      "inputs": ["default", "^production"]
     },
     "@nx/angular:package": {
       "cache": true,
@@ -55,26 +50,11 @@
       "e2eTestRunner": "none",
       "linter": "eslint",
       "style": "scss",
-      "unitTestRunner": "jest"
+      "unitTestRunner": "vitest-angular"
     },
     "@nx/angular:library": {
       "linter": "eslint",
-      "unitTestRunner": "jest"
-    },
-    "@nx/angular:component": {
-      "style": "css"
-    }
-  },
-  "release": {
-    "projects": ["packages/**", "!packages/table-**", "router-preload"],
-    "releaseTagPattern": "{projectName}@{version}",
-    "projectsRelationship": "independent",
-    "changelog": {
-      "projectChangelogs": true,
-      "workspaceChangelog": false
-    },
-    "version": {
-      "preVersionCommand": "pnpm dlx nx run-many -t build"
+      "unitTestRunner": "vitest-angular"
     }
   }
 }

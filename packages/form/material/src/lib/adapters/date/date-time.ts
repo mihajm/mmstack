@@ -6,11 +6,11 @@ import {
   type DateTimeStateOptions as GenericDateTimeStateOptions,
   type InjectedDateTimeStateOptions as GenericInjectedDateTimeStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal, toFakeDerivation } from '@mmstack/primitives';
+import { type DerivedSignal, toFakeDerivation } from '@mmstack/primitives';
 import {
   createTimeState,
   injectCreateTimeState,
-  MaterialTimeOptionSpecifics,
+  type MaterialTimeOptionSpecifics,
   type TimeState,
 } from './time';
 

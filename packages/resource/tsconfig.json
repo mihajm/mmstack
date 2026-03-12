@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "target": "es2024",
+    "moduleResolution": "bundler",
     "strict": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "lib": ["esnext", "dom"],
+    "emitDecoratorMetadata": false,
+    "module": "preserve"
   },
   "files": [],
   "include": [],

@@ -2,7 +2,6 @@
 
 An ecosystem of reactive, type-safe libraries to supercharge your Angular Signal game. :)
 
-[![CI Status](https://img.shields.io/github/actions/workflow/status/mihajm/mmstack/ci.yml?branch=master&style=flat-square)](https://github.com/mihajm/mmstack/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
 

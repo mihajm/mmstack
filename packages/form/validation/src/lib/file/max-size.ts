@@ -1,5 +1,5 @@
 import { isDevMode } from '@angular/core';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 const KNOWN_SIZE_TYPES = [
   'b',

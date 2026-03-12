@@ -1,6 +1,6 @@
 import { createGeneralValidators } from '../general';
 import { createMergeValidators } from '../merge-validators';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 import { createEmailValidator, defaultEmailMessageFactory } from './email';
 import {
   createIsStringValidator,

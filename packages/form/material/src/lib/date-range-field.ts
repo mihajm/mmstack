@@ -17,19 +17,19 @@ import {
   MatStartDate,
 } from '@angular/material/datepicker';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatPrefix,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatTooltip } from '@angular/material/tooltip';
-import { DateRangeState, SignalErrorValidator } from './adapters';
+import { type DateRangeState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-date-range-field',

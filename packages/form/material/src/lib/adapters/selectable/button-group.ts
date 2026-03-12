@@ -1,4 +1,4 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import {
   type ButtonGroupState as GenericButtonGroupState,
   type ButtonGroupStateOptions as GenericButtonGroupStateOptions,
@@ -6,7 +6,7 @@ import {
   createButtonGroupState as genericCreateButtonGroupState,
   injectCreateButtonGroupState as genericInjectCreateButtonGroupState,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 
 export type ButtonGroupState<T, TParent = undefined> = GenericButtonGroupState<
   T,

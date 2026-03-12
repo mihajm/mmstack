@@ -2,7 +2,7 @@ import {
   createMinLengthValidator as arrayCreateMinValidator,
   defaultMinLengthMessageFactory as arrayDefaultMessageFactory,
 } from '../array/min-length';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultMinLengthMessageFactory(min: number) {
   return arrayDefaultMessageFactory(min, 'characters');

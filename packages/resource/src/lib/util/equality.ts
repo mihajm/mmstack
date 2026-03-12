@@ -2,7 +2,7 @@ import {
   HttpContext,
   HttpHeaders,
   HttpParams,
-  HttpResourceRequest,
+  type HttpResourceRequest,
 } from '@angular/common/http';
 import { type ValueEqualityFn } from '@angular/core';
 

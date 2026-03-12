@@ -1,6 +1,6 @@
 import {
   HttpClient,
-  HttpHeaders,
+  type HttpHeaders,
   httpResource,
   HttpResponse,
   type HttpResourceOptions,
@@ -14,15 +14,15 @@ import {
   inject,
   isDevMode,
   linkedSignal,
-  Signal,
+  type Signal,
   untracked,
-  WritableSignal,
+  type WritableSignal,
 } from '@angular/core';
 import { toWritable } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
   catchValueError,
-  CircuitBreakerOptions,
+  type CircuitBreakerOptions,
   createCircuitBreaker,
   createEqualRequest,
   hasSlowConnection,
@@ -36,7 +36,7 @@ import {
   urlWithParams,
   type RetryOptions,
 } from './util';
-import { CacheEntry } from './util/cache/cache';
+import { type CacheEntry } from './util/cache/cache';
 
 /**
  * Options for configuring caching behavior of a `queryResource`.

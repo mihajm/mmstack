@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
-import { PreloadingStrategy, type Route, Router } from '@angular/router';
-import { EMPTY, filter, finalize, Observable, switchMap, take } from 'rxjs';
+import { type PreloadingStrategy, type Route, Router } from '@angular/router';
+import { EMPTY, filter, finalize, type Observable, switchMap, take } from 'rxjs';
 import { createRoutePredicate, findPath } from '../util';
 import { PreloadRequester } from './preload-requester';
 

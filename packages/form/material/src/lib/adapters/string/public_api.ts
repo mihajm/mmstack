@@ -2,8 +2,8 @@ export * from './autocomplete';
 export {
   createStringState,
   injectCreateStringState,
-  InjectedStringStateOptions,
-  StringState,
-  StringStateOptions,
+  type InjectedStringStateOptions,
+  type StringState,
+  type StringStateOptions,
 } from './base-string';
 export * from './textarea';

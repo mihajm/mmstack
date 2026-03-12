@@ -1,35 +1,18 @@
 {
-	"files.eol": "\n",
-	"editor.tabSize": 2,
-	"editor.codeActionsOnSave": {
-		"source.fixAll.eslint": "explicit",
-		"source.organizeImports": "explicit",
-		"source.sortMembers": "explicit"
-	},
-	"editor.formatOnSave": true,
-	"[typescript]": {
-		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	},
-	"[html]": {
-		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	},
-	"[javascript]": {
-		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	},
-	"[javascriptreact]": {
-		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	},
-	"[typescriptreact]": {
-		"editor.defaultFormatter": "esbenp.prettier-vscode"
-	},
-	"eslint.options": {
-		"extensions": [".js", ".ts", ".html"]
-	},
-	"eslint.validate": ["javascript", "typescript", "html"],
-	"angular.enable-strict-mode-prompt": false,
-	"search.exclude": {
-		"": true,
-		"**/node_modules": false
-	},
-	"search.useIgnoreFiles": true,
+  "files.eol": "\n",
+  "editor.tabSize": 2,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.organizeImports": "explicit",
+    "source.sortMembers": "explicit"
+  },
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "prettier.embeddedLanguageFormatting": "auto",
+  "editor.formatOnSave": true,
+  "eslint.validate": ["javascript", "typescript", "html"],
+  "search.exclude": {
+    "": true,
+    "**/node_modules": true
+  },
+  "search.useIgnoreFiles": true
 }

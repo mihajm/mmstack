@@ -10,20 +10,20 @@ import {
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatPrefix,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SignalErrorValidator, StringState } from './adapters';
+import { SignalErrorValidator, type StringState } from './adapters';
 
 @Component({
   selector: 'mm-string-field',

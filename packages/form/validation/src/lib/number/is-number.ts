@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultIsNumberMessageFactory() {
   return `Must be a number`;

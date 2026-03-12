@@ -1,8 +1,8 @@
 export {
-  BooleanState,
-  BooleanStateOptions,
   createBooleanState,
   injectCreateBooleanState,
-  InjectedBooleanStateOptions,
+  type BooleanState,
+  type BooleanStateOptions,
+  type InjectedBooleanStateOptions,
 } from './base-boolean';
 export * from './toggle';

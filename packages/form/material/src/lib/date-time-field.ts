@@ -15,15 +15,15 @@ import {
   MatDatepickerToggle,
 } from '@angular/material/datepicker';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import {
@@ -32,7 +32,7 @@ import {
   MatTimepickerToggle,
 } from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
-import { DateTimeState, SignalErrorValidator } from './adapters';
+import { type DateTimeState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-date-time-field',

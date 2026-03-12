@@ -1,5 +1,5 @@
 import { inject, InjectionToken } from '@angular/core';
-import { ResolvedLeafRoute } from '../util';
+import { type ResolvedLeafRoute } from '../util';
 
 /**
  * A function that returns a custom label generation function.

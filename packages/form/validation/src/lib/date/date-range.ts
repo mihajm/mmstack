@@ -1,11 +1,11 @@
 import {
-  DateMessageFactories,
-  DateValidatorOptions,
+  type DateMessageFactories,
+  type DateValidatorOptions,
   DEFAULT_DATE_MESSAGES,
 } from '.';
 import { createGeneralValidators } from '../general';
 import { createMergeValidators } from '../merge-validators';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 import { createIsDateValidator } from './is-date';
 import { createMaxDateValidator } from './max-date';
 import { createMinDateValidator } from './min-date';

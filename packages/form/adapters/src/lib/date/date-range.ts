@@ -15,7 +15,7 @@ import {
 } from '@mmstack/form-core';
 import {
   injectValidators,
-  Validators,
+  type Validators,
   type DateRange,
   type DateValidatorOptions,
 } from '@mmstack/form-validation';

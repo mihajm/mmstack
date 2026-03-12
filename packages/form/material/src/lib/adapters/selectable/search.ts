@@ -1,4 +1,4 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import {
   createSearchState as genericCreateSearchState,
   injectCreateSearchState as genericInjectCreateSearchState,
@@ -6,7 +6,7 @@ import {
   type SearchState as GenericSearchState,
   type SearchStateOptions as GenericSearchStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 import {
   type MaterialSelectStateExtension,
   type MaterialSelectStateOptionsExtension,

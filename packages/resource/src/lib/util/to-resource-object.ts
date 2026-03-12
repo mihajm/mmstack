@@ -1,4 +1,4 @@
-import { HttpResourceRef } from '@angular/common/http';
+import { type HttpResourceRef } from '@angular/common/http';
 
 export function toResourceObject<T>(
   res: HttpResourceRef<T>,

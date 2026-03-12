@@ -3,14 +3,14 @@ import {
   computed,
   inject,
   InjectionToken,
-  Injector,
+  type Injector,
   isDevMode,
   type Provider,
   type Signal,
   untracked,
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
-import { CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
+import { type CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
 
 function generateID() {
   if (globalThis.crypto?.randomUUID) {

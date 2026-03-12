@@ -4,11 +4,11 @@ import {
   inject,
   Injectable,
   linkedSignal,
-  Signal,
+  type Signal,
   untracked,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { ResolveFn } from '@angular/router';
+import { type ResolveFn } from '@angular/router';
 import { mutable, until } from '@mmstack/primitives';
 import { injectLeafRoutes, injectSnapshotPathResolver } from '../util';
 import { injectTitleConfig } from './title-config';

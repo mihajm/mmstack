@@ -1,11 +1,11 @@
 import { createGeneralValidators } from '../general';
 import { createMergeValidators } from '../merge-validators';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 import { createAcceptsValidator, defaultAcceptsMessage } from './accepts';
 import {
   createMaxSizeValidator,
   defaultMaxSizeMessageFactory,
-  KnownSizeType,
+  type KnownSizeType,
 } from './max-size';
 import { createRejectsValidator, defaultRejectsMessage } from './rejects';
 

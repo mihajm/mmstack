@@ -1,4 +1,4 @@
-import { HttpResourceRef } from '@angular/common/http';
+import { type HttpResourceRef } from '@angular/common/http';
 import { computed } from '@angular/core';
 import { toWritable } from '@mmstack/primitives';
 

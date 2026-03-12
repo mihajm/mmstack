@@ -5,10 +5,10 @@ import {
   type MultiSelectState as GenericMultiSelectState,
   type MultiSelectStateOptions as GenericMultiSelectStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 import {
-  MaterialSelectStateExtension,
-  MaterialSelectStateOptionsExtension,
+  type MaterialSelectStateExtension,
+  type MaterialSelectStateOptionsExtension,
   toMaterialSelectSpecifics,
 } from './select';
 

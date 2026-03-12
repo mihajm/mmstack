@@ -3,7 +3,7 @@
 import {
   HttpContext,
   HttpContextToken,
-  HttpInterceptorFn,
+  type HttpInterceptorFn,
   type HttpEvent,
   type HttpHandlerFn,
   type HttpRequest,

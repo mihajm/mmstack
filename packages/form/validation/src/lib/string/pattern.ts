@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultPatternMessageFactory(patternLabel: string) {
   return `Must match pattern ${patternLabel}`;

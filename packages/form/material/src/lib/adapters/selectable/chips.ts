@@ -5,10 +5,10 @@ import {
   type ChipsStateOptions as GenericChipsStateOptions,
   type InjectedChipsStateOptions as GenericInjectedChipsStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 import {
-  MaterialSelectStateExtension,
-  MaterialSelectStateOptionsExtension,
+  type MaterialSelectStateExtension,
+  type MaterialSelectStateOptionsExtension,
   toMaterialSelectSpecifics,
 } from './select';
 

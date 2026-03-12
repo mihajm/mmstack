@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultMultipleOfMessageFactory(multipleOf: number) {
   return `Must be a multiple of ${multipleOf}`;

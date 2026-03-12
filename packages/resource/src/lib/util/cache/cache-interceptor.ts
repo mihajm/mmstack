@@ -7,7 +7,7 @@ import {
   type HttpRequest,
   HttpResponse,
 } from '@angular/common/http';
-import { map, Observable, of, tap } from 'rxjs';
+import { map, type Observable, of, tap } from 'rxjs';
 import { injectQueryCache } from './cache';
 
 type CacheEntryOptions = {

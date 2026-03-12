@@ -1,4 +1,4 @@
-import { Validator } from './validator.type';
+import { type Validator } from './validator.type';
 
 const INTERNAL_ERROR_MERGE_DELIM = '::INTERNAL_MMSTACK_MERGE_DELIM::';
 

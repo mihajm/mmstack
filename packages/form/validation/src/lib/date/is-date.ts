@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultIsDateMessageFactory() {
   return `Must be a valid date`;

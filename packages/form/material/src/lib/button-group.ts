@@ -12,12 +12,12 @@ import {
 import { FormsModule, NgModel } from '@angular/forms';
 import {
   MAT_BUTTON_TOGGLE_DEFAULT_OPTIONS,
-  MatButtonToggleAppearance,
+  type MatButtonToggleAppearance,
   MatButtonToggleModule,
 } from '@angular/material/button-toggle';
 import { MatTooltip } from '@angular/material/tooltip';
 
-import { ButtonGroupState } from './adapters';
+import { type ButtonGroupState } from './adapters';
 
 @Component({
   selector: 'mm-button-group',

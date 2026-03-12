@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { ActivatedRouteSnapshot, Router } from '@angular/router';
+import { type ActivatedRouteSnapshot, Router } from '@angular/router';
 
 export function injectSnapshotPathResolver() {
   const router = inject(Router);

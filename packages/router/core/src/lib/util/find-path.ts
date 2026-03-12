@@ -2,7 +2,7 @@
 // (https://github.com/mgechev/ngx-quicklink)
 // Copyright (c) Minko Gechev and contributors, licensed under the MIT License.
 
-import { PRIMARY_OUTLET, Route } from '@angular/router';
+import { PRIMARY_OUTLET, type Route } from '@angular/router';
 
 function isPrimaryRoute(route: Route): boolean {
   return route.outlet === PRIMARY_OUTLET || !route.outlet;

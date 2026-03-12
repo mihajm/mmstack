@@ -1,4 +1,4 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import {
   createTextareaState as genericCreateTextareaState,
   injectCreateTextareaState as genericInjectCreateTextareaState,
@@ -6,7 +6,7 @@ import {
   type TextareaState as GenericTextareaState,
   type TextareaStateOptions as GenericTextareaStateOptions,
 } from '@mmstack/form-adapters';
-import { DerivedSignal } from '@mmstack/form-core';
+import { type DerivedSignal } from '@mmstack/form-core';
 
 export type TextareaState<TParent = undefined> =
   GenericTextareaState<TParent> & {

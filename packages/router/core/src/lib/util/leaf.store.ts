@@ -1,8 +1,8 @@
-import { computed, inject, Injectable, Signal } from '@angular/core';
+import { computed, inject, Injectable, type Signal } from '@angular/core';
 import {
-  ActivatedRouteSnapshot,
+  type ActivatedRouteSnapshot,
   Router,
-  RouterStateSnapshot,
+  type RouterStateSnapshot,
 } from '@angular/router';
 import { url } from '../url';
 

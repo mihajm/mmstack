@@ -1,4 +1,4 @@
-import { Route } from '@angular/router';
+import { type Route } from '@angular/router';
 import { findPath } from './find-path';
 
 describe('findPath', () => {

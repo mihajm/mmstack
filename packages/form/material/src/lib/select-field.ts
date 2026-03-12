@@ -8,23 +8,23 @@ import {
   effect,
   inject,
   input,
-  Signal,
+  type Signal,
   TemplateRef,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatPrefix,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import {
   MatOption,
@@ -32,7 +32,7 @@ import {
   MatSelectTrigger,
 } from '@angular/material/select';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SelectState, SignalErrorValidator } from './adapters';
+import { type SelectState, SignalErrorValidator } from './adapters';
 
 @Directive({
   selector: '[mmSelectOptionContent]',

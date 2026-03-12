@@ -7,8 +7,8 @@ import {
 } from '@mmstack/form-adapters';
 import { type DerivedSignal } from '@mmstack/form-core';
 import {
-  MaterialBooleanStateExtension,
-  MaterialBooleanStateOptionsExtension,
+  type MaterialBooleanStateExtension,
+  type MaterialBooleanStateOptionsExtension,
   toMaterialBooleanSpecifics,
 } from './base-boolean';
 

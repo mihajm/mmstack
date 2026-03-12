@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 const URI_REGEXP = /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/;
 

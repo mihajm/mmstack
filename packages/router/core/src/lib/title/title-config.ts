@@ -1,4 +1,4 @@
-import { inject, InjectionToken, Provider } from '@angular/core';
+import { inject, InjectionToken, type Provider } from '@angular/core';
 
 /**
  * Title configuration interface.

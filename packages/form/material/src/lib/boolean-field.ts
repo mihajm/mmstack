@@ -12,7 +12,7 @@ import {
 import { FormsModule, NgModel } from '@angular/forms';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { MatTooltip } from '@angular/material/tooltip';
-import { BooleanState, SignalErrorValidator } from './adapters';
+import { type BooleanState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-boolean-field',

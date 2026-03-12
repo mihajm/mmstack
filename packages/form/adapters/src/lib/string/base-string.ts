@@ -1,4 +1,4 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import {
   type CreateFormControlOptions,
   type DerivedSignal,

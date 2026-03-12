@@ -5,9 +5,9 @@ import {
   effect,
   inject,
   linkedSignal,
-  Signal,
+  type Signal,
   signal,
-  ValueEqualityFn,
+  type ValueEqualityFn,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { catchError, combineLatestWith, filter, map, of } from 'rxjs';

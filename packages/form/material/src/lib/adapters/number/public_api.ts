@@ -1,7 +1,7 @@
 export {
   createNumberState,
   injectCreateNumberState,
-  InjectedNumberStateOptions,
-  NumberState,
-  NumberStateOptions,
+  type InjectedNumberStateOptions,
+  type NumberState,
+  type NumberStateOptions,
 } from './base-number';

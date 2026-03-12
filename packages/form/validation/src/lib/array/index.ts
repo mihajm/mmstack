@@ -1,5 +1,5 @@
 import { createMergeValidators } from '../merge-validators';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 import {
   createMaxLengthValidator,
   defaultMaxLengthMessageFactory,

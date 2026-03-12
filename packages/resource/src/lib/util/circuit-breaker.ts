@@ -4,8 +4,8 @@ import {
   inject,
   InjectionToken,
   Injector,
-  Provider,
-  Signal,
+  type Provider,
+  type Signal,
   signal,
   untracked,
 } from '@angular/core';

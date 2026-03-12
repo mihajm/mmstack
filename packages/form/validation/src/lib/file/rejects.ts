@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultRejectsMessage(rejects: string[]) {
   return `Must not be: ${rejects.join(', ')}`;

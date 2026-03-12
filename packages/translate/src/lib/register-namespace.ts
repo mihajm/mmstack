@@ -6,7 +6,7 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import { ResolveFn } from '@angular/router';
+import { type ResolveFn } from '@angular/router';
 import {
   compileTranslation,
   type CompiledTranslation,
@@ -22,7 +22,7 @@ import {
   TranslationStore,
 } from './translation-store';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnyStringRecord = Record<string, any>;
 
 function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {

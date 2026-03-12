@@ -2,7 +2,7 @@ import {
   createMaxLengthValidator as arrayCreateMaxValidator,
   defaultMaxLengthMessageFactory as arrayDefaultMessageFactory,
 } from '../array/max-length';
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultMaxLengthMessageFactory(max: number) {
   return arrayDefaultMessageFactory(max, 'characters');

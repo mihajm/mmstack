@@ -8,7 +8,7 @@ import {
   InjectionToken,
   input,
   output,
-  Provider,
+  type Provider,
   untracked,
 } from '@angular/core';
 import {

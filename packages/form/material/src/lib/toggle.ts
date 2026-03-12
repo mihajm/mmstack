@@ -10,7 +10,7 @@ import {
 import { FormsModule, NgModel } from '@angular/forms';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SignalErrorValidator, ToggleState } from './adapters';
+import { SignalErrorValidator, type ToggleState } from './adapters';
 
 @Component({
   selector: 'mm-toggle',

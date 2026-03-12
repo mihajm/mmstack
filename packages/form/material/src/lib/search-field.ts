@@ -9,22 +9,22 @@ import {
   InjectionToken,
   input,
   PLATFORM_ID,
-  Provider,
+  type Provider,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
 import { FormsModule, NgModel } from '@angular/forms';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatPrefix,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatProgressSpinner } from '@angular/material/progress-spinner';
@@ -34,8 +34,8 @@ import {
   MatSelectTrigger,
 } from '@angular/material/select';
 import { MatTooltip } from '@angular/material/tooltip';
-import { queryResource, QueryResourceOptions } from '@mmstack/resource';
-import { SearchState, SignalErrorValidator } from './adapters';
+import { queryResource, type QueryResourceOptions } from '@mmstack/resource';
+import { type SearchState, SignalErrorValidator } from './adapters';
 import { SelectOptionContent } from './select-field';
 
 const SEARCH_QUERY_RESOURCE_OPTIONS = new InjectionToken<

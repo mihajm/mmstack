@@ -1,5 +1,5 @@
-import { HttpResourceRef } from '@angular/common/http';
-import { DestroyRef } from '@angular/core';
+import { type HttpResourceRef } from '@angular/common/http';
+import { type DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { interval } from 'rxjs';
 

@@ -1,5 +1,5 @@
 import { inject, untracked } from '@angular/core';
-import { ActivatedRouteSnapshot, Router } from '@angular/router';
+import { type ActivatedRouteSnapshot, Router } from '@angular/router';
 import { injectIntlConfig, TranslationStore } from './translation-store';
 
 export function injectResolveParamLocale(snapshot: ActivatedRouteSnapshot) {

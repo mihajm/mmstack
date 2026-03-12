@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultMinMessageFactory(min: number) {
   return `Must be at least ${min}`;

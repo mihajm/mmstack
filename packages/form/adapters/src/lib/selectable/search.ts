@@ -1,5 +1,5 @@
 import { type HttpResourceRequest } from '@angular/common/http';
-import { computed, Signal, WritableSignal } from '@angular/core';
+import { computed, type Signal, type WritableSignal } from '@angular/core';
 import {
   type CreateFormControlOptions,
   type DerivedSignal,

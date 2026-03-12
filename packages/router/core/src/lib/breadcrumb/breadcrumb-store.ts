@@ -1,11 +1,11 @@
-import { computed, inject, Injectable, Signal } from '@angular/core';
+import { computed, inject, Injectable, type Signal } from '@angular/core';
 import { mapArray, mutable } from '@mmstack/primitives';
-import { injectLeafRoutes, ResolvedLeafRoute } from '../util/leaf.store';
+import { injectLeafRoutes, type ResolvedLeafRoute } from '../util/leaf.store';
 import {
-  Breadcrumb,
+  type Breadcrumb,
   createInternalBreadcrumb,
   getBreadcrumbInternals,
-  InternalBreadcrumb,
+  type InternalBreadcrumb,
   isInternalBreadcrumb,
 } from './breadcrumb';
 import { injectBreadcrumbConfig } from './breadcrumb-config';

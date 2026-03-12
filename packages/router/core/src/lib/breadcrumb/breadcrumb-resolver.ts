@@ -30,7 +30,7 @@ type CreateBreadcrumbOptions = {
 
 import { until } from '@mmstack/primitives';
 import { injectSnapshotPathResolver } from '../util';
-import { Breadcrumb, createInternalBreadcrumb } from './breadcrumb';
+import { type Breadcrumb, createInternalBreadcrumb } from './breadcrumb';
 
 /**
  * Creates and registers a breadcrumb for a specific route.

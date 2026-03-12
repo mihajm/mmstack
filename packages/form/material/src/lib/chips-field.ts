@@ -14,34 +14,34 @@ import {
 import { FormsModule, NgModel } from '@angular/forms';
 import {
   MatAutocomplete,
-  MatAutocompleteSelectedEvent,
+  type MatAutocompleteSelectedEvent,
   MatAutocompleteTrigger,
   MatOption,
 } from '@angular/material/autocomplete';
 import {
   MatChipGrid,
   MatChipInput,
-  MatChipInputEvent,
+  type MatChipInputEvent,
   MatChipRemove,
   MatChipRow,
   MatChipsModule,
 } from '@angular/material/chips';
 import {
-  FloatLabelType,
+  type FloatLabelType,
   MAT_FORM_FIELD_DEFAULT_OPTIONS,
   MatError,
   MatFormField,
-  MatFormFieldAppearance,
+  type MatFormFieldAppearance,
   MatHint,
   MatLabel,
   MatPrefix,
   MatSuffix,
-  SubscriptSizing,
+  type SubscriptSizing,
 } from '@angular/material/form-field';
 import { MatIcon } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
-import { ChipsState, SignalErrorValidator } from './adapters';
+import { type ChipsState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-chips-field',

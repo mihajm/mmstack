@@ -13,7 +13,7 @@ import {
 } from '@mmstack/form-core';
 import {
   injectValidators,
-  NumberValidatorOptions,
+  type NumberValidatorOptions,
 } from '@mmstack/form-validation';
 import { tooltip } from '../util';
 

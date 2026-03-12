@@ -3,7 +3,7 @@ import {
   type CreateFormControlOptions,
   type DerivedSignal,
   formControl,
-  FormControlSignal,
+  type FormControlSignal,
 } from '@mmstack/form-core';
 import {
   type DateValidatorOptions,

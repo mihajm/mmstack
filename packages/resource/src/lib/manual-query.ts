@@ -1,10 +1,10 @@
-import { HttpResourceRequest } from '@angular/common/http';
+import { type HttpResourceRequest } from '@angular/common/http';
 import { computed, inject, Injector, signal, untracked } from '@angular/core';
 import { nestedEffect } from '@mmstack/primitives';
 import {
   queryResource,
-  QueryResourceOptions,
-  QueryResourceRef,
+  type QueryResourceOptions,
+  type QueryResourceRef,
 } from './query-resource';
 
 /**

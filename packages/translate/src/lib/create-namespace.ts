@@ -1,10 +1,10 @@
 import {
-  CompiledTranslation,
+  type CompiledTranslation,
   compileTranslation,
-  inferCompiledTranslationShape,
-  mergeTranslationMaps,
+  type inferCompiledTranslationShape,
+  type mergeTranslationMaps,
 } from './compile';
-import { UnknownStringKeyObject } from './string-key-object.type';
+import { type UnknownStringKeyObject } from './string-key-object.type';
 
 type TranslationNamespace<
   TNS extends string,

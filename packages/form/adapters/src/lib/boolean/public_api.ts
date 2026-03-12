@@ -1,14 +1,14 @@
 export {
-  BooleanState,
-  BooleanStateOptions,
   createBooleanState,
   injectCreateBooleanState,
-  InjectedBooleanStateOptions,
+  type BooleanState,
+  type BooleanStateOptions,
+  type InjectedBooleanStateOptions,
 } from './base-boolean';
 export {
   createToggleState,
   injectCreateToggleState,
-  InjectedToggleStateOptions,
-  ToggleState,
-  ToggleStateOptions,
+  type InjectedToggleStateOptions,
+  type ToggleState,
+  type ToggleStateOptions,
 } from './toggle';

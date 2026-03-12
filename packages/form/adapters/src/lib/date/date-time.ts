@@ -3,16 +3,14 @@ import { toFakeDerivation, type DerivedSignal } from '@mmstack/primitives';
 import {
   createDateState,
   injectCreateDateState,
-  InjectedDateStateOptions,
   type DateState,
-  type DateStateOptions,
 } from './base-date';
 import {
   createTimeState,
   injectCreateTimeState,
-  InjectedTimeStateOptions,
-  TimeStateOptions,
+  type InjectedTimeStateOptions,
   type TimeState,
+  type TimeStateOptions,
 } from './time';
 
 /**

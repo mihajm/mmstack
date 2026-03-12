@@ -1,5 +1,5 @@
 import { isDevMode } from '@angular/core';
-import { CacheEntry } from './cache';
+import { type CacheEntry } from './cache';
 
 type StoredEntry<T> = Omit<CacheEntry<T>, 'timeout'>;
 

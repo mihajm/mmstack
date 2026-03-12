@@ -6,7 +6,7 @@ import {
   type ResourceRef,
   type ValueEqualityFn,
 } from '@angular/core';
-import { filter, Observable } from 'rxjs';
+import { filter, type Observable } from 'rxjs';
 import type { IDBClient } from './idb-client';
 import type { IDBConnection } from './idb-connection';
 import { generateID, type FireEvent, type IDBChangeEvent } from './idb-events';

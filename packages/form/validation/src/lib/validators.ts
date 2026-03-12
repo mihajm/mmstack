@@ -1,9 +1,9 @@
 import {
   inject,
   InjectionToken,
-  Injector,
+  type Injector,
   LOCALE_ID,
-  Provider,
+  type Provider,
 } from '@angular/core';
 import { createArrayValidators } from './array';
 import { createBooleanValidators } from './boolean';

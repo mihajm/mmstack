@@ -1,21 +1,21 @@
 export {
-  AutocompleteState,
-  AutocompleteStateOptions,
   createAutocompleteState,
   injectCreateAutocompleteState,
-  InjectedAutocompleteStateOptions,
+  type AutocompleteState,
+  type AutocompleteStateOptions,
+  type InjectedAutocompleteStateOptions,
 } from './autocomplete';
 export {
   createStringState,
   injectCreateStringState,
-  InjectedStringStateOptions,
-  StringState,
-  StringStateOptions,
+  type InjectedStringStateOptions,
+  type StringState,
+  type StringStateOptions,
 } from './base-string';
 export {
   createTextareaState,
   injectCreateTextareaState,
-  InjectedTextareaStateOptions,
-  TextareaState,
-  TextareaStateOptions,
+  type InjectedTextareaStateOptions,
+  type TextareaState,
+  type TextareaStateOptions,
 } from './textarea';

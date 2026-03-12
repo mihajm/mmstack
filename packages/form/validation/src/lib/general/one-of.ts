@@ -1,4 +1,4 @@
-import { Validator } from '../validator.type';
+import { type Validator } from '../validator.type';
 
 export function defaultOneOfMessageFactory(values: string) {
   return `Must be one of: ${values}`;

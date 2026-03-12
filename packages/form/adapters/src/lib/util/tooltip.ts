@@ -1,4 +1,4 @@
-import { computed, Signal } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 
 type TooltipedSignals = {
   shortened: Signal<string>;

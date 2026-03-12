@@ -1,18 +1,18 @@
 export * from './button-group';
 export * from './chips';
 export {
-  ChipsState,
-  ChipsStateOptions,
   createChipsState,
   injectCreateChipsState,
-  InjectedChipsStateOptions,
+  type ChipsState,
+  type ChipsStateOptions,
+  type InjectedChipsStateOptions,
 } from './chips';
 export * from './multi-select';
 export * from './search';
 export {
   createSelectState,
   injectCreateSelectState,
-  InjectedSelectStateOptions,
-  SelectState,
-  SelectStateOptions,
+  type InjectedSelectStateOptions,
+  type SelectState,
+  type SelectStateOptions,
 } from './select';

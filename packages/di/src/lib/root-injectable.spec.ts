@@ -1,4 +1,4 @@
-import { type Injector, InjectionToken } from '@angular/core';
+import { InjectionToken } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { RootInjectables, rootInjectable } from './root-injectable';
 
@@ -56,7 +56,7 @@ describe('root-injectable', () => {
     it('should create a lazy singleton injection function', () => {
       let factoryCalls = 0;
 
-      const injectSingleton = rootInjectable((injector: Injector) => {
+      const injectSingleton = rootInjectable(() => {
         factoryCalls++;
         return { instanceName: 'global-singleton' };
       });

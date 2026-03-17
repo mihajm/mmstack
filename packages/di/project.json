@@ -20,6 +20,9 @@
         "development": {}
       },
       "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
     }
   }
 }

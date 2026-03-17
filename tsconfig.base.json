@@ -2,15 +2,21 @@
   "compileOnSave": false,
   "compilerOptions": {
     "rootDir": ".",
+    "isolatedModules": true,
     "sourceMap": true,
     "declaration": false,
-    "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
-    "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "emitDecoratorMetadata": false,
     "importHelpers": true,
     "target": "es2024",
-    "module": "esnext",
+    "moduleResolution": "bundler",
+    "module": "preserve",
     "lib": ["esnext", "dom"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
@@ -27,6 +33,12 @@
       "@mmstack/translate": ["packages/translate/src/index.ts"],
       "@mmstack/di": ["packages/di/src/index.ts"]
     }
+  },
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": true,
+    "strictInputAccessModifiers": true,
+    "strictTemplates": true
   },
   "exclude": ["node_modules", "tmp"]
 }

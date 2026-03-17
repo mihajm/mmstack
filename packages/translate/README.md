@@ -572,6 +572,52 @@ export class MyComponent {
 }
 ```
 
+## Testing
+
+When testing components that use `@mmstack/translate` (via `injectNamespaceT`, `Translate` directive, or `Translator` pipe), you don't need to configure actual translated namespaces or deal with Intl loading. Instead, use the provided `provideMockTranslations()` utility.
+
+```typescript
+import { TestBed } from '@angular/core/testing';
+import { provideMockTranslations } from '@mmstack/translate'; // Exported directly from main entry point
+import { MyComponent } from './my.component';
+
+describe('MyComponent', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [MyComponent],
+      providers: [
+        // Automatically intercepts translation logic & skips real loading
+        provideMockTranslations()
+      ]
+    });
+  });
+
+  it('should render translation keys directly', () => {
+    const fixture = TestBed.createComponent(MyComponent);
+    fixture.detectChanges();
+    
+    // By default, it echoes back the flattened object key using dot notation
+    expect(fixture.nativeElement.textContent).toContain('myNamespace.greeting.title');
+  });
+
+  it('allows providing explicit mock overrides', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideMockTranslations({
+          translations: {
+            myNamespace: { greeting: { title: 'Mocked Title' } }
+          }
+        })
+      ]
+    });
+
+    const fixture = TestBed.createComponent(MyComponent);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Mocked Title');
+  });
+});
+```
+
 ## Migration from Other Libraries
 
 ### From @angular/localize

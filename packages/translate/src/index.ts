@@ -15,3 +15,4 @@ export {
   provideIntlConfig,
 } from './lib/translation-store';
 export { Translator } from './lib/translator';
+export { provideMockTranslations } from './lib/testing/provide-mock-translations';

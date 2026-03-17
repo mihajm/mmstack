@@ -105,9 +105,6 @@ importers:
       eslint:
         specifier: ^9.39.3
         version: 9.39.3(jiti@2.6.1)
-      eslint-config-prettier:
-        specifier: ^10.0.0
-        version: 10.1.8(eslint@9.39.3(jiti@2.6.1))
       happy-dom:
         specifier: ^20.8.3
         version: 20.8.3
@@ -14374,6 +14371,7 @@ snapshots:
   eslint-config-prettier@10.1.8(eslint@9.39.3(jiti@2.6.1)):
     dependencies:
       eslint: 9.39.3(jiti@2.6.1)
+    optional: true
 
   eslint-scope@5.1.1:
     dependencies:

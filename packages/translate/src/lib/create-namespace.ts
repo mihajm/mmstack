@@ -40,7 +40,7 @@ export function createNamespace<
   type TShape = inferCompiledTranslationShape<typeof compiled>;
 
   const namespace: TranslationNamespace<TNS, TCompiled, TShape> = {
-    translation: compileTranslation(translation, ns),
+    translation: compiled,
     createTranslation: <TLocale extends string>(
       locale: TLocale,
       translation: TShape,
@@ -50,10 +50,8 @@ export function createNamespace<
     createMergedNamespace: <
       TOther extends UnknownStringKeyObject,
       TOtherNS extends string,
-      TOtherCompiled extends CompiledTranslation<
-        TOther,
-        TOtherNS
-      > = CompiledTranslation<TOther, TOtherNS>,
+      TOtherCompiled extends CompiledTranslation<TOther, TOtherNS> =
+        CompiledTranslation<TOther, TOtherNS>,
     >(
       otherNs: TOtherNS,
       otherTranslation: TOther,

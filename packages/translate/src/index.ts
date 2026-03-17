@@ -7,6 +7,7 @@ export {
 } from './lib/register-namespace';
 export { injectResolveParamLocale } from './lib/resovler-locale';
 export * from './lib/route-helpers';
+export { provideMockTranslations } from './lib/testing/provide-mock-translations';
 export { Translate } from './lib/translate';
 export {
   injectDynamicLocale,

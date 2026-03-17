@@ -53,8 +53,8 @@ export type FormatNumberOptions = {
 
 function getFormatter(
   locale: string,
-  minFractionDigits: number,
-  maxFractionDigits: number,
+  minFractionDigits: number | undefined,
+  maxFractionDigits: number | undefined,
   useGrouping?: boolean,
   notation?: NumberNotation,
   currency?: string,
@@ -71,6 +71,8 @@ function getFormatter(
       minimumFractionDigits: minFractionDigits,
       maximumFractionDigits: maxFractionDigits,
       useGrouping,
+      currency,
+      currencyDisplay: display,
     });
     cache.set(cacheKey, formatter);
   }
@@ -99,8 +101,8 @@ export function formatNumber(
 
   return getFormatter(
     loc,
-    unwrappedOpt?.minFractionDigits ?? 0,
-    unwrappedOpt?.maxFractionDigits ?? 0,
+    unwrappedOpt?.minFractionDigits,
+    unwrappedOpt?.maxFractionDigits,
     unwrappedOpt?.useGrouping ?? true,
     unwrappedOpt?.notation ?? 'standard',
   ).format(unwrappedNumber);
@@ -151,8 +153,8 @@ export function formatPercent(
 
   return getFormatter(
     loc,
-    unwrappedOpt?.minFractionDigits ?? 0,
-    unwrappedOpt?.maxFractionDigits ?? 0,
+    unwrappedOpt?.minFractionDigits,
+    unwrappedOpt?.maxFractionDigits,
     undefined,
     undefined,
     undefined,
@@ -196,8 +198,8 @@ export function formatCurrency(
 
   return getFormatter(
     loc,
-    0,
-    0,
+    undefined,
+    undefined,
     undefined,
     undefined,
     unwrap(currency),

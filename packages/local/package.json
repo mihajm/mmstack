@@ -1,7 +1,7 @@
 {
   "name": "@mmstack/local",
   "version": "21.0.0",
-    "keywords": [
+  "keywords": [
     "angular",
     "signals",
     "indexedDB",
@@ -13,7 +13,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mihajm/mmstack"
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/local"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/local",
   "peerDependencies": {

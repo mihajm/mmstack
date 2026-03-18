@@ -120,7 +120,7 @@ export function keyArray<T, U, K>(
         for (j = newEnd; j >= start; j--) {
           item = newItems[j];
           key = getKey(item);
-          i = newIndices.get(key)!;
+          i = newIndices.get(key) ?? -1;
           newIndicesNext[j] = i === undefined ? -1 : i;
           newIndices.set(key, j);
         }
@@ -128,7 +128,7 @@ export function keyArray<T, U, K>(
         for (i = start; i <= end; i++) {
           item = items[i];
           key = getKey(item);
-          j = newIndices.get(key)!;
+          j = newIndices.get(key) ?? -1;
           if (j !== undefined && j !== -1) {
             temp[j] = mapped[i];
             tempIndexes[j] = indexes[i];

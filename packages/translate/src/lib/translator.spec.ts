@@ -56,7 +56,8 @@ describe('Translator Pipe', () => {
   it('should translate keys correctly with variables', () => {
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
-    // Our mock translations utility simply returns the raw translation string directly without FormatJS interpolation inside tests
-    expect(el.querySelector('#with-vars')?.textContent).toBe('Hello {name}');
+    expect(el.querySelector('#with-vars')?.textContent?.trim()).toBe(
+      'Hello {name}',
+    );
   });
 });

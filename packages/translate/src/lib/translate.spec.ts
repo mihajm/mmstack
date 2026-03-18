@@ -53,7 +53,7 @@ describe('Translate Directive', () => {
 
   it('should render translation text content for static keys', () => {
     fixture.detectChanges();
-    TestBed.flushEffects(); // Required since Translate uses afterRenderEffect
+    TestBed.tick();
 
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('#static-test')?.textContent).toBe('Hello World');
@@ -61,7 +61,7 @@ describe('Translate Directive', () => {
 
   it('should render translation text content with variables', () => {
     fixture.detectChanges();
-    TestBed.flushEffects();
+    TestBed.tick();
 
     const el = fixture.nativeElement as HTMLElement;
     // Our mock translator doesn't run Intl ICU compilation
@@ -70,14 +70,14 @@ describe('Translate Directive', () => {
 
   it('should respond to signal changes in variables', () => {
     fixture.detectChanges();
-    TestBed.flushEffects();
+    TestBed.tick();
 
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('#var-test')?.textContent).toBe('Hello {name}');
 
     component.name.set('Jane');
     fixture.detectChanges();
-    TestBed.flushEffects();
+    TestBed.tick();
 
     // The text content should update, though currently the mock just returns the raw string,
     // it triggers the effect successfully. In actual execution formatMessage handles it.
@@ -86,7 +86,7 @@ describe('Translate Directive', () => {
 
   it('should respond to signal changes in keys', () => {
     fixture.detectChanges();
-    TestBed.flushEffects();
+    TestBed.tick();
 
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('#dynamic-key-test')?.textContent).toBe(
@@ -95,7 +95,7 @@ describe('Translate Directive', () => {
 
     component.dynamicKey.set('myNs::MMT_DELIM::goodbye');
     fixture.detectChanges();
-    TestBed.flushEffects();
+    TestBed.tick();
 
     expect(el.querySelector('#dynamic-key-test')?.textContent).toBe('Goodbye');
   });

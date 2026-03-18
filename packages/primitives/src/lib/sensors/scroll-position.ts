@@ -118,7 +118,7 @@ export function scrollPosition(
   }
 
   const {
-    target = window,
+    target = globalThis.window,
     throttle = 100,
     debugName = 'scrollPosition',
   } = opt || {};
@@ -127,11 +127,14 @@ export function scrollPosition(
 
   let getScrollPosition: () => ScrollPosition;
 
-  if (target instanceof Window) {
-    element = target;
+  if (target === globalThis.window || (target as any).window === target) {
+    element = target as Window;
 
     getScrollPosition = () => {
-      return { x: target.scrollX, y: target.scrollY };
+      return {
+        x: (target as Window).scrollX ?? (target as Window).pageXOffset ?? 0,
+        y: (target as Window).scrollY ?? (target as Window).pageYOffset ?? 0,
+      };
     };
   } else if (target instanceof ElementRef) {
     element = target.nativeElement;
@@ -142,11 +145,11 @@ export function scrollPosition(
       };
     };
   } else {
-    element = target;
+    element = target as HTMLElement;
     getScrollPosition = () => {
       return {
-        x: target.scrollLeft,
-        y: target.scrollTop,
+        x: (target as HTMLElement).scrollLeft,
+        y: (target as HTMLElement).scrollTop,
       };
     };
   }

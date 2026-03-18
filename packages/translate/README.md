@@ -578,7 +578,7 @@ When testing components that use `@mmstack/translate` (via `injectNamespaceT`, `
 
 ```typescript
 import { TestBed } from '@angular/core/testing';
-import { provideMockTranslations } from '@mmstack/translate'; // Exported directly from main entry point
+import { provideMockTranslations } from '@mmstack/translate';
 import { MyComponent } from './my.component';
 
 describe('MyComponent', () => {
@@ -587,15 +587,15 @@ describe('MyComponent', () => {
       imports: [MyComponent],
       providers: [
         // Automatically intercepts translation logic & skips real loading
-        provideMockTranslations()
-      ]
+        provideMockTranslations(),
+      ],
     });
   });
 
   it('should render translation keys directly', () => {
     const fixture = TestBed.createComponent(MyComponent);
     fixture.detectChanges();
-    
+
     // By default, it echoes back the flattened object key using dot notation
     expect(fixture.nativeElement.textContent).toContain('myNamespace.greeting.title');
   });
@@ -605,10 +605,10 @@ describe('MyComponent', () => {
       providers: [
         provideMockTranslations({
           translations: {
-            myNamespace: { greeting: { title: 'Mocked Title' } }
-          }
-        })
-      ]
+            myNamespace: { greeting: { title: 'Mocked Title' } },
+          },
+        }),
+      ],
     });
 
     const fixture = TestBed.createComponent(MyComponent);
@@ -646,4 +646,4 @@ Contributions, issues, and feature requests are welcome! Please see [CONTRIBUTIN
 
 ## License
 
-MIT © [Mihael Mulec](https://github.com/mihajm)
+MIT © [Miha Mulec](https://github.com/mihajm)

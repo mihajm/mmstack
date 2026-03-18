@@ -578,7 +578,7 @@ When testing components that use `@mmstack/translate` (via `injectNamespaceT`, `
 
 ```typescript
 import { TestBed } from '@angular/core/testing';
-import { provideMockTranslations } from '@mmstack/translate'; // Exported directly from main entry point
+import { provideMockTranslations } from '@mmstack/translate';
 import { MyComponent } from './my.component';
 
 describe('MyComponent', () => {
@@ -615,6 +615,24 @@ describe('MyComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Mocked Title');
   });
+
+  it('supports real ICU interpolation with formatValues', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideMockTranslations({
+          translations: {
+            myNamespace: { greeting: { title: 'Hello {name}!' } },
+          },
+          formatValues: true, // enables @formatjs/intl processing
+        }),
+      ],
+    });
+
+    const fixture = TestBed.createComponent(MyComponent);
+    fixture.detectChanges();
+    // Variables like {name} are now interpolated via @formatjs/intl
+    expect(fixture.nativeElement.textContent).toContain('Hello World!');
+  });
 });
 ```
 
@@ -646,4 +664,4 @@ Contributions, issues, and feature requests are welcome! Please see [CONTRIBUTIN
 
 ## License
 
-MIT © [Mihael Mulec](https://github.com/mihajm)
+MIT © [Miha Mulec](https://github.com/mihajm)

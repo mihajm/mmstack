@@ -1,4 +1,5 @@
 import { type Provider, signal } from '@angular/core';
+import { createIntl, createIntlCache, type IntlShape } from '@formatjs/intl';
 import { compileTranslation } from '../compile';
 import { type UnknownStringKeyObject } from '../string-key-object.type';
 import { TranslationStore } from '../translation-store';
@@ -20,6 +21,29 @@ export interface MockTranslationOptions {
    * ```
    */
   translations?: Record<string, UnknownStringKeyObject>;
+
+  /**
+   * When true, uses `@formatjs/intl` to process ICU message syntax (e.g. `{name}`, plurals, selects).
+   * This gives you real variable interpolation in your test assertions.
+   *
+   * @default false — values are ignored and the raw message string is returned.
+   *
+   * @example
+   * ```ts
+   * provideMockTranslations({
+   *   translations: { home: { greet: 'Hello {name}' } },
+   *   formatValues: true,
+   * })
+   * // t('home.greet', { name: 'Alice' }) → 'Hello Alice'
+   * ```
+   */
+  formatValues?: boolean;
+
+  /**
+   * The locale to use when `formatValues` is true.
+   * @default 'en-US'
+   */
+  locale?: string;
 }
 
 /**
@@ -56,16 +80,38 @@ export function provideMockTranslations(
     }
   }
 
+  const locale = options?.locale ?? 'en-US';
+
+  let intl: IntlShape | undefined;
+
+  if (options?.formatValues) {
+    intl = createIntl({ locale, messages: mappedMocks }, createIntlCache());
+  }
+
   return [
     {
       provide: TranslationStore,
       useValue: {
-        locale: signal('en-US'),
-        formatMessage: (key: string) => {
-          if (mappedMocks[key]) return mappedMocks[key];
+        locale: signal(locale),
+        formatMessage: (
+          key: string,
+          values?: Record<string, string | number>,
+        ) => {
+          const message = mappedMocks[key];
 
-          // Fallback to echoing the key back in dot notation (more readable for unit assertions).
-          return key.replaceAll('::MMT_DELIM::', '.');
+          if (!message) {
+            // Fallback to echoing the key back in dot notation (more readable for unit assertions).
+            return key.replaceAll('::MMT_DELIM::', '.');
+          }
+
+          if (intl) {
+            return intl.formatMessage(
+              { id: key, defaultMessage: message },
+              values,
+            );
+          }
+
+          return message;
         },
         hasLocaleLoaders: () => false,
         register: () => {

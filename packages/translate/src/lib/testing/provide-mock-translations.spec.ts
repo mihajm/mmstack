@@ -72,11 +72,41 @@ describe('provideMockTranslations', () => {
 
       const el = fixture.nativeElement as HTMLElement;
 
-      // Notice how formatMessage from mock currently doesn't process Intl variables,
-      // it simply returns the raw mocked string. This is usually sufficient for unit tests.
+      // Without formatValues, the raw mocked string is returned (variables are not interpolated).
       expect(el.querySelector('#fn-test')?.textContent).toBe('Mocked Hello');
-      expect(el.querySelector('#fn-var-test')?.textContent).toBe(
+      expect(el.querySelector('#fn-var-test')?.textContent?.trim()).toBe(
         'Mocked Greet {name}',
+      );
+    });
+  });
+
+  describe('with formatValues enabled', () => {
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [TestComponent],
+        providers: [
+          provideMockTranslations({
+            translations: {
+              dummy: {
+                hello: 'Mocked Hello',
+                greet: 'Hi {name}!',
+              },
+            },
+            formatValues: true,
+          }),
+        ],
+      }).compileComponents();
+    });
+
+    it('should interpolate ICU variables via @formatjs/intl', () => {
+      const fixture = TestBed.createComponent(TestComponent);
+      fixture.detectChanges();
+
+      const el = fixture.nativeElement as HTMLElement;
+
+      expect(el.querySelector('#fn-test')?.textContent).toBe('Mocked Hello');
+      expect(el.querySelector('#fn-var-test')?.textContent?.trim()).toBe(
+        'Hi Alice!',
       );
     });
   });

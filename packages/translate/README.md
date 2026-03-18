@@ -615,6 +615,24 @@ describe('MyComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Mocked Title');
   });
+
+  it('supports real ICU interpolation with formatValues', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideMockTranslations({
+          translations: {
+            myNamespace: { greeting: { title: 'Hello {name}!' } },
+          },
+          formatValues: true, // enables @formatjs/intl processing
+        }),
+      ],
+    });
+
+    const fixture = TestBed.createComponent(MyComponent);
+    fixture.detectChanges();
+    // Variables like {name} are now interpolated via @formatjs/intl
+    expect(fixture.nativeElement.textContent).toContain('Hello World!');
+  });
 });
 ```
 

@@ -606,6 +606,7 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
 }
 
 class NoopCache<T> extends Cache<T> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   override store(_: string, __: T, ___ = super.staleTime, ____ = super.ttl) {
     // noop
   }

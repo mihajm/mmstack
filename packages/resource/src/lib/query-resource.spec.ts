@@ -175,7 +175,7 @@ describe('queryResource', () => {
       queryResource(() => ({
         url,
         context: createTestContext(validate, { data: 'offline-test' }),
-      }))
+      })),
     );
 
     // It should immediately be disabled
@@ -196,7 +196,7 @@ describe('queryResource', () => {
 
     // It should automatically perform the fetch now
     const result = await TestBed.runInInjectionContext(() =>
-      until(res.value, (v) => v !== undefined)
+      until(res.value, (v) => v !== undefined),
     );
     expect(result).toEqual({ data: 'offline-test' });
     expect(requests).toBe(1);
@@ -204,7 +204,7 @@ describe('queryResource', () => {
 
   it('should be disabled unconditionally if the request function returns undefined', () => {
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(() => undefined)
+      queryResource(() => undefined),
     );
     expect(res.disabled()).toBe(true);
   });
@@ -215,26 +215,35 @@ describe('queryResource', () => {
     const url = 'https://example.com/onerror';
 
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(() => ({
-        url,
-        context: createTestContext(() => { /* noop */ }, null, true),
-      }), {
-        onError: (err) => {
-          onErrorCalled = true;
-          errorReceived = err;
-        }
-      })
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            null,
+            true,
+          ),
+        }),
+        {
+          onError: (err) => {
+            onErrorCalled = true;
+            errorReceived = err;
+          },
+        },
+      ),
     );
 
     try {
       await TestBed.runInInjectionContext(() =>
-        until(res.error, (v) => v !== undefined)
+        until(res.error, (v) => v !== undefined),
       );
     } catch {
       // Ignored
     }
 
-    TestBed.flushEffects(); 
+    TestBed.tick();
     expect(onErrorCalled).toBe(true);
     expect(errorReceived).toBeDefined();
   });
@@ -242,24 +251,28 @@ describe('queryResource', () => {
   it('should preserve previous value when keepPrevious is true and request URL changes', async () => {
     let returnData = { data: 'first' };
     const requestSignal = signal<any>({
-        url: 'https://example.com/keep-prev-1',
-        context: createTestContext(() => { /* noop */ }, returnData),
+      url: 'https://example.com/keep-prev-1',
+      context: createTestContext(() => {
+        /* noop */
+      }, returnData),
     });
 
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(requestSignal, { keepPrevious: true })
+      queryResource(requestSignal, { keepPrevious: true }),
     );
 
     await TestBed.runInInjectionContext(() =>
-      until(res.value, (v) => v !== undefined)
+      until(res.value, (v) => v !== undefined),
     );
     expect(res.value()).toEqual({ data: 'first' });
 
     // Change request to a new URL
     returnData = { data: 'second' };
     requestSignal.set({
-        url: 'https://example.com/keep-prev-2',
-        context: createTestContext(() => { /* noop */ }, returnData),
+      url: 'https://example.com/keep-prev-2',
+      context: createTestContext(() => {
+        /* noop */
+      }, returnData),
     });
 
     // We change the request, which triggers a reload, but prior value is synchronously kept
@@ -267,7 +280,7 @@ describe('queryResource', () => {
 
     // Wait for the new value to resolve
     await TestBed.runInInjectionContext(() =>
-      until(res.value, (v: any) => v?.data === 'second')
+      until(res.value, (v: any) => v?.data === 'second'),
     );
     expect(res.value()).toEqual({ data: 'second' });
   });
@@ -280,25 +293,31 @@ describe('queryResource', () => {
     };
 
     // identical contents, distinct references
-    const reqObj1 = { url, context: createTestContext(validate, { data: 'test' }) };
-    const reqObj2 = { url, context: createTestContext(validate, { data: 'test' }) };
+    const reqObj1 = {
+      url,
+      context: createTestContext(validate, { data: 'test' }),
+    };
+    const reqObj2 = {
+      url,
+      context: createTestContext(validate, { data: 'test' }),
+    };
 
     const reqSignal = signal<any>(reqObj1);
 
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(reqSignal, { triggerOnSameRequest: true })
+      queryResource(reqSignal, { triggerOnSameRequest: true }),
     );
 
     await TestBed.runInInjectionContext(() =>
-      until(res.value, (v) => v !== undefined)
+      until(res.value, (v) => v !== undefined),
     );
     expect(requests).toBe(1);
 
     // Provide new object (identical fields)
     reqSignal.set(reqObj2);
-    
+
     // allow microtasks to trigger the new request fetch cycle
-    await new Promise(r => setTimeout(r, 10)); 
+    await new Promise((r) => setTimeout(r, 10));
     expect(requests).toBe(2);
   });
 
@@ -309,35 +328,40 @@ describe('queryResource', () => {
     };
 
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(() => ({
-        url,
-        context: createTestContext(validate, null, true),
-      }), { circuitBreaker: true })
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(validate, null, true),
+        }),
+        { circuitBreaker: true },
+      ),
     );
 
     // Initial load throws
     try {
       await TestBed.runInInjectionContext(() =>
-        until(res.error, (v) => v !== undefined)
+        until(res.error, (v) => v !== undefined),
       );
     } catch {
       // Ignored
     }
 
-    TestBed.flushEffects();
+    TestBed.tick();
 
     // Default circuit breaker threshold is 5, we did 1, so 4 more
     for (let i = 0; i < 4; i++) {
-        try {
-          await res.reload();
-        } catch {
-             // Let it fail
-        }
-        TestBed.flushEffects();
+      try {
+        await res.reload();
+      } catch {
+        // Let it fail
+      }
+      TestBed.tick();
     }
 
     // Now circuit breaker should be open and the resource should be disabled
-    await TestBed.runInInjectionContext(() => until(res.disabled, (v) => v === true));
+    await TestBed.runInInjectionContext(() =>
+      until(res.disabled, (v) => v === true),
+    );
     expect(res.disabled()).toBe(true);
   });
 
@@ -349,24 +373,30 @@ describe('queryResource', () => {
     };
 
     const reqSignal = signal<any>(undefined);
-    
+
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(reqSignal, { cache: { staleTime: 10000 } })
+      queryResource(reqSignal, { cache: { staleTime: 10000 } }),
     );
 
     expect(requests).toBe(0);
 
     // Prefetch triggers the initial caching
-    await res.prefetch({ url, context: createTestContext(validate, { data: 'prefetch-data' }) });
+    await res.prefetch({
+      url,
+      context: createTestContext(validate, { data: 'prefetch-data' }),
+    });
     expect(requests).toBe(1);
 
     // Enable resource with the same request signature
-    reqSignal.set({ url, context: createTestContext(validate, { data: 'prefetch-data' }) });
-    
+    reqSignal.set({
+      url,
+      context: createTestContext(validate, { data: 'prefetch-data' }),
+    });
+
     const result = await TestBed.runInInjectionContext(() =>
-      until(res.value, (v) => v !== undefined)
+      until(res.value, (v) => v !== undefined),
     );
-    
+
     // Gets prefetch value instantly, and request count is not incremented
     expect(result).toEqual({ data: 'prefetch-data' });
     expect(requests).toBe(1);
@@ -380,31 +410,37 @@ describe('queryResource', () => {
     };
 
     const res = TestBed.runInInjectionContext(() =>
-      queryResource(() => ({
-        url,
-        context: createTestContext(validate, { data: 'cache-data' }),
-      }), { cache: { staleTime: 10000 } })
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(validate, { data: 'cache-data' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
     );
 
     const result = await TestBed.runInInjectionContext(() =>
-      until(res.value, (v) => v !== undefined)
+      until(res.value, (v) => v !== undefined),
     );
     expect(result).toEqual({ data: 'cache-data' });
     expect(requests).toBe(1);
 
     // Wait slightly to ensure caching effect processed
     const res2 = TestBed.runInInjectionContext(() =>
-      queryResource(() => ({
-        url,
-        context: createTestContext(validate, { data: 'cache-data' }),
-      }), { cache: { staleTime: 10000 } })
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(validate, { data: 'cache-data' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
     );
-    
+
     const result2 = await TestBed.runInInjectionContext(() =>
-      until(res2.value, (v) => v !== undefined)
+      until(res2.value, (v) => v !== undefined),
     );
     expect(result2).toEqual({ data: 'cache-data' });
-    
+
     // The request was intercepted and deduplicated/served from cache
     expect(requests).toBe(1);
   });

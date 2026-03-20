@@ -1,4 +1,13 @@
-import { HttpContext, HttpContextToken, HttpErrorResponse, HttpResponse, provideHttpClient, withInterceptors, withNoXsrfProtection, type HttpRequest } from '@angular/common/http';
+import {
+  HttpContext,
+  HttpContextToken,
+  HttpErrorResponse,
+  HttpResponse,
+  provideHttpClient,
+  withInterceptors,
+  withNoXsrfProtection,
+  type HttpRequest,
+} from '@angular/common/http';
 import { PLATFORM_ID, signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { delay, of, throwError } from 'rxjs';
@@ -10,21 +19,41 @@ const TEST_CONTEXT = new HttpContextToken<{
   returnValue: any;
   shouldThrow: boolean;
   delayMs: number;
-}>(() => ({ validate: () => { /* noop */ }, returnValue: null, shouldThrow: false, delayMs: 0 }));
+}>(() => ({
+  validate: () => {
+    /* noop */
+  },
+  returnValue: null,
+  shouldThrow: false,
+  delayMs: 0,
+}));
 
-function createTestContext(validate: (req: HttpRequest<any>) => void, returnValue: any, shouldThrow = false, delayMs = 0) {
-  return new HttpContext().set(TEST_CONTEXT, { validate, returnValue, shouldThrow, delayMs });
+function createTestContext(
+  validate: (req: HttpRequest<any>) => void,
+  returnValue: any,
+  shouldThrow = false,
+  delayMs = 0,
+) {
+  return new HttpContext().set(TEST_CONTEXT, {
+    validate,
+    returnValue,
+    shouldThrow,
+    delayMs,
+  });
 }
 
 const testInterceptor = (req: HttpRequest<any>) => {
-  const { validate, shouldThrow, returnValue, delayMs } = req.context.get(TEST_CONTEXT);
+  const { validate, shouldThrow, returnValue, delayMs } =
+    req.context.get(TEST_CONTEXT);
   validate(req);
-  
+
   if (shouldThrow) {
-    const err$ = throwError(() => new HttpErrorResponse({ error: 'Test error', status: 500 }));
+    const err$ = throwError(
+      () => new HttpErrorResponse({ error: 'Test error', status: 500 }),
+    );
     return delayMs ? err$.pipe(delay(delayMs)) : err$;
   }
-  
+
   const res$ = of(new HttpResponse({ body: returnValue, status: 200 }));
   return delayMs ? res$.pipe(delay(delayMs)) : res$;
 };
@@ -54,38 +83,44 @@ describe('mutationResource', () => {
   it('should execute mutation and call lifecycle hooks with correct context', async () => {
     const hooks: string[] = [];
     let requests = 0;
-    
+
     // We will await a promise that resolves in onSettled
     const { promise, resolve } = Promise.withResolvers<void>();
 
     const res = TestBed.runInInjectionContext(() =>
-      mutationResource((body: { id: number }) => ({
-        url: `https://example.com/mutate/${body.id}`,
-        method: 'POST',
-        body,
-        context: createTestContext((req) => {
-           expect(req.body).toEqual(body);
-           requests++;
-        }, { success: true }),
-      }), {
-        onMutate: (value) => {
-          hooks.push('onMutate');
-          return { originalId: value.id };
+      mutationResource(
+        (body: { id: number }) => ({
+          url: `https://example.com/mutate/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            (req) => {
+              expect(req.body).toEqual(body);
+              requests++;
+            },
+            { success: true },
+          ),
+        }),
+        {
+          onMutate: (value) => {
+            hooks.push('onMutate');
+            return { originalId: value.id };
+          },
+          onSuccess: (result, ctx) => {
+            hooks.push('onSuccess');
+            expect(result).toEqual({ success: true });
+            expect(ctx).toEqual({ originalId: 1 });
+          },
+          onError: () => {
+            hooks.push('onError');
+          },
+          onSettled: (ctx) => {
+            hooks.push('onSettled');
+            expect(ctx).toEqual({ originalId: 1 });
+            resolve();
+          },
         },
-        onSuccess: (result, ctx) => {
-          hooks.push('onSuccess');
-          expect(result).toEqual({ success: true });
-          expect(ctx).toEqual({ originalId: 1 });
-        },
-        onError: () => {
-          hooks.push('onError');
-        },
-        onSettled: (ctx) => {
-          hooks.push('onSettled');
-          expect(ctx).toEqual({ originalId: 1 });
-          resolve();
-        }
-      })
+      ),
     );
 
     res.mutate({ id: 1 });
@@ -104,20 +139,29 @@ describe('mutationResource', () => {
     const { promise, resolve } = Promise.withResolvers<void>();
 
     const res = TestBed.runInInjectionContext(() =>
-      mutationResource((body: any) => ({
-        url: 'https://example.com/fail',
-        method: 'POST',
-        body,
-        context: createTestContext(() => { /* noop */ }, null, true),
-      }), {
-        onMutate: () => hooks.push('onMutate'),
-        onSuccess: () => hooks.push('onSuccess'),
-        onError: () => hooks.push('onError'),
-        onSettled: () => {
-          hooks.push('onSettled');
-          resolve();
-        }
-      })
+      mutationResource(
+        (body: any) => ({
+          url: 'https://example.com/fail',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            null,
+            true,
+          ),
+        }),
+        {
+          onMutate: () => hooks.push('onMutate'),
+          onSuccess: () => hooks.push('onSuccess'),
+          onError: () => hooks.push('onError'),
+          onSettled: () => {
+            hooks.push('onSettled');
+            resolve();
+          },
+        },
+      ),
     );
 
     res.mutate({ data: 'fail' });
@@ -131,19 +175,27 @@ describe('mutationResource', () => {
     let settledCount = 0;
 
     const res = TestBed.runInInjectionContext(() =>
-      mutationResource((body: number) => ({
-        url: `https://example.com/queue/${body}`,
-        method: 'POST',
-        body,
-        context: createTestContext(() => {
-          executions.push(body);
-        }, { queued: body }, false, 10), // provide a non-null return value
-      }), {
-        queue: true,
-        onSettled: () => {
-          settledCount++;
-        }
-      })
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/queue/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { queued: body },
+            false,
+            10,
+          ), // provide a non-null return value
+        }),
+        {
+          queue: true,
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
     );
 
     res.mutate(1);
@@ -151,9 +203,9 @@ describe('mutationResource', () => {
     res.mutate(3);
 
     for (let i = 0; i < 50; i++) {
-        if (settledCount === 3) break;
-        await new Promise(r => setTimeout(r, 10));
-        TestBed.flushEffects();
+      if (settledCount === 3) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
     }
 
     expect(settledCount).toBe(3);
@@ -168,32 +220,40 @@ describe('mutationResource', () => {
     networkStatusSignal.set(false); // start offline
 
     const res = TestBed.runInInjectionContext(() =>
-      mutationResource((body: number) => ({
-        url: `https://example.com/queue-offline/${body}`,
-        method: 'POST',
-        body,
-        context: createTestContext(() => {
-          executions.push(body);
-        }, { queued: body }, false, 10), 
-      }), {
-        queue: true,
-        onSettled: () => {
-          settledCount++;
-        }
-      })
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/queue-offline/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { queued: body },
+            false,
+            10,
+          ),
+        }),
+        {
+          queue: true,
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
     );
 
     res.mutate(1);
     res.mutate(2);
 
-    TestBed.flushEffects();
+    TestBed.tick();
 
     // It should have dequeued the first item but pending at network layer
     expect(res.current()).toEqual(1);
     expect(executions.length).toBe(0); // network didn't fire
-    
+
     // Wait a bit to ensure it really doesn't fire
-    await new Promise(r => setTimeout(r, 40));
+    await new Promise((r) => setTimeout(r, 40));
     expect(executions.length).toBe(0);
 
     // Go online!
@@ -201,9 +261,9 @@ describe('mutationResource', () => {
 
     // Repeatedly flush effects until settledCount === 2
     for (let i = 0; i < 50; i++) {
-        if (settledCount === 2) break;
-        await new Promise(r => setTimeout(r, 10));
-        TestBed.flushEffects();
+      if (settledCount === 2) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
     }
 
     expect(settledCount).toBe(2);

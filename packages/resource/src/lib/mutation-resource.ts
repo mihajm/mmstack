@@ -59,6 +59,7 @@ export type MutationResourceOptions<
   TMutation = TResult,
   TCTX = void,
   TICTX = TCTX,
+  TError = unknown,
 > = Omit<
   QueryResourceOptions<TResult, TRaw>,
   'equal' | 'onError' | 'keepPrevious' | 'refresh' | 'cache' // we can't keep previous values, refresh or cache mutations as they are meant to be one-off operations
@@ -75,13 +76,13 @@ export type MutationResourceOptions<
    * @param error The error that occurred.
    * @param ctx The context value returned by the `onMutate` callback (or `undefined` if `onMutate` was not provided or returned `undefined`).
    */
-  onError?: (error: unknown, ctx: NoInfer<TCTX>) => void;
+  onError?: (error: TError, ctx: NoInfer<TCTX>) => void;
   /**
    * A callback function that is called if the mutation request succeeds.
    * @param value The result of the mutation (the parsed response body).
    * @param ctx The context value returned by the `onMutate` callback (or `undefined` if `onMutate` was not provided or returned `undefined`).
    */
-  onSuccess?: (value: NoInfer<TResult>, ctx: NoInfer<TCTX>) => void;
+  onSuccess?: (value: TResult, ctx: NoInfer<TCTX>) => void;
   /**
    * A callback function that is called when the mutation request settles (either succeeds or fails).
    * @param ctx The context value returned by the `onMutate` callback (or `undefined` if `onMutate` was not provided or returned `undefined`).

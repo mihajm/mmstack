@@ -1,4 +1,9 @@
-import { computed, type Signal, signal, type WritableSignal } from '@angular/core';
+import {
+  computed,
+  type Signal,
+  signal,
+  type WritableSignal,
+} from '@angular/core';
 import { type ArrayValidatorOptions } from '@mmstack/form-validation';
 import { type DerivedSignal } from '@mmstack/primitives';
 import {
@@ -7,7 +12,6 @@ import {
   type MultiSelectState,
   type MultiSelectStateOptions,
 } from './multi-select';
-import { type SelectState } from './select';
 
 /**
  * Represents the reactive state for a autocompletable chips form control

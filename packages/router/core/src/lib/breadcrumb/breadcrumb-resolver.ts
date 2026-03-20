@@ -4,6 +4,9 @@ import {
   Router,
   type ResolveFn,
 } from '@angular/router';
+import { until } from '@mmstack/primitives';
+import { injectSnapshotPathResolver } from '../util';
+import { createInternalBreadcrumb, type Breadcrumb } from './breadcrumb';
 import { BreadcrumbStore } from './breadcrumb-store';
 
 /**
@@ -27,10 +30,6 @@ type CreateBreadcrumbOptions = {
    */
   awaitValue?: boolean;
 };
-
-import { until } from '@mmstack/primitives';
-import { injectSnapshotPathResolver } from '../util';
-import { type Breadcrumb, createInternalBreadcrumb } from './breadcrumb';
 
 /**
  * Creates and registers a breadcrumb for a specific route.

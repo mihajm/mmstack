@@ -62,6 +62,7 @@ function autoGenerateBreadcrumb(
         !leaf().segment.path.endsWith('/') &&
         !!label(),
     ),
+    false,
   );
 }
 

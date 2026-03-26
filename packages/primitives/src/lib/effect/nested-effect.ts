@@ -128,18 +128,22 @@ export function nestedEffect(
     );
   });
 
+  let unregisterCleanup: (() => void) | undefined;
+
+  if (!parent && !options?.manualCleanup)
+    unregisterCleanup = injector.get(DestroyRef).onDestroy(() => ref.destroy());
+
   const ref: EffectRef = {
     destroy: () => {
       if (isDestroyed) return;
       isDestroyed = true;
       parent?.children.delete(ref);
       srcRef.destroy();
+      unregisterCleanup?.();
     },
   };
 
   parent?.children.add(ref);
-
-  injector.get(DestroyRef).onDestroy(() => ref.destroy());
 
   return ref;
 }

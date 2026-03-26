@@ -59,6 +59,7 @@ import { FormsModule } from '@angular/forms';
 })
 export class SearchComponent {
   searchTerm = debounced('', { ms: 300 }); // Debounce for 300ms
+  example2 = debounce(signal(''), { ms: 300 }); // pattern for adding debounce to an existing signal
 
   constructor() {
     effect(() => {

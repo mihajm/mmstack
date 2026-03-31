@@ -101,10 +101,30 @@ export function injectable<T>(
   opt: ErrorMessageInjectableOptions,
 ): InjectFns<T>;
 
+/**
+ * Creates an injectable with a baked-in factory.
+ * @example const [injectUser, provideUser] = injectable(() => inject(HttpClient).get('/user'), 'UserToken');
+ */
+export function injectable<T>(fn: () => T, name?: string): InjectFns<T>;
+
 export function injectable<T>(
-  token: string,
-  opt?: InjectableOptions<T>,
+  tokenOrFn: string | (() => T),
+  optOrString?: InjectableOptions<T> | string,
 ): InjectFns<T> {
+  const token =
+    typeof tokenOrFn === 'string'
+      ? tokenOrFn
+      : typeof optOrString === 'string'
+        ? optOrString
+        : '@mmstack/di/injectable';
+
+  const opt =
+    typeof tokenOrFn === 'function'
+      ? { lazyFallback: tokenOrFn }
+      : typeof optOrString === 'string'
+        ? undefined
+        : optOrString;
+
   const injectionToken = new InjectionToken<T>(token);
 
   const options = opt as

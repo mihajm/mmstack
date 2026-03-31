@@ -17,6 +17,7 @@ This library provides the following utilities:
 
 - `injectable` - Creates a typed InjectionToken with inject and provide helper functions for type-safe dependency injection.
 - `rootInjectable` - Creates a lazily-initialized root-level injectable that maintains a singleton instance.
+- `createScope` - Creates a dependency injection scope that caches singletons based on the factory function.
 
 ---
 
@@ -376,6 +377,49 @@ export class NavbarComponent {
   logout() {
     this.authStore.logout();
   }
+}
+```
+
+---
+
+## createScope
+
+Creates a dependency injection scope using a dynamic `InjectionToken` representing a caching registry. Factories executed within the scope run in the Angular injection context and their results are cached, effectively creating scoped singletons, that are destroyed when the scoped provider is. It returns a tuple of `[injectable, provider]`.
+
+### Basic Usage
+
+```typescript
+import { Component, inject } from '@angular/core';
+import { createScope } from '@mmstack/di';
+
+// Create the scope
+const [injectableFeatureItem, provideFeatureScope] = createScope('FeatureScope');
+
+// Provide the scope at a specific component level boundary
+@Component({
+  selector: 'app-feature',
+  providers: [provideFeatureScope()],
+  template: `<app-child></app-child>`,
+})
+export class FeatureComponent {}
+
+// Use the scope to register an item factory
+// The factory will run in the injection context so you can use inject()
+const useFeatureItem = injectableFeatureItem(() => {
+  const someDep = inject(SomeDependency);
+  return {
+    id: Math.random(),
+    doWork: () => someDep.work(),
+  };
+});
+
+@Component({
+  selector: 'app-child',
+  template: `<div>Child Item ID: {{ item.id }}</div>`,
+})
+export class ChildComponent {
+  // Always returns the exact same instance for this specific scope provider boundary
+  item = useFeatureItem();
 }
 ```
 

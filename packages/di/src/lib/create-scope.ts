@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 
 @Injectable()
-export class ScopeRegistry {
+class ScopeRegistry {
   private readonly injector = inject(Injector);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private readonly registry = new Map<Function, any>();

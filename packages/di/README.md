@@ -16,6 +16,8 @@ npm install @mmstack/di
 This library provides the following utilities:
 
 - `injectable` - Creates a typed InjectionToken with inject and provide helper functions for type-safe dependency injection.
+- `injectLazy` - Defers the resolution and instantiation of a token until it is actually accessed.
+- `createRunInInjectionContext` - Captures an injection context securely and returns a runner function, useful for `inject()` inside async callbacks.
 - `rootInjectable` - Creates a lazily-initialized root-level injectable that maintains a singleton instance.
 - `createScope` - Creates a dependency injection scope that caches singletons based on the factory function.
 
@@ -233,6 +235,97 @@ export class FormFieldComponent {
 export class FormActionsComponent {
   formContext = injectFormContext();
 }
+```
+
+---
+
+## injectLazy
+
+Defers the resolution and instantiation of an injection token until the returned getter function is actually called.
+
+Angular's native `inject()` resolves and instantiates dependencies immediately during the construction phase. If a service is heavily resource-intensive but only needed conditionally (like an export service or a complex editor), `injectLazy` allows you to capture the injection context immediately while delaying instantiation. The resolved value is cached, acting as a standard scoped singleton on subsequent calls.
+
+### Basic Usage
+
+```typescript
+import { Component, HostListener } from '@angular/core';
+import { injectLazy } from '@mmstack/di';
+
+@Component({
+  selector: 'app-export-button',
+  template: `<button>Export Data</button>`,
+})
+export class ExportButtonComponent {
+  // Captures the Injector but does NOT instantiate HeavyExportService yet
+  private getExportService = injectLazy(HeavyExportService);
+
+  @HostListener('click')
+  export() {
+    // HeavyExportService is instantiated on the first click, then cached
+    const service = this.getExportService();
+    service.doExport();
+  }
+}
+```
+
+### With Options
+
+It fully supports Angular's `InjectOptions` and guarantees correct return types (e.g., returning `T | null` when `optional: true`):
+
+```typescript
+const getOptionalDep = injectLazy(MyToken, { optional: true });
+
+// Later...
+const dep = getOptionalDep(); // MyToken | null
+```
+
+---
+
+## createRunInInjectionContext
+
+Captures an injection context securely and returns a runner function.
+
+This utility allows you to execute callbacks inside the captured context at a later time. It solves the common pain point of needing to use `inject()` inside asynchronous callbacks, RxJS streams, or external event listeners where the framework's implicit injection context has been lost.
+
+### Basic Usage
+
+```typescript
+import { Component, OnInit, inject } from '@angular/core';
+import { createRunInInjectionContext } from '@mmstack/di';
+
+@Component({
+  selector: 'app-dialog-trigger',
+  template: `<button>Open Dialog</button>`,
+})
+export class DialogTriggerComponent implements OnInit {
+  // Grabs the current injector during construction
+  private runInContext = createRunInInjectionContext();
+
+  ngOnInit() {
+    // someExternalLibrary is out of Angular's zone/context
+    someExternalLibrary.on('openEvent', () => {
+      this.runInContext(() => {
+        // We can safely use `inject()` here even though we are inside an async callback!
+        const dialog = inject(DialogService);
+        dialog.open();
+      });
+    });
+  }
+}
+```
+
+### With Explicit Injector
+
+You can also completely bypass the ambient capture and provide an `Injector` explicitly:
+
+```typescript
+// Outside of normal injection context
+const runner = createRunInInjectionContext(appRef.injector);
+
+runner(() => {
+  const router = inject(Router);
+  router.navigate(['/home']);
+});
 ```
 
 ---

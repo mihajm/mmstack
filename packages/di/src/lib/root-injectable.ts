@@ -1,7 +1,7 @@
 import { inject, InjectionToken, Injector } from '@angular/core';
 
 /**
- * Creates a tree-shakable root singleton without a class.
+ * Creates a root-level singleton hooked into the global injector.
  * @example const injectUser = rootInjectable(() => ({ name: signal('John') }));
  */
 export function rootInjectable<T>(

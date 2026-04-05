@@ -69,4 +69,34 @@ describe('createScope', () => {
       );
     });
   });
+
+  it('should throw on circular dependencies between scope registrations', () => {
+    const [registerScope, provideScope] = createScope('myScope');
+
+    TestBed.configureTestingModule({ providers: [provideScope()] });
+
+    const useA: () => unknown = registerScope(() => useB());
+    const useB: () => unknown = registerScope(() => useA());
+
+    TestBed.runInInjectionContext(() => {
+      expect(() => useA()).toThrowError(
+        '[mmstack/di]: Circular dependency detected in scope "myScope"'
+      );
+    });
+  });
+
+  it('should include the factory name in the circular dependency error when provided', () => {
+    const [registerScope, provideScope] = createScope('myScope');
+
+    TestBed.configureTestingModule({ providers: [provideScope()] });
+
+    const useA: () => unknown = registerScope(() => useB(), 'A');
+    const useB: () => unknown = registerScope(() => useA(), 'B');
+
+    TestBed.runInInjectionContext(() => {
+      expect(() => useA()).toThrowError(
+        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "A"'
+      );
+    });
+  });
 });

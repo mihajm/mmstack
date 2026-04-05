@@ -12,13 +12,28 @@ class ScopeRegistry {
   private readonly injector = inject(Injector);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private readonly registry = new Map<Function, any>();
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  private readonly resolving = new Set<Function>();
 
-  getOrCreate<T>(factory: () => T): T {
+  getOrCreate<T>(
+    factory: () => T,
+    scopeName?: string,
+    factoryName?: string,
+  ): T {
     if (this.registry.has(factory)) return this.registry.get(factory);
+    if (this.resolving.has(factory))
+      throw new Error(
+        `[mmstack/di]: Circular dependency detected in scope "${scopeName ?? 'unknown'}"${factoryName ? ` while resolving "${factoryName}"` : ''}`,
+      );
 
-    const val = runInInjectionContext(this.injector, factory);
-    this.registry.set(factory, val);
-    return val;
+    this.resolving.add(factory);
+    try {
+      const val = runInInjectionContext(this.injector, factory);
+      this.registry.set(factory, val);
+      return val;
+    } finally {
+      this.resolving.delete(factory);
+    }
   }
 }
 
@@ -67,7 +82,7 @@ export function createScope(name?: string) {
     useClass: ScopeRegistry,
   });
 
-  const registerFn = <T>(factory: () => T) => {
+  const registerFn = <T>(factory: () => T, factoryName?: string) => {
     return () => {
       const registry = inject(token, { optional: true });
       if (!registry)
@@ -75,7 +90,7 @@ export function createScope(name?: string) {
           `[mmstack/di]: Scope ${name ?? 'unknown'} not found. Please make sure you provide it`,
         );
 
-      return registry.getOrCreate(factory);
+      return registry.getOrCreate(factory, name, factoryName);
     };
   };
 

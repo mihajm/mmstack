@@ -15,6 +15,21 @@ import { createT } from './register-namespace';
 import { type UnknownStringKeyObject } from './string-key-object.type';
 import { TranslationStore } from './translation-store';
 
+function compareObjects(
+  a?: Record<string, string>,
+  b?: Record<string, string>,
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+
+  if (aKeys.length !== bKeys.length) return false;
+
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
 @Directive()
 export abstract class Translate<
   TInput extends string,
@@ -32,33 +47,24 @@ export abstract class Translate<
     >();
 
   constructor() {
-    const key = computed(() => {
-      const vars = this.translate();
-      return (Array.isArray(vars) ? vars[0] : vars) as TKey;
+    const inputs = computed(() => this.translate(), {
+      equal: (a, b) => {
+        if (a === b) return true;
+        if (typeof a === 'string' || typeof b === 'string') return false;
+        if (a[0] !== b[0]) return false;
+        return compareObjects(
+          a[1] as Record<string, string>,
+          b[1] as Record<string, string>,
+        );
+      },
     });
 
-    const args = computed(
-      () => {
-        const vars = this.translate();
-        return (Array.isArray(vars) ? vars[1] : undefined) as TMap[TKey];
-      },
-      {
-        equal: (a, b) => {
-          if (a === undefined && b === undefined) return true;
-          if (a === undefined || b === undefined) return false;
-
-          const aObj = a as Record<string, string>;
-          const keys = Object.keys(aObj);
-          const bObj = b as Record<string, string>;
-
-          if (!keys.length) return !Object.keys(bObj).length;
-
-          return keys.every((key) => aObj[key] === bObj[key]);
-        },
-      },
-    );
-
-    const translation = computed(() => this.t(key(), args()));
+    const translation = computed(() => {
+      const inp = inputs();
+      return typeof inp === 'string'
+        ? this.t(inp)
+        : this.t(inp[0], inp[1] as Record<string, string>);
+    });
 
     const renderer = inject(Renderer2);
     const el = inject<ElementRef<HTMLElement>>(ElementRef);

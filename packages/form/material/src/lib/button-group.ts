@@ -21,7 +21,6 @@ import { ButtonGroupState } from './adapters';
 
 @Component({
   selector: 'mm-button-group',
-  standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: {

@@ -30,23 +30,25 @@ It uses the robust **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message 
 - 🌍 **ICU Message Syntax:** Uses FormatJS runtime for robust support of variables (`{name}`), `plural`, `select`, and `selectordinal`. (Note: Complex inline date/number formats are not the focus; use Angular's built-in Pipes/format functions & use the result as variables in your translation.)
 - 🔗 **Shared Namespace Support:** Define common translations (e.g., 'Save', 'Cancel') in one namespace and make them type-safely accessible from others.
 - 🛠️ **Template Helpers:** Includes abstract `Translator` pipe and `Translate` directive for easy, type-safe templating.
+- 🔢 **Reactive Formatters:** First-class, Intl-based, locale-aware formatters for dates, numbers, currencies, percentages, lists, and relative time — all automatically reactive to locale changes via signals, no zone or common/locale dependency required.
 
 ### Comparison
 
-While Angular offers excellent i18n solutions like `@angular/localize` and `transloco`, `@mmstack/translate` aims to fill a specific niche by supporting **both** traditional multi-build and modern single-build approaches.
+While Angular offers excellent i18n solutions like `@angular/localize` and `@jsverse/transloco`, `@mmstack/translate` aims to fill a specific niche by supporting **both** traditional multi-build and modern single-build approaches with a typesafe & modular approach, perfect for nx-based environments.
 
-| Feature                  |         `@mmstack/translate`         |   `@angular/localize`    |          `transloco`          |      `ngx-translate`       |
-| :----------------------- | :----------------------------------: | :----------------------: | :---------------------------: | :------------------------: |
-| **Build Process**        |       ✅ Single or Multi-Build       | ❌ Multi-Build (Typical) |        ✅ Single Build        |      ✅ Single Build       |
-| **Translation Timing**   |        Runtime or Build Time         |       Compile Time       |            Runtime            |          Runtime           |
-| **Type Safety (Keys)**   | ✅ Strong (Inferred from structure)  |    🟡 via extraction     |      🟡 Tooling/TS Files      |    🟡 OK Manual/Tooling    |
-| **Type Safety (Params)** |    ✅ Strong (Inferred from ICU)     |         ❌ None          |           🟡 Manual           |         🟡 Manual          |
-| **Locale Switching**     | ✅ Dynamic (Runtime) or Page refresh | 🔄 Page Refresh Required |     ✅ Dynamic (Runtime)      |    ✅ Dynamic (Runtime)    |
-| **Lazy Loading**         |  ✅ Built-in (Namespaces/Resolvers)  |    N/A (Compile Time)    |     ✅ Built-in (Scopes)      |  ✅ Yes (Custom Loaders)   |
-| **Namespacing/Scopes**   |             ✅ Built-in              |         ❌ None          |     ✅ Built-in (Scopes)      | 🟡 Manual (File Structure) |
-| **ICU Support**          |   ✅ Subset (via FormatJS Runtime)   |  ✅ Yes (Compile Time)   | ✅ Yes (Runtime Intl/Plugins) |     🟡 Via Extensions      |
-| **Signal Integration**   |       ✅ Good (`t.asSignal()`)       |           N/A            | ✅ Good (`translateSignal()`) |      ❌ Minimal/None       |
-| **Maturity / Community** |                ✨ New                |       Core Angular       |      ✅ Mature / Active       |         ✅ Mature          |
+| Feature                  |         `@mmstack/translate`         |      `@angular/localize`      |                                         `@jsverse/transloco`                                         |       `ngx-translate`       |
+| :----------------------- | :----------------------------------: | :---------------------------: | :--------------------------------------------------------------------------------------------------: | :-------------------------: |
+| **Build Process**        |       ✅ Single or Multi-Build       |   ❌ Multi-Build (Typical)    |                                           ✅ Single Build                                            |       ✅ Single Build       |
+| **Translation Timing**   |        Runtime or Build Time         |         Compile Time          |                                               Runtime                                                |           Runtime           |
+| **Type Safety (Keys)**   | ✅ Strong (Inferred from structure)  |       🟡 via extraction       |                                         🟡 Tooling/TS Files                                          |    🟡 OK Manual/Tooling     |
+| **Type Safety (Params)** |    ✅ Strong (Inferred from ICU)     |            ❌ None            |                                              🟡 Manual                                               |          🟡 Manual          |
+| **Locale Switching**     | ✅ Dynamic (Runtime) or Page refresh |   🔄 Page Refresh Required    |                                         ✅ Dynamic (Runtime)                                         |    ✅ Dynamic (Runtime)     |
+| **Lazy Loading**         |  ✅ Built-in (Namespaces/Resolvers)  |      N/A (Compile Time)       |                                         ✅ Built-in (Scopes)                                         |   ✅ Yes (Custom Loaders)   |
+| **Namespacing/Scopes**   |             ✅ Built-in              |            ❌ None            |                                         ✅ Built-in (Scopes)                                         | 🟡 Manual (File Structure)  |
+| **ICU Support**          |   ✅ Subset (via FormatJS Runtime)   |     ✅ Yes (Compile Time)     |                                    ✅ Yes (Runtime Intl/Plugins)                                     |      🟡 Via Extensions      |
+| **Signal Integration**   |      ✅ Great (fully reactive)       |              N/A              |                          ✅ Good (`translateSignal()`, `activeLang` signal)                          |      ❌ Minimal/None¹       |
+| **Reactive Formatters**  |     ✅ Built-in Intl integration     | 🟡 Angular pipes (zone-based) | ✅ @jsverse/transloco-locale(`transloco-locale`²: date/number/currency/percent, not signal-reactive) | ❌ None (use Angular pipes) |
+| **Maturity / Community** |  🟡 Less mature, but battle tested   |         Core Angular          |                                          ✅ Mature / Active                                          |          ✅ Mature          |
 
 ## Installation
 
@@ -215,13 +217,11 @@ import { type QuoteLocale } from './quote.namespace';
 
 @Pipe({
   name: 'translate',
-  standalone: true,
 })
 export class QuoteTranslator extends Translator<QuoteLocale> {}
 
 @Directive({
   selector: '[translate]', // Input in Translate is named 'translate'
-  standalone: true,
 })
 export class QuoteTranslate<TInput extends string> extends Translate<TInput, QuoteLocale> {}
 ```
@@ -235,12 +235,18 @@ import { QuoteTranslator, QuoteTranslate } from './quote.helpers';
 
 @Component({
   selector: 'app-quote',
-  standalone: true,
   imports: [QuoteTranslator, QuoteTranslate],
   template: `
+    <!-- t() can be called directly in templates for variable-free keys.
+    It is fully reactive & performant enough for this to work well -->
+    <h1>{{ t('quote.pageTitle') }}</h1>
+    <span>{{ t('quote.detail.authorLabel') }}</span>
+
+    <!-- For keys with variables, use t.asSignal() instead (see below).
+         Calling t('key', { ... }) in a template creates a new object literal
+         every change detection cycle, causing recomputation & gc churn -->
+
     <!-- Pipe validates key & variables match -->
-    <h1>{{ 'quote.pageTitle' | translate }}</h1>
-    <!-- Non-pluralized params must be string -->
     <span>{{ 'quote.errors.minLength' | translate: { min: '5' } }}</span>
 
     <!-- Directive replaces textContent of element -->
@@ -250,17 +256,34 @@ import { QuoteTranslator, QuoteTranslate } from './quote.helpers';
 })
 export class QuoteComponent {
   protected readonly count = signal(0);
-  private readonly t = injectQuoteT();
 
-  // Static translation
-  private readonly author = this.t('quote.detail.authorLabel');
+  // Must be protected/public to be accessible from the template
+  protected readonly t = injectQuoteT();
 
-  // Reactive translation with signal parameters
-  private readonly stats = this.t.asSignal('quote.stats', () => ({
+  // performance best case, but only useful in a compiled locale scenario (when using LOCALE_ID)
+  protected readonly title = t('quote.pageTitle');
+
+  // For variable keys (or optimization scenarios), use asSignal() — it memoizes the result and only
+  // re-evaluates when the signal-based parameters actually change. If no variables are provided it basically
+  // recomputes only on locale changes
+  protected readonly stats = this.t.asSignal('quote.stats', () => ({
     count: this.count(), // Must match ICU parameter (type: number)
   }));
 }
 ```
+
+**When to use each API:**
+
+| Scenario                                   | Recommended API                                              |
+| :----------------------------------------- | :----------------------------------------------------------- |
+| Variable-free key in a template            | `{{ t('ns.key') }}`                                          |
+| Variable-free key in class logic           | `this.t('ns.key')`                                           |
+| Key with variables in a template           | `t.asSignal('ns.key', () => ({ var: val() }))`               |
+| Key with variables in class logic          | `this.t.asSignal('ns.key', () => ({ var: val() }))`          |
+| Type-safe pipe (with or without variables) | `'ns.key' \| translate` / `'ns.key' \| translate: vars`      |
+| Structural DOM replacement                 | `<el translate="ns.key">` / `[translate]="['ns.key', vars]"` |
+
+> **Why not `t(key, vars)` in templates?** Each change detection cycle creates a new object literal for `vars`, so FormatJS re-formats the message even when the values haven't changed. `t.asSignal()` wraps the params in a `computed()` with deep equality, skipping re-evaluation when the underlying values are stable.
 
 ### 4. [OPTIONAL] Route-Based Locale Detection
 
@@ -543,6 +566,12 @@ const valueThatNeedsProps = t('remote.myOtherKey', {
 The library includes a set of reactive formatters that automatically adapt to the current locale. They are standalone functions that do not require dependency injection, making them easy to use anywhere.
 
 **Note:** For reactivity, wrap them in a `computed()` if the input signals change or if you want them to react to dynamic locale changes.
+
+**SSR note:** Formatters read the active locale from a process-level signal. This is safe for all client-side usage and for SSR on serverless platforms (Lambda, Vercel, Netlify Edge) or worker-thread pools, where each request runs in an isolated V8 context. If you run a traditional single-process Node.js SSR server and concurrently render pages for **different** locales, pass the locale explicitly via the `locale` option on each formatter to avoid a potential cross-request read:
+
+```typescript
+readonly displayDate = computed(() => formatDate(this.date, { locale: this.currentLocale() }));
+```
 
 Available formatters:
 

@@ -150,7 +150,6 @@ export type StoredSignal<T> = WritableSignal<T> & {
  *
  * @Component({
  * selector: 'app-settings',
- * standalone: true,
  * template: `
  * Theme:
  * <select [ngModel]="theme()" (ngModelChange)="theme.set($event)">

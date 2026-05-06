@@ -33,7 +33,6 @@ import { pathParam } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-user-profile',
-  standalone: true,
   template: `
     <h1>User Profile</h1>
     <p>User ID: {{ userId() ?? 'Unknown' }}</p>
@@ -66,7 +65,6 @@ Creates a WritableSignal that synchronizes with a specific URL query parameter, 
 ```typescript
 @Component({
   selector: 'app-search-page',
-  standalone: true,
   imports: [FormsModule],
   template: `
     <label>
@@ -105,7 +103,6 @@ import { url } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-header',
-  standalone: true,
   template: `<nav>Current Path: {{ currentUrl() }}</nav>`,
 })
 export class HeaderComponent {
@@ -162,7 +159,6 @@ import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-navigation',
-  standalone: true,
   imports: [Link, RouterLink],
   template: `
     <nav>
@@ -196,7 +192,6 @@ import { injectBreadcrumbs } from '@mmstack/router-core'; // Adjust path if need
 
 @Component({
   selector: 'app-breadcrumbs',
-  standalone: true,
   template: `
     <nav aria-label="breadcrumb">
       <ol>

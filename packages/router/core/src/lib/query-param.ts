@@ -40,7 +40,6 @@ import { toWritable } from '@mmstack/primitives';
  *
  * @Component({
  * selector: 'app-product-list',
- * standalone: true,
  * // imports: [FormsModule], // If using ngModel
  * template: `
  * <div>

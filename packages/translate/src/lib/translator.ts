@@ -1,35 +1,60 @@
 import { ChangeDetectorRef, effect, inject } from '@angular/core';
-import { type CompiledTranslation, type inferCompiledTranslationMap } from './compile';
+import {
+  type CompiledTranslation,
+  type inferCompiledTranslationMap,
+} from './compile';
 import { createT } from './register-namespace';
-import { type UnknownStringKeyObject } from './string-key-object.type';
+import {
+  type AnyStringRecord,
+  type UnknownStringKeyObject,
+} from './string-key-object.type';
 import { TranslationStore } from './translation-store';
+
+type TransformTFn<
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+  TMap extends inferCompiledTranslationMap<T>,
+> = <TKey extends keyof TMap & string>(
+  key: TKey,
+  ...args: TMap[TKey] extends void
+    ? [locale?: string]
+    : [TMap[TKey], locale?: string]
+) => string;
+
+function createTransformFn<
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+  TMap extends inferCompiledTranslationMap<T>,
+>(): TransformTFn<T, TMap> {
+  const store = inject(TranslationStore);
+  const t = createT<TMap>(store);
+
+  const fn = <TKey extends keyof TMap & string>(
+    key: TKey,
+    variablesOrLocale?: string | AnyStringRecord,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _?: string, // maybeLocale
+  ): string => {
+    const vars =
+      typeof variablesOrLocale === 'string' ? undefined : variablesOrLocale;
+
+    return (t as (key: TKey, vars?: AnyStringRecord) => string)(key, vars);
+  };
+
+  return fn as unknown as TransformTFn<T, TMap>;
+}
 
 export abstract class Translator<
   T extends CompiledTranslation<UnknownStringKeyObject, string>,
   TMap extends inferCompiledTranslationMap<T> = inferCompiledTranslationMap<T>,
 > {
-  private readonly store = inject(TranslationStore);
-  private readonly t = createT<TMap>(this.store);
-
   constructor() {
     const cdr = inject(ChangeDetectorRef);
+    const locale = inject(TranslationStore).locale;
 
     effect(() => {
-      this.store.locale();
+      locale();
       cdr.markForCheck();
     });
   }
 
-  transform<K extends keyof TMap & string>(
-    key: K,
-    ...args: TMap[K] extends void
-      ? [locale?: string]
-      : [TMap[K], locale?: string]
-  ): string {
-    const actualArgs = args.filter(
-      (a) => typeof a === 'object',
-    ) as TMap[K] extends void ? [] : [TMap[K]];
-
-    return this.t(key, ...actualArgs);
-  }
+  transform = createTransformFn<T, TMap>();
 }

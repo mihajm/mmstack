@@ -15,15 +15,15 @@ import {
 } from './compile';
 import { replaceWithDelim } from './delim';
 import { injectResolveParamLocale } from './resovler-locale';
-import { type UnknownStringKeyObject } from './string-key-object.type';
+import {
+  type AnyStringRecord,
+  type UnknownStringKeyObject,
+} from './string-key-object.type';
 import {
   injectDefaultLocale,
   injectIntlConfig,
   TranslationStore,
 } from './translation-store';
-
- 
-type AnyStringRecord = Record<string, any>;
 
 function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {
   let keyMatcher: (a: T, b: T) => boolean;
@@ -70,17 +70,22 @@ type TFunctionWithSignalConstructor<
 function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
   fn: TFn,
   store: TranslationStore,
+  keyMap: Map<string, string>,
 ): TFunctionWithSignalConstructor<TMap, TFn> {
   const withSig = fn as TFunctionWithSignalConstructor<TMap, TFn>;
 
   const asSignal = <TKey extends keyof TMap & string>(
     key: TKey,
-    ...args: TMap[TKey] extends void ? [] : [() => TMap[TKey]]
+    variables?: () => AnyStringRecord,
   ): Signal<string> => {
-    const variables = args[0] as () => AnyStringRecord | undefined;
     const stringKey = key as string;
 
-    const flatPath = replaceWithDelim(stringKey);
+    let flatPath = keyMap.get(stringKey);
+
+    if (flatPath === undefined) {
+      flatPath = replaceWithDelim(stringKey);
+      keyMap.set(stringKey, flatPath);
+    }
 
     const varsFn = variables ?? (() => undefined);
     const varsSignal = isSignal(varsFn)
@@ -92,23 +97,35 @@ function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
     return computed(() => store.formatMessage(flatPath, varsSignal()));
   };
 
-  withSig.asSignal = asSignal;
+  withSig.asSignal = asSignal as unknown as TFunctionWithSignalConstructor<
+    TMap,
+    TFn
+  >['asSignal'];
 
   return withSig;
 }
 
 export function createT<TMap extends AnyStringRecord>(
   store: TranslationStore,
+  keyMap = new Map<string, string>(),
 ): TFunction<TMap> {
-  return <TKey extends keyof TMap & string>(
+  const fn = <TKey extends keyof TMap & string>(
     key: TKey,
-    ...args: TMap[TKey] extends void ? [] : [TMap[TKey]]
+    variables?: AnyStringRecord,
   ): string => {
-    const variables = args[0] as AnyStringRecord | undefined;
     const stringKey = key as string;
 
-    return store.formatMessage(replaceWithDelim(stringKey), variables);
+    let k = keyMap.get(stringKey);
+
+    if (k === undefined) {
+      k = replaceWithDelim(stringKey);
+      keyMap.set(stringKey, k);
+    }
+
+    return store.formatMessage(k, variables);
   };
+
+  return fn as unknown as TFunction<TMap>;
 }
 
 export function registerNamespace<
@@ -130,10 +147,12 @@ export function registerNamespace<
   type $BaseTFN = TFunction<$Map>;
   type $TFN = TFunctionWithSignalConstructor<$Map, $BaseTFN>;
 
+  const keyMap = new Map<string, string>();
+
   const injectT = (): $TFN => {
     const store = inject(TranslationStore);
 
-    return addSignalFn(createT(store), store);
+    return addSignalFn(createT(store, keyMap), store, keyMap);
   };
 
   let defaultTranslationLoaded = false;
@@ -227,10 +246,16 @@ export function registerRemoteNamespace<TNS extends string>(
   defaultTranslation: () => Promise<Record<string, string>>,
   other: Record<string, () => Promise<Record<string, string>>>,
 ) {
+  const keyMap = new Map<string, string>();
+
   const injectT = (): UntypedTFunction<TNS> => {
     const store = inject(TranslationStore);
 
-    return addSignalFn(createT(store), store) as UntypedTFunction<TNS>;
+    return addSignalFn(
+      createT(store, keyMap),
+      store,
+      keyMap,
+    ) as UntypedTFunction<TNS>;
   };
 
   let defaultTranslationLoaded = false;

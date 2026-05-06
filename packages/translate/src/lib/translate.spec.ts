@@ -6,12 +6,10 @@ import { Translate } from './translate';
 @Directive({
   // eslint-disable-next-line @angular-eslint/directive-selector
   selector: '[translate]',
-  standalone: true,
 })
 class TestTranslateDirective extends Translate<any, any> {}
 
 @Component({
-  standalone: true,
   imports: [TestTranslateDirective],
   template: `
     <div id="static-test" translate="myNs::MMT_DELIM::hello"></div>

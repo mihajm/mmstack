@@ -19,7 +19,6 @@ const { injectNamespaceT } = registerNamespace(
 // 3. Create a component that uses the function method
 @Component({
   selector: 'mm-cmp',
-  standalone: true,
   template: `
     <div id="fn-test">{{ t('dummy.hello') }}</div>
     <div id="fn-var-test">{{ t('dummy.greet', { name: 'Alice' }) }}</div>

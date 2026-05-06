@@ -1,18 +1,12 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FormsModule, NgControl } from '@angular/forms';
-import { SignalErrorValidator } from './signal-error-validator';
 import { By } from '@angular/platform-browser';
+import { SignalErrorValidator } from './signal-error-validator';
 
 @Component({
-  standalone: true,
   imports: [FormsModule, SignalErrorValidator],
-  template: `
-    <input
-      [(ngModel)]="value"
-      [mmSignalError]="error()"
-    />
-  `,
+  template: ` <input [(ngModel)]="value" [mmSignalError]="error()" /> `,
 })
 class TestComponent {
   value = '';
@@ -31,7 +25,9 @@ describe('SignalErrorValidator', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    const input = fixture.debugElement.query(By.directive(SignalErrorValidator));
+    const input = fixture.debugElement.query(
+      By.directive(SignalErrorValidator),
+    );
     const ngControl = input.injector.get(NgControl);
 
     expect(ngControl.errors).toBeNull();
@@ -48,7 +44,9 @@ describe('SignalErrorValidator', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    const input = fixture.debugElement.query(By.directive(SignalErrorValidator));
+    const input = fixture.debugElement.query(
+      By.directive(SignalErrorValidator),
+    );
     const ngControl = input.injector.get(NgControl);
 
     expect(ngControl.errors).toEqual({ error: 'Required field' });
@@ -62,7 +60,9 @@ describe('SignalErrorValidator', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    const ngControl = fixture.debugElement.query(By.directive(SignalErrorValidator)).injector.get(NgControl);
+    const ngControl = fixture.debugElement
+      .query(By.directive(SignalErrorValidator))
+      .injector.get(NgControl);
     expect(ngControl.errors).toEqual({ error: 'Old error' });
 
     component.error.set('');

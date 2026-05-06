@@ -94,7 +94,6 @@ import { JsonPipe } from '@angular/common';
 
 @Component({
   selector: 'app-throttle-demo',
-  standalone: true,
   imports: [JsonPipe],
   template: `
     <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here to see updates...</div>
@@ -196,7 +195,6 @@ import { stored } from '@mmstack/primitives';
 
 @Component({
   selector: 'app-theme-selector',
-  standalone: true,
   // imports: [FormsModule], // Import if using ngModel
   template: `
     Theme:
@@ -274,7 +272,6 @@ import { JsonPipe } from '@angular/common';
 
 @Component({
   selector: 'app-store-demo',
-  standalone: true,
   imports: [FormsModule, JsonPipe],
   template: `
     <h3>User Profile</h3>
@@ -681,7 +678,7 @@ import { tabSync } from '@mmstack/primitives';
   template: `
     <p>Open this page in two tabs!</p>
 
-    <button (click)="counter.update(n => n + 1)">Count: {{ counter() }}</button>
+    <button (click)="counter.update((n) => n + 1)">Count: {{ counter() }}</button>
 
     <select [ngModel]="theme()" (ngModelChange)="theme.set($event)">
       <option value="light">Light</option>
@@ -714,7 +711,6 @@ import { Component, signal, effect } from '@angular/core';
 
 @Component({
   selector: 'app-history-demo',
-  standalone: true,
   imports: [FormsModule, JsonPipe],
   template: `
     <h4>Simple Text Editor</h4>
@@ -781,7 +777,6 @@ import { JsonPipe } from '@angular/common';
 
 @Component({
   selector: 'app-mouse-tracker',
-  standalone: true,
   imports: [JsonPipe],
   template: `
     <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here...</div>
@@ -819,7 +814,6 @@ import { DatePipe } from '@angular/common';
 
 @Component({
   selector: 'app-network-info',
-  standalone: true,
   imports: [DatePipe],
   template: `
     @if (netStatus()) {
@@ -850,7 +844,6 @@ import { sensor } from '@mmstack/primitives'; // Or import { pageVisibility }
 
 @Component({
   selector: 'app-visibility-logger',
-  standalone: true,
   template: `<p>Page is currently: {{ visibility() }}</p>`,
 })
 export class VisibilityLoggerComponent {
@@ -877,7 +870,6 @@ import { sensor } from '@mmstack/primitives'; // Or import { windowSize }
 
 @Component({
   selector: 'app-responsive-display',
-  standalone: true,
   template: `
     <p>Current Window Size: {{ winSize().width }}px x {{ winSize().height }}px</p>
     <p>Unthrottled: W: {{ winSize.unthrottled().width }} H: {{ winSize.unthrottled().height }}</p>
@@ -911,7 +903,6 @@ import { JsonPipe } from '@angular/common';
 
 @Component({
   selector: 'app-scroll-indicator',
-  standalone: true,
   imports: [JsonPipe],
   template: `
     <div style="height: 100px; border-bottom: 2px solid red; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 10;">
@@ -945,7 +936,6 @@ import { mediaQuery, prefersDarkMode, prefersReducedMotion } from '@mmstack/prim
 
 @Component({
   selector: 'app-layout-checker',
-  standalone: true,
   template: `
     @if (isLargeScreen()) {
       <p>Using large screen layout.</p>
@@ -1007,7 +997,6 @@ import { elementVisibility } from '@mmstack/primitives';
 
 @Component({
   selector: 'app-lazy-load-item',
-  standalone: true,
   template: `
     <div #itemToObserve style="height: 300px; margin-top: 100vh; border: 2px solid green;">
       @if (intersectionEntry.visible()) {

@@ -39,7 +39,6 @@ import { NG_VALIDATORS, type Validator } from '@angular/forms';
  */
 @Directive({
   selector: '[ngModel][mmSignalError]',
-  standalone: true,
   providers: [
     {
       provide: NG_VALIDATORS,

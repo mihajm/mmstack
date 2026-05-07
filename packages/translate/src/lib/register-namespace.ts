@@ -67,7 +67,10 @@ type TFunctionWithSignalConstructor<
   asSignal: SignalTFunction<TMap>;
 };
 
-function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
+export function addSignalFn<
+  TMap extends AnyStringRecord,
+  TFn extends TFunction<TMap>,
+>(
   fn: TFn,
   store: TranslationStore,
   keyMap: Map<string, string>,
@@ -87,11 +90,13 @@ function addSignalFn<TMap extends AnyStringRecord, TFn extends TFunction<TMap>>(
       keyMap.set(stringKey, flatPath);
     }
 
-    const varsFn = variables ?? (() => undefined);
+    if (variables === undefined) return store.buildSimpleKeySignal(flatPath);
+
+    const varsFn = variables;
     const varsSignal = isSignal(varsFn)
       ? varsFn
-      : computed(varsFn, {
-          equal: createEqualsRecord(Object.keys(varsFn() ?? {})),
+      : computed(() => varsFn(), {
+          equal: createEqualsRecord(Object.keys(varsFn())),
         });
 
     return computed(() => store.formatMessage(flatPath, varsSignal()));

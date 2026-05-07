@@ -99,6 +99,7 @@ export function injectLocaleInternal() {
   providedIn: 'root',
 })
 export class TranslationStore {
+  private readonly simpleKeyMap = new Map<string, Signal<string>>();
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
   readonly loadQueue = signal<string[]>([]);
@@ -249,7 +250,25 @@ export class TranslationStore {
     });
   }
 
+  buildSimpleKeySignal(key: string) {
+    const found = this.simpleKeyMap.get(key);
+    if (found) return found;
+
+    const sig = computed(() => this.formatMessageInternal(key));
+    this.simpleKeyMap.set(key, sig);
+    return sig;
+  }
+
   formatMessage(key: string, values?: Record<string, string | number>) {
+    if (values === undefined) return this.buildSimpleKeySignal(key)();
+
+    return this.formatMessageInternal(key, values);
+  }
+
+  private formatMessageInternal(
+    key: string,
+    values?: Record<string, string | number>,
+  ) {
     const message =
       this.translations()[this.locale()]?.[key] ??
       this.translations()[this.defaultLocale]?.[key] ??

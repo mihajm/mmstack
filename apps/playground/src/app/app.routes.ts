@@ -7,6 +7,14 @@ export const appRoutes: Route[] = [
     loadComponent: () => import('./playground').then((m) => m.Playground),
   },
   {
+    path: 'list',
+    loadComponent: () => import('./list/list').then((m) => m.List),
+  },
+  {
+    path: 'kanban',
+    loadComponent: () => import('./kanban/kanban').then((m) => m.Kanban),
+  },
+  {
     path: '**',
     redirectTo: '',
   },

@@ -1,12 +1,50 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
-import { Draggable, DropTarget } from '@mmstack/dnd';
+import {
+  Draggable,
+  DropTarget,
+  monitorElements,
+  type DropEvent,
+} from '@mmstack/dnd';
 import { indexArray } from '@mmstack/primitives';
 
 type ChessPiece = {
+  id: number;
   type: 'pawn' | 'king';
   color: 'white' | 'black';
   location: [number, number];
 };
+
+type Square = { position: [number, number] };
+
+const isChessPiece = (d: unknown): d is ChessPiece =>
+  !!d &&
+  typeof d === 'object' &&
+  'id' in d &&
+  'type' in d &&
+  'location' in d;
+
+const isSquare = (d: unknown): d is Square =>
+  !!d && typeof d === 'object' && 'position' in d;
+
+const sameLoc = (a: [number, number], b: [number, number]) =>
+  a[0] === b[0] && a[1] === b[1];
+
+function isValidMove(piece: ChessPiece, target: [number, number]): boolean {
+  if (sameLoc(piece.location, target)) return false;
+
+  const [sr, sc] = piece.location;
+  const [tr, tc] = target;
+  const dr = tr - sr;
+  const dc = tc - sc;
+
+  if (piece.type === 'pawn') {
+    const dir = piece.color === 'white' ? 1 : -1;
+    return dc === 0 && dr === dir;
+  }
+
+  // king: any of the 8 adjacent squares
+  return Math.abs(dr) <= 1 && Math.abs(dc) <= 1;
+}
 
 @Component({
   selector: 'mm-piece',
@@ -15,7 +53,7 @@ type ChessPiece = {
     '[class.dark]': 'color() === "black"',
     '[class.dragging]': 'dir.dragging()',
   },
-  hostDirectives: [Draggable],
+  hostDirectives: [{ directive: Draggable, inputs: ['data: state'] }],
   styles: `
     :host {
       display: inline-flex;
@@ -49,9 +87,7 @@ type ChessPiece = {
   `,
 })
 export class Piece {
-  protected readonly dir = inject(Draggable, {
-    self: true,
-  });
+  protected readonly dir = inject(Draggable, { self: true });
   readonly state = input.required<ChessPiece>();
 
   protected readonly symbol = computed(() =>
@@ -80,7 +116,7 @@ export class Piece {
     }
   `,
 })
-export class Square {
+export class SquareCell {
   readonly position = input.required<[number, number]>();
 
   protected readonly isDark = computed(
@@ -90,16 +126,20 @@ export class Square {
 
 @Component({
   selector: 'mm-board',
-  imports: [Square, Piece, DropTarget],
+  imports: [SquareCell, Piece, DropTarget],
   template: `
     @for (row of board(); track $index) {
       @for (square of row(); track $index) {
         <mm-square
           [position]="square.square()"
           mmDropTarget
-          #dir="mmDropTarget"
-          [dropDisabled]="!!square.piece()"
-          [class.dragOver]="dir.isDragOver()"
+          #dt="mmDropTarget"
+          [accepts]="acceptsPiece"
+          [data]="{ position: square.square() }"
+          [class.targetable]="square.targetable() && !dt.isDragOver()"
+          [class.over-valid]="dt.isDragOver() && square.targetable()"
+          [class.over-invalid]="dt.isDragOver() && !square.targetable()"
+          (dropped)="onDrop($event)"
         >
           @if (square.piece(); as p) {
             <mm-piece [state]="p" />
@@ -116,14 +156,21 @@ export class Square {
       width: 500px;
       height: 500px;
       border: 3px solid lightgrey;
-
-      mm-square.dragOver {
-        background: skyblue !important;
-      }
+    }
+    :host mm-square.targetable {
+      background-color: #93c5fd !important;
+    }
+    :host mm-square.over-valid {
+      background-color: #2563eb !important;
+    }
+    :host mm-square.over-invalid {
+      background-color: #dc2626 !important;
     }
   `,
 })
 export class Board {
+  protected readonly acceptsPiece = isChessPiece;
+
   protected readonly rows = computed(() =>
     Array.from({ length: 8 }, (_, row) =>
       Array.from({ length: 8 }, (_, col): [number, number] => [row, col]),
@@ -131,25 +178,48 @@ export class Board {
   );
 
   protected readonly state = signal<ChessPiece[]>([
-    {
-      type: 'king',
-      color: 'white',
-      location: [0, 4],
-    },
+    { id: 1, type: 'king', color: 'white', location: [0, 4] },
+    { id: 2, type: 'pawn', color: 'white', location: [1, 3] },
+    { id: 3, type: 'king', color: 'black', location: [7, 4] },
+    { id: 4, type: 'pawn', color: 'black', location: [6, 3] },
   ]);
+
+  private readonly monitor = monitorElements<ChessPiece>({
+    accepts: isChessPiece,
+  });
 
   protected readonly board = indexArray(this.rows, (row) =>
     indexArray(row, (square) => {
-      return {
-        square,
-        piece: computed(() =>
-          this.state().find((p) => {
-            const [r, c] = p.location;
-            const [sr, sc] = square();
-            return r === sr && c === sc;
-          }),
-        ),
-      };
+      const piece = computed(() =>
+        this.state().find((p) => sameLoc(p.location, square())),
+      );
+      const targetable = computed(() => {
+        const src = this.monitor.source()?.data;
+        if (!src) return false;
+        const target = square();
+        const blockedBy = this.state().find(
+          (p) => p.id !== src.id && sameLoc(p.location, target),
+        );
+        if (blockedBy) return false;
+        return isValidMove(src, target);
+      });
+      return { square, piece, targetable };
     }),
   );
+
+  protected onDrop(event: DropEvent<ChessPiece>) {
+    const target = event.location.current[0]?.data;
+    if (!isSquare(target)) return;
+    const piece = event.data;
+    const blockedBy = this.state().find(
+      (p) => p.id !== piece.id && sameLoc(p.location, target.position),
+    );
+    if (blockedBy) return;
+    if (!isValidMove(piece, target.position)) return;
+    this.state.update((pieces) =>
+      pieces.map((p) =>
+        p.id === piece.id ? { ...p, location: target.position } : p,
+      ),
+    );
+  }
 }

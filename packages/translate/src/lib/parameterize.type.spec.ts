@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import type {
   inferTranslationParamMap,
   inferTranslationShape,
@@ -61,13 +63,12 @@ type _map_complex_then_trailing_simple = Expect<
 
 // Select keeps its option-autocomplete union; verify member assignability
 // rather than the exact Omit<string, ...> shape (which is brittle to compare).
-type _map_select_member_male =
-  'male' extends inferTranslationParamMap<
-    'ns',
-    { key: '{gender, select, male {he} female {she} other {they}}' }
-  >['ns.key']['gender']
-    ? true
-    : false;
+type _map_select_member_male = 'male' extends inferTranslationParamMap<
+  'ns',
+  { key: '{gender, select, male {he} female {she} other {they}}' }
+>['ns.key']['gender']
+  ? true
+  : false;
 type _assert_map_select_male = Expect<_map_select_member_male>;
 
 type _map_select_keys = Expect<

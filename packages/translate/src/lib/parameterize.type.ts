@@ -33,11 +33,23 @@ type extractComplexParam<T extends string> = T extends
     ? extractSelectParam<VarName, `${SelectOptions}}`> | extractParams<REST>
     : never;
 
+type IsSimpleIdent<T extends string> = T extends ''
+  ? false
+  : T extends
+        | `${string} ${string}`
+        | `${string},${string}`
+        | `${string}{${string}`
+        | `${string}#${string}`
+    ? false
+    : true;
+
 export type extractParams<T extends string> =
   T extends `${infer _Start}{${infer Var}}${infer End}`
     ? Var extends `${infer _}, ${infer __}`
       ? extractComplexParam<`{${Var}}${End}`>
-      : [Var, string] | extractParams<End>
+      : IsSimpleIdent<Var> extends true
+        ? [Var, string] | extractParams<End>
+        : extractParams<End>
     : never;
 
 type mergeParams<TExtracted extends [string, any]> = {

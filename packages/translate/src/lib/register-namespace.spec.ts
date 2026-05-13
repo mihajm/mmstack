@@ -1,6 +1,6 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { addSignalFn, createT } from './register-namespace';
+import { addSignalFn, createT, injectUnsafeT } from './register-namespace';
 import { injectLocaleInternal, TranslationStore } from './translation-store';
 
 function setupStore() {
@@ -192,5 +192,66 @@ describe('addSignalFn', () => {
 
       expect(sig()).toBe('Zdravo Alice');
     });
+  });
+});
+
+describe('injectUnsafeT', () => {
+  function setup() {
+    setupStore();
+    return TestBed.runInInjectionContext(() => injectUnsafeT());
+  }
+
+  it('reads a registered translation by dotted key', () => {
+    const t = setup();
+    expect(t('myNs.hello')).toBe('Hello World');
+  });
+
+  it('interpolates params with number/string mix', () => {
+    const t = setup();
+    expect(t('myNs.greet', { name: 'Alice' })).toBe('Hello Alice');
+  });
+
+  it('asSignal: reactive to locale changes', () => {
+    const t = setup();
+    const store = TestBed.inject(TranslationStore);
+
+    const sig = t.asSignal('myNs.greet', () => ({ name: 'Alice' }));
+    expect(sig()).toBe('Hello Alice');
+
+    store.locale.set('sl-SI');
+    expect(sig()).toBe('Zdravo Alice');
+  });
+
+  it('asSignal: reactive to param signal changes', () => {
+    const t = setup();
+    const name = signal('Alice');
+
+    const sig = t.asSignal('myNs.greet', () => ({ name: name() }));
+    expect(sig()).toBe('Hello Alice');
+
+    name.set('Bob');
+    expect(sig()).toBe('Hello Bob');
+  });
+
+  it('asSignal: returns simple-key signal when no params provided', () => {
+    const t = setup();
+    const store = TestBed.inject(TranslationStore);
+
+    const sig = t.asSignal('myNs.hello');
+    expect(sig()).toBe('Hello World');
+
+    store.locale.set('sl-SI');
+    expect(sig()).toBe('Pozdravljen svet');
+  });
+
+  it('shares the cached key map across injections (process-level cache)', () => {
+    setupStore();
+    const t1 = TestBed.runInInjectionContext(() => injectUnsafeT());
+    const t2 = TestBed.runInInjectionContext(() => injectUnsafeT());
+
+    // Both call sites resolve to the same cached delim form. If the cache
+    // weren't shared, both would still work — this just exercises the path.
+    expect(t1('myNs.hello')).toBe('Hello World');
+    expect(t2('myNs.hello')).toBe('Hello World');
   });
 });

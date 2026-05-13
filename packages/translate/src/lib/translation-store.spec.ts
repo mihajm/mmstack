@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import {
   TranslationStore,
+  injectAddTranslations,
   injectDefaultLocale,
   injectDynamicLocale,
   injectIntlConfig,
@@ -372,6 +373,75 @@ describe('translation-store', () => {
       // Should be queued in loadQueue since there are no loaders yet
       expect(store.loadQueue()).toContain('es-ES');
       // Locale itself doesn't change until loaded (or if it has loaders)
+    });
+  });
+
+  describe('injectAddTranslations', () => {
+    let addTranslations: ReturnType<typeof injectAddTranslations>;
+    let store: TranslationStore;
+
+    beforeEach(() => {
+      const routeMock = {
+        snapshot: { paramMap: convertToParamMap({}) },
+        paramMap: of(convertToParamMap({})),
+      };
+      TestBed.configureTestingModule({
+        providers: [
+          provideIntlConfig({
+            defaultLocale: 'en-US',
+            supportedLocales: ['en-US', 'sl-SI'],
+          }),
+          { provide: Router, useValue: { options: {} } },
+          { provide: ActivatedRoute, useValue: routeMock },
+        ],
+      });
+
+      TestBed.runInInjectionContext(() => {
+        injectLocaleInternal().set('en-US');
+        addTranslations = injectAddTranslations();
+        store = TestBed.inject(TranslationStore);
+      });
+    });
+
+    it('should add translations for supported locales', () => {
+      addTranslations('remote', {
+        'en-US': { greeting: 'Hi {name}' },
+        'sl-SI': { greeting: 'Zdravo {name}' },
+      });
+
+      expect(
+        store.formatMessage('remote::MMT_DELIM::greeting', { name: 'John' }),
+      ).toBe('Hi John');
+
+      store.locale.set('sl-SI');
+      expect(
+        store.formatMessage('remote::MMT_DELIM::greeting', { name: 'John' }),
+      ).toBe('Zdravo John');
+    });
+
+    it('should ignore translations for unsupported locales', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {
+        // noop
+      });
+
+      addTranslations('remote', {
+        'fr-FR': { greeting: 'Bonjour' },
+      });
+
+      // It shouldn't be possible to get 'Bonjour' since fr-FR is not supported
+      store.locale.set('en-US');
+      expect(store.formatMessage('remote::MMT_DELIM::greeting')).toBe('');
+
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('should allow adding translations to multiple namespaces', () => {
+      addTranslations('ns1', { 'en-US': { key: 'val1' } });
+      addTranslations('ns2', { 'en-US': { key: 'val2' } });
+
+      expect(store.formatMessage('ns1::MMT_DELIM::key')).toBe('val1');
+      expect(store.formatMessage('ns2::MMT_DELIM::key')).toBe('val2');
     });
   });
 });

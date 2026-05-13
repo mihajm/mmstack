@@ -1,4 +1,4 @@
-import { computed, LOCALE_ID } from '@angular/core';
+import { LOCALE_ID, computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
@@ -231,6 +231,106 @@ describe('translation-store', () => {
           store.formatMessage('ns::MMT_DELIM::greet', { name: 'Alice' }),
         ).toBe('Hola Alice');
       });
+    });
+  });
+
+  describe('localeStorage', () => {
+    const routeMock = {
+      snapshot: { paramMap: convertToParamMap({}) },
+      paramMap: of(convertToParamMap({})),
+    };
+
+    beforeEach(() => {
+      TestBed.resetTestingModule();
+    });
+
+    function configure(
+      localeStorage: { read: () => string | null; write: (l: string) => void },
+      supportedLocales: string[] = ['en-US', 'sl-SI', 'de-DE'],
+    ) {
+      TestBed.configureTestingModule({
+        providers: [
+          provideIntlConfig({
+            defaultLocale: 'en-US',
+            supportedLocales,
+            localeStorage,
+          }),
+          { provide: Router, useValue: { options: {} } },
+          { provide: ActivatedRoute, useValue: routeMock },
+        ],
+      });
+
+      // Ensure clean module-level signal before construction
+      TestBed.runInInjectionContext(() => {
+        injectLocaleInternal().set('en-US');
+      });
+    }
+
+    it('applies stored locale on init when supported', () => {
+      const read = vi.fn(() => 'sl-SI');
+      const write = vi.fn();
+      configure({ read, write });
+
+      const store = TestBed.inject(TranslationStore);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(store.locale()).toBe('sl-SI');
+    });
+
+    it('falls back to default when read() returns null', () => {
+      const read = vi.fn(() => null);
+      const write = vi.fn();
+      configure({ read, write });
+
+      const store = TestBed.inject(TranslationStore);
+      expect(store.locale()).toBe('en-US');
+    });
+
+    it('ignores stored locale not in supportedLocales', () => {
+      const read = vi.fn(() => 'fr-FR');
+      const write = vi.fn();
+      configure({ read, write }, ['en-US', 'sl-SI']);
+
+      const store = TestBed.inject(TranslationStore);
+      expect(store.locale()).toBe('en-US');
+    });
+
+    it('writes locale to storage when it changes', () => {
+      const write = vi.fn();
+      configure({ read: () => null, write });
+
+      const store = TestBed.inject(TranslationStore);
+      TestBed.tick();
+      write.mockClear();
+
+      store.locale.set('sl-SI');
+      TestBed.tick();
+
+      expect(write).toHaveBeenCalledWith('sl-SI');
+    });
+
+    it('swallows errors thrown from read()', () => {
+      const read = vi.fn(() => {
+        throw new Error('boom');
+      });
+      const write = vi.fn();
+      configure({ read, write });
+
+      expect(() => TestBed.inject(TranslationStore)).not.toThrow();
+      const store = TestBed.inject(TranslationStore);
+      expect(store.locale()).toBe('en-US');
+    });
+
+    it('swallows errors thrown from write()', () => {
+      const write = vi.fn(() => {
+        throw new Error('boom');
+      });
+      configure({ read: () => null, write });
+
+      const store = TestBed.inject(TranslationStore);
+      expect(() => {
+        store.locale.set('sl-SI');
+        TestBed.tick();
+      }).not.toThrow();
     });
   });
 

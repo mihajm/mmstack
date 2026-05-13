@@ -168,6 +168,34 @@ export default createQuoteTranslation('sl-SI', {
 });
 ```
 
+**Power-user: explicit params for variables nested inside ICU arms**
+
+Type-level parameter inference is one level deep — variables inside `plural` / `select` / `selectordinal` arms aren't picked up (e.g. the `{name}` inside `{count, plural, one {Hi {name}} ...}`). For those cases, wrap the message with `withParams<P>(...)` to declare the missing params explicitly:
+
+```typescript
+import { createNamespace, withParams } from '@mmstack/translate';
+
+const ns = createNamespace('quote', {
+  // auto-extracts `count`; `name` is declared because it lives inside the arms
+  stats: withParams<{ name: string }>(
+    '{count, plural, one {1 quote from {name}} other {# quotes from {name}}}',
+  ),
+});
+
+// t inferred as: ('quote.stats', { count: number; name: string }) => string
+t('quote.stats', { count: 3, name: 'Alice' });
+```
+
+Declared params are merged with auto-extracted ones; on key conflict, declared wins. Non-default locales for a wrapped key don't need to repeat the helper — they accept any string:
+
+```typescript
+createQuoteTranslation('sl-SI', {
+  stats: '{count, plural, =1 {1 citat od {name}} other {# citatov od {name}}}',
+});
+```
+
+Trade-off: wrapping a key opts out of template-literal shape strictness for that key in non-default locales (the auto-validation that requires placeholders to appear in the right positions). The library still enforces top-level placeholders for non-wrapped keys.
+
 ### 2. Register the Namespace & Load Translations
 
 Use `registerNamespace` to prepare your namespace definition and obtain the `injectNamespaceT` function and the `resolveNamespaceTranslation` resolver function.

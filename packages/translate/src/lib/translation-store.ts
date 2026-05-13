@@ -466,3 +466,54 @@ export function injectDynamicLocale(): WritableSignal<string> & {
 
   return source;
 }
+
+/**
+ * Power-user escape hatch for adding translations imperatively (e.g. content
+ * loaded from a remote API after bootstrap). Returns a function that registers
+ * a flat per-locale map of keys under a given namespace
+ *
+ * Pair with {@link injectUnsafeT} to read the added keys without compile-time
+ * constraints.
+ *
+ * @example
+ * ```ts
+ * const addTranslations = injectAddTranslations();
+ * addTranslations('remote', {
+ *   'en-US': { greeting: 'Hi {name}' },
+ *   'sl-SI': { greeting: 'Zdravo {name}' },
+ * });
+ * ```
+ */
+export function injectAddTranslations() {
+  const store = inject(TranslationStore);
+  const supportedLocales = injectIntlConfig()?.supportedLocales;
+  const supportedLocalesSet = supportedLocales
+    ? new Set(supportedLocales)
+    : null;
+
+  const validate = supportedLocalesSet
+    ? (translations: Record<string, Record<string, string>>) => {
+        const clean: Record<string, Record<string, string>> = {};
+        const invalidLocales: string[] = [];
+
+        for (const [locale, translation] of Object.entries(translations)) {
+          if (!supportedLocalesSet.has(locale)) {
+            invalidLocales.push(locale);
+            continue;
+          }
+          clean[locale] = translation;
+        }
+
+        if (isDevMode() && invalidLocales.length > 0)
+          console.warn(
+            `[Translate] Attempted to add translations for unsupported locales: ${invalidLocales.join(', ')}. These translations were ignored. Supported locales are: ${(supportedLocales ?? []).join(', ')}.`,
+          );
+
+        return clean;
+      }
+    : (translations: Record<string, Record<string, string>>) => translations;
+
+  return (ns: string, translations: Record<string, Record<string, string>>) => {
+    store.register(ns, validate(translations));
+  };
+}

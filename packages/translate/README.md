@@ -164,37 +164,10 @@ export default createQuoteTranslation('sl-SI', {
   errors: {
     minLength: 'Citat mora imeti vsaj {min} znakov.', // Variables must match original
   },
-  stats: '{count, plural, =1 {# citat} =2 {# citata} few {# citati} other {# citatov}} na voljo',
+  stats:
+    '{count, plural, =1 {# citat} =2 {# citata} few {# citati} other {# citatov}} na voljo',
 });
 ```
-
-**Power-user: explicit params for variables nested inside ICU arms**
-
-Type-level parameter inference is one level deep — variables inside `plural` / `select` / `selectordinal` arms aren't picked up (e.g. the `{name}` inside `{count, plural, one {Hi {name}} ...}`). For those cases, wrap the message with `withParams<P>(...)` to declare the missing params explicitly:
-
-```typescript
-import { createNamespace, withParams } from '@mmstack/translate';
-
-const ns = createNamespace('quote', {
-  // auto-extracts `count`; `name` is declared because it lives inside the arms
-  stats: withParams<{ name: string }>(
-    '{count, plural, one {1 quote from {name}} other {# quotes from {name}}}',
-  ),
-});
-
-// t inferred as: ('quote.stats', { count: number; name: string }) => string
-t('quote.stats', { count: 3, name: 'Alice' });
-```
-
-Declared params are merged with auto-extracted ones; on key conflict, declared wins. Non-default locales for a wrapped key don't need to repeat the helper — they accept any string:
-
-```typescript
-createQuoteTranslation('sl-SI', {
-  stats: '{count, plural, =1 {1 citat od {name}} other {# citatov od {name}}}',
-});
-```
-
-Trade-off: wrapping a key opts out of template-literal shape strictness for that key in non-default locales (the auto-validation that requires placeholders to appear in the right positions). The library still enforces top-level placeholders for non-wrapped keys.
 
 ### 2. Register the Namespace & Load Translations
 
@@ -251,7 +224,10 @@ export class QuoteTranslator extends Translator<QuoteLocale> {}
 @Directive({
   selector: '[translate]', // Input in Translate is named 'translate'
 })
-export class QuoteTranslate<TInput extends string> extends Translate<TInput, QuoteLocale> {}
+export class QuoteTranslate<TInput extends string> extends Translate<
+  TInput,
+  QuoteLocale
+> {}
 ```
 
 ### 3. Use Translations in Components
@@ -348,7 +324,8 @@ export const routes: Routes = [
     children: [
       {
         path: 'quotes',
-        loadChildren: () => import('./quote/quote.routes').then((m) => m.QUOTE_ROUTES),
+        loadChildren: () =>
+          import('./quote/quote.routes').then((m) => m.QUOTE_ROUTES),
       },
       // ... other routes
     ],
@@ -479,9 +456,12 @@ export const createAppNamespace = ns.createMergedNamespace;
 // common.t.ts
 import { registerNamespace } from '@mmstack/translate';
 
-const r = registerNamespace(() => import('./common.namespace').then((m) => m.default), {
-  'sl-SI': () => import('./common-sl.translation').then((m) => m.default),
-});
+const r = registerNamespace(
+  () => import('./common.namespace').then((m) => m.default),
+  {
+    'sl-SI': () => import('./common-sl.translation').then((m) => m.default),
+  },
+);
 
 export const injectCommonT = r.injectNamespaceT;
 export const resolveCommonTranslations = r.resolveNamespaceTranslation;
@@ -592,9 +572,13 @@ For cases where you need to load translations from a remote API (where keys aren
 import { registerRemoteNamespace } from '@mmstack/translate';
 
 // Returns an untyped t function: t('any.key')
-const { injectNamespaceT: injectRemoteT } = registerRemoteNamespace('remote', () => fetch('/api/en').then((r) => r.json()), {
-  'sl-SI': () => fetch('/api/sl').then((r) => r.json()),
-});
+const { injectNamespaceT: injectRemoteT } = registerRemoteNamespace(
+  'remote',
+  () => fetch('/api/en').then((r) => r.json()),
+  {
+    'sl-SI': () => fetch('/api/sl').then((r) => r.json()),
+  },
+);
 
 // usage
 const t = injectRemoteT();
@@ -671,7 +655,9 @@ describe('MyComponent', () => {
     fixture.detectChanges();
 
     // By default, it echoes back the flattened object key using dot notation
-    expect(fixture.nativeElement.textContent).toContain('myNamespace.greeting.title');
+    expect(fixture.nativeElement.textContent).toContain(
+      'myNamespace.greeting.title',
+    );
   });
 
   it('allows providing explicit mock overrides', () => {
@@ -731,6 +717,64 @@ If you're migrating from a runtime-only solution:
 3. Use `injectDynamicLocale()` for programmatic locale switching
 4. Convert your translation JSON files to TypeScript using `createNamespace`
 5. Update component/template usage to use the type-safe APIs
+
+## Escape Hatches
+
+Sometimes we all hit the limit of an api & need imperitive escape hatches for those edge cases. These are the ones mmstack/translate currently provides:
+
+**`withParams()`**
+
+Type-level parameter inference is one level deep — variables inside `plural` / `select` / `selectordinal` arms aren't picked up (e.g. the `{name}` inside `{count, plural, one {Hi {name}} ...}`). For those cases, wrap the message with `withParams<P>(...)` to declare the missing params explicitly:
+
+```typescript
+import { createNamespace, withParams } from '@mmstack/translate';
+
+const ns = createNamespace('quote', {
+  // auto-extracts `count`; `name` is declared because it lives inside the arms
+  stats: withParams<{ name: string }>(
+    '{count, plural, one {1 quote from {name}} other {# quotes from {name}}}',
+  ),
+});
+
+// t inferred as: ('quote.stats', { count: number; name: string }) => string
+t('quote.stats', { count: 3, name: 'Alice' });
+```
+
+Declared params are merged with auto-extracted ones; on key conflict, declared wins. Non-default locales for a wrapped key don't need to repeat the helper — they accept any string:
+
+```typescript
+createQuoteTranslation('sl-SI', {
+  stats: '{count, plural, =1 {1 citat od {name}} other {# citatov od {name}}}',
+});
+```
+
+Trade-off: wrapping a key opts out of template-literal shape strictness for that key in non-default locales (the auto-validation that requires placeholders to appear in the right positions). The library still enforces top-level placeholders for non-wrapped keys.
+
+**`injectAddTranslations()`**
+Allows adding flat, per-locale translations to any namespace at runtime.
+
+```typescript
+import { injectAddTranslations } from '@mmstack/translate';
+
+const addTranslations = injectAddTranslations();
+addTranslations('dynamicNs', {
+  'en-US': { greeting: 'Hello {name}!' },
+  'sl-SI': { greeting: 'Zdravo {name}!' },
+});
+```
+
+**`injectUnsafeT()`**
+Returns a fully untyped translation function `t('anyNamespace.key')`. Ideal for reading dynamically added keys or cross-namespace lookups where the typed API would be impractical.
+
+```typescript
+import { injectUnsafeT } from '@mmstack/translate';
+
+const t = injectUnsafeT();
+const greeting = t('dynamicNs.greeting', { name: 'Alice' });
+const signalGreeting = t.asSignal('dynamicNs.greeting', () => ({
+  name: 'Alice',
+}));
+```
 
 ## Contributing
 

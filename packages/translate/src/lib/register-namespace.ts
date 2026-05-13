@@ -1,6 +1,7 @@
 import {
   computed,
   inject,
+  Injectable,
   isDevMode,
   isSignal,
   untracked,
@@ -338,4 +339,67 @@ export function registerRemoteNamespace<TNS extends string>(
     injectNamespaceT: injectT,
     resolveNamespaceTranslation: resolver,
   };
+}
+
+@Injectable({
+  providedIn: 'root',
+})
+export class UnsafeTKeyMap {
+  readonly map = new Map<string, string>();
+}
+
+/**
+ * Power-user escape hatch that returns a fully untyped translation function.
+ * Intended for use alongside {@link injectAddTranslations} when translations
+ * are added imperatively (e.g. from a remote API), or for cross-namespace
+ * lookups where the typed API would be impractical.
+ *
+ * @example
+ * ```ts
+ * const t = injectUnsafeT();
+ * t('any.namespace.key', { name: 'Alice', count: 3 });
+ * const sig = t.asSignal('any.namespace.key', () => ({ name: name() }));
+ * ```
+ */
+export function injectUnsafeT() {
+  const store = inject(TranslationStore);
+  const map = inject(UnsafeTKeyMap).map;
+
+  const fn = (
+    key: string,
+    params?: Record<string, string | number>,
+  ): string => {
+    let k = map.get(key);
+
+    if (k === undefined) {
+      k = replaceWithDelim(key);
+      map.set(key, k);
+    }
+
+    return store.formatMessage(k, params);
+  };
+
+  fn.asSignal = (
+    key: string,
+    params?: () => Record<string, string | number>,
+  ): Signal<string> => {
+    let k = map.get(key);
+
+    if (k === undefined) {
+      k = replaceWithDelim(key);
+      map.set(key, k);
+    }
+
+    if (!params) return store.buildSimpleKeySignal(k);
+
+    const paramsSignal = isSignal(params)
+      ? params
+      : computed(() => params(), {
+          equal: createEqualsRecord(Object.keys(params())),
+        });
+
+    return computed(() => store.formatMessage(k, paramsSignal()));
+  };
+
+  return fn;
 }

@@ -19,24 +19,37 @@ import { prependDelim } from './delim';
 import { pathParam } from './path-param';
 import { type UnknownStringKeyObject } from './string-key-object.type';
 
-const CONFIG_TOKEN = new InjectionToken<
-  Omit<IntlConfig, 'locale' | 'messages'> & {
-    supportedLocales?: string[];
-    preloadDefaultLocale?: boolean;
-    localeParamName?: string;
-  }
->('mmstack-intl-config');
+type BaseConfig = Omit<IntlConfig, 'locale' | 'messages'> & {
+  /** Checks next locale is in provided array before switching locales */
+  supportedLocales?: string[];
+  /** Preloads the default locale ensuring sync fallback, not necessary for most cases as it will lazily load automatically when needed */
+  preloadDefaultLocale?: boolean;
+};
 
-export function provideIntlConfig(
-  config: Omit<IntlConfig, 'locale' | 'messages'> & {
-    /** Checks next locale is in provided array before switching locales */
-    supportedLocales?: string[];
-    /** Preloads the default locale ensuring sync fallback, not necessary for most cases as it will lazily load automatically when needed */
-    preloadDefaultLocale?: boolean;
-    /** Auto-resolution when using a locale parameter via angular router */
-    localeParamName?: string;
-  },
-): Provider[] {
+type RouteBasedConfig = BaseConfig & {
+  /** Auto-resolution when using a locale parameter via angular router */
+  localeParamName?: string;
+  localeStorage?: never;
+};
+
+type LocaleStorage = {
+  /** Called once on init to restore the last selected locale. Return `null` if nothing is stored. Values not in `supportedLocales` are ignored. */
+  read: () => string | null;
+  /** Called whenever the active locale changes. Fires once on init with the resolved initial value. */
+  write: (locale: string) => void;
+};
+
+type DynamicConfig = BaseConfig & {
+  /** Custom storage mechanism for last set locale, it will be read on init & set the locale to the last value if it is still valid */
+  localeStorage?: LocaleStorage;
+  localeParamName?: never;
+};
+
+type Config = RouteBasedConfig | DynamicConfig;
+
+const CONFIG_TOKEN = new InjectionToken<Config>('mmstack-intl-config');
+
+export function provideIntlConfig(config: Config): Provider[] {
   const providers: Provider[] = [
     {
       useFactory: (localeId: string) => {
@@ -93,6 +106,52 @@ const STORE_LOCALE = signal('en-US');
 
 export function injectLocaleInternal() {
   return STORE_LOCALE;
+}
+
+function isDynamicConfig(
+  cfg?: Config,
+): cfg is DynamicConfig & { localeStorage: LocaleStorage } {
+  return !!cfg && 'localeStorage' in cfg && !!cfg.localeStorage;
+}
+
+function initLocale(src: WritableSignal<string>) {
+  const config = injectIntlConfig();
+  const defaultValue = injectDefaultLocale();
+
+  if (!isDynamicConfig(config)) {
+    src.set(defaultValue);
+    return src;
+  }
+
+  let next: string | null = null;
+  try {
+    const stored = config.localeStorage.read();
+
+    if (
+      stored !== null &&
+      (!config.supportedLocales || config.supportedLocales.includes(stored))
+    ) {
+      next = stored;
+    }
+  } catch (e) {
+    if (isDevMode())
+      console.error(
+        '[Translate] Failed to read stored locale from localeStorage',
+        e,
+      );
+  }
+
+  src.set(next ?? defaultValue);
+  effect(() => {
+    try {
+      config.localeStorage.write(src());
+    } catch (e) {
+      if (isDevMode())
+        console.error('[Translate] Failed to write locale to localeStorage', e);
+    }
+  });
+
+  return src;
 }
 
 @Injectable({
@@ -200,8 +259,7 @@ export class TranslationStore {
   );
 
   constructor() {
-    this.locale = STORE_LOCALE;
-    this.locale.set(injectDefaultLocale());
+    this.locale = initLocale(STORE_LOCALE);
     const paramName = this.config?.localeParamName;
     if (paramName) {
       const param = pathParam(paramName);

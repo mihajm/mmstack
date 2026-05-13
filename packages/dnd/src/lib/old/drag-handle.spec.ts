@@ -2,7 +2,7 @@ import { ElementRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { DragHandle } from './drag-handle';
-import { resolveElement } from './types';
+import { resolveElement } from './internal';
 
 describe('DragHandle directive', () => {
   it('captures its host element via ElementRef', () => {

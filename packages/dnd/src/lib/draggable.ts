@@ -1,161 +1,102 @@
-import { isPlatformServer } from '@angular/common';
 import {
-  ApplicationRef,
+  afterRenderEffect,
   computed,
-  Directive,
-  effect,
   ElementRef,
-  EnvironmentInjector,
-  inject,
-  input,
-  output,
-  PLATFORM_ID,
+  isSignal,
   signal,
   untracked,
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { DragStartEvent } from './event.type';
+import { box, injectHTMLElement, isServer } from './util';
 
-import {
-  boxDragData,
-  extractEdgeFromInnermost,
-  mapDropTargets,
-  resolveElement,
-  resolveSignal,
-} from './internal';
-import { registerCustomPreview, type PreviewConfig } from './preview';
-import type {
-  DragHandleLike,
-  DragMeta,
-  DragStartEvent,
-  DropEvent,
-  Resolvable,
-} from './types';
+type ResolvableElement =
+  | HTMLElement
+  | ElementRef<HTMLElement>
+  | { elementRef: HTMLElement };
 
-export type CreateDraggableOptions<
-  TData,
-  TMeta extends DragMeta = DragMeta,
-> = {
-  data: Resolvable<TData>;
-  meta?: Resolvable<TMeta>;
-  canDrag?: () => boolean;
-  dragHandle?: Resolvable<DragHandleLike | undefined>;
-  /**
-   * Custom drag preview. Pass a literal config or a function returning one
-   * (useful when the source is a `TemplateRef` resolved via `viewChild`,
-   * which isn't available at composable-setup time).
-   */
-  preview?:
-    | PreviewConfig<TData>
-    | (() => PreviewConfig<TData> | undefined | null);
-  onDragStart?: (event: DragStartEvent<TData, TMeta>) => void;
-  onDrop?: (event: DropEvent<TData, TMeta>) => void;
+type BaseDraggableOptions<TData> = {
+  dragHandle?: ResolvableElement | Signal<ResolvableElement>;
+  canDrag?: (element: HTMLElement, data: TData) => boolean;
+  onDragStart?: (e: DragStartEvent<TData>) => void;
 };
 
-export type DraggableRef<TData> = {
+export type CreateDraggableOptions<TData> = BaseDraggableOptions<TData> &
+  ([TData] extends [void]
+    ? {
+        data?: TData | Signal<TData>;
+      }
+    : { data: TData | Signal<TData> });
+
+export type Draggable<TData> = {
   dragging: Signal<boolean>;
   data: Signal<TData>;
+  destroy: () => void;
 };
 
-export function draggable<TData, TMeta extends DragMeta = DragMeta>(
-  opts: CreateDraggableOptions<TData, TMeta>,
-): DraggableRef<TData> {
-  const data = resolveSignal(opts.data);
-  const meta = opts.meta ? resolveSignal(opts.meta) : undefined;
+export function draggable(): Draggable<void>;
+export function draggable<TData = void>(
+  opt: CreateDraggableOptions<TData>,
+): Draggable<TData>;
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
-    return { dragging: computed(() => false), data };
-  }
+export function draggable<TData = void>(
+  opt?: CreateDraggableOptions<TData>,
+): Draggable<TData> {
+  const dataSig =
+    opt?.data !== undefined && isSignal(opt.data)
+      ? opt.data
+      : signal(opt?.data as TData).asReadonly();
 
-  const element = inject(ElementRef<HTMLElement>).nativeElement;
+  if (isServer())
+    return {
+      dragging: computed(() => false),
+      data: dataSig,
+      destroy: () => {
+        // noop
+      },
+    };
+
+  const { canDrag, dragHandle } = (opt ?? {}) as Omit<
+    CreateDraggableOptions<TData>,
+    'data'
+  >;
+
   const dragging = signal(false);
-  const handle = opts.dragHandle ? resolveSignal(opts.dragHandle) : undefined;
+  const el = injectHTMLElement();
 
-  const readMeta = (): TMeta =>
-    (meta ? untracked(meta) : ({} as TMeta));
+  const canDragFn = canDrag ? () => canDrag(el, untracked(dataSig)) : undefined;
 
-  const previewResolver: (() => PreviewConfig<TData> | undefined | null) | null =
-    opts.preview === undefined
-      ? null
-      : typeof opts.preview === 'function'
-        ? (opts.preview as () => PreviewConfig<TData> | undefined | null)
-        : () => opts.preview as PreviewConfig<TData>;
-  const envInjector = previewResolver ? inject(EnvironmentInjector) : null;
-  const appRef = previewResolver ? inject(ApplicationRef) : null;
+  const handleSig: Signal<ResolvableElement | undefined> =
+    dragHandle && isSignal(dragHandle)
+      ? (dragHandle as Signal<ResolvableElement>)
+      : computed(() => dragHandle as ResolvableElement | undefined);
 
-  effect((onCleanup) => {
-    const dragHandle = handle ? resolveElement(handle()) : undefined;
-
-    const canDragFn = opts.canDrag;
-    const cleanup = pragmaticDraggable({
-      element,
-      dragHandle,
-      canDrag: canDragFn ? () => canDragFn() : undefined,
-      getInitialData: () => ({
-        ...boxDragData(untracked(data)),
-        ...(readMeta() as Record<symbol, unknown>),
-      }),
-      onGenerateDragPreview:
-        previewResolver && envInjector && appRef
-          ? ({ nativeSetDragImage }) => {
-              const cfg = previewResolver();
-              if (!cfg) return;
-              registerCustomPreview(cfg, envInjector, appRef, {
-                nativeSetDragImage,
-              });
-            }
-          : undefined,
-      onDragStart: ({ source }) => {
-        dragging.set(true);
-        opts.onDragStart?.({
-          data: untracked(data),
-          meta: readMeta(),
-          element: source.element,
-        });
-      },
-      onDrop: ({ location }) => {
-        dragging.set(false);
-        opts.onDrop?.({
-          data: untracked(data),
-          meta: readMeta(),
-          edge: extractEdgeFromInnermost(location.current.dropTargets),
-          location: {
-            current: mapDropTargets(location.current.dropTargets),
-            previous: mapDropTargets(location.previous.dropTargets),
+  const effectRef = afterRenderEffect<
+    ResolvableElement | undefined,
+    void,
+    void
+  >({
+    earlyRead: () => handleSig(),
+    write: (handle, cleanup) =>
+      cleanup(
+        pragmaticDraggable({
+          element: el,
+          canDrag: canDragFn,
+          getInitialData: () => box(untracked(dataSig)),
+          onDragStart: (e) => {
+            dragging.set(true);
           },
-        });
-      },
-    });
-
-    onCleanup(cleanup);
+          onDrop: (e) => {
+            dragging.set(false);
+          },
+        }),
+      ),
   });
 
-  return { dragging, data };
-}
-
-@Directive({
-  selector: '[mmDraggable]',
-  exportAs: 'mmDraggable',
-})
-export class Draggable<TData = unknown, TMeta extends DragMeta = DragMeta> {
-  readonly data = input.required<TData>();
-  readonly meta = input<TMeta | undefined>(undefined);
-  readonly canDrag = input<(() => boolean) | undefined>(undefined);
-  readonly dragHandle = input<DragHandleLike | undefined>(undefined);
-  readonly preview = input<PreviewConfig<TData> | undefined>(undefined);
-
-  readonly dragStart = output<DragStartEvent<TData, TMeta>>();
-  readonly dropped = output<DropEvent<TData, TMeta>>();
-
-  private readonly ref = draggable<TData, TMeta>({
-    data: this.data,
-    meta: () => (this.meta() ?? ({} as TMeta)),
-    canDrag: () => this.canDrag()?.() ?? true,
-    dragHandle: this.dragHandle,
-    preview: () => this.preview() ?? undefined,
-    onDragStart: (e) => this.dragStart.emit(e),
-    onDrop: (e) => this.dropped.emit(e),
-  });
-
-  readonly dragging = this.ref.dragging;
+  return {
+    dragging: dragging.asReadonly(),
+    data: dataSig,
+    destroy: () => effectRef.destroy(),
+  };
 }

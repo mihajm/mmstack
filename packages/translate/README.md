@@ -402,6 +402,23 @@ Due to Angular's memoization, pure pipes don't automatically react to locale cha
 export class QuoteTranslator extends Translator<QuoteLocale> {}
 ```
 
+**Persisting the selected locale:**
+
+If you want the user's last selected locale to survive page reloads, pass a `localeStorage` adapter to `provideIntlConfig()`. The library calls `read()` once on init to restore the previous selection, and `write()` whenever the active locale changes — you decide where it lives (localStorage, cookies, IndexedDB-with-sync-wrapper, etc.).
+
+```typescript
+provideIntlConfig({
+  defaultLocale: 'en-US',
+  supportedLocales: ['en-US', 'sl-SI', 'de-DE'],
+  localeStorage: {
+    read: () => localStorage.getItem('locale'),
+    write: (locale) => localStorage.setItem('locale', locale),
+  },
+});
+```
+
+Stored values are validated against `supportedLocales` before being applied — anything unrecognized is ignored and the default applies. Errors thrown from `read()` / `write()` are swallowed (and logged in dev mode) so a misbehaving storage backend can't break the app. `localeStorage` is mutually exclusive with `localeParamName` at the type level — when the URL is the source of truth, persisting separately would just fight it.
+
 ### 6. [OPTIONAL] Creating a Shared/Common Namespace
 
 A shared namespace allows you to define common translations (e.g., 'Save', 'Cancel', 'Yes', 'No') once and use them type-safely across all other namespaces.

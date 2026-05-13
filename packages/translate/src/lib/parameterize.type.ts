@@ -56,16 +56,42 @@ type mergeParams<TExtracted extends [string, any]> = {
   [K in TExtracted as K[0]]: K[1];
 };
 
-type flattenParams<
-  TKey extends string,
-  TVal,
-> = TVal extends UnknownStringKeyObject
-  ? inferParamTupples<TVal, `${TKey}.`>
-  : TVal extends string
-    ? extractParams<TVal> extends never
-      ? [TKey]
-      : [TKey, mergeParams<extractParams<TVal>>]
-    : never;
+declare const PARAM_BRAND: unique symbol;
+
+/**
+ * Branded string type produced by `withParams<P>(message)`. The brand carries
+ * both the declared parameter shape `P` and the original literal message `S` —
+ * the literal lives inside the brand (not just on the intersection) so the
+ * inference machinery can recover it without going through template-literal
+ * pattern matching on a branded intersection (which widens `infer` slots to
+ * `string` and breaks auto-extraction). Module-local `unique symbol`, so the
+ * brand is not constructible outside this package.
+ */
+export type WithParams<
+  P extends Record<string, unknown>,
+  S extends string = string,
+> = S & {
+  readonly [PARAM_BRAND]: { params: P; literal: S };
+};
+
+type flattenParams<TKey extends string, TVal> = TVal extends {
+  readonly [PARAM_BRAND]: {
+    params: infer P;
+    literal: infer S extends string;
+  };
+}
+  ? P extends Record<string, unknown>
+    ? extractParams<S> extends never
+      ? [TKey, P]
+      : [TKey, Omit<mergeParams<extractParams<S>>, keyof P> & P]
+    : [TKey]
+  : TVal extends UnknownStringKeyObject
+    ? inferParamTupples<TVal, `${TKey}.`>
+    : TVal extends string
+      ? extractParams<TVal> extends never
+        ? [TKey]
+        : [TKey, mergeParams<extractParams<TVal>>]
+      : never;
 
 type inferParamTupples<
   T extends UnknownStringKeyObject,
@@ -106,9 +132,11 @@ type inferParamsFromValue<V extends string> =
     : TypeEnsuringAllPlaceholders<extractParamString<V>>;
 
 export type inferTranslationShape<T extends UnknownStringKeyObject> = {
-  [K in keyof T]: T[K] extends UnknownStringKeyObject
-    ? inferTranslationShape<T[K]>
-    : T[K] extends string
-      ? inferParamsFromValue<T[K]>
-      : never;
+  [K in keyof T]: T[K] extends { readonly [PARAM_BRAND]: any }
+    ? string
+    : T[K] extends UnknownStringKeyObject
+      ? inferTranslationShape<T[K]>
+      : T[K] extends string
+        ? inferParamsFromValue<T[K]>
+        : never;
 };

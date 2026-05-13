@@ -16,3 +16,4 @@ export {
   provideIntlConfig,
 } from './lib/translation-store';
 export { Translator } from './lib/translator';
+export { withParams } from './lib/with-params';

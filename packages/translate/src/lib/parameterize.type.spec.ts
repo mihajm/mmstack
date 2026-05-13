@@ -3,6 +3,7 @@
 import type {
   inferTranslationParamMap,
   inferTranslationShape,
+  WithParams,
 } from './parameterize.type';
 
 type Equals<X, Y> =
@@ -171,6 +172,83 @@ type _shape_plural = Expect<
         | `${string}{count, ${string}}${string}`
         | `${string}{# quotes}${string}`;
     }
+  >
+>;
+
+// -----------------------------------------------------------------------------
+// withParams (power-user escape hatch for nested-ICU params)
+// -----------------------------------------------------------------------------
+
+// Auto-extracted top-level params merge with declared params from the brand.
+type _withparams_merges = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      {
+        key: WithParams<
+          { name: string },
+          '{count, plural, one {Hi {name}} other {Hi {name}}}'
+        >;
+      }
+    >,
+    { 'ns.key': { count: number; name: string } }
+  >
+>;
+
+// When auto-extraction yields nothing, params equal the declared set.
+type _withparams_no_auto = Expect<
+  Equals<
+    inferTranslationParamMap<'ns', { key: WithParams<{ x: number }> }>,
+    { 'ns.key': { x: number } }
+  >
+>;
+
+// On key conflict, the declared param type wins over auto-extracted.
+type _withparams_user_wins = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      {
+        key: WithParams<
+          { count: string },
+          '{count, plural, one {x} other {y}}'
+        >;
+      }
+    >,
+    { 'ns.key': { count: string } }
+  >
+>;
+
+// Sibling keys without the brand still infer normally.
+type _withparams_sibling_unaffected = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      {
+        branded: WithParams<{ x: number }>;
+        normal: 'Hi {n}';
+      }
+    >,
+    { 'ns.branded': { x: number }; 'ns.normal': { n: string } }
+  >
+>;
+
+// Branded keys' shape widens to `string` — non-defaults can write anything.
+type _withparams_shape_widens = Expect<
+  Equals<
+    inferTranslationShape<{ branded: WithParams<{ x: number }> }>,
+    { branded: string }
+  >
+>;
+
+// Sibling non-branded keys keep their template-literal shape.
+type _withparams_sibling_shape_unaffected = Expect<
+  Equals<
+    inferTranslationShape<{
+      branded: WithParams<{ x: number }>;
+      normal: 'Hi {n}';
+    }>,
+    { branded: string; normal: `${string}{n}${string}` }
   >
 >;
 

@@ -1,4 +1,35 @@
 import { createNamespace } from './create-namespace';
+import { withParams } from './with-params';
+
+describe('withParams', () => {
+  it('is an identity cast at runtime', () => {
+    const msg = '{count, plural, one {Hi {name}} other {Hi {name}}}';
+    expect(withParams<{ name: string }>(msg)).toBe(msg);
+  });
+
+  it('integrates with createNamespace and accepts plain strings for non-default locales', () => {
+    const ns = createNamespace('quote', {
+      simple: 'Hello',
+      complex: withParams<{ name: string }>(
+        '{count, plural, one {Hi {name}} other {Hi {name}}}',
+      ),
+    });
+
+    expect(ns.translation.flat).toEqual({
+      simple: 'Hello',
+      complex: '{count, plural, one {Hi {name}} other {Hi {name}}}',
+    });
+
+    // Non-default locale: branded key accepts any string, no withParams needed.
+    const es = ns.createTranslation('es-ES', {
+      simple: 'Hola',
+      complex: 'Hola {name}',
+    });
+
+    expect(es.locale).toBe('es-ES');
+    expect(es.flat).toEqual({ simple: 'Hola', complex: 'Hola {name}' });
+  });
+});
 
 describe('createNamespace', () => {
   it('should create a namespace with compiled translation', () => {

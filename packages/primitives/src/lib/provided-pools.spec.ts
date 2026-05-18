@@ -44,8 +44,8 @@ describe('pooledArray', () => {
     sig();
 
     expect(create).toHaveBeenCalledTimes(2);
-    // reads 1+2 are fresh (skip), reads 3+4 reuse buffers
-    expect(reset).toHaveBeenCalledTimes(2);
+    // reset-on-release: first read has no buffer to release, every read after does
+    expect(reset).toHaveBeenCalledTimes(3);
   });
 
   it('alternates between two buffer instances', () => {

@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { pooled } from './pooled';
 
 describe('pooled', () => {
@@ -37,14 +37,12 @@ describe('pooled', () => {
       eager: true,
     });
 
-    // both buffers exist before any read
     expect(create).toHaveBeenCalledTimes(2);
 
     sig();
     sig();
     sig();
 
-    // no additional allocation after reads
     expect(create).toHaveBeenCalledTimes(2);
   });
 
@@ -69,12 +67,11 @@ describe('pooled', () => {
     const c = sig();
 
     expect(a).not.toBe(b);
-    expect(b).not.toBe(c);
     // double-buffer: a and c share an underlying instance
     expect(a).toBe(c);
   });
 
-  it('skips reset on freshly-created buffers, runs it on reused ones (lazy)', () => {
+  it('does not reset on the first read (no buffer to release yet)', () => {
     const src = signal(0);
     const reset = vi.fn((buf: { value: number }) => {
       buf.value = -1;
@@ -89,23 +86,19 @@ describe('pooled', () => {
       },
     });
 
-    // reads 1 and 2 use freshly-created buffers → reset is skipped
-    sig();
-    src.set(1);
     sig();
     expect(reset).not.toHaveBeenCalled();
 
-    // read 3 reuses the buffer from read 1 → reset runs
-    src.set(2);
+    src.set(1);
     sig();
     expect(reset).toHaveBeenCalledTimes(1);
 
-    src.set(3);
+    src.set(2);
     sig();
     expect(reset).toHaveBeenCalledTimes(2);
   });
 
-  it('skips reset on the eager-allocated buffers for the first two reads', () => {
+  it('skips reset on the eager pre-allocated current for its first release', () => {
     const src = signal(0);
     const reset = vi.fn();
 
@@ -119,39 +112,53 @@ describe('pooled', () => {
       eager: true,
     });
 
-    sig();
-    src.set(1);
+    // first read demotes the fresh pre-allocated current → no reset
     sig();
     expect(reset).not.toHaveBeenCalled();
 
-    src.set(2);
+    // from here, every read demotes a dirty buffer
+    src.set(1);
     sig();
     expect(reset).toHaveBeenCalledTimes(1);
+
+    src.set(2);
+    sig();
+    expect(reset).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the reset return value when one is provided', () => {
+  it('threads reset swap-returns through the pool', () => {
     const src = signal(0);
-    const swapped = { tag: 'swapped' as const };
+    let resetN = 0;
+    type Buf = { source: 'created' | 'reset'; n: number };
 
-    const sig = pooled<{ tag: string }>({
-      create: () => ({ tag: 'created' }),
-      reset: () => swapped,
+    const sig = pooled<Buf>({
+      create: () => ({ source: 'created', n: 0 }),
+      reset: () => ({ source: 'reset', n: ++resetN }),
       computation: (buf) => {
         void src();
         return buf;
       },
     });
 
-    // first two reads are fresh — get the `create()` instance, not the swap
-    expect(sig().tag).toBe('created');
-    src.set(1);
-    expect(sig().tag).toBe('created');
+    const a = sig();
+    expect(a.source).toBe('created');
 
-    // third read reuses a buffer, so reset runs and the swap is used
+    src.set(1);
+    const b = sig();
+    expect(b.source).toBe('created');
+    expect(b).not.toBe(a);
+
     src.set(2);
-    expect(sig()).toBe(swapped);
+    const c = sig();
+    // reset(a) returned a swap; it's now `other`, becomes `next`, then `current`
+    expect(c.source).toBe('reset');
+    expect(c.n).toBe(1);
+
     src.set(3);
-    expect(sig()).toBe(swapped);
+    const d = sig();
+    expect(d.source).toBe('reset');
+    expect(d.n).toBe(2);
+    expect(d).not.toBe(c);
   });
 
   it('honors equal from CreateSignalOptions', () => {
@@ -174,7 +181,6 @@ describe('pooled', () => {
     src.set(2);
     const third = sig();
 
-    // equal: () => true → the signal never emits a new identity
     expect(second).toBe(first);
     expect(third).toBe(first);
   });
@@ -196,10 +202,38 @@ describe('pooled', () => {
     expect(sig()).toEqual([0, 1, 2]);
 
     src.set(1);
-    // if reset didn't run, the buffer would still contain the prior writes
     expect(sig()).toEqual([0]);
 
     src.set(2);
     expect(sig()).toEqual([0, 1]);
+  });
+
+  it('propagates updates through a downstream computed', () => {
+    const src = signal(0);
+    const pooledSig = pooled<number[]>({
+      create: () => [],
+      reset: (buf) => {
+        buf.length = 0;
+      },
+      computation: (buf) => {
+        for (let i = 0; i < src(); i++) buf.push(i);
+        return buf;
+      },
+    });
+
+    const sum = computed(() => pooledSig().reduce((acc, n) => acc + n, 0));
+    const len = computed(() => pooledSig().length);
+
+    src.set(3);
+    expect(len()).toBe(3);
+    expect(sum()).toBe(0 + 1 + 2);
+
+    src.set(5);
+    expect(len()).toBe(5);
+    expect(sum()).toBe(0 + 1 + 2 + 3 + 4);
+
+    src.set(1);
+    expect(len()).toBe(1);
+    expect(sum()).toBe(0);
   });
 });

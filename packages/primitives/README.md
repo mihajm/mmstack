@@ -29,6 +29,7 @@ This library provides the following primitives:
 - `toWritable` - Converts a read-only signal to writable using custom write logic.
 - `derived` - Creates a signal with two-way binding to a source signal.
 - `chunked` - Creates a signal that time-slices an array into chunked values & emits thats array based on the provided options.
+- `pooled` / `pooledArray` / `pooledMap` / `pooledSet` - Double-buffered object pools for `computed` signals; recycle the output container to remove allocation pressure in high-frequency recomputation.
 - `tabSync` - Low level primitive to "share" the value of a WritableSignal accross tabs via the BroadcastChannel api.
 - `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This was the suggestion from before; it just reads a little smoother and more accurately reflects what the facade creates directly).
   - `mediaQuery` - A generic primitive that tracks a CSS media query (forms the basis for `prefersDarkMode` and `prefersReducedMotion`).
@@ -654,6 +655,75 @@ export class HeavyListComponent {
   });
 }
 ```
+
+### pooled / pooledArray / pooledMap / pooledSet
+
+A double-buffered object pool for `computed` signal outputs. After a brief warm-up the pool reaches steady state with **zero allocations per recomputation** — two buffers are swapped on every read, with `reset` invoked before each `computation`. Each read returns a different identity from the previous read, so default `Object.is` equality still flags changes correctly. Most users will reach for the preset helpers (`pooledArray`, `pooledMap`, `pooledSet`); drop down to `pooled` only when you need a custom buffer type.
+
+> **Retention contract:** the value returned from a pooled signal is only valid until the next read of that signal. The container is reused on the second-next read and will be `reset` first, mutating any reference you still hold. Do not store the result in component state, async closures, or anywhere outside the same reactive tick. Treat it as scratch output consumed synchronously.
+
+Use these when a computed is recomputed at high frequency and produces a large allocation (filter/map outputs over big arrays, lookup indices, RAF-driven computeds). For typical UI computeds over small data, just use `computed` — the docs cost and footgun aren't worth saving an allocation that doesn't show up in a profile.
+
+```typescript
+import { Component, signal } from '@angular/core';
+import { pooledArray, pooledMap, pooledSet } from '@mmstack/primitives';
+
+@Component({
+  selector: 'app-pooled-demo',
+  template: `<p>Active: {{ activeIds().length }} / {{ items().length }}</p>`,
+})
+export class PooledDemoComponent {
+  readonly items = signal(Array.from({ length: 10_000 }, (_, i) => ({ id: i, active: i % 2 === 0 })));
+
+  // Recycles a single number[] across recomputations.
+  readonly activeIds = pooledArray<number[]>((buf) => {
+    for (const item of this.items()) {
+      if (item.active) buf.push(item.id);
+    }
+    return buf;
+  });
+
+  // Recycles a Map for fast id → item lookups.
+  readonly byId = pooledMap<Map<number, { id: number; active: boolean }>>((buf) => {
+    for (const item of this.items()) buf.set(item.id, item);
+    return buf;
+  });
+
+  // Recycles a Set of distinct values.
+  readonly distinctFlags = pooledSet<Set<boolean>>((buf) => {
+    for (const item of this.items()) buf.add(item.active);
+    return buf;
+  });
+}
+```
+
+Need a custom buffer type (typed array, your own struct)? Use `pooled` directly:
+
+```typescript
+import { signal } from '@angular/core';
+import { pooled } from '@mmstack/primitives';
+
+const source = signal<{ active: boolean }[]>([]);
+
+// Pre-allocate both slots at construction (eager) — useful when create() is expensive.
+const counters = pooled<{ total: number; active: number }>({
+  create: () => ({ total: 0, active: 0 }),
+  reset: (c) => {
+    c.total = 0;
+    c.active = 0;
+  },
+  computation: (c) => {
+    for (const item of source()) {
+      c.total++;
+      if (item.active) c.active++;
+    }
+    return c;
+  },
+  eager: true,
+});
+```
+
+Complementary to `linkedSignal` (which carries previous *state* forward, not the *container*) and `chunked` (which time-slices large outputs across frames).
 
 ### tabSync
 

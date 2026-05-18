@@ -5,6 +5,8 @@ export { nestedEffect } from './lib/effect';
 export * from './lib/mappers';
 export * from './lib/mutable';
 export * from './lib/pipeable/public_api';
+export * from './lib/pooled';
+export * from './lib/provided-pools';
 export * from './lib/sensors';
 export * from './lib/store';
 export * from './lib/stored';

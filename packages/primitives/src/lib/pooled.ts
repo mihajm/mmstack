@@ -72,31 +72,25 @@ export function pooled<T, U = T>({
 }: CreatePooledOptions<T, U>): Signal<U> {
   let other: T | undefined = opt.eager ? create() : undefined;
   let current: T | undefined = opt.eager ? create() : undefined;
-  let otherFresh = opt.eager;
+  // only relevant for eager mode: the pre-allocated `current` is fresh until its first demote
   let currentFresh = opt.eager;
 
   return computed(() => {
-    let next: T;
-    let nextFresh: boolean;
-
-    if (other !== undefined) {
-      next = other;
-      nextFresh = !!otherFresh;
-    } else {
-      next = untracked(() => create());
-      nextFresh = true;
-    }
+    const next = other ?? untracked(() => create());
 
     if (current !== undefined) {
-      other = current;
-      otherFresh = currentFresh;
+      if (currentFresh) {
+        // never-mutated buffer leaving the active slot; nothing to clean
+        other = current;
+      } else {
+        // reset on release: clean the dirty buffer as it goes back into the pool
+        // (also threads the swap-return correctly into the pool's spare slot)
+        other = untracked(() => reset(current!)) ?? current;
+      }
     }
     current = next;
-    // the buffer is about to be mutated by `computation`, so it's no longer fresh
     currentFresh = false;
 
-    const clean = nextFresh ? next : (untracked(() => reset(next)) ?? next);
-
-    return computation(clean);
+    return computation(next);
   }, opt);
 }

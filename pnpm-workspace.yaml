@@ -1,0 +1,6 @@
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  '@swc/core': set this to true or false
+  esbuild: true
+  lmdb: true
+  nx: true

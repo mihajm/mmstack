@@ -82,6 +82,33 @@ describe('breadcrumb-resolver', () => {
     expect(registered.ariaLabel()).toBe('Updated Aria Signal');
   });
 
+  it('should accept a plain string as a shorthand for { label }', async () => {
+    await setupRouter('Static String');
+
+    const registered = mockStore.register.mock.calls[0][0];
+
+    expect(registered.label()).toBe('Static String');
+    expect(registered.ariaLabel()).toBe('Static String');
+  });
+
+  it('should accept a plain options object', async () => {
+    await setupRouter({ label: 'Object Label', ariaLabel: 'Object Aria' });
+
+    const registered = mockStore.register.mock.calls[0][0];
+
+    expect(registered.label()).toBe('Object Label');
+    expect(registered.ariaLabel()).toBe('Object Aria');
+  });
+
+  it('should accept a factory returning a plain string', async () => {
+    await setupRouter(() => 'Factory String');
+
+    const registered = mockStore.register.mock.calls[0][0];
+
+    expect(registered.label()).toBe('Factory String');
+    expect(registered.ariaLabel()).toBe('Factory String');
+  });
+
   it('should await truthy value if awaitValue is true', async () => {
     const labelSignal = signal('');
     

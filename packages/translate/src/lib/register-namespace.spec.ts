@@ -1,6 +1,12 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { addSignalFn, createT, injectUnsafeT } from './register-namespace';
+import { compileTranslation } from './compile';
+import {
+  addSignalFn,
+  createT,
+  injectUnsafeT,
+  resolveTranslationModule,
+} from './register-namespace';
 import { injectLocaleInternal, TranslationStore } from './translation-store';
 
 function setupStore() {
@@ -253,5 +259,48 @@ describe('injectUnsafeT', () => {
     // weren't shared, both would still work — this just exercises the path.
     expect(t1('myNs.hello')).toBe('Hello World');
     expect(t2('myNs.hello')).toBe('Hello World');
+  });
+});
+
+describe('resolveTranslationModule', () => {
+  const compiled = compileTranslation({ hello: 'Hello' }, 'demo', 'en-US');
+
+  it('returns the value unchanged when passed a CompiledTranslation directly', () => {
+    expect(resolveTranslationModule(compiled)).toBe(compiled);
+  });
+
+  it('unwraps an ES-module default export (`{ default }`)', () => {
+    // Shape returned by `await import('./quote.namespace')` when the file
+    // does `export default ns.translation`.
+    const moduleLike = {
+      default: compiled,
+      [Symbol.toStringTag]: 'Module',
+      createDemoTranslation: () => null,
+    };
+    expect(resolveTranslationModule(moduleLike)).toBe(compiled);
+  });
+
+  it('unwraps a named `translation` export (`{ translation }`)', () => {
+    // Shape returned when the file does `export const translation = ns.translation`.
+    const moduleLike = {
+      translation: compiled,
+      [Symbol.toStringTag]: 'Module',
+    };
+    expect(resolveTranslationModule(moduleLike)).toBe(compiled);
+  });
+
+  it('prefers `default` over `translation` when both are present', () => {
+    const other = compileTranslation({ hello: 'Hi' }, 'demo', 'en-US');
+    const moduleLike = { default: compiled, translation: other };
+    expect(resolveTranslationModule(moduleLike)).toBe(compiled);
+  });
+
+  it('throws when the loader returns something that is not a CompiledTranslation', () => {
+    expect(() => resolveTranslationModule({} as never)).toThrow(
+      /CompiledTranslation/,
+    );
+    expect(() =>
+      resolveTranslationModule({ default: 'oops' } as never),
+    ).toThrow(/CompiledTranslation/);
   });
 });

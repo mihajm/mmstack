@@ -11,13 +11,11 @@ describe('url', () => {
     eventsSubject = new Subject();
     routerMock = {
       url: '/initial',
-      events: eventsSubject
+      events: eventsSubject,
     };
 
     TestBed.configureTestingModule({
-      providers: [
-        { provide: Router, useValue: routerMock }
-      ]
+      providers: [{ provide: Router, useValue: routerMock }],
     });
   });
 
@@ -28,16 +26,32 @@ describe('url', () => {
     });
   });
 
+  it('should use the provided router if passed in', () => {
+    const mock = {
+      ...routerMock,
+      url: '/mocked',
+    } as Router;
+
+    const u = TestBed.runInInjectionContext(() => url(mock));
+    expect(u()).toBe(mock.url);
+  });
+
   it('should update url on navigation end', () => {
     let u: any;
     TestBed.runInInjectionContext(() => {
       u = url();
     });
 
-    eventsSubject.next({ type: EventType.NavigationEnd, urlAfterRedirects: '/home' });
+    eventsSubject.next({
+      type: EventType.NavigationEnd,
+      urlAfterRedirects: '/home',
+    });
     expect(u()).toBe('/home');
 
-    eventsSubject.next({ type: EventType.NavigationEnd, urlAfterRedirects: '/about' });
+    eventsSubject.next({
+      type: EventType.NavigationEnd,
+      urlAfterRedirects: '/about',
+    });
     expect(u()).toBe('/about');
 
     eventsSubject.next({ type: EventType.NavigationStart, url: '/other' });

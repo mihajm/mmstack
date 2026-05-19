@@ -6,7 +6,7 @@ import {
   convertToParamMap,
 } from '@angular/router';
 import { of } from 'rxjs';
-import { injectResolveParamLocale } from './resovler-locale';
+import { injectResolveParamLocale } from './resolver-locale';
 import { TranslationStore, provideIntlConfig } from './translation-store';
 
 describe('injectResolveParamLocale', () => {
@@ -68,7 +68,7 @@ describe('injectResolveParamLocale', () => {
     const snapshot = {
       paramMap: convertToParamMap({}),
       parent: {
-        paramMap: convertToParamMap({ locale: 'es-ES' }),
+        paramMap: convertToParamMap({ lang: 'es-ES' }),
       },
     } as any as ActivatedRouteSnapshot;
 

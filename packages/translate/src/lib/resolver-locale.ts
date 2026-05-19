@@ -2,6 +2,9 @@ import { inject, untracked } from '@angular/core';
 import { type ActivatedRouteSnapshot, Router } from '@angular/router';
 import { injectIntlConfig, TranslationStore } from './translation-store';
 
+/**
+ * @internal
+ */
 export function injectResolveParamLocale(snapshot: ActivatedRouteSnapshot) {
   let locale: string | null = null;
 
@@ -20,7 +23,7 @@ export function injectResolveParamLocale(snapshot: ActivatedRouteSnapshot) {
     if (!locale && !alwaysInheritParams) {
       let currentRoute: ActivatedRouteSnapshot | null = snapshot;
       while (currentRoute && !locale) {
-        locale = currentRoute.paramMap.get('locale');
+        locale = currentRoute.paramMap.get(paramName);
         currentRoute = currentRoute.parent;
       }
     }

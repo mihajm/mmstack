@@ -54,6 +54,38 @@ function treeToSerializedUrl(
   return router.serializeUrl(urlTree);
 }
 
+/**
+ * Returns an imperative function that triggers preloading for an arbitrary link, using
+ * the same path resolution and {@link PreloadStrategy} pipeline as the {@link Link}
+ * (`mmLink`) directive.
+ *
+ * Use this when the `Link` directive isn't a fit — for example, preloading a route from
+ * an effect when a user opens a menu, hovers a non-link element, or reacts to a signal
+ * change — and you don't want to render an `<a [mmLink]>` just to request the preload.
+ *
+ * Requires {@link PreloadStrategy} to be wired up via `provideRouter(routes, withPreloading(PreloadStrategy))`,
+ * just like the directive.
+ *
+ * @returns A function accepting the same link descriptor shape as `mmLink` (`string`,
+ * commands array, `UrlTree`, or `null`). Passing `null` or an unresolvable link is a no-op.
+ *
+ * @example
+ * ```typescript
+ * @Component({ ... })
+ * export class CommandPaletteComponent {
+ *   private readonly triggerPreload = injectTriggerPreload();
+ *
+ *   protected readonly highlighted = signal<string | null>(null);
+ *
+ *   constructor() {
+ *     effect(() => {
+ *       const target = this.highlighted();
+ *       if (target) this.triggerPreload(target);
+ *     });
+ *   }
+ * }
+ * ```
+ */
 export function injectTriggerPreload() {
   const req = inject(PreloadRequester);
   const router = inject(Router);

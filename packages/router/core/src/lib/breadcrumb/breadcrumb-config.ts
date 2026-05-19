@@ -38,7 +38,9 @@ export type BreadcrumbConfig = {
 /**
  * @internal
  */
-const token = new InjectionToken<BreadcrumbConfig>('MMSTACK_BREADCRUMB_CONFIG');
+const token = new InjectionToken<BreadcrumbConfig>(
+  '@mmstack/router-core:breadcrumb-config',
+);
 
 /**
  * Provides configuration for the breadcrumb system.

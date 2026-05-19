@@ -15,7 +15,7 @@ import {
   type inferCompiledTranslationNamespace,
 } from './compile';
 import { replaceWithDelim } from './delim';
-import { injectResolveParamLocale } from './resovler-locale';
+import { injectResolveParamLocale } from './resolver-locale';
 import {
   type AnyStringRecord,
   type UnknownStringKeyObject,
@@ -134,17 +134,63 @@ export function createT<TMap extends AnyStringRecord>(
   return fn as unknown as TFunction<TMap>;
 }
 
+/**
+ * Shape accepted by a namespace loader: a direct `CompiledTranslation`, or an
+ * ES-module-style object exposing one as `default` or `translation`. Lets
+ * callers write `() => import('./quote.namespace')` instead of the more
+ * verbose `() => import('./quote.namespace').then((m) => m.default)`.
+ */
+export type LoadedTranslation<
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+> = T | { default: T } | { translation: T };
+
+function isCompiledTranslation(
+  value: unknown,
+): value is CompiledTranslation<UnknownStringKeyObject, string> {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'flat' in value &&
+    'namespace' in value
+  );
+}
+
+/**
+ * @internal exported for unit testing
+ *
+ * Unwraps a loader result to a `CompiledTranslation`. Detection order:
+ *   1. value is already a `CompiledTranslation` (has `flat` + `namespace`)
+ *   2. value has a `default` export holding a `CompiledTranslation` (ESM default)
+ *   3. value has a `translation` export holding a `CompiledTranslation` (named export)
+ */
+export function resolveTranslationModule<
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+>(loaded: LoadedTranslation<T>): T {
+  if (isCompiledTranslation(loaded)) return loaded as T;
+  if (loaded && typeof loaded === 'object') {
+    const def = (loaded as { default?: unknown }).default;
+    if (isCompiledTranslation(def)) return def as T;
+    const tr = (loaded as { translation?: unknown }).translation;
+    if (isCompiledTranslation(tr)) return tr as T;
+  }
+  throw new Error(
+    '[@mmstack/translate] Loader did not return a CompiledTranslation. Expected the value from `createNamespace` / `createTranslation`, or a module exporting one as `default` or `translation`.',
+  );
+}
+
 export function registerNamespace<
   TDefault extends CompiledTranslation<UnknownStringKeyObject, string>,
 >(
-  defaultTranslation: () => Promise<TDefault>,
+  defaultTranslation: () => Promise<LoadedTranslation<TDefault>>,
   other: Record<
     string,
     () => Promise<
-      CompiledTranslation<
-        UnknownStringKeyObject,
-        inferCompiledTranslationNamespace<TDefault>,
-        string
+      LoadedTranslation<
+        CompiledTranslation<
+          UnknownStringKeyObject,
+          inferCompiledTranslationNamespace<TDefault>,
+          string
+        >
       >
     >
   >,
@@ -155,12 +201,38 @@ export function registerNamespace<
 
   const keyMap = new Map<string, string>();
 
+  // Pre-wrap loaders once so the rest of the pipeline — including the
+  // dynamic-locale loader in `TranslationStore`, which reads `.namespace`
+  // and `.flat` directly off the result — always sees a `CompiledTranslation`
+  // regardless of which loader shape the caller used.
+  const unwrappedDefault = (): Promise<TDefault> =>
+    defaultTranslation().then(resolveTranslationModule);
+
+  type LocaleLoader = () => Promise<
+    CompiledTranslation<
+      UnknownStringKeyObject,
+      inferCompiledTranslationNamespace<TDefault>,
+      string
+    >
+  >;
+  const unwrappedOther: Record<string, LocaleLoader> = Object.fromEntries(
+    Object.entries(other).map(([loc, loader]) => [
+      loc,
+      () => loader().then(resolveTranslationModule) as ReturnType<LocaleLoader>,
+    ]),
+  );
+
   const injectT = (): $TFN => {
     const store = inject(TranslationStore);
 
     return addSignalFn(createT(store, keyMap), store, keyMap);
   };
 
+  // Tracks whether the default locale's translation has been loaded by any prior
+  // resolver call. Captured in closure across navigations on purpose — concurrent
+  // resolves may each see `false` and both queue a default preload; that's harmless
+  // because `store.register` is idempotent (same payload overwrites with the same
+  // value). Do not add locking here.
   let defaultTranslationLoaded = false;
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
@@ -171,14 +243,14 @@ export function registerNamespace<
     const shouldPreloadDefault =
       injectIntlConfig()?.preloadDefaultLocale ?? false;
 
-    const tPromise = other[locale] as (typeof other)[string] | undefined;
+    const tPromise = unwrappedOther[locale] as LocaleLoader | undefined;
 
-    const promise = tPromise ?? defaultTranslation;
+    const promise = tPromise ?? unwrappedDefault;
     if (!promise && isDevMode()) {
       return console.warn(`No translation found for locale: ${locale}`);
     }
 
-    if (promise === defaultTranslation && defaultTranslationLoaded) return;
+    if (promise === unwrappedDefault && defaultTranslationLoaded) return;
 
     try {
       const promises = [promise()];
@@ -186,20 +258,20 @@ export function registerNamespace<
       if (
         shouldPreloadDefault &&
         !defaultTranslationLoaded &&
-        promise !== defaultTranslation
+        promise !== unwrappedDefault
       )
-        promises.push(defaultTranslation());
+        promises.push(unwrappedDefault());
 
       const translations = await Promise.allSettled(promises);
 
-      const fullfilled = translations.map((t) =>
+      const fulfilled = translations.map((t) =>
         t.status === 'fulfilled' ? t.value : null,
       );
 
-      if (fullfilled.at(0) === null && fullfilled.at(1) === null)
+      if (fulfilled.at(0) === null && fulfilled.at(1) === null)
         throw new Error('Failed to load translations');
 
-      const [t, defaultT] = fullfilled;
+      const [t, defaultT] = fulfilled;
 
       const ns = t?.namespace ?? defaultT?.namespace;
       if (!ns) throw new Error('No namespace found in translation');
@@ -208,8 +280,8 @@ export function registerNamespace<
         console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
 
       store.registerOnDemandLoaders(ns, {
-        ...other,
-        [defaultLocale]: defaultTranslation,
+        ...unwrappedOther,
+        [defaultLocale]: unwrappedDefault,
       });
 
       const toRegister: Record<string, Record<string, string>> = {};
@@ -218,7 +290,7 @@ export function registerNamespace<
 
       store.register(ns, toRegister);
 
-      if (promise === defaultTranslation || defaultT)
+      if (promise === unwrappedDefault || defaultT)
         defaultTranslationLoaded = true;
     } catch {
       if (isDevMode()) {
@@ -254,6 +326,27 @@ export function registerRemoteNamespace<TNS extends string>(
 ) {
   const keyMap = new Map<string, string>();
 
+  // The dynamic-locale loader in TranslationStore reads `.namespace` and `.flat`
+  // off the loader result, so on-demand loaders must return CompiledTranslation.
+  // Wrap the raw remote fetchers once here at registration time rather than every
+  // resolver call.
+  const compileLoader =
+    <TLocale extends string>(
+      loader: () => Promise<Record<string, string>>,
+      locale: TLocale,
+    ) =>
+    () => loader().then((raw) => compileTranslation(raw, ns, locale));
+
+  const compiledOther: Record<
+    string,
+    () => Promise<CompiledTranslation<UnknownStringKeyObject, TNS>>
+  > = Object.fromEntries(
+    Object.entries(other).map(([loc, loader]) => [
+      loc,
+      compileLoader(loader, loc),
+    ]),
+  );
+
   const injectT = (): UntypedTFunction<TNS> => {
     const store = inject(TranslationStore);
 
@@ -264,6 +357,8 @@ export function registerRemoteNamespace<TNS extends string>(
     ) as UntypedTFunction<TNS>;
   };
 
+  // See `defaultTranslationLoaded` in `registerNamespace` for rationale —
+  // intentionally racy, safe via idempotent `store.register`.
   let defaultTranslationLoaded = false;
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
@@ -296,14 +391,14 @@ export function registerRemoteNamespace<TNS extends string>(
 
       const translations = await Promise.allSettled(promises);
 
-      const fullfilled = translations.map((t) =>
+      const fulfilled = translations.map((t) =>
         t.status === 'fulfilled' ? t.value : null,
       );
 
-      if (fullfilled.at(0) === null && fullfilled.at(1) === null)
+      if (fulfilled.at(0) === null && fulfilled.at(1) === null)
         throw new Error('Failed to load translations');
 
-      const [baseT, baseDefaultT] = fullfilled;
+      const [baseT, baseDefaultT] = fulfilled;
 
       const t = baseT ? compileTranslation(baseT, ns, locale) : null;
       const defaultT = baseDefaultT
@@ -314,8 +409,8 @@ export function registerRemoteNamespace<TNS extends string>(
         console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
 
       store.registerOnDemandLoaders(ns, {
-        ...other,
-        [defaultLocale]: defaultTranslation,
+        ...compiledOther,
+        [defaultLocale]: compileLoader(defaultTranslation, defaultLocale),
       });
 
       const toRegister: Record<string, Record<string, string>> = {};

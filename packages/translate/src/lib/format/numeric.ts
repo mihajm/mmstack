@@ -55,7 +55,7 @@ export type FormatNumberOptions = {
 };
 
 /**
- * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ * @deprecated UNSAFE FOR SSR/EDGE. Omitting the locale property forces a fallback to a process-level global singleton.
  */
 export type UnsafeFormatNumberOptions = Omit<FormatNumberOptions, 'locale'> & {
   /** Optional locale string falling back to the legacy global signal */
@@ -241,7 +241,7 @@ export type FormatPercentOptions = {
 };
 
 /**
- * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ * @deprecated UNSAFE FOR SSR/EDGE. Omitting the locale property forces a fallback to a process-level global singleton.
  */
 export type UnsafeFormatPercentOptions = Omit<
   FormatPercentOptions,
@@ -390,7 +390,7 @@ export type FormatCurrencyOptions = {
 };
 
 /**
- * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ * @deprecated UNSAFE FOR SSR/EDGE. Omitting the locale property forces a fallback to a process-level global singleton.
  */
 export type UnsafeFormatCurrencyOptions = Omit<
   FormatCurrencyOptions,

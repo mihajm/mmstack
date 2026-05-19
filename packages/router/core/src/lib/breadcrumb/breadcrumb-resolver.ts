@@ -34,10 +34,11 @@ type CreateBreadcrumbOptions = {
 /**
  * Creates and registers a breadcrumb for a specific route.
  * This function is designed to be used as an Angular Route `ResolveFn`.
- * It handles the registration of the breadcrumb with the `BreadcrumbStore`
- * and ensures automatic deregistration when the route is destroyed.
  *
- * @param factory A function that returns a `CreateBreadcrumbOptions` object.
+ * Accepts a static label (`string`), a static options object, or a factory returning either —
+ * use a factory when you need `inject()` for dynamic data.
+ *
+ * @param factoryOrValue A static label, a static `CreateBreadcrumbOptions`, or a factory returning either.
  * @see CreateBreadcrumbOptions
  *
  * @example
@@ -47,27 +48,41 @@ type CreateBreadcrumbOptions = {
  *     path: 'home',
  *     component: HomeComponent,
  *     resolve: {
- *       breadcrumb: createBreadcrumb(() => ({
- *         label: 'Home',
- *       });
+ *       // shorthand for { label: 'Home' }
+ *       breadcrumb: createBreadcrumb('Home'),
  *     },
+ *   },
+ *   {
  *     path: 'users/:userId',
  *     component: UserProfileComponent,
  *     resolve: {
  *       breadcrumb: createBreadcrumb(() => {
  *         const userStore = inject(UserStore);
  *         return {
- *            label: () => userStore.user().name ?? 'Loading...
- *        };
- *      })
+ *           label: () => userStore.user().name ?? 'Loading...',
+ *         };
+ *       }),
  *     },
- *   }
+ *   },
  * ];
  * ```
  */
 export function createBreadcrumb(
-  factory: () => CreateBreadcrumbOptions,
+  factoryOrValue:
+    | (() => CreateBreadcrumbOptions | string)
+    | string
+    | CreateBreadcrumbOptions,
 ): ResolveFn<void> {
+  const factory =
+    typeof factoryOrValue === 'string'
+      ? (): CreateBreadcrumbOptions => ({ label: factoryOrValue })
+      : typeof factoryOrValue === 'function'
+        ? (): CreateBreadcrumbOptions => {
+            const result = factoryOrValue();
+            return typeof result === 'string' ? { label: result } : result;
+          }
+        : () => factoryOrValue;
+
   return async (route) => {
     const router = inject(Router);
     const store = inject(BreadcrumbStore);

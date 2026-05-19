@@ -67,6 +67,10 @@ describe('numeric formatting', () => {
         expect(result).toBe('1.234,56');
       });
     });
+
+    it('should accept an explicit locale string (SSR-safe overload)', () => {
+      expect(formatNumber(1234.56, 'de-DE')).toBe('1.234,56');
+    });
   });
 
   describe('formatPercent', () => {
@@ -88,6 +92,10 @@ describe('numeric formatting', () => {
         expect(formatPercent(null, { fallbackToZero: true })).toBe('0%');
       });
     });
+
+    it('should accept an explicit locale string (SSR-safe overload)', () => {
+      expect(formatPercent(0.5, 'de-DE')).toBe('50 %');
+    });
   });
 
   describe('formatCurrency', () => {
@@ -108,10 +116,15 @@ describe('numeric formatting', () => {
       const val = signal(50);
       const currency = signal('GBP');
       const opt = signal({ display: 'symbol' as const });
-      
+
       TestBed.runInInjectionContext(() => {
         expect(formatCurrency(val, currency, opt)).toBe('£50.00');
       });
+    });
+
+    it('should accept an explicit locale string (SSR-safe overload)', () => {
+      // German formatting: "1.234,50 €"
+      expect(formatCurrency(1234.5, 'EUR', 'de-DE')).toBe('1.234,50 €');
     });
   });
 });

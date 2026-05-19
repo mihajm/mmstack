@@ -50,4 +50,8 @@ describe('formatList', () => {
       expect(result).toBe('Apfel und Birne');
     });
   });
+
+  it('should accept an explicit locale string (SSR-safe overload)', () => {
+    expect(formatList(['Apfel', 'Birne'], 'de-DE')).toBe('Apfel und Birne');
+  });
 });

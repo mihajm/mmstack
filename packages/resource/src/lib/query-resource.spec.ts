@@ -207,6 +207,31 @@ describe('queryResource', () => {
       queryResource(() => undefined),
     );
     expect(res.disabled()).toBe(true);
+    expect(res.disabledReason()).toBe('no-request');
+  });
+
+  it('reports disabledReason as offline when network is unavailable', () => {
+    networkStatusSignal.set(false);
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(() => ({ url: 'https://example.com' })),
+    );
+    expect(res.disabled()).toBe(true);
+    expect(res.disabledReason()).toBe('offline');
+  });
+
+  it('reports disabledReason as null when fully enabled', () => {
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(() => ({
+        url: 'https://example.com',
+        context: createTestContext(
+          () => {
+            // noop
+          },
+          { data: 'ok' },
+        ),
+      })),
+    );
+    expect(res.disabledReason()).toBeNull();
   });
 
   it('should call onError callback in an effect when request fails', async () => {

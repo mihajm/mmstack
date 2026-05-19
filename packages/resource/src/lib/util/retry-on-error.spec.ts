@@ -97,4 +97,57 @@ describe('retryOnError', () => {
       expect(mock._destroySpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  it('fires onError with retryCount + isFinal on every attempt', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource('data', { status: 'idle' });
+      const onError = vi.fn();
+
+      retryOnError(mock, 2, onError);
+
+      const err1 = new Error('boom 1');
+      mock._error.set(err1);
+      mock._status.set('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(1000);
+      expect(onError).toHaveBeenLastCalledWith(err1, 0, false);
+
+      const err2 = new Error('boom 2');
+      mock._error.set(err2);
+      mock._status.set('loading');
+      TestBed.tick();
+      mock._status.set('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(2000);
+      expect(onError).toHaveBeenLastCalledWith(err2, 1, false);
+
+      const err3 = new Error('boom 3');
+      mock._error.set(err3);
+      mock._status.set('loading');
+      TestBed.tick();
+      mock._status.set('error');
+      TestBed.tick();
+      // 3rd attempt (retryCount=2) is the final one — isFinal flips to true
+      expect(onError).toHaveBeenLastCalledWith(err3, 2, true);
+
+      expect(onError).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it('marks the first failure as final when retry is 0', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource('data', { status: 'idle' });
+      const onError = vi.fn();
+
+      retryOnError(mock, 0, onError);
+
+      const err = new Error('boom');
+      mock._error.set(err);
+      mock._status.set('error');
+      TestBed.tick();
+
+      expect(onError).toHaveBeenCalledWith(err, 0, true);
+      expect(mock._reloadSpy).not.toHaveBeenCalled();
+    });
+  });
 });

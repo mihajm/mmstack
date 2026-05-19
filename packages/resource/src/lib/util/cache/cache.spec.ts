@@ -1,4 +1,5 @@
-import { Cache, type CacheEntry } from './cache';
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { Cache } from './cache';
 
 describe('Cache', () => {
   beforeEach(() => {
@@ -41,6 +42,46 @@ describe('Cache', () => {
 
     // Should not throw
     expect(() => cache.invalidate('nonexistent')).not.toThrow();
+  });
+
+  it('invalidatePrefix removes every matching key', () => {
+    const cache = new Cache<string>();
+    cache.store('GET /api/posts', 'list');
+    cache.store('GET /api/posts/1', 'one');
+    cache.store('GET /api/posts/2', 'two');
+    cache.store('GET /api/users', 'users');
+
+    const removed = cache.invalidatePrefix('GET /api/posts');
+
+    expect(removed).toBe(3);
+    expect(cache.getUntracked('GET /api/posts')).toBeNull();
+    expect(cache.getUntracked('GET /api/posts/1')).toBeNull();
+    expect(cache.getUntracked('GET /api/posts/2')).toBeNull();
+    // unrelated key survives
+    expect(cache.getUntracked('GET /api/users')).not.toBeNull();
+  });
+
+  it('invalidatePrefix returns 0 when no keys match', () => {
+    const cache = new Cache<string>();
+    cache.store('GET /api/posts', 'list');
+
+    expect(cache.invalidatePrefix('GET /api/users')).toBe(0);
+    // existing entry untouched
+    expect(cache.getUntracked('GET /api/posts')).not.toBeNull();
+  });
+
+  it('invalidateWhere accepts arbitrary predicates', () => {
+    const cache = new Cache<string>();
+    cache.store('user:42:profile', 'p');
+    cache.store('user:42:settings', 's');
+    cache.store('user:99:profile', 'p2');
+
+    const removed = cache.invalidateWhere((k) => k.includes(':42:'));
+
+    expect(removed).toBe(2);
+    expect(cache.getUntracked('user:42:profile')).toBeNull();
+    expect(cache.getUntracked('user:42:settings')).toBeNull();
+    expect(cache.getUntracked('user:99:profile')).not.toBeNull();
   });
 
   it('should auto-expire entries after TTL', () => {
@@ -127,22 +168,32 @@ describe('Cache', () => {
 
   it('should throw for maxSize <= 0', () => {
     expect(
-      () => new Cache<string>(1000, 500, { type: 'lru', maxSize: 0, checkInterval: 1000 }),
+      () =>
+        new Cache<string>(1000, 500, {
+          type: 'lru',
+          maxSize: 0,
+          checkInterval: 1000,
+        }),
     ).toThrow('maxSize must be greater than 0');
 
     expect(
-      () => new Cache<string>(1000, 500, { type: 'lru', maxSize: -1, checkInterval: 1000 }),
+      () =>
+        new Cache<string>(1000, 500, {
+          type: 'lru',
+          maxSize: -1,
+          checkInterval: 1000,
+        }),
     ).toThrow('maxSize must be greater than 0');
   });
 
   describe('LRU cleanup', () => {
     it('should evict least recently used entries when exceeding maxSize', () => {
       const checkInterval = 1000;
-      const cache = new Cache<number>(
-        100000,
-        50000,
-        { type: 'lru', maxSize: 3, checkInterval },
-      );
+      const cache = new Cache<number>(100000, 50000, {
+        type: 'lru',
+        maxSize: 3,
+        checkInterval,
+      });
 
       cache.store('a', 1);
       cache.store('b', 2);
@@ -165,11 +216,11 @@ describe('Cache', () => {
   describe('oldest cleanup', () => {
     it('should evict oldest entries when exceeding maxSize', () => {
       const checkInterval = 1000;
-      const cache = new Cache<number>(
-        100000,
-        50000,
-        { type: 'oldest', maxSize: 3, checkInterval },
-      );
+      const cache = new Cache<number>(100000, 50000, {
+        type: 'oldest',
+        maxSize: 3,
+        checkInterval,
+      });
 
       cache.store('a', 1);
       vi.advanceTimersByTime(10);
@@ -186,6 +237,90 @@ describe('Cache', () => {
       expect(cache.getUntracked('a')).toBeNull();
       // 'd' should survive (newest)
       expect(cache.getUntracked('d')).not.toBeNull();
+    });
+  });
+
+  describe('cross-tab sync (BroadcastChannel)', () => {
+    function waitForChannel() {
+      // BroadcastChannel delivery uses the macrotask queue; one setTimeout(0)
+      // is enough to let the message land.
+      return new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+
+    it('drops stale store messages whose updated timestamp is older than the local entry', async () => {
+      if (typeof BroadcastChannel === 'undefined') return;
+      vi.useRealTimers();
+
+      const channelId = `mmstack-sync-test-stale-${Math.random()}`;
+      const cache = new Cache<string>(undefined, undefined, undefined, {
+        id: channelId,
+        serialize: (v) => v,
+        deserialize: (v) => v,
+      });
+
+      cache.store('k', 'local-newer');
+      const localUpdated = cache.getUntracked('k')!.updated;
+
+      const otherTabChannel = new BroadcastChannel(channelId);
+      otherTabChannel.postMessage({
+        action: 'store',
+        type: 'cache-sync-message',
+        cacheId: 'some-other-cache',
+        entry: {
+          key: 'k',
+          value: 'stale-from-other-tab',
+          updated: localUpdated - 100,
+          created: localUpdated - 100,
+          stale: localUpdated - 100 + 60_000,
+          expiresAt: localUpdated - 100 + 60_000,
+          useCount: 1,
+        },
+      });
+
+      await waitForChannel();
+
+      expect(cache.getUntracked('k')!.value).toBe('local-newer');
+
+      otherTabChannel.close();
+      cache.destroy();
+    });
+
+    it('accepts store messages newer than the local entry', async () => {
+      if (typeof BroadcastChannel === 'undefined') return;
+      vi.useRealTimers();
+
+      const channelId = `mmstack-sync-test-newer-${Math.random()}`;
+      const cache = new Cache<string>(undefined, undefined, undefined, {
+        id: channelId,
+        serialize: (v) => v,
+        deserialize: (v) => v,
+      });
+
+      cache.store('k', 'local-older');
+      const localUpdated = cache.getUntracked('k')!.updated;
+
+      const otherTabChannel = new BroadcastChannel(channelId);
+      otherTabChannel.postMessage({
+        action: 'store',
+        type: 'cache-sync-message',
+        cacheId: 'some-other-cache',
+        entry: {
+          key: 'k',
+          value: 'newer-from-other-tab',
+          updated: localUpdated + 100,
+          created: localUpdated,
+          stale: localUpdated + 100 + 60_000,
+          expiresAt: localUpdated + 100 + 60_000,
+          useCount: 1,
+        },
+      });
+
+      await waitForChannel();
+
+      expect(cache.getUntracked('k')!.value).toBe('newer-from-other-tab');
+
+      otherTabChannel.close();
+      cache.destroy();
     });
   });
 

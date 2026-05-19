@@ -157,4 +157,81 @@ describe('circuit-breaker', () => {
       expect(() => cb.destroy()).not.toThrow();
     });
   });
+
+  describe('threshold / treshold alias', () => {
+    it('accepts the new `threshold` field', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker({ threshold: 2, timeout: 1000 });
+        cb.fail();
+        expect(cb.status()).toBe('CLOSED');
+        cb.fail();
+        expect(cb.status()).toBe('OPEN');
+      });
+    });
+
+    it('still accepts the deprecated `treshold` field', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker({ treshold: 2, timeout: 1000 });
+        cb.fail();
+        cb.fail();
+        expect(cb.status()).toBe('OPEN');
+      });
+    });
+
+    it('prefers `threshold` over `treshold` when both are provided', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker({ threshold: 2, treshold: 99, timeout: 1000 });
+        cb.fail();
+        cb.fail();
+        expect(cb.status()).toBe('OPEN');
+      });
+    });
+  });
+
+  describe('hardReset', () => {
+    it('clears failure count and returns to CLOSED', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker({ threshold: 2, timeout: 5000 });
+        cb.fail();
+        cb.fail();
+        expect(cb.status()).toBe('OPEN');
+
+        cb.hardReset();
+        expect(cb.status()).toBe('CLOSED');
+
+        // and the breaker is genuinely fresh — needs a full threshold to trip again
+        cb.fail();
+        expect(cb.status()).toBe('CLOSED');
+        cb.fail();
+        expect(cb.status()).toBe('OPEN');
+      });
+    });
+
+    it('recovers from a permanent (shouldFailForever) open', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker({
+          threshold: 5,
+          timeout: 1000,
+          shouldFailForever: (err) => err?.message === 'permanent',
+        });
+
+        cb.fail(new Error('permanent'));
+        expect(cb.status()).toBe('OPEN');
+        TestBed.tick();
+        vi.advanceTimersByTime(10000);
+        expect(cb.status()).toBe('OPEN');
+
+        cb.hardReset();
+        expect(cb.status()).toBe('CLOSED');
+      });
+    });
+
+    it('is a noop on never-broken breakers', () => {
+      TestBed.runInInjectionContext(() => {
+        const cb = createCircuitBreaker(false);
+        expect(() => cb.hardReset()).not.toThrow();
+        expect(cb.status()).toBe('CLOSED');
+      });
+    });
+  });
 });

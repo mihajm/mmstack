@@ -49,4 +49,8 @@ describe('formatRelativeTime', () => {
       expect(formatRelativeTime(-1, 'day', { locale: 'de-DE', numeric: 'auto' })).toBe('gestern');
     });
   });
+
+  it('should accept an explicit locale string (SSR-safe overload)', () => {
+    expect(formatRelativeTime(2, 'month', 'de-DE')).toBe('in 2 Monaten');
+  });
 });

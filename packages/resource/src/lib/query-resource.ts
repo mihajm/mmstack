@@ -106,10 +106,16 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
    */
   retry?: RetryOptions;
   /**
-   * An optional error handler callback.  This function will be called whenever the
-   * underlying HTTP request fails. Useful for displaying toasts or other error messages.
+   * Called on every failed attempt, including each retry.
+   *
+   * @param err - The error from the underlying HTTP request.
+   * @param retryCount - The number of retries that already happened before
+   * this error (`0` on the original failure, `1` after the first retry, etc.).
+   * @param isFinal - `true` when no further retry will be scheduled — either
+   * because retries are exhausted or `retry` was unset/0. Branch on this for
+   * "user actually needs to know" side effects (toasts, error reporting).
    */
-  onError?: (err: unknown) => void;
+  onError?: (err: unknown, retryCount: number, isFinal: boolean) => void;
   /**
    * Options for configuring a circuit breaker for the resource.
    */
@@ -124,6 +130,13 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
    */
   triggerOnSameRequest?: boolean;
 };
+
+/**
+ * The reason a query resource is currently in the `disabled` state, or `null`
+ * if it is enabled. Useful for branching UI on cause (e.g. "offline" vs
+ * "circuit tripped" vs "nothing to fetch yet").
+ */
+export type DisabledReason = 'offline' | 'circuit-open' | 'no-request';
 
 /**
  * Represents a resource created by `queryResource`. Extends `HttpResourceRef` with additional properties.
@@ -141,9 +154,14 @@ export type QueryResourceRef<TResult> = Omit<
    */
   readonly statusCode: WritableSignal<number | undefined>;
   /**
-   * A signal indicating whether the resource is currently disabled (due to circuit breaker or undefined request).
+   * A signal indicating whether the resource is currently disabled (due to circuit breaker, offline, or undefined request).
    */
   disabled: Signal<boolean>;
+  /**
+   * Why the resource is currently disabled, or `null` if it is enabled.
+   * Maps to one of: `'offline'`, `'circuit-open'`, `'no-request'`.
+   */
+  disabledReason: Signal<DisabledReason | null>;
   /**
    * Prefetches data for the resource, populating the cache if caching is enabled.  This can be
    * used to proactively load data before it's needed.  If a slow connection is detected, prefetching is skipped.
@@ -212,10 +230,19 @@ export function queryResource<TResult, TRaw = TResult>(
     ? undefined
     : createEqualRequest(options?.equal);
 
+  const rawRequest = computed(() => request() ?? undefined);
+
+  const disabledReason = computed<DisabledReason | null>(() => {
+    if (!networkAvailable()) return 'offline';
+    if (cb.isOpen()) return 'circuit-open';
+    if (!rawRequest()) return 'no-request';
+    return null;
+  });
+
   const stableRequest = computed(
     (): HttpResourceRequest | undefined => {
-      if (!networkAvailable() || cb.isOpen()) return undefined;
-      const req = request();
+      if (disabledReason() !== null) return undefined;
+      const req = rawRequest();
       if (!req) return undefined;
       if (typeof req === 'string') return { method: 'GET', url: req };
       return req;
@@ -316,7 +343,7 @@ export function queryResource<TResult, TRaw = TResult>(
   });
 
   resource = refresh(resource, destroyRef, options?.refresh);
-  resource = retryOnError(resource, options?.retry);
+  resource = retryOnError(resource, options?.retry, options?.onError);
 
   resource = persistResourceValues<TResult>(
     resource,
@@ -334,22 +361,6 @@ export function queryResource<TResult, TRaw = TResult>(
         resource.value.update,
       )
     : resource.value;
-
-  const onError = options?.onError; // Put in own variable to ensure value remains even if options are somehow mutated in-line
-
-  if (onError) {
-    const onErrorRef = effect(() => {
-      const err = resource.error();
-      if (err) onError(err);
-    });
-
-    // cleanup on manual destroy, I'm comfortable setting these props in-line as we have yet to 'release' the object out of this lexical scope
-    const destroyRest = resource.destroy;
-    resource.destroy = () => {
-      onErrorRef.destroy();
-      destroyRest();
-    };
-  }
 
   // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
   const cbEffectRef = effect(() => {
@@ -391,7 +402,8 @@ export function queryResource<TResult, TRaw = TResult>(
     update,
     statusCode: linkedSignal(resource.statusCode),
     headers: linkedSignal(resource.headers),
-    disabled: computed(() => cb.isOpen() || stableRequest() === undefined),
+    disabled: computed(() => disabledReason() !== null),
+    disabledReason,
     reload: () => {
       cb.halfOpen(); // open the circuit for manual reload
       return resource.reload();

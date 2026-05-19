@@ -50,6 +50,13 @@ export type CircuitBreaker = {
    */
   halfOpen: () => void;
   /**
+   * Fully resets the breaker state — clears the failure count, drops the half-open
+   * flag, and lifts a permanent open caused by `shouldFailForever`. Use after the
+   * underlying condition has been resolved (e.g. user re-authenticated after a
+   * 401-triggered permanent open).
+   */
+  hardReset: () => void;
+  /**
    * Destroys the circuit breaker & initiates related cleanup
    */
   destroy: () => void;
@@ -62,6 +69,10 @@ type CreateCircuitBreakerOptions = {
   /**
    * The number of failures that will cause the circuit breaker to open.
    * @default 5
+   */
+  threshold?: number;
+  /**
+   * @deprecated Misspelled — use `threshold` instead. Kept for backwards compatibility; will be removed in a future major.
    */
   treshold?: number;
   /**
@@ -76,6 +87,7 @@ type CreateCircuitBreakerOptions = {
   shouldFail?: (err?: Error) => boolean;
   /**
    * A function that determines whether an error should cause the circuit breaker to be open forever.
+   * `hardReset()` is required to lift this state.
    * @default Always returns false
    */
   shouldFailForever?: (err?: Error) => boolean;
@@ -86,7 +98,7 @@ type CreateCircuitBreakerOptions = {
  *  - `false`: Disables circuit breaker functionality (always open).
  *  - true: Creates a new circuit breaker with default options.
  *  - `CircuitBreaker`: Provides an existing `CircuitBreaker` instance to use.
- *  - `{ treshold?: number; timeout?: number; }`: Creates a new circuit breaker with the specified options.
+ *  - `{ threshold?: number; timeout?: number; }`: Creates a new circuit breaker with the specified options.
  */
 export type CircuitBreakerOptions =
   | false
@@ -94,8 +106,10 @@ export type CircuitBreakerOptions =
   | CreateCircuitBreakerOptions;
 
 /** @internal */
-const DEFAULT_OPTIONS: Required<CreateCircuitBreakerOptions> = {
-  treshold: 5,
+const DEFAULT_OPTIONS: Required<
+  Omit<CreateCircuitBreakerOptions, 'treshold'>
+> = {
+  threshold: 5,
   timeout: 30000,
   shouldFail: () => true,
   shouldFailForever: () => false,
@@ -103,16 +117,17 @@ const DEFAULT_OPTIONS: Required<CreateCircuitBreakerOptions> = {
 
 /** @internal */
 function internalCeateCircuitBreaker(
-  treshold = 5,
+  threshold = 5,
   resetTimeout = 30000,
   shouldFail: (err?: Error) => boolean = () => true,
   shouldFailForever: (err?: Error) => boolean = () => false,
 ): CircuitBreaker {
   const halfOpen = signal(false);
   const failureCount = signal(0);
+  const failedForever = signal(false);
 
   const status = computed<CircuitBreakerState>(() => {
-    if (failureCount() >= treshold) return 'OPEN';
+    if (failedForever() || failureCount() >= threshold) return 'OPEN';
     return halfOpen() ? 'HALF_OPEN' : 'CLOSED';
   });
 
@@ -127,18 +142,18 @@ function internalCeateCircuitBreaker(
   const tryOnce = () => {
     if (!untracked(isOpen)) return;
     halfOpen.set(true);
-    failureCount.set(treshold - 1);
+    failureCount.set(threshold - 1);
   };
 
-  let failForeverResetId: ReturnType<typeof setTimeout> | null = null;
+  // Auto-probe effect: schedules a half-open retry after `resetTimeout` whenever
+  // the breaker is open, *unless* we've been failed forever (in which case only
+  // hardReset() can recover).
   const effectRef = effect((cleanup) => {
-    if (!isOpen()) return;
+    if (!isOpen() || failedForever()) return;
 
     const timeout = setTimeout(tryOnce, resetTimeout);
-    failForeverResetId = timeout;
     return cleanup(() => {
       clearTimeout(timeout);
-      failForeverResetId = null;
     });
   });
 
@@ -148,17 +163,20 @@ function internalCeateCircuitBreaker(
   };
 
   const failForever = () => {
-    if (failForeverResetId) clearTimeout(failForeverResetId);
-    effectRef.destroy();
-    failureCount.set(Infinity);
+    failedForever.set(true);
     halfOpen.set(false);
-    return;
   };
 
   const fail = (err?: Error) => {
     if (shouldFailForever(err)) return failForever();
     if (shouldFail(err)) return failInternal();
     // If the error does not trigger a failure, we do nothing.
+  };
+
+  const hardReset = () => {
+    failedForever.set(false);
+    failureCount.set(0);
+    halfOpen.set(false);
   };
 
   return {
@@ -168,6 +186,7 @@ function internalCeateCircuitBreaker(
     fail,
     success,
     halfOpen: tryOnce,
+    hardReset,
     destroy: () => effectRef.destroy(),
   };
 }
@@ -187,6 +206,9 @@ function createNeverBrokenCircuitBreaker(): CircuitBreaker {
     halfOpen: () => {
       // noop
     },
+    hardReset: () => {
+      // noop
+    },
     destroy: () => {
       // noop
     },
@@ -194,9 +216,31 @@ function createNeverBrokenCircuitBreaker(): CircuitBreaker {
 }
 
 const CB_DEFAULT_OPTIONS = new InjectionToken<
-  Required<CreateCircuitBreakerOptions>
+  Required<Omit<CreateCircuitBreakerOptions, 'treshold'>>
 >('MMSTACK_CIRCUIT_BREAKER_DEFAULT_OPTIONS');
 
+/**
+ * Provides application-wide default options for {@link createCircuitBreaker}.
+ * Any `createCircuitBreaker()` call without explicit options (or with only
+ * partial options) merges these defaults in, so you can centralize threshold /
+ * timeout / failure-classifier behavior in one place.
+ *
+ * Per-call options always win over the provided defaults.
+ *
+ * @example
+ * ```ts
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideCircuitBreakerDefaultOptions({
+ *       threshold: 10,
+ *       timeout: 60_000,
+ *       shouldFailForever: (err) =>
+ *         err instanceof HttpErrorResponse && [401, 403].includes(err.status),
+ *     }),
+ *   ],
+ * });
+ * ```
+ */
 export function provideCircuitBreakerDefaultOptions(
   options: CircuitBreakerOptions,
 ): Provider {
@@ -204,25 +248,38 @@ export function provideCircuitBreakerDefaultOptions(
     provide: CB_DEFAULT_OPTIONS,
     useValue: {
       ...DEFAULT_OPTIONS,
-      ...options,
+      ...normalizeThreshold(options),
     },
   };
 }
 
 function injectCircuitBreakerOptions(
   injector = inject(Injector),
-): Required<CreateCircuitBreakerOptions> {
+): Required<Omit<CreateCircuitBreakerOptions, 'treshold'>> {
   return injector.get(CB_DEFAULT_OPTIONS, DEFAULT_OPTIONS, {
     optional: true,
   });
+}
+
+/** @internal — strips the deprecated `treshold` field and folds it into `threshold` */
+function normalizeThreshold(
+  opt: CircuitBreakerOptions | undefined,
+): Partial<Omit<CreateCircuitBreakerOptions, 'treshold'>> {
+  if (!opt || typeof opt !== 'object' || 'isClosed' in opt) return {};
+  const { treshold, threshold, ...rest } = opt;
+  return {
+    ...rest,
+    threshold: threshold ?? treshold,
+  };
 }
 
 /**
  * Creates a circuit breaker instance.
  *
  * @param options - Configuration options for the circuit breaker.  Can be:
- *   - `undefined`:  Creates a "no-op" circuit breaker that is always open (never trips).
- *   - `true`: Creates a circuit breaker with default settings (threshold: 5, timeout: 30000ms).
+ *   - `undefined`:  Uses defaults (threshold: 5, timeout: 30000ms) or provided defaults via {@link provideCircuitBreakerDefaultOptions}.
+ *   - `false`: Creates a "no-op" circuit breaker that is always closed (never trips).
+ *   - `true`: Creates a circuit breaker with default settings.
  *   - `CircuitBreaker`:  Reuses an existing `CircuitBreaker` instance.
  *   - `{ threshold?: number; timeout?: number; }`: Creates a circuit breaker with the specified threshold and timeout.
  *
@@ -248,13 +305,13 @@ export function createCircuitBreaker(
 
   if (typeof opt === 'object' && 'isClosed' in opt) return opt;
 
-  const { treshold, timeout, shouldFail, shouldFailForever } = {
+  const { threshold, timeout, shouldFail, shouldFailForever } = {
     ...injectCircuitBreakerOptions(injector),
-    ...opt,
+    ...normalizeThreshold(opt),
   };
 
   return internalCeateCircuitBreaker(
-    treshold,
+    threshold,
     timeout,
     shouldFail,
     shouldFailForever,

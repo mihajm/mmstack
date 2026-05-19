@@ -213,6 +213,13 @@ export class Cache<T> {
         if (msg.action === 'store') {
           const value = syncTabs.deserialize(msg.entry.value);
           if (value === null) return;
+
+          // Last-write-wins by `updated` timestamp. If our local entry was
+          // written more recently than the broadcast we just received, the
+          // broadcast is stale (in-flight when we wrote locally) — drop it.
+          const existing = untracked(this.internal).get(msg.entry.key);
+          if (existing && existing.updated >= msg.entry.updated) return;
+
           this.storeInternal(
             msg.entry.key,
             value,
@@ -406,6 +413,32 @@ export class Cache<T> {
    */
   invalidate(key: string) {
     this.invalidateInternal(key);
+  }
+
+  /**
+   * Invalidates every cache entry whose key starts with `prefix`. Common after a
+   * list-mutating operation (e.g. invalidate every paginated `GET /api/posts*`
+   * after a POST). Returns the number of entries removed.
+   *
+   * @example
+   * cache.invalidatePrefix('GET https://api.example.com/posts');
+   */
+  invalidatePrefix(prefix: string): number {
+    return this.invalidateWhere((key) => key.startsWith(prefix));
+  }
+
+  /**
+   * Invalidates every cache entry whose key matches the predicate. Use for
+   * arbitrary bulk invalidation that doesn't fit prefix matching (e.g.
+   * "everything containing `userId=42`"). Returns the number of entries removed.
+   *
+   * @example
+   * cache.invalidateWhere((key) => key.includes('/me/'));
+   */
+  invalidateWhere(predicate: (key: string) => boolean): number {
+    const keys = Array.from(untracked(this.internal).keys()).filter(predicate);
+    for (const key of keys) this.invalidateInternal(key);
+    return keys.length;
   }
 
   private invalidateInternal(key: string, fromSync = false) {

@@ -116,7 +116,7 @@ export function injectLocaleInternal() {
   return STORE_LOCALE;
 }
 
-function proxyToGlobalSignleton(
+function proxyToGlobalSingleton(
   src: WritableSignal<string>,
 ): WritableSignal<string> {
   const originalSet = src.set;
@@ -284,7 +284,7 @@ export class TranslationStore {
   );
 
   constructor() {
-    this.locale = proxyToGlobalSignleton(initLocale(signal('en-US')));
+    this.locale = proxyToGlobalSingleton(initLocale(signal('en-US')));
     const paramName = this.config?.localeParamName;
     if (paramName) {
       const param = pathParam(paramName);

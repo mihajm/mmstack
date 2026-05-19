@@ -1,6 +1,6 @@
 # @mmstack/router-core
 
-Core utilities and Signal-based primitives for enhancing development with `@angular/router`. This library provides helpers for common routing tasks, reactive integration with router state, and intelligent module preloading.
+Signal-based primitives for `@angular/router` — reactive router state, resolver-driven UI (titles, breadcrumbs, headless nav menus), and on-demand module preloading.
 
 Part of the `@mmstack` ecosystem, designed to complement [@mmstack/primitives](https://www.npmjs.com/package/@mmstack/primitives).
 
@@ -12,236 +12,202 @@ Part of the `@mmstack` ecosystem, designed to complement [@mmstack/primitives](h
 npm install @mmstack/router-core
 ```
 
-## Signal Utilities
+## Features
 
-This library includes helpers to interact with router state reactively using Angular Signals.
+- **Reactive router state** — read the current URL, path params, and query params as Angular Signals.
+- **Resolver-driven UI** — declare your document title, breadcrumbs, and one or more nav menus from your `Routes` config; consume them reactively from any component.
+- **Smart preloading** — a `RouterLink` replacement and `PreloadingStrategy` that preload lazy-loaded route modules on hover, visibility, or imperatively.
+
+## Table of contents
+
+- [Reactive router state](#reactive-router-state)
+  - [`url`](#url)
+  - [`queryParam`](#queryparam)
+- [Resolver-driven UI](#resolver-driven-ui)
+  - [Title — `createTitle`](#title)
+  - [Breadcrumbs — `createBreadcrumb` / `injectBreadcrumbs`](#breadcrumbs)
+  - [Nav menus — `createNavItems` / `injectNavItems`](#nav-menus)
+- [Preloading](#preloading)
+  - [`PreloadStrategy`](#preloadstrategy)
+  - [`Link` (`mmLink`)](#link-mmlink)
+  - [`injectTriggerPreload`](#injecttriggerpreload)
 
 ---
 
-### pathParam
+## Reactive router state
 
-Creates a read-only Signal that tracks a specific route path parameter (e.g., `:id` in `/users/:id`).
+Helpers that expose router state as Angular Signals — read them anywhere you'd read a signal (templates, computeds, effects).
 
-- Reading the signal returns the parameter's current value (string) or null if absent.
-- Reacts to navigation changes affecting the parameter.
-- Traverses parent routes to find the parameter.
-- Supports static or dynamic (function/signal) keys.
+### `url`
 
-```typescript
-import { Component, effect } from '@angular/core';
-import { pathParam } from '@mmstack/router-core';
+A read-only Signal tracking the current router URL.
 
-@Component({
-  selector: 'app-user-profile',
-  template: `
-    <h1>User Profile</h1>
-    <p>User ID: {{ userId() ?? 'Unknown' }}</p>
-  `,
-})
-export class UserProfileComponent {
-  // Track the ':userId' path parameter from the route
-  protected readonly userId = pathParam('id');
-
-  constructor() {
-    effect(() => {
-      const id = this.userId();
-      console.log('User ID changed:', id);
-      // Load user data, update UI, etc. based on id
-    });
-  }
-}
-```
-
-### queryParam
-
-Creates a WritableSignal that synchronizes with a specific URL query parameter, enabling two-way binding between the signal's state and the URL.
-
-- Reading the signal returns the parameter's current value (string) or null if absent.
-- Setting the signal to a string updates the URL parameter.
-- Setting the signal to null removes the parameter from the URL.
-- Reacts to external navigation changes affecting the parameter.
-- Supports static or dynamic (function/signal) keys.
+- Updates after every successful navigation.
+- Reflects the URL after redirects (`urlAfterRedirects`).
+- Initializes synchronously with the router's current URL.
 
 ```typescript
-@Component({
-  selector: 'app-search-page',
-  imports: [FormsModule],
-  template: `
-    <label>
-      Search:
-      <input [(ngModel)]="searchTerm" placeholder="Enter search term..." />
-    </label>
-    <button (click)="searchTerm.set(null)" [disabled]="!searchTerm()">Clear</button>
-    <p>Current search: {{ searchTerm() ?? 'None' }}</p>
-  `,
-})
-export class SearchPageComponent {
-  // Two-way bind the 'q' query parameter (?q=...)
-  protected readonly searchTerm = queryParam('q');
-
-  constructor() {
-    effect(() => {
-      const currentTerm = this.searchTerm();
-      console.log('Search term changed:', currentTerm);
-      // Trigger API call, update results, etc. based on currentTerm
-    });
-  }
-}
-```
-
-### url
-
-Creates a read-only Signal that tracks the current router URL string.
-
-- Updates after each successful navigation.
-- Reflects the URL after any redirects (urlAfterRedirects).
-- Initializes with the router's current URL synchronously.
-
-```typescript
-import { Component, effect } from '@angular/core';
+import { Component } from '@angular/core';
 import { url } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-header',
-  template: `<nav>Current Path: {{ currentUrl() }}</nav>`,
+  template: `<nav>Current path: {{ currentUrl() }}</nav>`,
 })
 export class HeaderComponent {
   protected readonly currentUrl = url();
 }
 ```
 
-## Preloading Utilities
+### `queryParam`
+
+A `WritableSignal` that two-way binds with a URL query parameter.
+
+- Reading returns the current value (or `null` if absent).
+- Setting to a string updates the URL.
+- Setting to `null` removes the parameter.
+- Reacts to external navigation changes.
+- Uses `queryParamsHandling: 'merge'`, so unrelated params survive updates.
+
+```typescript
+import { Component } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { queryParam } from '@mmstack/router-core';
+
+@Component({
+  selector: 'app-search-page',
+  imports: [FormsModule],
+  template: `
+    <input [(ngModel)]="searchTerm" placeholder="Enter search term..." />
+    <button (click)="searchTerm.set(null)" [disabled]="!searchTerm()">
+      Clear
+    </button>
+    <p>Current search: {{ searchTerm() ?? 'None' }}</p>
+  `,
+})
+export class SearchPageComponent {
+  protected readonly searchTerm = queryParam('q');
+}
+```
 
 ---
 
-Enhance your application's performance by preloading Angular modules. This library provides a flexible directive and a smart preloading strategy to load modules just before they are needed.
+## Resolver-driven UI
 
-### PreloadStrategy
+Three helpers (`createTitle`, `createBreadcrumb`, `createNavItems`) hook into Angular's route `resolve` map (or `title` map for titles) to populate the document title, a breadcrumb trail, and one or more nav menus from your `Routes` config. They share the same pattern: declare on the route, consume reactively from a component.
 
-This is a custom Angular PreloadingStrategy that works in tandem with the mmstack `Link` (via an internal `PreloadService`) to intelligently preload lazy-loaded modules.
+### Title
 
-**Features**:
-
-- Listens for preload requests triggered by the `Link` directive.
-- Uses advanced path matching to identify the correct route to preload, even with route parameters and matrix parameters.
-- Avoids preloading if the connection is slow (e.g., '2g' effective type) or if the user has data-saving enabled in their browser.
-- Respects a `data: { preload: false }` flag in route configurations to explicitly disable preloading for specific routes.
-- Prevents redundant preloading attempts for the same route path.
-
-To enable this preloading strategy, you need to provide it in your application's main routing configuration.
+`createTitle` is a route resolver that sets the document title. Use it directly in the route's `title` property — it accepts static strings or signal-driven dynamic titles.
 
 ```typescript
-import { PreloadStrategy } from '@mmstack/router-core';
-import { ApplicationConfig } from '@angular/core';
-import { provideRouter, withPreloading } from '@angular/router';
-import { routes } from './app.routes';
+import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { createTitle } from '@mmstack/router-core';
+import { ProductStore } from './product.store';
+
+export const appRoutes: Routes = [
+  {
+    path: 'about',
+    title: createTitle('About Us'),
+    loadComponent: () =>
+      import('./about.component').then((m) => m.AboutComponent),
+  },
+  {
+    path: 'products/:id',
+    // Signal-driven title — the inner function becomes a computed under the hood.
+    title: createTitle(() => {
+      const products = inject(ProductStore);
+      return () => `Product: ${products.product().name ?? 'Loading...'}`;
+    }),
+    loadComponent: () =>
+      import('./product-detail.component').then((m) => m.ProductComponent),
+  },
+];
+```
+
+#### Configuration (optional)
+
+`provideTitleConfig` customizes title formatting and fallbacks:
+
+- **`prefix`** — `string | (title: string) => string`. Static prefix, or a full formatter for complete control over the result.
+- **`keepLastKnownTitle`** (default `true`) — when navigating to a route that doesn't provide a title, hold the last route-driven title instead of clearing it.
+- **`initialTitle`** — explicit fallback when no route title is active. If omitted, `TitleStore` captures `Title.getTitle()` once at construction (typically the `<title>` from `index.html`). Set this explicitly if you set the document title imperatively before the router has bootstrapped.
+
+```typescript
+import { provideRouter } from '@angular/router';
+import { provideTitleConfig } from '@mmstack/router-core';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    //...other providers
-    provideRouter(routes, withPreloading(PreloadStrategy)),
+    provideRouter(appRoutes),
+    provideTitleConfig({
+      prefix: (title) => (title ? `${title} — MyApp` : 'MyApp'),
+      initialTitle: 'MyApp',
+    }),
   ],
 };
 ```
 
-### Link (mmLink)
+### Breadcrumbs
 
-The `Link` directive (used with the `mmLink` attribute) is an enhancement for Angular's standard `RouterLink` directive. It adds the capability to preload the JavaScript modules associated with the linked route, based on user interaction or visibility. Other than the added `preloadOn` input & `preloading` output it directly proxies `RouterLink`.
-
-- `preloadOn`: `input<'hover' | 'visible' | null>()` [default: 'hover'] specifies when to preload, `null` disables preloading
-- `preloading` - `output<void>()` fires when route is registered for preloading (before load)
-
-To use it simply replace any exiting routerLinks that you would like to enable preloading on with the mmLink, you can keep all existing inputs the same. And add the mmstack `PreloadStrategy` in your configuration
-
-```typescript
-import { Link } from '@mmstack/router-core';
-import { RouterLink } from '@angular/router';
-
-@Component({
-  selector: 'app-navigation',
-  imports: [Link, RouterLink],
-  template: `
-    <nav>
-      <!-- preload on hover -->
-      <a [mmLink]="['/features']" preloadOn="hover">Features</a>
-      <!-- preload on visible -->
-      <a [mmLink]="['/pricing']" preloadOn="visible">Pricing</a>
-      <!-- no preload -->
-      <a [mmLink]="['/contact']" [preloadOn]="null">Contact</a>
-      <!-- preload on hover -->
-      <a [mmLink]="['/about']">About</a>
-      <!-- no preload, or just use [preloadOn]="null" -->
-      <a [routerLink]="['/terms']">Terms & Conditions</a>
-    </nav>
-  `,
-})
-export class NavigationComponent {}
-```
-
-## Headless breadcrumb utilities
-
-This library includes a signal-based, headless toolkit for generating and managing breadcrumbs in your Angular application. It provides the logic to derive breadcrumb data from your routes, allowing you to easily build a completely custom breadcrumb UI component & let the library worry about active routes :)
-
-### Consuming breadcrumbs
-
-The primary way to access the breadcrumb data is via the `injectBreadcrumbs` function. It returns a `Signal<Breadcrumb[]>` that updates automatically as navigation changes. Each `Breadcrumb` object in the array contains reactive signals for its `label`, `link`, `ariaLabel`, and a static id for iteration purposes.
+A signal-based, headless breadcrumb toolkit. Breadcrumbs are auto-generated from route segments by default, with per-route overrides via `createBreadcrumb`. Consume the reactive list with `injectBreadcrumbs`.
 
 ```typescript
 import { Component } from '@angular/core';
-import { injectBreadcrumbs } from '@mmstack/router-core'; // Adjust path if needed
+import { RouterLink } from '@angular/router';
+import { injectBreadcrumbs } from '@mmstack/router-core';
 
 @Component({
   selector: 'app-breadcrumbs',
+  imports: [RouterLink],
   template: `
     <nav aria-label="breadcrumb">
       <ol>
         @for (crumb of breadcrumbs(); track crumb.id) {
           <li>
-            <a [href]="crumb.link()" [attr.aria-label]="crumb.ariaLabel()">{{ crumb.label() }}</a>
+            <a
+              [routerLink]="crumb.link()"
+              [attr.aria-label]="crumb.ariaLabel()"
+            >
+              {{ crumb.label() }}
+            </a>
           </li>
         }
       </ol>
     </nav>
   `,
 })
-export class CustomBreadcrumbsComponent {
+export class BreadcrumbsComponent {
   protected readonly breadcrumbs = injectBreadcrumbs();
 }
 ```
 
-### Registering custom breadcrumbs
+> **Heads up:** `crumb.link()` is a serialized URL string. Bind it to `[routerLink]` (or `[mmLink]` if you want preloading) — `[href]` would trigger a full page reload.
 
-For routes where automatic breadcrumb generation isn't sufficient or when you need more control, you can manually define breadcrumbs using the `createBreadcrumb` route resolver.
+#### Overriding a breadcrumb
 
-This function allows you to specify the label (static or dynamic via a function) and other properties for a breadcrumb associated with a particular route.
-You can use injection in the factory function, as you would with any resolver, making translations or subscribing to dynamic data a breaze! :)
+When auto-generation isn't enough, register a custom breadcrumb in the route's `resolve` map. The factory runs in an injection context, so you can pull labels from stores, i18n services, etc.
 
 ```typescript
 import { Routes } from '@angular/router';
-import { createBreadcrumb } from '@mmstack/router-core';
-import { HomeComponent } from './home.component';
-import { UserProfileComponent } from './user-profile.component';
-import { UserStore } from './user.store';
 import { inject } from '@angular/core';
-import { AdminComponent } from './admin.component';
+import { createBreadcrumb } from '@mmstack/router-core';
+import { UserStore } from './user.store';
 
 export const appRoutes: Routes = [
   {
     path: 'home',
     component: HomeComponent,
     resolve: {
-      // Simple static breadcrumb
-      breadcrumb: createBreadcrumb(() => ({
-        label: 'Home',
-      })),
+      // Shorthand for { label: 'Home' } — also accepts an options object or a factory returning either.
+      breadcrumb: createBreadcrumb('Home'),
     },
   },
   {
     path: 'admin',
     component: AdminComponent,
-    data: {
-      skipBreadcrumb: true, // opt out of auto-generation for this specific route
-    },
+    data: { skipBreadcrumb: true }, // opt out of auto-generation for this route
   },
   {
     path: 'users/:userId',
@@ -250,8 +216,9 @@ export const appRoutes: Routes = [
       breadcrumb: createBreadcrumb(() => {
         const userStore = inject(UserStore);
         return {
-          label: () => `Profile: ${userStore.currentUser().name}` ?? 'Loading...',
-          ariaLabel: () => `View profile for ${userStore.currentUser().name ?? 'user'}`,
+          label: () => userStore.currentUser().name ?? 'Loading...',
+          ariaLabel: () =>
+            `View profile for ${userStore.currentUser().name ?? 'user'}`,
         };
       }),
     },
@@ -259,94 +226,278 @@ export const appRoutes: Routes = [
 ];
 ```
 
-### Configuration [optional]
+#### Configuration (optional)
 
-The breadcrumb system can be configured globally using `provideBreadcrumbConfig`. This allows you to, for example, set the system to 'manual' mode (disabling all automatic generation) or provide a custom function for generating breadcrumb labels.
+`provideBreadcrumbConfig` controls auto-generation behavior:
+
+- **`generation: 'manual'`** — disable auto-generation entirely; only routes with `createBreadcrumb` produce breadcrumbs.
+- **`generation: () => (leaf: ResolvedLeafRoute) => string`** — supply a custom label generator. The outer function runs in a root injection context, so you can inject stores or i18n services there.
 
 ```typescript
-import { provideRouter } from '@angular/router';
-import { provideBreadcrumbConfig, BreadcrumbConfig, ResolvedLeafRoute } from '@mmstack/router-core'; // Adjust path
-import { appRoutes } from './app.routes';
-import { ApplicationConfig } from '@angular/core';
+import {
+  provideBreadcrumbConfig,
+  type BreadcrumbConfig,
+  type ResolvedLeafRoute,
+} from '@mmstack/router-core';
 
-// Example: Custom label generation strategy
-const customLabelStrategy = () => {
-  // you can inject root injectable services/stores here.
-  return (leaf: ResolvedLeafRoute): string => {
-    return leaf.route.data?.['navTitle'] || leaf.route.title || 'Default Title';
-  };
+const customStrategy: BreadcrumbConfig['generation'] = () => {
+  return (leaf: ResolvedLeafRoute): string =>
+    leaf.route.data?.['navTitle'] ?? leaf.route.title ?? 'Default';
 };
+
 export const appConfig: ApplicationConfig = {
-  providers: [
-    // ...rest
-    provideBreadcrumbConfig({
-      // generation: 'manual' // When set to 'manual' the system only uses explicitly defined breadcrumbs
-      generation: customLabelStrategy, // Or provide a custom generation function
-    }),
-  ],
+  providers: [provideBreadcrumbConfig({ generation: customStrategy })],
 };
 ```
 
-## Title utilities
+### Nav menus
 
-This library provides a helper function, `createTitle`, to set the document title dynamically from within your route configuration. It integrates seamlessly with Angular's built-in `title` property on routes, allowing for both static and signal-based reactive titles.
+A headless, scope-aware navigation menu primitive. Routes declare nav items via `createNavItems`; components consume them via `injectNavItems()` as `Signal<NavItem[]>`. When multiple routes in the active chain register items for the same scope, the deepest active registration wins — navigating away restores the shallower one.
 
-By default, the system will use a title defined on a route's `data` or `title` property. createTitle enhances this by allowing titles to be derived from reactive state.
+```typescript
+import { Component } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { injectNavItems } from '@mmstack/router-core';
 
-### Using `createTitle`
+@Component({
+  selector: 'app-top-bar',
+  imports: [RouterLink],
+  template: `
+    <nav>
+      @for (item of items(); track item.id()) {
+        <a
+          [routerLink]="item.link()"
+          [class.active]="item.active()"
+          [attr.aria-disabled]="item.disabled()"
+        >
+          {{ item.label() }}
+        </a>
+      }
+    </nav>
+  `,
+})
+export class TopBar {
+  protected readonly items = injectNavItems();
+}
+```
 
-The `createTitle` function is a route resolver that returns a title string. You use it directly in the `title` property of a route definition. It can accept a function that returns a static string or a function that returns a dynamic string (which will be converted to a `signal`).
+> **Heads up:** `item.link()` is a serialized URL string. Bind it to `[routerLink]` (or `[mmLink]` for preloading) — `[href]` would cause a full page reload.
+
+#### Registering items
+
+Items are declared in a route's `resolve` map. Links resolve **relative to the route the resolver is attached to**, matching Angular's `routerLink` convention — a leading slash makes a link absolute.
 
 ```typescript
 import { Routes } from '@angular/router';
-import { createTitle } from '@mmstack/router-core';
-import { inject } from '@angular/core';
-import { ProductStore } from './product.store';
+import { createNavItems } from '@mmstack/router-core';
 
 export const appRoutes: Routes = [
   {
-    path: 'about',
-    // Example 1: Static title
+    path: '',
     resolve: {
-      title: createTitle(() => 'About Us'), // static
+      // Root menu — visible on every page unless a deeper route overrides.
+      // Absolute paths work fine for top-level app menus:
+      nav: createNavItems([
+        { label: 'Home', link: '/' },
+        { label: 'Products', link: '/products' },
+        { label: 'About', link: '/about' },
+      ]),
     },
-    loadComponent: () => import('./about.component').then((m) => m.AboutComponent),
-  },
-  {
-    path: 'products/:id',
-    // Example 2: Dynamic, signal-based title from a store
-    resolve: {
-      title: createTitle(() => {
-        const productStore = inject(ProductStore);
-        // The inner function creates a computed signal under the hood
-        return () => `Product: ${productStore.product().name ?? 'Loading...'}`;
-      }),
-    },
-    loadComponent: () => import('./product-detail.component').then((m) => m.ProductComponent),
+    children: [
+      {
+        path: 'products',
+        loadComponent: () =>
+          import('./products.component').then((m) => m.ProductsComponent),
+        resolve: {
+          // Inside /products, the menu changes — root menu is shadowed until we navigate away.
+          // Relative links work too — these resolve against /products:
+          nav: createNavItems([
+            { label: 'All', link: '/products' },
+            { label: 'Featured', link: 'featured' }, // → /products/featured
+            { label: 'Categories', link: 'categories' }, // → /products/categories
+          ]),
+        },
+      },
+    ],
   },
 ];
 ```
 
-### Configuration [optional]
+`NavItem.active` is computed against the current URL with `subsetMatchOptions` defaults (prefix-match paths, subset query params, ignore matrix/fragment). Override per-item with `activeMatch: Partial<IsActiveMatchOptions>` or globally with `provideNavConfig({ activeMatch })`.
 
-You can provide a global configuration to prepend or append text to all titles using provideTitleConfig.
+#### Link resolution rules
+
+| Input                | Resolved to (when the resolver route is mounted at `/myLib`) |
+| -------------------- | ------------------------------------------------------------ |
+| `'a'` or `'a/b'`     | `/myLib/a`, `/myLib/a/b`                                     |
+| `['a', 'b']`         | `/myLib/a/b`                                                 |
+| `'/elsewhere'`       | `/elsewhere` (absolute escape)                               |
+| `['/fooBar', 'baz']` | `/fooBar/baz` (absolute escape)                              |
+| `UrlTree`            | passed through unchanged                                     |
+
+Relative-by-default makes nav items portable across mount points — particularly useful for **nx feature libraries** that export `Routes` without knowing where the consuming app will mount them:
 
 ```typescript
-import { provideRouter } from '@angular/router';
-import { provideTitleConfig } from '@mmstack/router-core';
-import { appRoutes } from './app.routes';
-import { ApplicationConfig } from '@angular/core';
+// libs/my-feature/src/lib/routes.ts
+export const myFeatureRoutes: Routes = [
+  {
+    path: '',
+    component: MyFeatureShellComponent,
+    resolve: {
+      nav: createNavItems([
+        { label: 'Overview', link: 'overview' }, // → ${mount}/overview
+        { label: 'Settings', link: 'settings' }, // → ${mount}/settings
+      ]),
+    },
+    children: [
+      { path: 'overview', component: OverviewComponent },
+      { path: 'settings', component: SettingsComponent },
+    ],
+  },
+];
+
+// apps/host/src/app/app.routes.ts — the consumer picks the mount path.
+export const appRoutes: Routes = [
+  {
+    path: 'my-feature',
+    loadChildren: () =>
+      import('@org/my-feature').then((m) => m.myFeatureRoutes),
+  },
+  // Same lib, same nav items, different mount — links resolve correctly:
+  {
+    path: 'admin/tools',
+    loadChildren: () =>
+      import('@org/my-feature').then((m) => m.myFeatureRoutes),
+  },
+];
+```
+
+#### Named scopes
+
+Pass `{ name }` when a route declares more than one menu (e.g. top bar + side bar). The `resolve` key is just a unique handle Angular requires; the store keys on `name`.
+
+```typescript
+resolve: {
+  mainNav: createNavItems([...primary], { name: 'main' }),
+  sideNav: createNavItems([...secondary], { name: 'side' }),
+}
+
+// consumers
+@Component({ ... }) class TopBar  { items = injectNavItems('main'); }
+@Component({ ... }) class SideBar { items = injectNavItems('side'); }
+```
+
+#### Children, hidden, disabled
+
+Items can declare `children` for nested menus. By default a parent is active when its own link matches OR any descendant is active — useful for grouping headers with no own link. Setting `activeMatch` explicitly disables the OR; pass `matchesWhenChildActive: true` to re-enable it.
+
+`hidden` filters the item (and its subtree) out of the consumer-facing array. `disabled` is preserved on the item and cascades to descendants — useful for permission-gated subtrees:
+
+```typescript
+createNavItems(() => [
+  {
+    label: 'Admin',
+    link: 'admin',
+    hidden: () => !permissions.isAdmin(), // signal-driven
+    children: [
+      { label: 'Users', link: 'admin/users' },
+      { label: 'Settings', link: 'admin/settings' },
+    ],
+  },
+]);
+```
+
+#### Typed metadata
+
+`CreateNavItem` and `NavItem` carry a `TMeta` generic so consumers can attach app-specific fields (icons, badges, etc.) without the library imposing a shape:
+
+```typescript
+type NavMeta = { icon: string };
+
+createNavItems<NavMeta>([{ label: 'Home', link: '/', meta: { icon: 'home' } }]);
+
+// in the component
+items = injectNavItems<NavMeta>();
+// items()[0].meta().icon → 'home'
+```
+
+---
+
+## Preloading
+
+Two complementary primitives speed up lazy-loaded routes: a `PreloadingStrategy` that listens for preload requests, and a `RouterLink` replacement that issues them on hover or visibility. An imperative escape hatch (`injectTriggerPreload`) covers the cases where the directive isn't a fit.
+
+### `PreloadStrategy`
+
+A custom `PreloadingStrategy` that defers preloading until something asks for a specific route. It pairs with the `Link` (`mmLink`) directive or `injectTriggerPreload` — neither preloads anything on its own.
+
+- Listens for preload requests triggered by `Link` / `injectTriggerPreload`.
+- Path-matches the requested URL against the route config (supports route params, matrix params, and wildcards).
+- Skips preloading on slow connections (`effectiveType: '2g'`) or when the browser reports `saveData`.
+- Respects `data: { preload: false }` on a route config to opt that route out.
+- Deduplicates: each path is preloaded at most once.
+
+Provide it alongside `provideRouter`:
+
+```typescript
+import { PreloadStrategy } from '@mmstack/router-core';
+import { provideRouter, withPreloading } from '@angular/router';
 
 export const appConfig: ApplicationConfig = {
-  providers: [
-    provideRouter(appRoutes),
-    provideTitleConfig({
-      // Prefix can be a static string...
-      // prefix: 'My Awesome App | '
-
-      // ...or a function for more control over the format
-      prefix: (title) => (title ? `${title} - MyApp` : 'MyApp'),
-    }),
-  ],
+  providers: [provideRouter(routes, withPreloading(PreloadStrategy))],
 };
+```
+
+### `Link` (`mmLink`)
+
+The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds preloading. All standard `routerLink` inputs (`queryParams`, `fragment`, `state`, `relativeTo`, etc.) are proxied through unchanged.
+
+- **`preloadOn`** — `input<'hover' | 'visible' | null>()` (default: `'hover'`). `null` disables preloading.
+- **`preloading`** — `output<void>()` fires when the route is queued for preload (before the JS actually loads).
+
+Replace existing `routerLink`s with `mmLink` to opt them in:
+
+```typescript
+import { Component } from '@angular/core';
+import { Link } from '@mmstack/router-core';
+
+@Component({
+  selector: 'app-navigation',
+  imports: [Link],
+  template: `
+    <nav>
+      <!-- preload on hover (default) -->
+      <a [mmLink]="['/features']">Features</a>
+      <!-- preload when scrolled into view -->
+      <a [mmLink]="['/pricing']" preloadOn="visible">Pricing</a>
+      <!-- no preload -->
+      <a [mmLink]="['/contact']" [preloadOn]="null">Contact</a>
+    </nav>
+  `,
+})
+export class NavigationComponent {}
+```
+
+### `injectTriggerPreload`
+
+When the directive isn't a fit — preloading from a signal effect, on a keyboard shortcut, when a command palette opens — `injectTriggerPreload()` returns a function that runs the same preload pipeline imperatively. Same `PreloadStrategy` requirement.
+
+```typescript
+import { Component, effect, signal } from '@angular/core';
+import { injectTriggerPreload } from '@mmstack/router-core';
+
+@Component({
+  /* ... */
+})
+export class CommandPaletteComponent {
+  private readonly triggerPreload = injectTriggerPreload();
+  protected readonly highlighted = signal<string | null>(null);
+
+  constructor() {
+    effect(() => {
+      const target = this.highlighted();
+      if (target) this.triggerPreload(target);
+    });
+  }
+}
 ```

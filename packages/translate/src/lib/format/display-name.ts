@@ -21,7 +21,7 @@ export type FormatDisplayNameOptions = {
 };
 
 /**
- * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ * @deprecated UNSAFE FOR SSR/EDGE. Omitting the locale property forces a fallback to a process-level global singleton.
  */
 export type UnsafeFormatDisplayNameOptions = Omit<
   FormatDisplayNameOptions,
@@ -159,9 +159,9 @@ export function injectFormatDisplayName() {
     const unwrapped = unwrap(localeOrOpt);
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults, ...unwrapped }
+        ? { ...defaults(), ...unwrapped }
         : {
-            ...defaults,
+            ...defaults(),
             locale: unwrapped,
           };
 

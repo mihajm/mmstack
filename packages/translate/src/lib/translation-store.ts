@@ -104,8 +104,33 @@ export function injectSupportedLocales() {
  */
 const STORE_LOCALE = signal('en-US');
 
+/**
+ * @internal
+ * @deprecated will be removed when ng23 drops
+ */
+export function readLocaleUnsafe() {
+  return STORE_LOCALE();
+}
+
 export function injectLocaleInternal() {
   return STORE_LOCALE;
+}
+
+function proxyToGlobalSignleton(
+  src: WritableSignal<string>,
+): WritableSignal<string> {
+  const originalSet = src.set;
+
+  src.set = (next) => {
+    originalSet(next);
+    STORE_LOCALE.set(next);
+  };
+
+  src.update = (updater) => {
+    src.set(updater(untracked(src)));
+  };
+
+  return src;
 }
 
 function isDynamicConfig(
@@ -259,7 +284,7 @@ export class TranslationStore {
   );
 
   constructor() {
-    this.locale = initLocale(STORE_LOCALE);
+    this.locale = proxyToGlobalSignleton(initLocale(signal('en-US')));
     const paramName = this.config?.localeParamName;
     if (paramName) {
       const param = pathParam(paramName);

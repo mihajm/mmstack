@@ -49,6 +49,17 @@ export function provideTitleConfig(config?: TitleConfig): Provider {
   };
 }
 
+function identity(str: string) {
+  return str;
+}
+
 export function injectTitleConfig(): InternalTitleConfig {
-  return inject(token);
+  return (
+    inject(token, {
+      optional: true,
+    }) ?? {
+      parser: identity,
+      keepLastKnown: true,
+    }
+  );
 }

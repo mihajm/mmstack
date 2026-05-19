@@ -1,11 +1,11 @@
 import {
   computed,
+  inject,
   InjectionToken,
   isSignal,
   type Provider,
   type Signal,
 } from '@angular/core';
-import { inject } from '@angular/core/primitives/di';
 import { injectDynamicLocale } from '../translation-store';
 
 function equalLocale(a: { locale: string }, b: { locale: string }): boolean {

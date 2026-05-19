@@ -1,8 +1,9 @@
 import { type Signal } from '@angular/core';
-import { injectLocaleInternal } from '../translation-store';
+import { readLocaleUnsafe } from '../translation-store';
+import { createFormatterProvider } from './provide-defaults';
 import { unwrap } from './unwrap';
 
-const FORMAT_PRESETS: Record<string, Intl.DateTimeFormatOptions> = {
+const FORMAT_PRESETS = {
   short: { dateStyle: 'short', timeStyle: 'short' },
   medium: { dateStyle: 'medium', timeStyle: 'medium' },
   long: { dateStyle: 'long', timeStyle: 'long' },
@@ -17,7 +18,7 @@ const FORMAT_PRESETS: Record<string, Intl.DateTimeFormatOptions> = {
   mediumTime: { timeStyle: 'medium' },
   longTime: { timeStyle: 'long' },
   fullTime: { timeStyle: 'full' },
-};
+} satisfies Record<string, Intl.DateTimeFormatOptions>;
 
 type DateFormat = keyof typeof FORMAT_PRESETS;
 
@@ -38,10 +39,18 @@ export type FormatDateOptions = {
    * Format to use for formatting
    * @default 'medium'
    */
-  format?: DateFormat;
+  format?: DateFormat | Intl.DateTimeFormatOptions;
   /**
-   * Locale to use for formatting, opts out to dynamic locale changes
+   * Locale to use for formatting
    */
+  locale: string;
+};
+
+/**
+ * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ */
+export type UnsafeFormatDateOptions = Omit<FormatDateOptions, 'locale'> & {
+  /** Optional locale string falling back to the legacy global signal */
   locale?: string;
 };
 
@@ -58,15 +67,15 @@ const cache = new Map<string, Intl.DateTimeFormat>();
 
 function getFormatter(
   locale: string,
-  format: DateFormat,
+  format: DateFormat | Intl.DateTimeFormatOptions,
   timeZone?: string,
 ): Intl.DateTimeFormat {
-  const cacheKey = `${locale}|${format}|${timeZone ?? ''}`;
+  const cacheKey = `${locale}|${typeof format === 'string' ? format : JSON.stringify(format)}|${timeZone ?? ''}`;
   let formatter = cache.get(cacheKey);
 
   if (!formatter) {
     formatter = new Intl.DateTimeFormat(locale, {
-      ...FORMAT_PRESETS[format],
+      ...(typeof format === 'string' ? FORMAT_PRESETS[format] : format),
       timeZone,
     });
     cache.set(cacheKey, formatter);
@@ -76,26 +85,113 @@ function getFormatter(
 }
 
 /**
- * Format a date using the current or provided locale & timezone
- * By default it is reactive to the global dynamic locale, works best when wrapped in a computed() if you need to react to locale changes
- *
- * @param date - Date to format
- * @param opt - Options for formatting
- * @returns Formatted date string
+ * @example formatDate(this.date, this.locale)
  */
 export function formatDate(
   date: SupportedDateInput | Signal<SupportedDateInput>,
-  opt?: FormatDateOptions | Signal<FormatDateOptions>,
+  locale: string | Signal<string>,
+): string;
+
+/**
+ * @example formatDate(this.date, { locale: 'sl-SI', format: 'shortDate' })
+ */
+export function formatDate(
+  date: SupportedDateInput | Signal<SupportedDateInput>,
+  opt: FormatDateOptions | Signal<FormatDateOptions>,
+): string;
+
+/**
+ * @deprecated UNSAFE FOR SSR/EDGE. This signature reads from a process-level global singleton, will be fully removed when Angular 23 drops
+ * Use `injectFormatDate()` instead, or pass locale explicitly.
+ * @example formatDate(this.date)
+ */
+export function formatDate(
+  date: SupportedDateInput | Signal<SupportedDateInput>,
+  opt?: UnsafeFormatDateOptions | Signal<UnsafeFormatDateOptions>,
+): string;
+
+export function formatDate(
+  date: SupportedDateInput | Signal<SupportedDateInput>,
+  optOrLocale?:
+    | FormatDateOptions
+    | Signal<FormatDateOptions>
+    | string
+    | Signal<string>
+    | UnsafeFormatDateOptions
+    | Signal<UnsafeFormatDateOptions>,
 ): string {
   const validDate = validDateOrNull(unwrap(date));
   if (validDate === null) return '';
 
-  const unwrappedOpt = unwrap(opt);
-  const loc = unwrappedOpt?.locale ?? injectLocaleInternal()();
+  const unwrappedArgs = unwrap(optOrLocale);
+  let locale: string;
+  let format: DateFormat | Intl.DateTimeFormatOptions = 'medium';
+  let tz: string | undefined;
 
-  return getFormatter(
-    loc,
-    unwrappedOpt?.format ?? 'medium',
-    unwrappedOpt?.tz,
-  ).format(validDate);
+  if (typeof unwrappedArgs === 'string') {
+    locale = unwrappedArgs;
+  } else if (unwrappedArgs && typeof unwrappedArgs === 'object') {
+    locale = unwrappedArgs.locale ?? readLocaleUnsafe();
+    format = unwrappedArgs.format ?? 'medium';
+    tz = unwrappedArgs.tz;
+  } else {
+    locale = readLocaleUnsafe();
+  }
+
+  return getFormatter(locale, format, tz).format(validDate);
+}
+
+const [provideFormatDateDefaults, injectFormatDateOptions] =
+  createFormatterProvider<FormatDateOptions>(
+    'date',
+    {
+      format: 'medium',
+    },
+    (a, b) => {
+      if (a.tz !== b.tz) return false;
+
+      if (a.format === b.format) return true;
+
+      return JSON.stringify(a.format) === JSON.stringify(b.format);
+    },
+  );
+
+/**
+ * Provide application-wide defaults for date formatting presets and timezones.
+ * @example provideFormatDateDefaults({ format: 'shortDate'})
+ */
+export { provideFormatDateDefaults };
+
+/**
+ * Inject a context-safe date formatting function tied to the current injector.
+ * Uses the libraries locale signal & provided default configuration to react to locale/config changes
+ * @example
+ * const formatDate = injectFormatDate();
+ * readonly displayDate = computed(() => formatDate(this.date()));
+ */
+export function injectFormatDate() {
+  const defaults = injectFormatDateOptions();
+
+  return (
+    date: SupportedDateInput | Signal<SupportedDateInput>,
+    optOrLocale?:
+      | Partial<FormatDateOptions>
+      | Signal<Partial<FormatDateOptions>>
+      | string
+      | Signal<string>,
+  ) => {
+    if (!optOrLocale) return formatDate(date, defaults());
+
+    const unwrapped = unwrap(optOrLocale);
+
+    const opt =
+      typeof unwrapped === 'object'
+        ? { ...defaults(), ...unwrapped }
+        : {
+            ...defaults(),
+            locale: unwrapped,
+          };
+
+    return formatDate(date, opt);
+  };
 }

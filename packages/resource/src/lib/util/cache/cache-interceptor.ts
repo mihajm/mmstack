@@ -228,7 +228,9 @@ export function createCacheInterceptor(
 
     return next(req).pipe(
       tap((event) => {
-        if (event instanceof HttpResponse && event.ok) {
+        if (!(event instanceof HttpResponse)) return;
+
+        if (event.ok) {
           const cacheControl = parseCacheControlHeader(event);
 
           if (cacheControl.noStore && !opt.ignoreCacheControl) return;
@@ -250,6 +252,19 @@ export function createCacheInterceptor(
             : event;
 
           cache.store(key, parsedResponse, staleTime, ttl, opt.persist);
+          return;
+        }
+
+        // 304 → server confirmed our cached entry is still valid. Re-stamp the
+        // existing entry so subsequent reads within the new freshness window
+        // don't trigger another revalidation round-trip.
+        if (event.status === 304 && entry) {
+          const cacheControl = parseCacheControlHeader(event);
+          const { staleTime, ttl } = opt.ignoreCacheControl
+            ? opt
+            : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
+
+          cache.store(key, entry.value, staleTime, ttl, opt.persist);
         }
       }),
       map((event) => {

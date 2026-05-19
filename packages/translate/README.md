@@ -592,15 +592,7 @@ const valueThatNeedsProps = t('remote.myOtherKey', {
 
 ## Formatters
 
-The library includes a set of reactive formatters that automatically adapt to the current locale. They are standalone functions that do not require dependency injection, making them easy to use anywhere.
-
-**Note:** For reactivity, wrap them in a `computed()` if the input signals change or if you want them to react to dynamic locale changes.
-
-**SSR note:** Formatters read the active locale from a process-level signal. This is safe for all client-side usage and for SSR on serverless platforms (Lambda, Vercel, Netlify Edge) or worker-thread pools, where each request runs in an isolated V8 context. If you run a traditional single-process Node.js SSR server and concurrently render pages for **different** locales, pass the locale explicitly via the `locale` option on each formatter to avoid a potential cross-request read:
-
-```typescript
-readonly displayDate = computed(() => formatDate(this.date, { locale: this.currentLocale() }));
-```
+The library includes a set of reactive formatters that wrap the standard `Intl.*` APIs and integrate with the dynamic locale signal.
 
 Available formatters:
 
@@ -612,23 +604,81 @@ Available formatters:
 - **`formatRelativeTime`**: Wraps `Intl.RelativeTimeFormat`
 - **`formatDisplayName`**: Wraps `Intl.DisplayNames`
 
-**Example:**
+Each formatter ships in two flavors:
+
+1. **Standalone function** (`formatDate`, `formatList`, …) — pass `locale` explicitly, either as a string or via the options object. Three overloads per formatter: `(value, locale)`, `(value, opt)` with a required `locale` field, and a deprecated unsafe form that omits the locale (kept for backwards compatibility, see SSR note below).
+2. **`injectFormat*()` companion** (`injectFormatDate`, `injectFormatList`, …) — call inside an injection context to get a function that auto-resolves locale from `injectDynamicLocale()` and respects any defaults registered via `provideFormat*Defaults`. **This is the recommended path for components and services.**
+
+You can grab them all at once via the `injectFormatters()` facade:
 
 ```typescript
 import { computed, signal } from '@angular/core';
-import { formatCurrency, formatDate } from '@mmstack/translate';
+import { injectFormatters } from '@mmstack/translate';
 
 export class MyComponent {
+  private readonly fmt = injectFormatters();
+
   readonly price = signal(1234.56);
   readonly date = new Date();
 
-  // Reacts to price changes OR locale changes
-  readonly displayPrice = computed(() => formatCurrency(this.price(), 'EUR'));
-
-  // Reacts to locale changes
-  readonly displayDate = computed(() => formatDate(this.date));
+  // Reacts to price changes AND locale changes — no explicit locale needed
+  readonly displayPrice = computed(() => this.fmt.currency(this.price(), 'EUR'));
+  readonly displayDate = computed(() => this.fmt.date(this.date));
 }
 ```
+
+If you'd rather call the standalone forms (e.g. outside an injection context), pass the locale explicitly:
+
+```typescript
+import { computed } from '@angular/core';
+import { formatCurrency, formatDate, injectDynamicLocale } from '@mmstack/translate';
+
+const locale = injectDynamicLocale();
+
+readonly displayPrice = computed(() => formatCurrency(this.price(), 'EUR', { locale: locale() }));
+readonly displayDate = computed(() => formatDate(this.date, locale()));
+```
+
+### Provider defaults
+
+Each formatter has a paired `provideFormat*Defaults` provider, and they can be registered together via `provideFormatDefaults`:
+
+```typescript
+import { provideFormatDefaults } from '@mmstack/translate';
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideFormatDefaults({
+      date: { format: 'mediumDate' },
+      number: { useGrouping: true, maxFractionDigits: 2 },
+      currency: { display: 'code' },
+      relativeTime: { numeric: 'auto' },
+      list: { type: 'disjunction' },
+      percent: { maxFractionDigits: 1 },
+      displayName: { style: 'short' },
+    }),
+  ],
+});
+```
+
+The injected formatter functions (`injectFormat*()`) automatically merge these defaults with the dynamic locale.
+
+### SSR note
+
+The deprecated unsafe overload (omitting `locale`) reads from a **process-level global signal**, which can cross-contaminate concurrent requests on a single-process Node.js SSR server rendering pages for different locales. The new overloads with required `locale` and the `injectFormat*()` companions are SSR-safe.
+
+For SSR-bound code, prefer either:
+
+```typescript
+// 1. Recommended — let the injected formatter handle locale
+private readonly formatDate = injectFormatDate();
+readonly displayDate = computed(() => this.formatDate(this.date));
+
+// 2. Or pass locale explicitly to the standalone function
+readonly displayDate = computed(() => formatDate(this.date, this.currentLocale()));
+```
+
+The unsafe overload is kept for backwards compatibility and will be removed in a future release.
 
 ## Testing
 

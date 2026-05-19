@@ -1,10 +1,10 @@
 import {
   afterRenderEffect,
   computed,
-  ElementRef,
   isSignal,
   signal,
   untracked,
+  type ElementRef,
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
@@ -87,7 +87,7 @@ export function draggable<TData = void>(
           onDragStart: (e) => {
             dragging.set(true);
           },
-          onDrop: (e) => {
+          onDrop: () => {
             dragging.set(false);
           },
         }),

@@ -30,7 +30,7 @@ const d2 = draggable({ data: 123 });
 type T2 = typeof d2;
 
 // Test 3: Explicit TData - should FAIL if data is missing
-// @ts-expect-error
+// @ts-expect-error testing types
 const d3 = draggable<string>({});
 
 // Test 4: Explicit TData - should WORK if data is present

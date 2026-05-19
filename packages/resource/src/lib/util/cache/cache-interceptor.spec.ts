@@ -13,11 +13,8 @@ import {
 import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
-import { Cache, injectQueryCache, provideQueryCache } from './cache';
-import {
-  createCacheInterceptor,
-  setCacheContext,
-} from './cache-interceptor';
+import { injectQueryCache, provideQueryCache, type Cache } from './cache';
+import { createCacheInterceptor, setCacheContext } from './cache-interceptor';
 
 type StubBehavior = {
   status: number;
@@ -183,5 +180,4 @@ describe('createCacheInterceptor', () => {
 
     expect(response.body).toEqual({ id: 1 });
   });
-
 });

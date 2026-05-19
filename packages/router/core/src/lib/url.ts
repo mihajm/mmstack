@@ -46,8 +46,8 @@ function isNavigationEnd(e: Event): e is NavigationEnd {
  * }
  * ```
  */
-export function url(): Signal<string> {
-  const router = inject(Router);
+export function url(router?: Router): Signal<string> {
+  if (!router) router = inject(Router);
 
   return toSignal(
     router.events.pipe(

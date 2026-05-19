@@ -47,7 +47,7 @@ export type FormatDateOptions = {
 };
 
 /**
- * @deprecated UNSAFE FOR SSR/EDGE. Omiting the locale property forces a fallback to a process-level global singleton.
+ * @deprecated UNSAFE FOR SSR/EDGE. Omitting the locale property forces a fallback to a process-level global singleton.
  */
 export type UnsafeFormatDateOptions = Omit<FormatDateOptions, 'locale'> & {
   /** Optional locale string falling back to the legacy global signal */

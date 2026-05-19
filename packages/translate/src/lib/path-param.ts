@@ -2,6 +2,10 @@ import { computed, inject, type Signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, type ParamMap, Router } from '@angular/router';
 
+/**
+ * Dynamic path parameter signal, that allows resolution even when paramsInheritenceStrategy isnt always
+ * This helper depends on an internal
+ */
 export function pathParam(
   key: string | (() => string),
   route = inject(ActivatedRoute),

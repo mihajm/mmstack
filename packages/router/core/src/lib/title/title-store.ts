@@ -4,8 +4,8 @@ import {
   inject,
   Injectable,
   linkedSignal,
-  Signal,
   untracked,
+  type Signal,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { ResolveFn } from '@angular/router';
@@ -17,23 +17,26 @@ import { injectTitleConfig } from './title-config';
   providedIn: 'root',
 })
 export class TitleStore {
-  private readonly title = inject(Title);
   private readonly map = mutable<Map<string, Signal<string>>>(new Map());
-  private readonly leafRoutes = injectLeafRoutes();
 
   constructor() {
-    const reverseLeaves = computed(() => this.leafRoutes().toReversed());
+    const { keepLastKnown, initialTitle } = injectTitleConfig();
+    const leafRoutes = injectLeafRoutes();
+    const title = inject(Title);
+    const fallbackTitle = initialTitle || untracked(() => title.getTitle());
+
+    const reverseLeaves = computed(() => leafRoutes().toReversed());
 
     const currentResolvedTitles = computed(() => {
       const map = this.map();
       return reverseLeaves()
-        .map((leaf) => map.get(leaf.path)?.() ?? leaf.route.title)
-        .filter((v): v is string => !!v);
+        .map((leaf) => map.get(leaf.path)?.() ?? leaf.route.title ?? null)
+        .filter((v) => v !== null);
     });
 
     const currentTitle = computed(() => currentResolvedTitles().at(0) ?? '');
 
-    const heldTitle = injectTitleConfig().keepLastKnown
+    const heldTitle = keepLastKnown
       ? linkedSignal<string, string>({
           source: () => currentTitle(),
           computation: (value, prev) => {
@@ -44,7 +47,7 @@ export class TitleStore {
       : currentTitle;
 
     effect(() => {
-      this.title.setTitle(heldTitle());
+      title.setTitle(heldTitle() || fallbackTitle);
     });
   }
 
@@ -57,16 +60,19 @@ export class TitleStore {
  *
  * Creates a title resolver function that can be used in Angular's router.
  *
- * @param fn
- * A function that returns a string or a Signal<string> representing the title.
+ * @param factoryOrValue
+ * A function that returns a string or a Signal<string> representing the title or just the string directly.
  * @param awaitValue
  * If `true`, the resolver will wait until the title signal has a value before resolving.
  * Defaults to `false`.
  */
 export function createTitle(
-  fn: () => string | (() => string),
+  factoryOrValue: (() => string | (() => string)) | string,
   awaitValue = false,
 ): ResolveFn<string> {
+  const factory =
+    typeof factoryOrValue === 'string' ? () => factoryOrValue : factoryOrValue;
+
   return async (route): Promise<string> => {
     const store = inject(TitleStore);
     const resolver = injectSnapshotPathResolver();
@@ -74,7 +80,7 @@ export function createTitle(
 
     const { parser } = injectTitleConfig();
 
-    const resolved = fn();
+    const resolved = factory();
 
     const titleSignal =
       typeof resolved === 'string'

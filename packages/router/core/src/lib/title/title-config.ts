@@ -7,6 +7,12 @@ import { inject, InjectionToken, Provider } from '@angular/core';
  */
 export type TitleConfig = {
   /**
+   * The base title to fallback to, by default Title.getTitle() is called on instantiation and that is used as a fallback,
+   * which in most cases should resolve to what is in index.html, unless you specifically call Title.setTitle() before any routes,
+   * are initialized.
+   */
+  initialTitle?: string;
+  /**
    * The title to be used when no title is set.
    * If not provided it defaults to an empty string
    * @default ''
@@ -23,11 +29,14 @@ export type TitleConfig = {
  * @internal
  */
 export type InternalTitleConfig = {
+  initialTitle: string;
   parser: (title: string) => string;
   keepLastKnown: boolean;
 };
 
-const token = new InjectionToken<InternalTitleConfig>('MMSTACK_TITLE_CONFIG');
+const token = new InjectionToken<InternalTitleConfig>(
+  '@mmstack/router-core:title-config',
+);
 
 /**
  * used to provide the title configuration, will not be applied unless a `createTitle` resolver is used
@@ -43,9 +52,10 @@ export function provideTitleConfig(config?: TitleConfig): Provider {
   return {
     provide: token,
     useValue: {
+      initialTitle: config?.initialTitle ?? '',
       parser: prefixFn,
       keepLastKnown: config?.keepLastKnownTitle ?? true,
-    },
+    } satisfies InternalTitleConfig,
   };
 }
 
@@ -58,6 +68,7 @@ export function injectTitleConfig(): InternalTitleConfig {
     inject(token, {
       optional: true,
     }) ?? {
+      initialTitle: '',
       parser: identity,
       keepLastKnown: true,
     }

@@ -6,12 +6,13 @@ export {
   registerNamespace,
   registerRemoteNamespace,
 } from './lib/register-namespace';
-export { injectResolveParamLocale } from './lib/resovler-locale';
+export { injectResolveParamLocale } from './lib/resolver-locale';
 export * from './lib/route-helpers';
 export { provideMockTranslations } from './lib/testing/provide-mock-translations';
 export { Translate } from './lib/translate';
 export {
   injectAddTranslations,
+  injectDefaultLocale,
   injectDynamicLocale,
   injectIntl,
   injectSupportedLocales,

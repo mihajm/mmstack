@@ -67,6 +67,12 @@ describe('hashRequest', () => {
       ).toBe('GET:/api/items:json:ids=1&ids=2&ids=3');
     });
 
+    it('joins array param values as comma-separated', () => {
+      expect(
+        hashRequest({ url: '/api/items', params: { ids: ['1', '2', '3'] } }),
+      ).toBe('GET:/api/items:json:ids=1&ids=2&ids=3');
+    });
+
     it('handles HttpParams instance', () => {
       const params = new HttpParams().set('a', '1').set('b', '2');
       const result = hashRequest({ url: '/api/data', params });

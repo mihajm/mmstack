@@ -25,6 +25,7 @@ import {
   CircuitBreakerOptions,
   createCircuitBreaker,
   createEqualRequest,
+  hashRequest,
   hasSlowConnection,
   injectNetworkStatus,
   injectQueryCache,
@@ -33,7 +34,6 @@ import {
   retryOnError,
   setCacheContext,
   toResourceObject,
-  urlWithParams,
   type RetryOptions,
 } from './util';
 import { CacheEntry } from './util/cache/cache';
@@ -256,8 +256,8 @@ export function queryResource<TResult, TRaw = TResult>(
 
   const hashFn =
     typeof options?.cache === 'object'
-      ? (options.cache.hash ?? urlWithParams)
-      : urlWithParams;
+      ? (options.cache.hash ?? hashRequest)
+      : hashRequest;
 
   const staleTime =
     typeof options?.cache === 'object' ? options.cache.staleTime : 0;

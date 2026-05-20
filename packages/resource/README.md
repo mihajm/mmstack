@@ -123,15 +123,15 @@ All three return a signal-typed ref — `value()`, `status()`, `error()`, `heade
 
 When the cache interceptor is registered (`createCacheInterceptor()`) and a query resource opts in via `cache`, responses are stored in the shared `Cache` keyed by a string derived from the request.
 
-**Default key**: `${method} ${urlWithParams(request)}` — produced by `urlWithParams()` (`util/url-with-params.ts:24`). It includes method, URL path, and sorted query params. **It does not include headers, body, or `HttpContext`.**
+**Default key**: produced by `hashRequest()` (`util/hash-request.ts`). Composition is `${method}:${url}:${responseType}[:${params}][:${body}]` — sorted query params, stable body hashing (incl. `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer` markers). **It does not include headers or `HttpContext`.**
 
-If two requests should _not_ share a cache entry but the default key would collide (e.g. different `Authorization` headers, request body in a GET-equivalent POST), pass a custom hash:
+If two requests should _not_ share a cache entry but the default key would collide (e.g. different `Authorization` headers), pass a custom hash:
 
 ```typescript
 queryResource<Post>(() => ({ url, headers }), {
   cache: {
     hash: (req) =>
-      `${req.method}:${req.urlWithParams}:${req.headers.get('Authorization') ?? ''}`,
+      `${hashRequest(req)}:${(req.headers as HttpHeaders | undefined)?.get('Authorization') ?? ''}`,
   },
 });
 ```
@@ -321,7 +321,7 @@ provideQueryCache({
 | -------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | `staleTime`          | from `provideQueryCache` | Per-resource override.                                                                                               |
 | `ttl`                | from `provideQueryCache` | Per-resource override.                                                                                               |
-| `hash`               | `urlWithParams`          | Custom cache key function. See [cache + cache keys](#cache--cache-keys).                                             |
+| `hash`               | `hashRequest`            | Custom cache key function. See [cache + cache keys](#cache--cache-keys).                                             |
 | `persist`            | `false`                  | Mirror this resource's responses to IndexedDB (only effective if the cache itself was created with `persist: true`). |
 | `ignoreCacheControl` | `false`                  | Ignore HTTP `Cache-Control` directives and use only `staleTime`/`ttl`.                                               |
 

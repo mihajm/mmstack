@@ -3,12 +3,13 @@
 import {
   HttpContext,
   HttpContextToken,
-  type HttpInterceptorFn,
   type HttpEvent,
   type HttpHandlerFn,
+  type HttpInterceptorFn,
   type HttpRequest,
 } from '@angular/common/http';
 import { finalize, shareReplay, type Observable } from 'rxjs';
+import { hashRequest } from './hash-request';
 
 const NO_DEDUPE = new HttpContextToken<boolean>(() => false);
 
@@ -40,6 +41,9 @@ export function noDedupe(ctx: HttpContext = new HttpContext()) {
  *
  * @param allowed - An array of HTTP methods for which deduplication should be enabled.
  *                  Defaults to `['GET', 'DELETE', 'HEAD', 'OPTIONS']`.
+ * @param keyFn - Optional function to compute the dedupe key from a request.
+ *                Defaults to `hashRequest`, which includes method, URL,
+ *                response type, params, and body.
  *
  * @returns An `HttpInterceptorFn` that implements the request deduplication logic.
  *
@@ -65,6 +69,7 @@ export function noDedupe(ctx: HttpContext = new HttpContext()) {
  */
 export function createDedupeRequestsInterceptor(
   allowed = ['GET', 'DELETE', 'HEAD', 'OPTIONS'],
+  keyFn: (req: HttpRequest<unknown>) => string = hashRequest,
 ): HttpInterceptorFn {
   const inFlight = new Map<string, Observable<HttpEvent<unknown>>>();
 
@@ -77,15 +82,16 @@ export function createDedupeRequestsInterceptor(
     if (!DEDUPE_METHODS.has(req.method) || req.context.get(NO_DEDUPE))
       return next(req);
 
-    const found = inFlight.get(req.urlWithParams);
+    const key = keyFn(req);
+    const found = inFlight.get(key);
 
     if (found) return found;
 
     const request = next(req).pipe(
-      finalize(() => inFlight.delete(req.urlWithParams)),
-      shareReplay(),
+      finalize(() => inFlight.delete(key)),
+      shareReplay({ bufferSize: 1, refCount: true }),
     );
-    inFlight.set(req.urlWithParams, request);
+    inFlight.set(key, request);
 
     return request;
   };

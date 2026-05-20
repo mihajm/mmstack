@@ -4,6 +4,7 @@ import {
   DestroyRef,
   effect,
   inject,
+  isDevMode,
   linkedSignal,
   type Signal,
   signal,
@@ -17,6 +18,8 @@ import {
   type QueryResourceRef,
 } from './query-resource';
 import { createCircuitBreaker, createEqualRequest } from './util';
+
+const NULL_VALUE = Symbol('@mmstack/resource:null');
 
 /**
  * @internal
@@ -161,10 +164,10 @@ export function mutationResource<
   const requestEqual = createEqualRequest(equal);
 
   const eq = equal ?? Object.is;
-  const next = signal<TMutation | null>(null, {
+  const next = signal<TMutation | typeof NULL_VALUE>(NULL_VALUE, {
     equal: (a, b) => {
-      if (!a && !b) return true;
-      if (!a || !b) return false;
+      if (a === NULL_VALUE && b === NULL_VALUE) return true;
+      if (a === NULL_VALUE || b === NULL_VALUE) return false;
       return eq(a, b);
     },
   });
@@ -175,17 +178,27 @@ export function mutationResource<
 
   const queueRef = effect(() => {
     const nextInQueue = queue().at(0);
-    if (!nextInQueue || next() !== null) return;
+    if (nextInQueue === undefined || next() !== NULL_VALUE) return;
     queue.update((q) => q.slice(1));
     const [value, ictx] = nextInQueue;
-    ctx = onMutate?.(value, ictx) as TCTX;
-    next.set(value);
+    try {
+      ctx = onMutate?.(value, ictx) as TCTX;
+      next.set(value);
+    } catch (mutationErr) {
+      ctx = undefined as TCTX;
+      next.set(NULL_VALUE);
+      if (isDevMode())
+        console.error(
+          '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
+          mutationErr,
+        );
+    }
   });
 
   const req = computed(
     (): HttpResourceRequest | undefined => {
       const nr = next();
-      if (!nr) return;
+      if (nr === NULL_VALUE) return;
 
       return request(nr) ?? undefined;
     },
@@ -194,10 +207,13 @@ export function mutationResource<
     },
   );
 
-  const lastValue = linkedSignal<TMutation | null, TMutation | null>({
+  const lastValue = linkedSignal<
+    TMutation | typeof NULL_VALUE,
+    TMutation | typeof NULL_VALUE
+  >({
     source: next,
     computation: (next, prev) => {
-      if (next === null && !!prev) return prev.value;
+      if (next === NULL_VALUE && !!prev) return prev.value;
       return next;
     },
   });
@@ -205,7 +221,7 @@ export function mutationResource<
   const lastValueRequest = computed(
     (): HttpResourceRequest | undefined => {
       const nr = lastValue();
-      if (!nr) return;
+      if (nr === NULL_VALUE) return;
 
       return request(nr) ?? undefined;
     },
@@ -224,7 +240,7 @@ export function mutationResource<
   const resource = queryResource<TResult, TRaw>(req, {
     ...rest,
     circuitBreaker: cb,
-    defaultValue: null as unknown as TResult, // doesnt matter since .value is not accessible
+    defaultValue: NULL_VALUE as unknown as TResult, // doesnt matter since .value is not accessible
   });
 
   const destroyRef = options.injector
@@ -232,29 +248,33 @@ export function mutationResource<
     : inject(DestroyRef);
 
   const error$ = toObservable(resource.error);
-  const value$ = toObservable(resource.value).pipe(catchError(() => of(null)));
+  const value$ = toObservable(resource.value).pipe(
+    catchError(() => of(NULL_VALUE)),
+  );
 
   const statusSub = toObservable(resource.status)
     .pipe(
       combineLatestWith(error$, value$),
-      map(([status, error, value]): StatusResult<TResult> | null => {
-        if (status === 'error' && error) {
-          return {
-            status: 'error',
-            error,
-          };
-        }
+      map(
+        ([status, error, value]): StatusResult<TResult> | typeof NULL_VALUE => {
+          if (status === 'error' && error) {
+            return {
+              status: 'error',
+              error,
+            };
+          }
 
-        if (status === 'resolved' && value !== null) {
-          return {
-            status: 'resolved',
-            value,
-          };
-        }
+          if (status === 'resolved' && value !== NULL_VALUE) {
+            return {
+              status: 'resolved',
+              value,
+            };
+          }
 
-        return null;
-      }),
-      filter((v) => v !== null),
+          return NULL_VALUE;
+        },
+      ),
+      filter((v) => v !== NULL_VALUE),
       takeUntilDestroyed(destroyRef),
     )
     .subscribe((result) => {
@@ -263,7 +283,7 @@ export function mutationResource<
 
       onSettled?.(ctx);
       ctx = undefined as TCTX;
-      next.set(null);
+      next.set(NULL_VALUE);
     });
 
   const shouldQueue = options.queue ?? false;
@@ -279,11 +299,24 @@ export function mutationResource<
       if (shouldQueue) {
         return queue.update((q) => [...q, [value, ictx]]);
       } else {
-        ctx = onMutate?.(value, ictx) as TCTX;
-        next.set(value);
+        try {
+          ctx = onMutate?.(value, ictx) as TCTX;
+          next.set(value);
+        } catch (mutationErr) {
+          ctx = undefined as TCTX;
+          next.set(NULL_VALUE);
+          if (isDevMode())
+            console.error(
+              '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
+              mutationErr,
+            );
+        }
       }
     },
-    current: next,
+    current: computed(() => {
+      const nv = next();
+      return nv === NULL_VALUE ? null : nv;
+    }),
     // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
     disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
   };

@@ -407,6 +407,35 @@ createNavItems(() => [
 ]);
 ```
 
+#### Default (fallback) items
+
+Routes register items on-demand, so any URL with no registration in its active chain renders an empty menu. `provideNavConfig({ defaults })` declares fallback items rendered on those URLs — handy for landing pages, error routes, or app shells where a few items should always be visible:
+
+```typescript
+provideNavConfig({
+  defaults: [
+    { label: 'Home', link: '/' },
+    { label: 'Docs', link: '/docs' },
+  ],
+}),
+```
+
+Relative `link`s on defaults resolve from `/` (the router root), so `link: 'home'` becomes `/home`. Absolute links and `UrlTree`s pass through unchanged.
+
+Named scopes are supported via the record form:
+
+```typescript
+provideNavConfig({
+  defaults: {
+    '': [{ label: 'Home', link: '/' }],          // default scope
+    main: [{ label: 'Home', link: '/' }],         // injectNavItems('main')
+    side: () => [{ label: 'Settings', link: '/settings' }], // factory
+  },
+}),
+```
+
+Shadowing follows the usual deepest-wins rule — any active route that calls `createNavItems` (including `createNavItems([])` to render an explicitly empty menu) replaces the defaults for that scope.
+
 #### Typed metadata
 
 `CreateNavItem` and `NavItem` carry a `TMeta` generic so consumers can attach app-specific fields (icons, badges, etc.) without the library imposing a shape:

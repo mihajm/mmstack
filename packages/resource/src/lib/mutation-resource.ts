@@ -6,6 +6,7 @@ import {
   inject,
   isDevMode,
   linkedSignal,
+  ResourceStatus,
   type Signal,
   signal,
   type ValueEqualityFn,
@@ -255,23 +256,25 @@ export function mutationResource<
   const statusSub = toObservable(resource.status)
     .pipe(
       combineLatestWith(error$, value$),
-      map(([status, error, value]): StatusResult<TResult> | null => {
-        if (status === ResourceStatus.Error && error) {
-          return {
-            status: 'error',
-            error,
-          };
-        }
+      map(
+        ([status, error, value]): StatusResult<TResult> | typeof NULL_VALUE => {
+          if (status === ResourceStatus.Error && error) {
+            return {
+              status: 'error',
+              error,
+            };
+          }
 
-        if (status === ResourceStatus.Resolved && value !== NULL_VALUE) {
-          return {
-            status: 'resolved',
-            value,
-          };
-        }
+          if (status === ResourceStatus.Resolved && value !== NULL_VALUE) {
+            return {
+              status: 'resolved',
+              value,
+            };
+          }
 
-        return NULL_VALUE;
-      }),
+          return NULL_VALUE;
+        },
+      ),
       filter((v) => v !== NULL_VALUE),
       takeUntilDestroyed(destroyRef),
     )

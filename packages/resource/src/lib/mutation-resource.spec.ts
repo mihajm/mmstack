@@ -213,6 +213,239 @@ describe('mutationResource', () => {
     expect(executions).toEqual([1, 2, 3]);
   });
 
+  it('should abort the mutation when onMutate throws (non-queued)', async () => {
+    let requests = 0;
+    const hooks: string[] = [];
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+      /* suppress dev-mode log */
+    });
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: { id: number }) => ({
+          url: `https://example.com/throw/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              requests++;
+            },
+            { ok: true },
+          ),
+        }),
+        {
+          onMutate: () => {
+            hooks.push('onMutate');
+            throw new Error('boom');
+          },
+          onSuccess: () => hooks.push('onSuccess'),
+          onError: () => hooks.push('onError'),
+          onSettled: () => hooks.push('onSettled'),
+        },
+      ),
+    );
+
+    res.mutate({ id: 1 });
+
+    // Give effects/microtasks a chance to flush — nothing should settle.
+    await new Promise((r) => setTimeout(r, 20));
+    TestBed.tick();
+
+    expect(requests).toBe(0); // HTTP never fired
+    expect(hooks).toEqual(['onMutate']); // only the throwing hook ran
+    expect(res.current()).toBeNull();
+
+    errSpy.mockRestore();
+  });
+
+  it('should skip a queued mutation when onMutate throws and continue with the rest', async () => {
+    const executions: number[] = [];
+    let settledCount = 0;
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+      /* suppress dev-mode log */
+    });
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/queue-throw/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { ok: true },
+            false,
+            10,
+          ),
+        }),
+        {
+          queue: true,
+          onMutate: (value) => {
+            if (value === 2) throw new Error('boom on 2');
+          },
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
+    );
+
+    res.mutate(1);
+    res.mutate(2);
+    res.mutate(3);
+
+    for (let i = 0; i < 50; i++) {
+      if (settledCount === 2) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+
+    expect(executions).toEqual([1, 3]);
+    expect(settledCount).toBe(2);
+    expect(res.current()).toBeNull();
+
+    errSpy.mockRestore();
+  });
+
+  it('should drain the queue when onMutate throws on the head item', async () => {
+    const executions: number[] = [];
+    let settledCount = 0;
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+      /* suppress dev-mode log */
+    });
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/queue-head-throw/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { ok: true },
+            false,
+            10,
+          ),
+        }),
+        {
+          queue: true,
+          onMutate: (value) => {
+            if (value === 1) throw new Error('boom on 1');
+          },
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
+    );
+
+    res.mutate(1);
+    res.mutate(2);
+
+    for (let i = 0; i < 50; i++) {
+      if (settledCount === 1) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+
+    expect(executions).toEqual([2]);
+    expect(settledCount).toBe(1);
+
+    errSpy.mockRestore();
+  });
+
+  it('should fire the request and run lifecycle hooks when mutate(null) is called', async () => {
+    const hooks: string[] = [];
+    let requests = 0;
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource<{ ok: true }, { ok: true }, null>(
+        (body) => ({
+          url: 'https://example.com/null-mutate',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            (req) => {
+              requests++;
+              expect(req.body).toBeNull();
+            },
+            { ok: true },
+          ),
+        }),
+        {
+          onMutate: () => {
+            hooks.push('onMutate');
+          },
+          onSuccess: (result) => {
+            hooks.push('onSuccess');
+            expect(result).toEqual({ ok: true });
+          },
+          onSettled: () => {
+            hooks.push('onSettled');
+            resolve();
+          },
+        },
+      ),
+    );
+
+    res.mutate(null);
+    await promise;
+
+    expect(requests).toBe(1);
+    expect(hooks).toEqual(['onMutate', 'onSuccess', 'onSettled']);
+    expect(res.current()).toBeNull();
+  });
+
+  it('should drain queued mutate(null) calls sequentially', async () => {
+    const executions: unknown[] = [];
+    let settledCount = 0;
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource<{ ok: true }, { ok: true }, null>(
+        (body) => ({
+          url: 'https://example.com/queue-null',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            (req) => {
+              executions.push(req.body);
+            },
+            { ok: true },
+            false,
+            10,
+          ),
+        }),
+        {
+          queue: true,
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
+    );
+
+    res.mutate(null);
+    res.mutate(null);
+
+    for (let i = 0; i < 50; i++) {
+      if (settledCount === 2) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+
+    expect(executions).toEqual([null, null]);
+    expect(settledCount).toBe(2);
+    expect(res.current()).toBeNull();
+  });
+
   it('should queue mutations while offline and flush them sequentially when online', async () => {
     const executions: number[] = [];
     let settledCount = 0;

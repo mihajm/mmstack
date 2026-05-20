@@ -510,6 +510,182 @@ describe('createNavItems / injectNavItems', () => {
     });
   });
 
+  describe('config defaults (fallback nav items)', () => {
+    it('renders config defaults when no active route registers items', async () => {
+      const { router } = setup(
+        [{ path: 'home', component: DummyComponent }],
+        {
+          defaults: [
+            { label: 'Home', link: '/' },
+            { label: 'Docs', link: '/docs' },
+          ],
+        },
+      );
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      const result = items()();
+      expect(result.map((i) => i.label())).toEqual(['Home', 'Docs']);
+    });
+
+    it('resolves relative links in defaults from the root', async () => {
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: [{ label: 'Home', link: 'home' }],
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      expect(items()()[0].link()).toBe('/home');
+    });
+
+    it('a route registering items shadows the defaults', async () => {
+      const { router } = setup(
+        [
+          {
+            path: 'home',
+            component: DummyComponent,
+            resolve: {
+              nav: createNavItems([{ label: 'Override', link: '/x' }]),
+            },
+          },
+          { path: 'other', component: DummyComponent },
+        ],
+        { defaults: [{ label: 'Default', link: '/' }] },
+      );
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+      expect(items()().map((i) => i.label())).toEqual(['Override']);
+
+      await router.navigateByUrl('/other');
+      TestBed.tick();
+      expect(items()().map((i) => i.label())).toEqual(['Default']);
+    });
+
+    it('explicit empty createNavItems([]) shadows defaults with an empty menu', async () => {
+      const { router } = setup(
+        [
+          {
+            path: 'empty',
+            component: DummyComponent,
+            resolve: { nav: createNavItems([]) },
+          },
+          { path: 'other', component: DummyComponent },
+        ],
+        { defaults: [{ label: 'Default', link: '/' }] },
+      );
+
+      await router.navigateByUrl('/empty');
+      TestBed.tick();
+      expect(items()().length).toBe(0);
+
+      await router.navigateByUrl('/other');
+      TestBed.tick();
+      expect(items()().map((i) => i.label())).toEqual(['Default']);
+    });
+
+    it('accepts a factory form for defaults', async () => {
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: () => [{ label: 'Computed', link: '/' }],
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      expect(items()()[0].label()).toBe('Computed');
+    });
+
+    it('supports per-scope defaults via the record form', async () => {
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: {
+          main: [{ label: 'M', link: '/' }],
+          side: () => [{ label: 'S', link: '/' }],
+        },
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      expect(items('main')().map((i) => i.label())).toEqual(['M']);
+      expect(items('side')().map((i) => i.label())).toEqual(['S']);
+      expect(items()().length).toBe(0);
+    });
+
+    it('supports the default scope via the record form using the empty-string key', async () => {
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: {
+          '': [{ label: 'Root', link: '/' }],
+          side: [{ label: 'S', link: '/' }],
+        },
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      expect(items()().map((i) => i.label())).toEqual(['Root']);
+      expect(items('side')().map((i) => i.label())).toEqual(['S']);
+    });
+
+    it('returns empty for a scope with no config entry and no route registration', async () => {
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: { main: [{ label: 'M', link: '/' }] },
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      expect(items('unknown')().length).toBe(0);
+    });
+
+    it('filters hidden default items reactively', async () => {
+      const show = signal(false);
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: () => [
+          { label: 'Always', link: '/' },
+          { label: 'Secret', link: '/secret', hidden: () => !show() },
+        ],
+      });
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+
+      const result = items();
+      expect(result().map((i) => i.label())).toEqual(['Always']);
+
+      show.set(true);
+      expect(result().map((i) => i.label())).toEqual(['Always', 'Secret']);
+    });
+
+    it('default items reflect active state against the current URL', async () => {
+      const { router } = setup(
+        [
+          { path: 'home', component: DummyComponent },
+          { path: 'docs', component: DummyComponent },
+        ],
+        {
+          defaults: [
+            { label: 'Home', link: '/home' },
+            { label: 'Docs', link: '/docs' },
+          ],
+        },
+      );
+
+      await router.navigateByUrl('/docs');
+      TestBed.tick();
+      let result = items()();
+      expect(result[0].active()).toBe(false);
+      expect(result[1].active()).toBe(true);
+
+      await router.navigateByUrl('/home');
+      TestBed.tick();
+      result = items()();
+      expect(result[0].active()).toBe(true);
+      expect(result[1].active()).toBe(false);
+    });
+  });
+
   it('applies provideNavConfig activeMatch as the global default', async () => {
     const { router } = setup(
       [

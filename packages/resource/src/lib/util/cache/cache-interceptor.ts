@@ -7,7 +7,8 @@ import {
   type HttpRequest,
   HttpResponse,
 } from '@angular/common/http';
-import { map, Observable, of, tap } from 'rxjs';
+import { map, type Observable, of, tap } from 'rxjs';
+import { hashRequest } from '../hash-request';
 import { injectQueryCache } from './cache';
 
 type CacheEntryOptions = {
@@ -201,7 +202,7 @@ export function createCacheInterceptor(
 
     if (!opt.cache) return next(req);
 
-    const key = opt.key ?? req.urlWithParams;
+    const key = opt.key ?? hashRequest(req);
     const entry = cache.getUntracked(key); // null if expired or not found
 
     // If the entry is not stale, return it

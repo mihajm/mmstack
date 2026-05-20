@@ -46,7 +46,7 @@ export function retryOnError<T>(
 
     if (timeout) clearTimeout(timeout);
 
-    setTimeout(
+    timeout = setTimeout(
       () => res.reload(),
       retries <= 0 ? 0 : backoff * Math.pow(2, retries - 1),
     );

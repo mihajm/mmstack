@@ -119,8 +119,9 @@ export function indexArray<T, U>(
 
   if (isWritableSignal(data) && isMutable(data) && !opt.equal) {
     opt.equal = (a: T, b: T) => {
-      if (a !== b) return false; // actually check primitives and references
-      return false; // opt out for same refs
+      if (typeof a !== typeof b) return false;
+      if (typeof a === 'object' || typeof a === 'function') return false;
+      return a === b;
     };
   }
 

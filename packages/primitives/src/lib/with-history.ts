@@ -1,6 +1,8 @@
 import {
   computed,
   type CreateSignalOptions,
+  isSignal,
+  signal,
   type Signal,
   untracked,
   type ValueEqualityFn,
@@ -108,10 +110,17 @@ export type CreateHistoryOptions<T> = Omit<
  * ```
  */
 export function withHistory<T>(
-  source: WritableSignal<T>,
+  sourceOrValue: WritableSignal<T> | T,
   opt?: CreateHistoryOptions<T>,
 ): SignalWithHistory<T> {
-  const equal = opt?.equal ?? getSignalEquality(source);
+  const equal =
+    (opt?.equal ?? isSignal(sourceOrValue))
+      ? getSignalEquality(sourceOrValue as Signal<T>)
+      : Object.is;
+
+  const source = isSignal(sourceOrValue)
+    ? (sourceOrValue as WritableSignal<T>)
+    : signal(sourceOrValue);
   const maxSize = opt?.maxSize ?? Infinity;
 
   const history = mutable<T[]>([], {
@@ -123,6 +132,15 @@ export function withHistory<T>(
 
   const originalSet = source.set;
 
+  const trim = (arr: T[]): T[] => {
+    if (arr.length < maxSize) return arr;
+    if (opt?.cleanupStrategy === 'shift') {
+      arr.shift();
+      return arr;
+    }
+    return arr.slice(Math.floor(maxSize / 2));
+  };
+
   const set = (value: T) => {
     const current = untracked(source);
     if (equal(value, current)) return;
@@ -130,13 +148,7 @@ export function withHistory<T>(
     source.set(value);
 
     history.mutate((c) => {
-      if (c.length >= maxSize) {
-        if (opt?.cleanupStrategy === 'shift') {
-          c.shift();
-        } else {
-          c = c.slice(Math.floor(maxSize / 2));
-        }
-      }
+      c = trim(c);
       c.push(current);
       return c;
     });
@@ -168,7 +180,11 @@ export function withHistory<T>(
     originalSet.call(source, valueToRestore);
 
     history.inline((h) => h.pop());
-    redoArray.inline((r) => r.push(valueForRedo));
+    redoArray.mutate((r) => {
+      r = trim(r);
+      r.push(valueForRedo);
+      return r;
+    });
   };
 
   internal.redo = () => {
@@ -183,13 +199,7 @@ export function withHistory<T>(
 
     redoArray.inline((r) => r.pop());
     history.mutate((h) => {
-      if (h.length >= maxSize) {
-        if (opt?.cleanupStrategy === 'shift') {
-          h.shift();
-        } else {
-          h = h.slice(Math.floor(maxSize / 2));
-        }
-      }
+      h = trim(h);
       h.push(valueForUndo);
       return h;
     });

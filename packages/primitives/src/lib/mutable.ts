@@ -91,10 +91,10 @@ export function mutable<T>(
   opt?: CreateSignalOptions<T>,
 ): MutableSignal<T> {
   const baseEqual = opt?.equal ?? is;
-  let trigger = false;
+  let cnt = 0;
 
   const equal: ValueEqualityFn<T | undefined> = (a, b) => {
-    if (trigger) return false;
+    if (cnt > 0) return false;
     return baseEqual(a, b);
   };
 
@@ -106,9 +106,9 @@ export function mutable<T>(
   const internalUpdate = sig.update;
 
   sig.mutate = (updater) => {
-    trigger = true;
+    cnt++;
     internalUpdate(updater);
-    trigger = false;
+    cnt--;
   };
 
   sig.inline = (updater) => {

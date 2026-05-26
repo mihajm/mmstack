@@ -1,1098 +1,450 @@
 # @mmstack/primitives
 
-A collection of utility functions and primitives designed to enhance development with Angular Signals, providing helpful patterns and inspired by features from other reactive libraries. All value helpers also use pure derivations (no effects/RxJS).
+**Signal-native utilities for Angular — debounce, throttle, two-way derivations, deep stores, undo/redo, sensors, and more.**
 
 [![npm version](https://badge.fury.io/js/%40mmstack%2Fprimitives.svg)](https://badge.fury.io/js/%40mmstack%2Fprimitives)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/primitives/LICENSE)
 
-## Installation
+`@mmstack/primitives` is a low-level toolbox of Angular Signal primitives. Every value-producing helper is a pure derivation — no `effect()`, no RxJS bridges, no zone churn — so you can compose them freely inside `computed()` graphs without worrying about side-effect lifetimes. Effect-shaped helpers (`tabSync`, `nestedEffect`, sensors) clean up via `DestroyRef`.
+
+## Install
 
 ```bash
 npm install @mmstack/primitives
 ```
 
-## Primitives
+## Contents
 
-This library provides the following primitives:
+- [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `toWritable`
+- [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
+- [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
+- [Effects](#effects) — `nestedEffect`
+- [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`
+- [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
+- [Sensors](#sensors) — `sensor()` facade + browser-state signals
+- [Pipelines](#pipelines) — `piped` / `pipeable`, operators (`select`, `map`, `filter`, `filterWith`, `distinct`, `combineWith`, `tap`, `startWith`, `pairwise`, `scan`)
 
-- `debounced` - Creates a writable signal whose value updates are debounced after set/update.
-- `throttled` - Creates a writable signal whose value updates are rate-limited.
-- `mutable` - A signal variant allowing in-place mutations while triggering updates.
-- `stored` - Creates a signal synchronized with persistent storage (e.g., localStorage).
-- `piped` – Creates a signal with a chainable & typesafe `.pipe(...)` method, which returns a pipable computed.
-- `store` - A deep-reactivity proxy, with Array & Record support.
-- `withHistory` - Enhances a signal with a complete undo/redo history stack.
-- `indexArray` - Maps a reactive array by index into an array of stable derivations.
-- `keyArray` - Maps a reactive array by key (track by) into an array of stable derivations.
-- `mapObject` - Maps a reactive object by key (track by) into an object of stable derivations.
-- `nestedEffect` - Creates an effect with a hierarchical lifetime, enabling fine-grained, conditional side-effects.
-- `toWritable` - Converts a read-only signal to writable using custom write logic.
-- `derived` - Creates a signal with two-way binding to a source signal.
-- `chunked` - Creates a signal that time-slices an array into chunked values & emits thats array based on the provided options.
-- `pooled` / `pooledArray` / `pooledMap` / `pooledSet` - Double-buffered object pools for `computed` signals; recycle the output container to remove allocation pressure in high-frequency recomputation.
-- `tabSync` - Low level primitive to "share" the value of a WritableSignal accross tabs via the BroadcastChannel api.
-- `sensor` - A facade function to create various reactive sensor signals (e.g., mouse position, network status, page visibility, dark mode preference)." (This was the suggestion from before; it just reads a little smoother and more accurately reflects what the facade creates directly).
-  - `mediaQuery` - A generic primitive that tracks a CSS media query (forms the basis for `prefersDarkMode` and `prefersReducedMotion`).
-  - `elementVisibility` - Tracks if an element is intersecting the viewport using IntersectionObserver.
-  - `elementSize` - Tracks the size of the DOM element
-  - `mediaQuery` - Creates a signal that reacts to changes based on the provided media queries "truthyness". Additional helpers such as `prefersDarkMode` and `prefersReducedMotion` available
-  - `mousePosition` - Throttled signal that reacts to the mouses position within a given element
-  - `networkStatus` - A signal of the current network status, used my @mmstack/resource
-  - `pageVisibility` - A signal useful when reacting to the user switching tabs
-  - `scrollPosition` - A throttled signal of the current scroll position within a given element
-  - `windowSize` - A throttled signal useful to reacting to window resize events
-- `until` - Creates a Promise that resolves when a signal's value meets a specific condition.
+## Writable signal variants
 
----
+### `mutable`
 
-### debounced
-
-Creates a WritableSignal where the propagation of its value (after calls to .set() or .update()) is delayed. The publicly readable signal value updates only after a specified time (ms) has passed without further set/update calls. It also includes an .original property, which is a Signal reflecting the value immediately after set/update is called.
+A `WritableSignal` with `.mutate()` and `.inline()` for in-place updates. Cheaper than `update(prev => ({...prev, ...})) ` for large objects or arrays, while still notifying dependents.
 
 ```typescript
-import { Component, signal, effect } from '@angular/core';
-import { debounced, debounce } from '@mmstack/primitives';
-import { FormsModule } from '@angular/forms';
-
-@Component({
-  selector: 'app-debounced',
-  template: `<input [(ngModel)]="searchTerm" />`,
-})
-export class SearchComponent {
-  searchTerm = debounced('', { ms: 300 }); // Debounce for 300ms
-  example2 = debounce(signal(''), { ms: 300 }); // pattern for adding debounce to an existing signal
-
-  constructor() {
-    effect(() => {
-      // Runs 300ms after the user stops typing
-      console.log('Perform search for:', this.searchTerm());
-    });
-    effect(() => {
-      // Runs immediately on input change
-      console.log('Input value:', this.searchTerm.original());
-    });
-  }
-}
-```
-
-You can also debounce an existing signal:
-
-```typescript
-import { debounce } from '@mmstack/primitives';
-
-const query = signal('');
-const debouncedQuery = debounce(query, { ms: 300 });
-```
-
-### throttled
-
-Creates a WritableSignal whose value is rate-limited. It ensures that the public-facing signal only updates at most once per specified time interval (ms). It uses a trailing-edge strategy, meaning it updates with the most recent value at the end of the interval. This is useful for handling high-frequency events like scrolling or mouse movement without overwhelming your application's reactivity.
-
-```typescript
-import { Component, signal, effect } from '@angular/core';
-import { throttled } from '@mmstack/primitives';
-import { JsonPipe } from '@angular/common';
-
-@Component({
-  selector: 'app-throttle-demo',
-  imports: [JsonPipe],
-  template: `
-    <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here to see updates...</div>
-    <p><b>Original Position:</b> {{ position.original() | json }}</p>
-    <p><b>Throttled Position:</b> {{ position() | json }}</p>
-  `,
-})
-export class ThrottleDemoComponent {
-  // Throttle updates to at most once every 200ms
-  position = throttled({ x: 0, y: 0 }, { ms: 200 });
-
-  constructor() {
-    // This effect runs on every single mouse move event.
-    effect(() => {
-      // console.log('Original value updated:', this.position.original());
-    });
-    // This effect will only run at most every 200ms.
-    effect(() => {
-      console.log('Throttled value updated:', this.position());
-    });
-  }
-
-  onMouseMove(event: MouseEvent) {
-    this.position.set({ x: event.offsetX, y: event.offsetY });
-  }
-}
-```
-
-### mutable
-
-Creates a MutableSignal, a signal variant designed for scenarios where you want to perform in-place mutations on objects or arrays held within the signal, while still ensuring Angular's change detection is correctly triggered. It provides .mutate() and .inline() methods alongside the standard .set() and .update(). Please note that any computeds, which resolve non-primitive values from a mutable require equals to be set to false.
-
-```typescript
-import { Component, computed, effect } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
-import { FormsModule } from '@angular/forms';
 
-@Component({
-  selector: 'app-mutable',
-  template: ` <button (click)="incrementAge()">inc</button> `,
-})
-export class SearchComponent {
-  user = mutable({ name: { first: 'John', last: 'Doe' }, age: 30 });
+const user = mutable({ name: 'John', age: 30 });
 
-  constructor() {
-    effect(() => {
-      // Runs every time user is mutated
-      console.log(this.user());
-    });
-
-    const age = computed(() => this.user().age);
-
-    effect(() => {
-      // Runs every time age changes
-      console.log(age());
-    });
-
-    const name = computed(() => this.user().name);
-    effect(() => {
-      // Doesnt run if user changes, unless name is destructured
-      console.log(name());
-    });
-
-    const name2 = computed(() => this.user().name, {
-      equal: () => false,
-    });
-
-    effect(() => {
-      // Runs every time user changes (even if name did not change)
-      console.log(name2());
-    });
-  }
-
-  incrementAge() {
-    user.mutate((prev) => {
-      prev.age++;
-      return prev;
-    });
-  }
-
-  incrementInline() {
-    user.inline((prev) => {
-      prev.age++;
-    });
-  }
-}
-```
-
-### stored
-
-Creates a WritableSignal whose state is automatically synchronized with persistent storage (like localStorage or sessionStorage), providing a fallback value when no data is found or fails to parse.
-
-It handles Server-Side Rendering (SSR) gracefully, allows dynamic storage keys, custom serialization/deserialization, custom storage providers, and optional synchronization across browser tabs via the storage event. It returns a StoredSignal<T> which includes a .clear() method and a reactive .key signal.
-
-```typescript
-import { Component, effect, signal } from '@angular/core';
-import { stored } from '@mmstack/primitives';
-// import { FormsModule } from '@angular/forms'; // Needed for ngModel
-
-@Component({
-  selector: 'app-theme-selector',
-  // imports: [FormsModule], // Import if using ngModel
-  template: `
-    Theme:
-    <select [value]="theme()" (change)="theme.set($event.target.value)">
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-      <option value="system">System</option>
-    </select>
-    <button (click)="theme.clear()">Reset Theme</button>
-    <p>Using storage key: {{ theme.key() }}</p>
-  `,
-})
-export class ThemeSelectorComponent {
-  // Persist theme preference in localStorage, default to 'system'
-  theme = stored<'light' | 'dark' | 'system'>('system', {
-    key: 'user-theme',
-    syncTabs: true, // Sync theme choice across tabs
-  });
-
-  constructor() {
-    effect(() => {
-      console.log(`Theme set to: ${this.theme()}`);
-      // Logic to apply theme (e.g., add class to body)
-      document.body.className = `theme-${this.theme()}`;
-    });
-  }
-}
-```
-
-### piped
-
-Adds two fluent APIs to signals:
-
-- **`.map(...transforms, [options])`** – compose pure, synchronous value→value transforms. Returns a computed signal that remains pipeable.
-- **`.pipe(...operators)`** – compose operators (signal→signal), useful for combining signals or reusable projections.
-
-```typescript
-import { piped, pipeable, select, combineWith } from '@mmstack/primitives';
-import { signal } from '@angular/core';
-
-const count = piped(1);
-
-// Map: value -> value
-const label = count.map(
-  (n) => n * 2,
-  (n) => (num: n),
-  { equal: (a, b) => a.num === b.num },
-);
-
-// Pipe: signal -> signal
-const base = pipeable(signal(10));
-const total = count.pipe(select((n) => n * 3)).pipe(combineWith(count, (a, b) => a + b));
-
-label(); // e.g., "#2"
-total(); // reactive sum
-```
-
-### store / mutableStore / toStore
-
-Provides "Deep Reactivity" by creating a proxy around a source object or array. Instead of reading raw values, accessing a property on a store returns a Signal representing that specific property.
-This allows you to pass specific slices of a large state object to child components as Input() signals, or bind directly to nested properties without manually creating computed or derived selectors.
-Propagates mutablity/writability down the chain so if the source is a WritableSignal all children are WritableSignal derivations.
-
-#### Features:
-
-- Lazy Generation: Sub-signals are created only when accessed.
-- Caching: Accessed signals are cached (via WeakRef), so accessing state.user.name multiple times returns the exact same signal instance.
-- Array Support: Array signals provide reactive access to indices (e.g., state.users[0])
-
-```ts
-import { Component, effect } from '@angular/core';
-import { store, mutableStore } from '@mmstack/primitives';
-import { FormsModule } from '@angular/forms';
-import { JsonPipe } from '@angular/common';
-
-@Component({
-  selector: 'app-store-demo',
-  imports: [FormsModule, JsonPipe],
-  template: `
-    <h3>User Profile</h3>
-    <p>Name: {{ state.user.name() }}</p>
-
-    <input [ngModel]="state.user.name()" (ngModelChange)="state.user.name.set($event)" />
-
-    <h3>Settings (Mutable)</h3>
-    <label>
-      <input type="checkbox" [checked]="settings.notifications.email()" (change)="toggleEmail()" />
-      Email Notifications
-    </label>
-
-    <pre>{{ state() | json }}</pre>
-  `,
-})
-export class StoreDemoComponent {
-  // 1. Standard Store
-  state = store({
-    user: {
-      name: 'Alice',
-      address: { city: 'New York', zip: 10001 },
-    },
-    tags: ['admin', 'editor'],
-  });
-
-  // 2. Mutable Store (allows .mutate/.inline)
-  settings = mutableStore({
-    theme: 'dark',
-    notifications: { email: true, sms: false },
-  });
-
-  constructor() {
-    // Effect tracks only the specific slice accessed
-    effect(() => {
-      console.log('City changed to:', this.state.user.address.city());
-    });
-
-    // Array access returns a signal for that index
-    const firstTag = this.state.tags[0];
-    console.log('First tag:', firstTag()); // 'admin'
-  }
-
-  updateZip() {
-    // You can set deep properties directly
-    this.state.user.address.zip.set(90210);
-  }
-
-  toggleEmail() {
-    // With mutableStore, you can use .mutate on the root or sub-signals
-    this.settings.notifications.mutate((n) => {
-      n.email = !n.email;
-    });
-  }
-}
-```
-
-### Array Stores
-
-When a store holds an array, the array itself is a signal, but you can also access indices as signals. Additionally Array stores also expose a `.length` signal & support Symbol.Iterator.
-Currently the array store function isn't exposed, but they are automatically created when a given property within the store is an array. Hit me up, if you need top-level array support, though in those cases you're probably looking for `indexArray` / `keyArray`
-
-```ts
-const state = store({
-  todos: [
-    { id: 1, text: 'Buy Milk', done: false },
-    { id: 2, text: 'Walk Dog', done: true },
-  ],
+user.mutate((prev) => {
+  prev.age++;
+  return prev;
 });
 
-const firstTodo = state.todos[0]; // Signal<{ text: string, ... }>
-const firstTodoText = state.todos[0].text; // Signal<string>
-
-// Update specific item property without replacing the whole array
-state.todos[0].done.set(true);
-
-const len = state.todos.length(); // reacts to length changes
-
-for (const todo of state.todos) {
-  const t = todo(); // iteration returns proxied children
-  const id = todo.id();
-}
+user.inline((prev) => {
+  prev.age++;
+}); // void return — same effect
 ```
 
-### indexArray/keyArray
+> **Caveat:** A `computed()` that returns a non-primitive value derived from a mutable signal must declare `equal: false` (or `() => false`) — otherwise the reference-equality default suppresses the change notification. This is documented inline on `mutable` itself.
 
-Reactive map helper that stabilizes a source array Signal by length. It provides stability by giving the mapping function a stable Signal<T> for each item based on its index. Sub signals are not re-created, rather they propagate value updates through. This is particularly useful for rendering lists (@for) as it minimizes DOM changes when array items change identity but represent the same conceptual entity.
+### `derived`
 
-`keyArray` is similar, but stabilizes/reconciles via a provided track by function instead of the index. This is computationally more expensive, so use it when "identity" stability is more important than simply data pass-through
-
-Both utilize memory pooling to "ease" GC pressure.
+A two-way-bound slice of another `WritableSignal`. Writes to the derived signal update the source; changes to the source flow through. Use a key/index shorthand for object/array slices, or pass a `{ from, onChange }` pair for custom mappings.
 
 ```typescript
-import { Component, signal } from '@angular/core';
-import { indexArray, keyArray, mutable } from '@mmstack/primitives';
+import { derived } from '@mmstack/primitives';
 
-@Component({
-  selector: 'app-map-demo',
-  template: `
-    <ul>
-      @for (item of displayItems(); track item) {
-        <li>{{ item() }}</li>
-        @if ($first) {
-            <button (click)="updateFirst(item)">Update First</button>
-        }
-      }
-    </ul>
-    <button (click)="addItem()">Add</button>
-  `,
-})
-export class ListComponent {
-  readonly sourceItems = signal([
-    { id: 1, name: 'A' },
-    { id: 2, name: 'B' },
-  ]);
+const user = signal({ name: 'John', age: 30 });
 
-  readonly displayItems = indexArray(this.sourceItems, (child, index) => computed(() => `Item ${index}: ${child().name}`));
+const name = derived(user, 'name'); // WritableSignal<string>
+const list = signal([1, 2, 3]);
+const second = derived(list, 1); // WritableSignal<number>
 
-  // keyArray is similar, but the index becomes dynamic & the child object is static
-  readonly keyed = keyArray(this.sourceItems, (child, index) => computed(() => `Item ${index()}: ${child.name}}`), {
-    key: (item) => item.id
-  });
-
-
-  addItem() {
-    this.sourceItems.update((items) => [...items, { id: Date.now(), name: String.fromCharCode(67 + items.length - 2) }]);
-  }
-
-  updateFirst() {
-    this.sourceItems.update((items) => {
-      items[0] = { ...items[0], name: items[0].name + '+' };
-      return [...items]; // New array, but indexArray keeps stable signals
-    });
-  }
-
-  // since the underlying source is a signal we can also create updaters in the mapper
-  readonly updatableItems = indexArray(this.sourceItems, (child, index) => {
-
-    return {
-      value: computed(() => `Item ${index}: ${child().name}`))
-      updateName: () => child.update((cur) => ({...cur, name: cur.name + '+'}))
-    };
-  });
-
-
-  // since the underlying source is a WritableSignal we can also create updaters in the mapper
-  readonly writableItems = indexArray(this.sourceItems, (child, index) => {
-
-    return {
-      value: computed(() => `Item ${index}: ${child().name}`))
-      updateName: () => child.update((cur) => ({...cur, name: cur.name + '+'}))
-    };
-  });
-
-  // if the source is a mutable signal we can even update them inline
-  readonly sourceItems = mutable([
-    { id: 1, name: 'A' },
-    { id: 2, name: 'B' },
-  ]);
-
-  readonly mutableItems = indexArray(this.sourceItems, (child, index) => {
-
-    return {
-      value: computed(() => `Item ${index}: ${child().name}`))
-      updateName: () => child.inline((cur) => {
-        cur.name += '+';
-      })
-    };
-  });
-}
+// Full custom mapping
+const upper = derived(user, {
+  from: (u) => u.name.toUpperCase(),
+  onChange: (next) => user.update((u) => ({ ...u, name: next.toLowerCase() })),
+});
 ```
 
-### mapObject
+When the source is a `MutableSignal`, the derived signal is also a `MutableSignal` — `derived(state, 'items').mutate(arr => { arr.push(...); return arr })` propagates correctly.
 
-Projects a reactive object (Record<string, T>) into a new object (Record<string, U>), maintaining referential stability for values associated with unchanged keys. This is the Object-equivalent of keyArray.
+### `store` / `mutableStore`
 
-The projection function receives the key and a value Signal. If the source is a WritableSignal or MutableSignal, the provided value signal is also writable (via derived), allowing child components or logic to update the specific property in the source object directly.
-
-```ts
-import { Component, signal, computed } from '@angular/core';
-import { mapObject } from '@mmstack/primitives';
-
-@Component({
-  selector: 'app-settings',
-  template: `
-    @for (key of objectKeys(controls()); track key) {
-      <div class="setting">
-        <span>{{ controls()[key].label }}</span>
-        <button (click)="controls()[key].toggle()">
-          {{ controls()[key].isActive() ? 'ON' : 'OFF' }}
-        </button>
-      </div>
-    }
-  `,
-})
-export class SettingsComponent {
-  objectKeys = Object.keys;
-
-  // Source state
-  readonly settings = signal<Record<string, boolean>>({
-    wifi: true,
-    bluetooth: false,
-  });
-
-  // Mapped object: { [key]: { label, isActive, toggle } }
-  readonly controls = mapObject(
-    this.settings,
-    (key, value) => {
-      // 'value' is a WritableSignal linked to this specific property
-      return {
-        label: key.toUpperCase(),
-        isActive: value, // Expose as ReadOnly for template
-        toggle: () => value.update((v) => !v),
-        destroy: () => console.log(`Cleanup logic for ${key}`),
-      };
-    },
-    {
-      // Optional cleanup hook when a key is removed from the source
-      onDestroy: (mappedItem) => mappedItem.destroy(),
-    },
-  );
-
-  addSetting() {
-    this.settings.update((s) => ({ ...s, airdrop: false }));
-  }
-}
-```
-
-### nestedEffect
-
-Creates an effect that can be nested, similar to SolidJS's `createEffect`.
-
-This primitive enables true hierarchical reactivity. A `nestedEffect` created within another `nestedEffect` is **automatically destroyed and recreated** when the parent re-runs.
-
-It automatically handles injector propagation and lifetime management, allowing you to create fine-grained, conditional side-effects that only track dependencies when they are "live". This is a powerful optimization for scenarios where a "hot" signal (which changes often) should only be tracked when a "cold" signal (a condition that changes rarely) is true.
-
-```ts
-import { Component, signal } from '@angular/core';
-import { nestedEffect } from '@mmstack/primitives';
-
-@Component({ selector: 'app-nested-demo' })
-export class NestedDemoComponent {
-  // `coldGuard` changes rarely
-  readonly coldGuard = signal(false);
-  // `hotSignal` changes very often
-  readonly hotSignal = signal(0);
-
-  constructor() {
-    // A standard effect would track *both* signals and run
-    // every time `hotSignal` changes, even if `coldGuard` is false.
-    // effect(() => {
-    //   if (this.coldGuard()) {
-    //     console.log('Hot signal is:', this.hotSignal());
-    //   }
-    // });
-
-    // `nestedEffect` solves this:
-    nestedEffect(() => {
-      // This outer effect ONLY tracks `coldGuard`.
-      // It does not track `hotSignal`.
-      if (this.coldGuard()) {
-        // This inner effect is CREATED when coldGuard is true
-        // and DESTROYED when it becomes false.
-        nestedEffect(() => {
-          // It only tracks `hotSignal` while it exists.
-          console.log('Hot signal is:', this.hotSignal());
-        });
-      }
-    });
-  }
-}
-```
-
-#### Advanced Example: Fine-grained Lists
-
-`nestedEffect` can be composed with `indexArray` to create truly fine-grained reactive lists, where each item can manage its own side-effects (like external library integrations) that are automatically cleaned up when the item is removed.
-
-```ts
-import { Component, signal, computed } from '@angular/core';
-import { indexArray, nestedEffect } from '@mmstack/primitives';
-
-@Component({ selector: 'app-list-demo' })
-export class ListDemoComponent {
-  readonly users = signal([
-    { id: 1, name: 'Alice' },
-    { id: 2, name: 'Bob' },
-  ]);
-
-  // indexArray creates stable signals for each item
-  readonly mappedUsers = indexArray(
-    this.users,
-    (userSignal, index) => {
-      // Create a side-effect tied to THIS item's lifetime
-      const effectRef = nestedEffect(() => {
-        // This only runs if `userSignal` (this specific user) changes.
-        console.log(`User ${index} updated:`, userSignal().name);
-
-        // e.g., updateAGGridRow(index, userSignal());
-      });
-
-      // Return the data and the cleanup logic
-      return {
-        label: computed(() => `User: ${userSignal().name}`),
-        // This function will be called by `onDestroy`
-        _destroy: () => effectRef.destroy(),
-      };
-    },
-    {
-      // When indexArray removes an item, it calls `onDestroy`
-      onDestroy: (mappedItem) => {
-        mappedItem._destroy(); // Manually destroy the nested effect
-      },
-    },
-  );
-}
-```
-
-### toWritable
-
-A utility function that converts a read-only Signal into a WritableSignal by allowing you to provide custom implementations for the .set() and .update() methods. This is useful for creating controlled write access to signals that are naturally read-only (like those created by computed). This is used under the hood in derived.
+Proxies an object (or signal of an object) into a tree of `WritableSignal`s — one per property, lazily created and cached via `WeakRef`. Arrays expose indices as signals plus a `.length` signal and `Symbol.iterator`. Mutability propagates: if the root is a `MutableSignal`, every child is too.
 
 ```typescript
-import { Component, signal, effect } from '@angular/core';
+import { store, mutableStore } from '@mmstack/primitives';
+
+const state = store({
+  user: { name: 'Alice', address: { city: 'NYC', zip: 10001 } },
+  tags: ['admin', 'editor'],
+});
+
+state.user.address.city(); // Signal read: 'NYC'
+state.user.address.zip.set(90210); // Two-way write into the source
+state.tags[0](); // 'admin'
+state.tags.length(); // 2 (reactive)
+
+const settings = mutableStore({ notifications: { email: true } });
+settings.notifications.mutate((n) => {
+  n.email = false;
+});
+```
+
+Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for those.
+
+### `toWritable`
+
+Turn any read-only `Signal<T>` into a `WritableSignal<T>` by providing custom `set` / `update` implementations. Powers `derived` internally; use it directly when you have a `computed` you want to expose as writable.
+
+```typescript
 import { toWritable } from '@mmstack/primitives';
 
 const user = signal({ name: 'John' });
-
 const name = toWritable(
   computed(() => user().name),
-  (name) => user.update((prev) => ({ ...prev, name })),
-); // WritableSignal<string> bound to user signal
+  (next) => user.update((u) => ({ ...u, name: next })),
+);
 ```
 
-### derived
+## Timing & propagation
 
-Creates a WritableSignal that represents a part of another source WritableSignal (e.g., an object property or an array element), enabling two-way data binding. Changes to the source update the derived signal, and changes to the derived signal (via .set() or .update()) update the source signal accordingly.
+### `debounced`
+
+A `WritableSignal` that holds its read value `ms` milliseconds after the last write. The underlying source is exposed as `.original` for callers that want the immediate value.
 
 ```typescript
-const user = signal({ name: 'John' });
+import { debounce, debounced } from '@mmstack/primitives';
 
-const name = derived(user, 'name'); // WritableSignal<string>, which updates user signal & reacts to changes in the name property
+const query = debounced('', { ms: 300 }); // create + debounce
+const wrapped = debounce(signal(''), { ms: 300 }); // debounce an existing signal
 
-// Full syntax example
-const name2 = derived(user, {
-  from: (u) => u.name,
-  onChange: (name) => user.update((prev) => ({ ...prev, name })),
+effect(() => fetch(query())); // fires 300ms after typing stops
+effect(() => preview(query.original())); // fires immediately
+```
+
+### `throttled`
+
+Rate-limits read propagation to at most one value per `ms` window. Defaults to **trailing-edge only** (the latest write within the window lands at the end). Pass `leading: true` to emit the first write immediately, `trailing: false` to suppress the trailing fire.
+
+```typescript
+import { throttled } from '@mmstack/primitives';
+
+// Trailing edge only — first write held until window closes (default)
+const t = throttled(0, { ms: 200 });
+
+// Lodash-style leading + trailing
+const both = throttled(0, { ms: 200, leading: true, trailing: true });
+
+// Leading edge only — fires immediately, ignores writes during cooldown
+const lead = throttled(0, { ms: 200, leading: true, trailing: false });
+```
+
+Same `.original` escape hatch as `debounced`.
+
+### `until`
+
+Resolves a Promise when a signal value satisfies a predicate. Supports type-narrowing predicates, optional timeout, and auto-cancellation when the consuming context is destroyed.
+
+```typescript
+import { until } from '@mmstack/primitives';
+
+const event = signal<Event | null>(null);
+
+// Narrowing predicate — promise resolves with MouseEvent
+const click = await until(
+  event,
+  (e): e is MouseEvent => e instanceof MouseEvent,
+);
+
+// With a timeout
+await until(progress, (p) => p === 100, { timeout: 5_000 });
+```
+
+## Reactive collections
+
+### `indexArray` / `keyArray`
+
+Map a source array signal into a stable array of derived values. `indexArray` stabilizes by **position** — each index gets a writable signal whose value is the item at that index. `keyArray` stabilizes by **identity** (via an optional `key` selector) — moving an item preserves its mapped output and just updates the item's index signal.
+
+Both pool their internal buffers, so reordering a 10k-item list is much cheaper than `.map()` of a `computed`.
+
+```typescript
+import { indexArray, keyArray, mutable } from '@mmstack/primitives';
+
+const items = mutable([
+  { id: 1, name: 'A' },
+  { id: 2, name: 'B' },
+]);
+
+// Position-stable: `child` is a MutableSignal<{ id, name }> for the current index.
+const labels = indexArray(items, (child, index) =>
+  computed(() => `Item ${index}: ${child().name}`),
+);
+
+// Identity-stable: `child` is the item value, `index` is a Signal<number>.
+const keyed = keyArray(
+  items,
+  (child, index) => computed(() => `${index()}: ${child.name}`),
+  { key: (item) => item.id },
+);
+```
+
+`indexArray` is the cheaper default. Reach for `keyArray` only when DOM/instance reuse across reorders matters — `<for>` blocks rendering heavy components, charts, drag-and-drop reordering, etc.
+
+### `mapObject`
+
+The object equivalent of `keyArray`: map `Record<K, V>` into `Record<K, U>` with referential stability for unchanged keys. The mapping function receives the key and a writable signal slice (if the source is writable).
+
+```typescript
+import { mapObject } from '@mmstack/primitives';
+
+const settings = signal<Record<string, boolean>>({
+  wifi: true,
+  bluetooth: false,
 });
+
+const controls = mapObject(
+  settings,
+  (key, value) => ({
+    label: key.toUpperCase(),
+    isActive: value, // WritableSignal<boolean>
+    toggle: () => value.update((v) => !v),
+  }),
+  { onDestroy: (entry) => console.log(`Removed ${entry.label}`) },
+);
 ```
 
-### chunked
+## Effects
 
-Creates a Signal that progressively emits segments of a source array, chunk by chunk. This is a time-slicing primitive designed to keep the main thread responsive when rendering large lists or processing heavy data sets.
+### `nestedEffect`
 
-Instead of rendering 10,000 items at once (which would freeze the UI), chunked emits the first batch immediately, then schedules the next batch to be added in the next frame (or after a delay), repeating until the full list is visible. If the source array changes, the process resets and starts over from the first chunk.
-
-```ts
-import { Component, signal } from '@angular/core';
-import { chunked } from '@mmstack/primitives';
-
-@Component({
-  selector: 'app-heavy-list',
-  template: `
-    <div class="status-bar">Loaded: {{ visibleItems().length }} / {{ allItems().length }}</div>
-
-    <ul>
-      @for (item of visibleItems(); track item.id) {
-        <li>{{ item.label }}</li>
-      }
-    </ul>
-  `,
-})
-export class HeavyListComponent {
-  // A heavy source with 10,000 items
-  readonly allItems = signal(Array.from({ length: 10000 }, (_, i) => ({ id: i, label: `Item #${i}` })));
-
-  // Process 100 items per animation frame to prevent UI blocking
-  readonly visibleItems = chunked(this.allItems, {
-    chunkSize: 100,
-    delay: 'frame', // 'frame' | 'microtask' | number (ms)
-  });
-}
-```
-
-### pooled / pooledArray / pooledMap / pooledSet
-
-A double-buffered object pool for `computed` signal outputs. After a brief warm-up the pool reaches steady state with **zero allocations per recomputation** — two buffers are swapped on every read, with `reset` invoked before each `computation`. Each read returns a different identity from the previous read, so default `Object.is` equality still flags changes correctly. Most users will reach for the preset helpers (`pooledArray`, `pooledMap`, `pooledSet`); drop down to `pooled` only when you need a custom buffer type.
-
-> **Retention contract:** the value returned from a pooled signal is only valid until the next read of that signal. The container is reused on the second-next read and will be `reset` first, mutating any reference you still hold. Do not store the result in component state, async closures, or anywhere outside the same reactive tick. Treat it as scratch output consumed synchronously.
-
-Use these when a computed is recomputed at high frequency and produces a large allocation (filter/map outputs over big arrays, lookup indices, RAF-driven computeds). For typical UI computeds over small data, just use `computed` — the docs cost and footgun aren't worth saving an allocation that doesn't show up in a profile.
+A SolidJS-style hierarchical effect: a `nestedEffect` created inside another `nestedEffect` is automatically destroyed and recreated when the parent re-runs. The outer effect only tracks the dependencies you read in _its_ body; the inner effect's deps are tracked only while it's alive.
 
 ```typescript
-import { Component, signal } from '@angular/core';
-import { pooledArray, pooledMap, pooledSet } from '@mmstack/primitives';
+import { nestedEffect } from '@mmstack/primitives';
 
-@Component({
-  selector: 'app-pooled-demo',
-  template: `<p>Active: {{ activeIds().length }} / {{ items().length }}</p>`,
-})
-export class PooledDemoComponent {
-  readonly items = signal(Array.from({ length: 10_000 }, (_, i) => ({ id: i, active: i % 2 === 0 })));
-
-  // Recycles a single number[] across recomputations.
-  readonly activeIds = pooledArray<number[]>((buf) => {
-    for (const item of this.items()) {
-      if (item.active) buf.push(item.id);
-    }
-    return buf;
-  });
-
-  // Recycles a Map for fast id → item lookups.
-  readonly byId = pooledMap<Map<number, { id: number; active: boolean }>>((buf) => {
-    for (const item of this.items()) buf.set(item.id, item);
-    return buf;
-  });
-
-  // Recycles a Set of distinct values.
-  readonly distinctFlags = pooledSet<Set<boolean>>((buf) => {
-    for (const item of this.items()) buf.add(item.active);
-    return buf;
-  });
-}
-```
-
-Need a custom buffer type (typed array, your own struct)? Use `pooled` directly:
-
-```typescript
-import { signal } from '@angular/core';
-import { pooled } from '@mmstack/primitives';
-
-const source = signal<{ active: boolean }[]>([]);
-
-// Pre-allocate both slots at construction (eager) — useful when create() is expensive.
-const counters = pooled<{ total: number; active: number }>({
-  create: () => ({ total: 0, active: 0 }),
-  reset: (c) => {
-    c.total = 0;
-    c.active = 0;
-  },
-  computation: (c) => {
-    for (const item of source()) {
-      c.total++;
-      if (item.active) c.active++;
-    }
-    return c;
-  },
-  eager: true,
-});
-```
-
-Complementary to `linkedSignal` (which carries previous *state* forward, not the *container*) and `chunked` (which time-slices large outputs across frames).
-
-### tabSync
-
-A low-level primitive that synchronizes a WritableSignal across multiple browser tabs or windows of the same application using the BroadcastChannel API. Used by the cache in @mmstack/resource & the stored signal.
-
-When the signal is updated in one tab, the new value is broadcast and automatically set in the corresponding signal in all other open tabs. This is ideal for synchronizing global state like user sessions, theme preferences, or shopping cart data.
-
-#### Key Features:
-
-- SSR Safe: Gracefully degrades to a standard signal on the server.
-- Automatic Cleanup: Handles event listeners and disconnects when the injection context is destroyed.
-- Smart ID Generation: Can auto-generate IDs for rapid prototyping, but supports explicit IDs for production stability.
-
-Note: While tabSync attempts to generate a deterministic ID based on the call site, it is highly recommended to provide a manual id string in production to ensure stability across different builds and minification processes.
-
-```ts
-import { Component, signal } from '@angular/core';
-import { tabSync } from '@mmstack/primitives';
-
-@Component({
-  selector: 'app-sync-demo',
-  template: `
-    <p>Open this page in two tabs!</p>
-
-    <button (click)="counter.update((n) => n + 1)">Count: {{ counter() }}</button>
-
-    <select [ngModel]="theme()" (ngModelChange)="theme.set($event)">
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-    </select>
-  `,
-})
-export class SyncDemoComponent {
-  // 1. Quick usage (Auto-ID)
-  // Good for dev, but ID might change if code moves lines/files
-  readonly counter = tabSync(signal(0));
-
-  // 2. Production usage (Explicit ID)
-  // Recommended: Ensures tabs always find each other regardless of minification
-  readonly theme = tabSync(signal('light'), {
-    id: 'global-app-theme',
-  });
-}
-```
-
-### withHistory
-
-Enhances any WritableSignal with a complete undo/redo history stack. This is useful for building user-friendly editors, forms, or any feature where reverting changes is necessary. It provides .undo(), .redo(), and .clear() methods, along with reactive boolean signals like .canUndo and .canRedo to easily enable or disable UI controls.
-
-```typescript
-import { FormsModule } from '@angular/forms';
-import { JsonPipe } from '@angular/common';
-import { withHistory } from '@mmstack/primitives';
-import { Component, signal, effect } from '@angular/core';
-
-@Component({
-  selector: 'app-history-demo',
-  imports: [FormsModule, JsonPipe],
-  template: `
-    <h4>Simple Text Editor</h4>
-    <textarea [(ngModel)]="text" rows="4" cols="50"></textarea>
-    <div class="buttons" style="margin-top: 8px; display: flex; gap: 8px;">
-      <button (click)="text.undo()" [disabled]="!text.canUndo()">Undo</button>
-      <button (click)="text.redo()" [disabled]="!text.canRedo()">Redo</button>
-      <button (click)="text.clear()" [disabled]="!text.canClear()">Clear History</button>
-    </div>
-    <p>History Stack:</p>
-    <pre>{{ text.history() | json }}</pre>
-  `,
-})
-export class HistoryDemoComponent {
-  // Create a signal and immediately enhance it with history capabilities.
-  text = withHistory(signal('Hello, type something!'), { maxSize: 10 });
-
-  constructor() {
-    // You can react to history changes as well
-    effect(() => {
-      console.log('History stack changed:', this.text.history());
+// `coldGuard` changes rarely, `hotSignal` fires often.
+nestedEffect(() => {
+  if (coldGuard()) {
+    nestedEffect(() => {
+      // Only tracks `hotSignal` while coldGuard is true.
+      console.log(hotSignal());
     });
   }
-}
+});
 ```
 
-### sensor
+Composes with `indexArray` to give each mapped item its own effect that's automatically torn down when the item is removed — see the doc comments on `nestedEffect` for the pattern.
 
-### sensor
+## History & persistence
 
-The `sensor()` facade provides a unified way to create various reactive sensor signals that track browser events, states, and user preferences. You specify the type of sensor you want (e.g., `'mousePosition'`, `'networkStatus'`, `'windowSize'`, `'dark-mode'`), and it returns the corresponding signal, often with specific properties or methods. These primitives are generally SSR-safe and handle their own event listener cleanup.
+### `withHistory`
 
-You can either use the `sensor('sensorType', options)` facade or import the specific sensor functions directly if you prefer.
+Wrap any `WritableSignal` (or pass an initial value) into one with `.undo()`, `.redo()`, `.clear()`, `.canUndo`, `.canRedo`, `.canClear`, and a reactive `.history` stack. `maxSize` bounds both the undo and redo stacks, with `cleanupStrategy: 'shift' | 'halve'`.
 
-**Facade Usage Example:**
+```typescript
+import { withHistory } from '@mmstack/primitives';
+
+const text = withHistory('Hello', { maxSize: 10, cleanupStrategy: 'halve' });
+
+text.set('Hello world');
+text.undo(); // back to 'Hello'
+text.redo(); // forward to 'Hello world'
+text.canUndo(); // Signal<boolean>
+```
+
+### `stored`
+
+A `WritableSignal` whose value is synchronized with `localStorage` (or any compatible adapter). SSR-safe, supports dynamic keys, custom serialization, cross-tab sync via the `storage` event, and per-key cleanup strategies. The returned signal carries a `.clear()` method and a reactive `.key` signal.
+
+```typescript
+import { stored } from '@mmstack/primitives';
+
+const theme = stored<'light' | 'dark' | 'system'>('system', {
+  key: 'app-theme',
+  syncTabs: true,
+});
+
+theme.set('dark');
+theme.clear(); // restores fallback
+```
+
+### `tabSync`
+
+Mirrors a `WritableSignal` across browser tabs via `BroadcastChannel`. Used internally by `@mmstack/resource`'s cache invalidation. Provide an explicit `id` in production — the auto-generated stack-frame ID is fine for prototyping but unstable across minified builds.
+
+```typescript
+import { tabSync } from '@mmstack/primitives';
+
+const cart = tabSync(signal([]), { id: 'shopping-cart' });
+```
+
+## Performance helpers
+
+### `chunked`
+
+Time-slices a large array into progressive emissions to keep the main thread responsive. Emits the first `chunkSize` items immediately, then schedules the next batch on the next animation frame, microtask, or after a `ms` delay. Resets when the source array changes.
+
+```typescript
+import { chunked } from '@mmstack/primitives';
+
+const visible = chunked(allItems, { chunkSize: 100, delay: 'frame' });
+```
+
+### `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
+
+Double-buffered object pools for high-frequency `computed` outputs. After a brief warmup, recomputation reaches **zero allocations**: two buffers swap on every read, with `reset` called on the dirty one before `computation` writes into it.
+
+```typescript
+import { pooledArray, pooledMap } from '@mmstack/primitives';
+
+// Reuses one array across reads — no GC churn even at 60fps.
+const activeIds = pooledArray<number[]>((buf) => {
+  for (const item of items()) if (item.active) buf.push(item.id);
+  return buf;
+});
+
+const byId = pooledMap<Map<number, Item>>((buf) => {
+  for (const item of items()) buf.set(item.id, item);
+  return buf;
+});
+```
+
+> **Retention contract:** the returned value is only valid until the next read. Do not store it in component state, async closures, or anywhere outside the current reactive tick — the container is recycled and `reset`, mutating any reference you still hold.
+
+For custom buffer types (typed arrays, structs) drop down to `pooled` directly. Complementary to `linkedSignal` (which carries previous _state_ forward) and `chunked` (which time-slices large outputs).
+
+## Sensors
+
+The `sensor()` facade creates browser-state signals with consistent SSR fallbacks and `DestroyRef`-driven cleanup. Each sensor is also available as a standalone function if you'd rather skip the facade.
 
 ```typescript
 import { sensor } from '@mmstack/primitives';
-import { effect } from '@angular/core';
 
-const network = sensor('networkStatus');
-const mouse = sensor('mousePosition', { throttle: 50, coordinateSpace: 'page' });
+const network = sensor('networkStatus'); // Signal<boolean> + .since
+const isDark = sensor('dark-mode'); // Signal<boolean>
 const winSize = sensor('windowSize', { throttle: 150 });
-const isDark = sensor('dark-mode');
-
-effect(() => console.log('Online:', network().isOnline));
-effect(() => console.log('Mouse X:', mouse().x));
-effect(() => console.log('Window Width:', winSize().width));
-effect(() => console.log('Dark Mode Preferred:', isDark()));
-```
-
-Individual sensors available through the facade or direct import:
-
-#### mousePosition
-
-Tracks the mouse cursor's position. By default, updates are throttled to 100ms. It provides the main throttled signal and an .unthrottled property to access the raw updates.
-
-Key Options: target, coordinateSpace ('client' or 'page'), touch (boolean), throttle (ms).
-
-```typescript
-import { Component, effect } from '@angular/core';
-import { sensor } from '@mmstack/primitives'; // Or import { mousePosition }
-import { JsonPipe } from '@angular/common';
-
-@Component({
-  selector: 'app-mouse-tracker',
-  imports: [JsonPipe],
-  template: `
-    <div (mousemove)="onMouseMove($event)" style="width: 300px; height: 200px; border: 1px solid black; padding: 10px; user-select: none;">Move mouse here...</div>
-    <p><b>Throttled Position:</b> {{ mousePos() | json }}</p>
-    <p><b>Unthrottled Position:</b> {{ mousePos.unthrottled() | json }}</p>
-  `,
-})
-export class MouseTrackerComponent {
-  // Using the facade
-  readonly mousePos = sensor('mousePosition', { coordinateSpace: 'page', throttle: 200 });
-  // Or direct import:
-  // readonly mousePos = mousePosition({ coordinateSpace: 'page', throttle: 200 });
-
-  // Note: The (mousemove) event here is just to show the example area works.
-  // The mousePosition sensor binds its own listeners based on the target option.
-  onMouseMove(event: MouseEvent) {
-    // No need to call set, mousePosition handles it.
-  }
-
-  constructor() {
-    effect(() => console.log('Throttled Mouse:', this.mousePos()));
-    effect(() => console.log('Unthrottled Mouse:', this.mousePos.unthrottled()));
-  }
-}
-```
-
-#### networkStatus
-
-Tracks the browser's online/offline status. The returned signal is a boolean (`true` for online) and has an attached `.since` signal indicating when the status last changed.
-
-```typescript
-import { Component, effect } from '@angular/core';
-import { sensor } from '@mmstack/primitives'; // Or import { networkStatus }
-import { DatePipe } from '@angular/common';
-
-@Component({
-  selector: 'app-network-info',
-  imports: [DatePipe],
-  template: `
-    @if (netStatus()) {
-      <p>✅ Online (Since: {{ netStatus.since() | date: 'short' }})</p>
-    } @else {
-      <p>❌ Offline (Since: {{ netStatus.since() | date: 'short' }})</p>
-    }
-  `,
-})
-export class NetworkInfoComponent {
-  readonly netStatus = sensor('networkStatus');
-
-  constructor() {
-    effect(() => {
-      console.log('Network online:', this.netStatus(), 'Since:', this.netStatus.since());
-    });
-  }
-}
-```
-
-#### pageVisibility
-
-Tracks the page's visibility state (e.g., 'visible', 'hidden') using the Page Visibility API.
-
-```typescript
-import { Component, effect } from '@angular/core';
-import { sensor } from '@mmstack/primitives'; // Or import { pageVisibility }
-
-@Component({
-  selector: 'app-visibility-logger',
-  template: `<p>Page is currently: {{ visibility() }}</p>`,
-})
-export class VisibilityLoggerComponent {
-  readonly visibility = sensor('pageVisibility');
-
-  constructor() {
-    effect(() => {
-      console.log('Page visibility changed to:', this.visibility());
-      if (this.visibility() === 'hidden') {
-        // Perform cleanup or pause tasks
-      }
-    });
-  }
-}
-```
-
-#### windowSize
-
-Tracks the browser window's inner dimensions (width and height). Updates are throttled by default (100ms). It provides the main throttled signal and an .unthrottled property to access raw updates.
-
-```typescript
-import { Component, effect, computed } from '@angular/core';
-import { sensor } from '@mmstack/primitives'; // Or import { windowSize }
-
-@Component({
-  selector: 'app-responsive-display',
-  template: `
-    <p>Current Window Size: {{ winSize().width }}px x {{ winSize().height }}px</p>
-    <p>Unthrottled: W: {{ winSize.unthrottled().width }} H: {{ winSize.unthrottled().height }}</p>
-    @if (isMobileDisplay()) {
-      <p>Displaying mobile layout.</p>
-    } @else {
-      <p>Displaying desktop layout.</p>
-    }
-  `,
-})
-export class ResponsiveDisplayComponent {
-  readonly winSize = sensor('windowSize', { throttle: 150 });
-  // Or: readonly winSize = windowSize({ throttle: 150 });
-
-  readonly isMobileDisplay = computed(() => this.winSize().width < 768);
-
-  constructor() {
-    effect(() => console.log('Window Size (Throttled):', this.winSize()));
-  }
-}
-```
-
-#### scrollPosition
-
-Tracks the scroll position (x, y) of the window or a specified HTML element. Updates are throttled by default (100ms). It provides the main throttled signal and an .unthrottled property to access raw updates.
-
-```typescript
-import { Component, effect, ElementRef, viewChild } from '@angular/core';
-import { sensor } from '@mmstack/primitives'; // Or import { scrollPosition }
-import { JsonPipe } from '@angular/common';
-
-@Component({
-  selector: 'app-scroll-indicator',
-  imports: [JsonPipe],
-  template: `
-    <div style="height: 100px; border-bottom: 2px solid red; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 10;">
-      Page Scroll Y: {{ pageScroll().y }}px
-      <p>Unthrottled Y: {{ pageScroll.unthrottled().y }}</p>
-    </div>
-    <div #scrollableContent style="height: 2000px; padding-top: 120px;">Scroll down...</div>
-  `,
-})
-export class ScrollIndicatorComponent {
-  readonly pageScroll = sensor('scrollPosition', { throttle: 50 });
-  // Or: readonly pageScroll = scrollPosition({ throttle: 50 });
-
-  constructor() {
-    effect(() => {
-      // Example: Change header style based on scroll
-      console.log('Page scroll Y (Throttled):', this.pageScroll().y);
-    });
-  }
-}
-```
-
-#### mediaQuery, prefersDarkMode() & prefersReducedMotion()
-
-A generic mediaQuery primitive, you can use directly for any CSS media query. Two specific versions have been created for `prefersDarkMode()` & `prefersReducedMotion()`.
-Reacts to changes in preferences & exposes a `Signal<boolean>`.
-
-```typescript
-import { Component, effect } from '@angular/core';
-import { mediaQuery, prefersDarkMode, prefersReducedMotion } from '@mmstack/primitives'; // Direct import
-
-@Component({
-  selector: 'app-layout-checker',
-  template: `
-    @if (isLargeScreen()) {
-      <p>Using large screen layout.</p>
-    } @else {
-      <p>Using small screen layout.</p>
-    }
-  `,
-})
-export class LayoutCheckerComponent {
-  readonly isLargeScreen = mediaQuery('(min-width: 1280px)');
-  readonly prefersDark = prefersDarkMode(); // is just a pre-defined mediaQuery signal
-  readonly prefersReducedMotion = prefersReducedMotion(); // is just a pre-defined mediaQuery signal
-  constructor() {
-    effect(() => {
-      console.log('Is large screen:', this.isLargeScreen());
-    });
-  }
-}
-```
-
-### until
-
-The `until` primitive provides a powerful way to bridge Angular's reactive signals with imperative, Promise-based asynchronous code. It returns a Promise that resolves when the value of a given signal satisfies a specified predicate function.
-
-This is particularly useful for:
-
-- Orchestrating complex sequences of operations (e.g., waiting for data to load or for a user action to complete before proceeding).
-- Writing tests where you need to await a certain state before making assertions.
-- Integrating with other Promise-based APIs.
-
-It also supports optional timeouts and automatic cancellation via DestroyRef if the consuming context (like a component) is destroyed before the condition is met.
-
-```typescript
-import { signal } from '@angular/core';
-import { until } from '@mmstack/primitives';
-
-it('should reject on timeout if the condition is not met in time', async () => {
-  const count = signal(0);
-  const timeoutDuration = 500;
-
-  const untilPromise = until(count, (value) => value >= 10, { timeout: timeoutDuration });
-
-  // Simulate a change that doesn't meet the condition
-  setTimeout(() => count.set(1), 10);
-
-  await expect(untilPromise).toThrow(`until: Timeout after ${timeoutDuration}ms.`);
+const mouse = sensor('mousePosition', {
+  coordinateSpace: 'page',
+  throttle: 50,
 });
 ```
 
-### elementVisibility
+`sensors(['networkStatus', 'windowSize'])` returns a record of all requested sensors in one call.
 
-Tracks if a target DOM element is intersecting with the viewport (or a specified root element) using the `IntersectionObserver` API. This is highly performant for use cases like lazy-loading content or triggering animations when elements scroll into view.
+### Available sensors
 
-It can observe a static `ElementRef`/`Element` or a `Signal` that resolves to one, allowing for dynamic targets. The returned signal emits the full `IntersectionObserverEntry` object (or `undefined`) & exposes a sub-signal `.visible` which is just a boolean signal for ease of use
+| Type                | Standalone fn                | Returns                                                | Notes                                                                      |
+| ------------------- | ---------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `networkStatus`     | `networkStatus()`            | `Signal<boolean>` + `.since`                           | Online/offline. `since` is `Signal<Date>` of last transition.              |
+| `pageVisibility`    | `pageVisibility()`           | `Signal<DocumentVisibilityState>`                      | `'visible' \| 'hidden' \| 'prerender'`.                                    |
+| `mediaQuery`        | `mediaQuery(q)`              | `Signal<boolean>`                                      | Generic CSS media-query tracker.                                           |
+| `dark-mode`         | `prefersDarkMode()`          | `Signal<boolean>`                                      | Shorthand for `(prefers-color-scheme: dark)`.                              |
+| `reduced-motion`    | `prefersReducedMotion()`     | `Signal<boolean>`                                      | Shorthand for `(prefers-reduced-motion: reduce)`.                          |
+| `windowSize`        | `windowSize()`               | `Signal<{ width, height }>` + `.unthrottled`           | Throttled to 100ms by default.                                             |
+| `scrollPosition`    | `scrollPosition()`           | `Signal<{ x, y }>` + `.unthrottled`                    | Window or element scroll, throttled 100ms.                                 |
+| `mousePosition`     | `mousePosition()`            | `Signal<{ x, y }>` + `.unthrottled`                    | Throttled 100ms. `coordinateSpace: 'client' \| 'page'`, optional `touch`.  |
+| `elementVisibility` | `elementVisibility(target?)` | `Signal<IntersectionObserverEntry?>` + `.visible`      | IntersectionObserver-based, `.visible` is a boolean shorthand.             |
+| `elementSize`       | `elementSize(target?)`       | `Signal<{ width, height }?>`                           | ResizeObserver-based. Defaults to `border-box`.                            |
+| `geolocation`       | `geolocation(opt?)`          | `Signal<GeolocationPosition?>` + `.error` + `.loading` | One-shot by default; pass `watch: true` for `watchPosition`.               |
+| `clipboard`         | `clipboard()`                | `Signal<string>` + `.copy(v)` + `.isSupported`         | Mirrors clipboard contents; `.copy` writes through and updates the signal. |
+| `orientation`       | `orientation()`              | `Signal<{ angle, type }>`                              | Tracks `screen.orientation`.                                               |
+| `batteryStatus`     | `batteryStatus()`            | `Signal<BatteryStatus \| null>`                        | `null` until `navigator.getBattery()` resolves, or forever if unsupported. |
+| `idle`              | `idle({ ms })`               | `Signal<boolean>` + `.since`                           | Flips to `true` after `ms` of inactivity. Configurable activity events.    |
+| `focusWithin`       | `focusWithin(target?)`       | `Signal<boolean>`                                      | Mirrors the `:focus-within` CSS pseudo-class.                              |
+
+Element-targeting sensors (`elementSize`, `elementVisibility`, `focusWithin`) default `target` to `inject(ElementRef)` so they're drop-in inside a component.
+
+### `signalFromEvent`
+
+A generic EventTarget → Signal helper. Not surfaced through the `sensor()` facade (it needs positional arguments rather than an options bag), but it's how most of the sensors above are shaped under the hood.
 
 ```typescript
-import { Component, effect, ElementRef, viewChild, computed } from '@angular/core';
-import { elementVisibility } from '@mmstack/primitives';
+import { signalFromEvent } from '@mmstack/primitives';
+
+// Raw event signal
+const lastClick = signalFromEvent<MouseEvent>(document, 'click', null);
+
+// Projecting overload — pluck just the data you want
+const lastPoint = signalFromEvent<MouseEvent, { x: number; y: number }>(
+  document,
+  'mousemove',
+  { x: 0, y: 0 },
+  (e) => ({ x: e.clientX, y: e.clientY }),
+);
+```
+
+The `target` accepts a static `EventTarget`, an `ElementRef`, or a `Signal` resolving to either — when the signal flips, the listener is moved automatically.
+
+### Sensor example
+
+```typescript
+import { Component } from '@angular/core';
+import { sensor } from '@mmstack/primitives';
 
 @Component({
-  selector: 'app-lazy-load-item',
+  selector: 'app-network-badge',
   template: `
-    <div #itemToObserve style="height: 300px; margin-top: 100vh; border: 2px solid green;">
-      @if (intersectionEntry.visible()) {
-        <p>This content was lazy-loaded because it became visible!</p>
-      } @else {
-        <p>Item is off-screen. Scroll down to load it.</p>
-      }
-    </div>
+    @if (network()) {
+      <span class="online"
+        >Online since {{ network.since() | date: 'short' }}</span
+      >
+    } @else {
+      <span class="offline"
+        >Offline since {{ network.since() | date: 'short' }}</span
+      >
+    }
   `,
 })
-export class LazyLoadItemComponent {
-  readonly itemRef = viewChild.required<ElementRef<HTMLDivElement>>('itemToObserve', {
-    read: ElementRef,
-  });
-
-  // Observe the element, get the full IntersectionObserverEntry
-  readonly intersectionEntry = elementVisibility(this.itemRef);
-
-  constructor() {
-    effect(() => {
-      if (this.intersectionEntry.visible()) {
-        console.log('Item is now visible!', this.intersectionEntry());
-      } else {
-        console.log('Item is no longer visible or not yet visible.');
-      }
-    });
-  }
+export class NetworkBadgeComponent {
+  protected readonly network = sensor('networkStatus');
 }
 ```
+
+## Pipelines
+
+### `piped` and `pipeable`
+
+Adds a chainable, fully typed `.pipe(...)` and `.map(...)` to any signal. `piped(initial)` creates a writable signal already wrapped; `pipeable(existing)` retrofits the API onto a signal you already have.
+
+```typescript
+import { piped, pipeable, map, distinct, scan } from '@mmstack/primitives';
+
+const count = piped(1);
+
+// .map composes value -> value transforms inline
+const label = count.map(
+  (n) => n * 2,
+  (n) => `#${n}`,
+);
+
+// .pipe composes operators (signal -> signal)
+const total = pipeable(signal(10)).pipe(
+  map((n) => n * 3),
+  distinct(),
+  scan((acc, n) => acc + n, 0),
+);
+```
+
+### Operators
+
+All operators are `(src: Signal<I>) => Signal<O>` and compose via `.pipe(...)`.
+
+| Operator                         | Shape                      | Notes                                                                   |
+| -------------------------------- | -------------------------- | ----------------------------------------------------------------------- |
+| `select(fn, opt?)`               | `(I) => O`                 | Projection with optional equality. Identical to `map` + `distinct`.     |
+| `map(fn)`                        | `(I) => O`                 | Pure transform.                                                         |
+| `distinct(equal?)`               | `T -> T`                   | Suppress emissions when `equal(prev, next)` returns `true`.             |
+| `combineWith(other, fn)`         | `(A, B) => R`              | Project two signals together.                                           |
+| `filter(predicate)`              | `T -> T \| undefined`      | Keeps last passing value; returns `undefined` until the first match.    |
+| `filterWith(predicate, initial)` | `T -> T`                   | Same as `filter` but emits `initial` before the first match.            |
+| `tap(fn, injector?)`             | `T -> T`                   | Runs a side effect via `effect()`; pass an `Injector` when out of DI.   |
+| `startWith(initial)`             | `T -> T \| U`              | Emits `initial` first, then mirrors source.                             |
+| `pairwise()`                     | `T -> [T \| undefined, T]` | Emits `[prev, curr]` pairs (prev is `undefined` on the first emission). |
+| `scan(reducer, seed)`            | `(R, T) => R`              | Reduce-like accumulator across emissions.                               |
+
+## License
+
+MIT © [Miha Mulec](https://github.com/mihajm)

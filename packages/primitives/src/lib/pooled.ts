@@ -80,11 +80,9 @@ export function pooled<T, U = T>({
 
     if (current !== undefined) {
       if (currentFresh) {
-        // never-mutated buffer leaving the active slot; nothing to clean
         other = current;
       } else {
-        // reset on release: clean the dirty buffer as it goes back into the pool
-        // (also threads the swap-return correctly into the pool's spare slot)
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by the `current !== undefined` check above
         other = untracked(() => reset(current!)) ?? current;
       }
     }

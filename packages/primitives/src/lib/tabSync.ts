@@ -64,9 +64,37 @@ export function generateDeterministicID(): string {
   );
 }
 
-type SyncSignalOptions = {
+/*
+ * @deprecated Use `SyncSignalOptions` instead and pass it as the second argument to `tabSync`.
+ */
+type LegacySyncSignalOptions = {
   id?: string;
 };
+
+/*
+ * Options for configuring the behavior of the `tabSync` function.
+ */
+export type SyncSignalOptions = {
+  /* The channel id used to synchronize across tabs */
+  id: string;
+};
+
+/**
+ * @example tabSync(signal('dark), {id: 'theme})
+ */
+export function tabSync<T extends WritableSignal<any>>(
+  sig: T,
+  opt: SyncSignalOptions | string,
+): T;
+
+/**
+ * @deprecated Use `tabSync` with `SyncSignalOptions` instead and pass the options as the second argument
+ * @throws {Error} When deterministic ID generation fails and no explicit ID is provided
+ */
+export function tabSync<T extends WritableSignal<any>>(
+  sig: T,
+  opt?: LegacySyncSignalOptions,
+): T;
 
 /**
  * Synchronizes a WritableSignal across browser tabs using BroadcastChannel API.
@@ -77,14 +105,11 @@ type SyncSignalOptions = {
  *
  * @template T - The type of the WritableSignal
  * @param sig - The WritableSignal to synchronize across tabs
- * @param opt - Optional configuration object
- * @param opt.id - Explicit channel ID for synchronization. If not provided,
- *                 a deterministic ID is generated based on the call site.
- *                 Use explicit IDs in production for reliability.
+ * @param opt - configuration object
+ * @param opt.id - Explicit channel ID for synchronization.
  *
  * @returns The same WritableSignal instance, now synchronized across tabs
  *
- * @throws {Error} When deterministic ID generation fails and no explicit ID is provided
  *
  * @example
  * ```typescript
@@ -107,11 +132,12 @@ type SyncSignalOptions = {
  */
 export function tabSync<T extends WritableSignal<any>>(
   sig: T,
-  opt?: SyncSignalOptions,
+  opt?: SyncSignalOptions | LegacySyncSignalOptions | string,
 ): T {
   if (isPlatformServer(inject(PLATFORM_ID))) return sig;
 
-  const id = opt?.id || generateDeterministicID();
+  const id =
+    typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());
 
   const bus = inject(MessageBus);
 

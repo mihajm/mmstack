@@ -1,6 +1,17 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { combineWith, distinct, filter, map, select, tap } from './operators';
+import {
+  combineWith,
+  distinct,
+  filter,
+  filterWith,
+  map,
+  pairwise,
+  scan,
+  select,
+  startWith,
+  tap,
+} from './operators';
 import { pipeable } from './pipeble';
 
 describe('operators', () => {
@@ -122,6 +133,81 @@ describe('operators', () => {
         TestBed.tick();
         expect(spy).toHaveBeenCalledWith(20);
         expect(tapped()).toBe(20);
+      });
+    });
+  });
+
+  describe('filterWith', () => {
+    it('should emit initial until predicate passes, then mirror source', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(1);
+        const ps = pipeable(source);
+        const evens = ps.pipe(filterWith((n) => n % 2 === 0, -1));
+
+        expect(evens()).toBe(-1); // initial — predicate failed for first value
+
+        source.set(2);
+        expect(evens()).toBe(2);
+
+        source.set(3);
+        expect(evens()).toBe(2); // keeps last passing
+
+        source.set(4);
+        expect(evens()).toBe(4);
+      });
+    });
+  });
+
+  describe('startWith', () => {
+    it('should emit initial first, then mirror source', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(10);
+        const ps = pipeable(source);
+        const withInitial = ps.pipe(startWith('start'));
+
+        expect(withInitial()).toBe('start');
+
+        source.set(20);
+        expect(withInitial()).toBe(20);
+
+        source.set(30);
+        expect(withInitial()).toBe(30);
+      });
+    });
+  });
+
+  describe('pairwise', () => {
+    it('should emit [prev, curr] tuples', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(1);
+        const ps = pipeable(source);
+        const pairs = ps.pipe(pairwise<number>());
+
+        expect(pairs()).toEqual([undefined, 1]);
+
+        source.set(2);
+        expect(pairs()).toEqual([1, 2]);
+
+        source.set(5);
+        expect(pairs()).toEqual([2, 5]);
+      });
+    });
+  });
+
+  describe('scan', () => {
+    it('should accumulate values across emissions', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(1);
+        const ps = pipeable(source);
+        const sum = ps.pipe(scan<number, number>((acc, n) => acc + n, 0));
+
+        expect(sum()).toBe(1);
+
+        source.set(2);
+        expect(sum()).toBe(3);
+
+        source.set(3);
+        expect(sum()).toBe(6);
       });
     });
   });

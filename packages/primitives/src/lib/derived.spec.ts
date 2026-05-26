@@ -62,4 +62,25 @@ describe('derived', () => {
     first.mutate(() => 20);
     expect(list()).toEqual([20, 2, 3]);
   });
+
+  it('should handle re-entrant mutate calls without throwing or dropping state', () => {
+    const state = mutable({ items: [{ id: 1, n: 0 }] });
+    const items = derived(state, 'items');
+
+    // Outer mutate that re-enters itself synchronously. With the boolean
+    // `trigger` flag the inner call would flip it back to false before the
+    // outer's equality check fires; the counter implementation must keep the
+    // "force inequality" guard active for the full outer scope.
+    items.mutate((arr) => {
+      items.mutate((inner) => {
+        inner.push({ id: 2, n: 0 });
+        return inner;
+      });
+      arr.push({ id: 3, n: 0 });
+      return arr;
+    });
+
+    expect(items().length).toBe(3);
+    expect(state().items.length).toBe(3);
+  });
 });

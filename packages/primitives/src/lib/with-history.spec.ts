@@ -52,4 +52,29 @@ describe('with-history', () => {
     
     expect(sigHalve.history()).toEqual([2, 3, 4]); // Because history tracks previous values
   });
+
+  it('should bound the redo stack with the same maxSize/cleanupStrategy as undo', () => {
+    // Use a tiny maxSize so we can overflow the redo stack by undoing.
+    const sig = withHistory(signal(0), { maxSize: 2, cleanupStrategy: 'shift' });
+
+    sig.set(1);
+    sig.set(2);
+    sig.set(3);
+    // Undo stack bounded to 2 → [1, 2], current value 3.
+    expect(sig.history()).toEqual([1, 2]);
+
+    sig.undo(); // current 2, redo [3]
+    sig.undo(); // current 1, redo [3, 2] — at capacity
+    // Third undo will push the current (1) onto the redo stack — the shift
+    // strategy must drop the oldest entry (3) so redo stays bounded to 2.
+    sig.undo(); // history empty → no-op
+
+    expect(sig()).toBe(1);
+    expect(sig.canUndo()).toBe(false);
+
+    // The redo stack must respect the same maxSize bound.
+    sig.redo(); // current 2
+    sig.redo(); // current 3
+    expect(sig()).toBe(3);
+  });
 });

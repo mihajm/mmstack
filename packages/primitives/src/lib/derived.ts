@@ -230,11 +230,11 @@ export function derived<T, U>(
   const rest = typeof optOrKey === 'object' ? { ...optOrKey, ...opt } : opt;
 
   const baseEqual = rest?.equal ?? Object.is;
-  let trigger = false;
+  let cnt = 0;
 
   const equal: ValueEqualityFn<U> = isMutable(source)
     ? (a: U, b: U) => {
-        if (trigger) return false;
+        if (cnt > 0) return false;
         return baseEqual(a, b);
       }
     : baseEqual;
@@ -250,9 +250,9 @@ export function derived<T, U>(
 
   if (isMutable(source)) {
     sig.mutate = (updater) => {
-      trigger = true;
+      cnt++;
       sig.update(updater);
-      trigger = false;
+      cnt--;
     };
 
     sig.inline = (updater) => {

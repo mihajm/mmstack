@@ -1,10 +1,16 @@
+export * from './battery-status';
+export * from './clipboard';
 export * from './element-size';
 export * from './element-visibility';
+export * from './focus-within';
+export * from './geolocation';
+export * from './idle';
 export * from './media-query';
 export * from './mouse-position';
 export * from './network-status';
+export * from './orientation';
 export * from './page-visibility';
 export * from './scroll-position';
 export * from './sensor';
+export * from './signal-from-event';
 export * from './window-size';
-

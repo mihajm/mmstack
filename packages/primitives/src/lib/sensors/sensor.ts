@@ -1,5 +1,10 @@
 import { type ElementRef, type Signal } from '@angular/core';
 import {
+  type BatteryStatus,
+  batteryStatus,
+} from './battery-status';
+import { type ClipboardSignal, clipboard } from './clipboard';
+import {
   type ElementSizeOptions as BaseElementSizeOptions,
   type ElementSizeSignal,
   elementSize,
@@ -9,6 +14,13 @@ import {
   type ElementVisibilitySignal,
   elementVisibility,
 } from './element-visibility';
+import { focusWithin } from './focus-within';
+import {
+  type GeolocationOptions,
+  type GeolocationSignal,
+  geolocation,
+} from './geolocation';
+import { type IdleOptions, type IdleSignal, idle } from './idle';
 import {
   mediaQuery,
   prefersDarkMode,
@@ -20,6 +32,7 @@ import {
   mousePosition,
 } from './mouse-position';
 import { type NetworkStatusSignal, networkStatus } from './network-status';
+import { type ScreenOrientation, orientation } from './orientation';
 import { pageVisibility } from './page-visibility';
 import {
   type ScrollPositionOptions,
@@ -81,6 +94,36 @@ type SensorTypedOptions = {
   };
   mediaQuery: {
     opt: { query: string; debugName?: string };
+    returnType: Signal<boolean>;
+  };
+  geolocation: {
+    opt: GeolocationOptions;
+    returnType: GeolocationSignal;
+  };
+  clipboard: {
+    opt: { debugName?: string };
+    returnType: ClipboardSignal;
+  };
+  orientation: {
+    opt: { debugName?: string };
+    returnType: Signal<ScreenOrientation>;
+  };
+  batteryStatus: {
+    opt: { debugName?: string };
+    returnType: Signal<BatteryStatus | null>;
+  };
+  idle: {
+    opt: IdleOptions;
+    returnType: IdleSignal;
+  };
+  focusWithin: {
+    opt: {
+      debugName?: string;
+      target?:
+        | ElementRef<Element>
+        | Element
+        | Signal<ElementRef<Element> | Element | null>;
+    };
     returnType: Signal<boolean>;
   };
 };
@@ -216,6 +259,60 @@ export function sensor(
 ): ScrollPositionSignal;
 
 /**
+ * Creates a sensor signal exposing the device's current geolocation position.
+ * @see {geolocation}
+ */
+export function sensor(
+  type: 'geolocation',
+  options?: SensorTypedOptions['geolocation']['opt'],
+): GeolocationSignal;
+
+/**
+ * Creates a sensor signal mirroring the system clipboard contents.
+ * @see {clipboard}
+ */
+export function sensor(
+  type: 'clipboard',
+  options?: SensorTypedOptions['clipboard']['opt'],
+): ClipboardSignal;
+
+/**
+ * Creates a sensor signal tracking the screen orientation.
+ * @see {orientation}
+ */
+export function sensor(
+  type: 'orientation',
+  options?: SensorTypedOptions['orientation']['opt'],
+): Signal<ScreenOrientation>;
+
+/**
+ * Creates a sensor signal tracking the system battery status.
+ * @see {batteryStatus}
+ */
+export function sensor(
+  type: 'batteryStatus',
+  options?: SensorTypedOptions['batteryStatus']['opt'],
+): Signal<BatteryStatus | null>;
+
+/**
+ * Creates a sensor signal that flips to `true` after a window of user inactivity.
+ * @see {idle}
+ */
+export function sensor(
+  type: 'idle',
+  options?: SensorTypedOptions['idle']['opt'],
+): IdleSignal;
+
+/**
+ * Creates a sensor signal tracking whether focus is within a target subtree.
+ * @see {focusWithin}
+ */
+export function sensor(
+  type: 'focusWithin',
+  options?: SensorTypedOptions['focusWithin']['opt'],
+): Signal<boolean>;
+
+/**
  * Implementation for sensor overloads.
  * Users should refer to the specific overloads for detailed documentation.
  * @internal
@@ -224,35 +321,42 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
   type: TType | 'dark-mode' | 'reduced-motion',
   options?: SensorTypedOptions[TType]['opt'],
 ): SensorTypedOptions[TType]['returnType'] {
+  const opts = options as any;
   switch (type) {
     case 'mousePosition':
-      return mousePosition(options as MousePositionOptions);
+      return mousePosition(opts);
     case 'networkStatus':
-      return networkStatus(options?.debugName);
+      return networkStatus(opts?.debugName);
     case 'pageVisibility':
-      return pageVisibility(options?.debugName);
+      return pageVisibility(opts?.debugName);
     case 'darkMode':
     case 'dark-mode':
-      return prefersDarkMode(options?.debugName);
+      return prefersDarkMode(opts?.debugName);
     case 'reducedMotion':
     case 'reduced-motion':
-      return prefersReducedMotion(options?.debugName);
-    case 'mediaQuery': {
-      const opt = options as SensorTypedOptions['mediaQuery']['opt'];
-      return mediaQuery(opt.query, opt.debugName);
-    }
+      return prefersReducedMotion(opts?.debugName);
+    case 'mediaQuery':
+      return mediaQuery(opts.query, opts.debugName);
     case 'windowSize':
-      return windowSize(options);
+      return windowSize(opts);
     case 'scrollPosition':
-      return scrollPosition(options as ScrollPositionOptions);
-    case 'elementVisibility': {
-      const opt = options as SensorTypedOptions['elementVisibility']['opt'];
-      return elementVisibility(opt.target, opt);
-    }
-    case 'elementSize': {
-      const opt = options as SensorTypedOptions['elementSize']['opt'];
-      return elementSize(opt.target, opt);
-    }
+      return scrollPosition(opts);
+    case 'elementVisibility':
+      return elementVisibility(opts?.target, opts);
+    case 'elementSize':
+      return elementSize(opts?.target, opts);
+    case 'geolocation':
+      return geolocation(opts);
+    case 'clipboard':
+      return clipboard(opts?.debugName);
+    case 'orientation':
+      return orientation(opts?.debugName);
+    case 'batteryStatus':
+      return batteryStatus(opts?.debugName);
+    case 'idle':
+      return idle(opts);
+    case 'focusWithin':
+      return focusWithin(opts?.target);
     default:
       throw new Error(`Unknown sensor type: ${type}`);
   }
@@ -271,7 +375,7 @@ export function sensors<const TType extends keyof SensorTypedOptions>(
   opt?: SensorsOptions<TType>,
 ): Sensors<TType> {
   return track.reduce((result, key) => {
-    result[key] = sensor(key as any, opt?.[key]);
+    result[key] = sensor(key as any, opt?.[key] as any);
     return result;
   }, {} as Sensors<TType>);
 }

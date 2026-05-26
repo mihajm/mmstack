@@ -29,6 +29,18 @@ export type CreateThrottledOptions<T> = CreateSignalOptions<T> & {
    * If it is not provided or injected, the timer will not be cleared automatically...which is usually fine :)
    */
   destroyRef?: DestroyRef;
+  /**
+   * If `true`, the throttled signal emits the first value immediately when a
+   * burst starts, then enforces the cooldown window before the next emission.
+   * @default false
+   */
+  leading?: boolean;
+  /**
+   * If `true`, the throttled signal emits the latest pending value at the end
+   * of each cooldown window (only when at least one write occurred during it).
+   * @default true
+   */
+  trailing?: boolean;
 };
 
 /**
@@ -95,10 +107,14 @@ export function throttle<T>(
   opt?: CreateThrottledOptions<T>,
 ): ThrottledSignal<T> {
   const ms = opt?.ms ?? 0;
+  const leading = opt?.leading ?? false;
+  const trailing = opt?.trailing ?? true;
 
   const trigger = signal(false);
+  const fire = () => trigger.update((c) => !c);
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let pendingTrailing = false;
 
   try {
     const destroyRef =
@@ -107,18 +123,28 @@ export function throttle<T>(
     destroyRef?.onDestroy(() => {
       if (timeout) clearTimeout(timeout);
       timeout = undefined;
+      pendingTrailing = false;
     });
   } catch {
     // not in injection context & no destroyRef provided opting out of cleanup
   }
 
   const tick = () => {
-    if (timeout) return;
+    if (!timeout) {
+      if (leading) fire();
+      else pendingTrailing = trailing;
 
-    timeout = setTimeout(() => {
-      trigger.update((c) => !c);
-      timeout = undefined;
-    }, ms);
+      timeout = setTimeout(() => {
+        timeout = undefined;
+        if (trailing && pendingTrailing) {
+          pendingTrailing = false;
+          fire();
+        }
+      }, ms);
+      return;
+    }
+
+    if (trailing) pendingTrailing = true;
   };
 
   const set = (value: T) => {

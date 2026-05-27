@@ -1,5 +1,6 @@
 import {
   computed,
+  DestroyRef,
   inject,
   Injectable,
   isDevMode,
@@ -41,6 +42,7 @@ function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {
   }
 
   return (a?: T, b?: T): boolean => {
+    if (a === b) return true;
     if (!a && !b) return true;
     if (!a || !b) return false;
     return keyMatcher(a, b);
@@ -68,6 +70,29 @@ type TFunctionWithSignalConstructor<
   asSignal: SignalTFunction<TMap>;
 };
 
+/**
+ * Returns a pinning callback when the store is configured for weak-cache mode,
+ * otherwise `null`. The callback adds objects (signals / WeakMap containers)
+ * to a per-consumer `Set` so they stay strongly reachable while the consumer
+ * lives. On `DestroyRef.onDestroy` the set is cleared, releasing strong refs
+ * so the cache's `WeakRef` entries become collectable.
+ *
+ * Must be invoked in an injection context (it consumes `DestroyRef`). That's
+ * already guaranteed by the call sites in `createT` and `addSignalFn`, both
+ * of which run inside `inject(TranslationStore)`-bearing factories.
+ */
+function createPinner(
+  store: TranslationStore,
+): ((sig: object, container?: object) => void) | null {
+  if (!store.cacheIsWeak) return null;
+  const pinned = new Set<object>();
+  inject(DestroyRef).onDestroy(() => pinned.clear());
+  return (sig: object, container?: object) => {
+    pinned.add(sig);
+    if (container) pinned.add(container);
+  };
+}
+
 export function addSignalFn<
   TMap extends AnyStringRecord,
   TFn extends TFunction<TMap>,
@@ -77,6 +102,7 @@ export function addSignalFn<
   keyMap: Map<string, string>,
 ): TFunctionWithSignalConstructor<TMap, TFn> {
   const withSig = fn as TFunctionWithSignalConstructor<TMap, TFn>;
+  const pin = createPinner(store);
 
   const asSignal = <TKey extends keyof TMap & string>(
     key: TKey,
@@ -91,7 +117,11 @@ export function addSignalFn<
       keyMap.set(stringKey, flatPath);
     }
 
-    if (variables === undefined) return store.buildSimpleKeySignal(flatPath);
+    if (variables === undefined) {
+      const sig = store.buildSimpleKeySignal(flatPath);
+      pin?.(sig);
+      return sig;
+    }
 
     const varsFn = variables;
     const varsSignal = isSignal(varsFn)
@@ -100,7 +130,12 @@ export function addSignalFn<
           equal: createEqualsRecord(Object.keys(varsFn())),
         });
 
-    return computed(() => store.formatMessage(flatPath, varsSignal()));
+    return computed(() => {
+      const vars = varsSignal();
+      const { signal, container } = store.buildParamKeySignal(flatPath, vars);
+      pin?.(signal, container);
+      return signal();
+    });
   };
 
   withSig.asSignal = asSignal as unknown as TFunctionWithSignalConstructor<
@@ -115,6 +150,8 @@ export function createT<TMap extends AnyStringRecord>(
   store: TranslationStore,
   keyMap = new Map<string, string>(),
 ): TFunction<TMap> {
+  const pin = createPinner(store);
+
   const fn = <TKey extends keyof TMap & string>(
     key: TKey,
     variables?: AnyStringRecord,
@@ -128,7 +165,15 @@ export function createT<TMap extends AnyStringRecord>(
       keyMap.set(stringKey, k);
     }
 
-    return store.formatMessage(k, variables);
+    if (variables === undefined) {
+      const sig = store.buildSimpleKeySignal(k);
+      pin?.(sig);
+      return sig();
+    }
+
+    const { signal, container } = store.buildParamKeySignal(k, variables);
+    pin?.(signal, container);
+    return signal();
   };
 
   return fn as unknown as TFunction<TMap>;
@@ -335,7 +380,8 @@ export function registerRemoteNamespace<TNS extends string>(
       loader: () => Promise<Record<string, string>>,
       locale: TLocale,
     ) =>
-    () => loader().then((raw) => compileTranslation(raw, ns, locale));
+    () =>
+      loader().then((raw) => compileTranslation(raw, ns, locale));
 
   const compiledOther: Record<
     string,
@@ -459,6 +505,7 @@ export class UnsafeTKeyMap {
 export function injectUnsafeT() {
   const store = inject(TranslationStore);
   const map = inject(UnsafeTKeyMap).map;
+  const pin = createPinner(store);
 
   const fn = (
     key: string,
@@ -471,7 +518,15 @@ export function injectUnsafeT() {
       map.set(key, k);
     }
 
-    return store.formatMessage(k, params);
+    if (params === undefined) {
+      const sig = store.buildSimpleKeySignal(k);
+      pin?.(sig);
+      return sig();
+    }
+
+    const { signal, container } = store.buildParamKeySignal(k, params);
+    pin?.(signal, container);
+    return signal();
   };
 
   fn.asSignal = (
@@ -485,7 +540,11 @@ export function injectUnsafeT() {
       map.set(key, k);
     }
 
-    if (!params) return store.buildSimpleKeySignal(k);
+    if (!params) {
+      const sig = store.buildSimpleKeySignal(k);
+      pin?.(sig);
+      return sig;
+    }
 
     const paramsSignal = isSignal(params)
       ? params
@@ -493,7 +552,12 @@ export function injectUnsafeT() {
           equal: createEqualsRecord(Object.keys(params())),
         });
 
-    return computed(() => store.formatMessage(k, paramsSignal()));
+    return computed(() => {
+      const vars = paramsSignal();
+      const { signal, container } = store.buildParamKeySignal(k, vars);
+      pin?.(signal, container);
+      return signal();
+    });
   };
 
   return fn;

@@ -1,9 +1,10 @@
-import { LOCALE_ID, computed } from '@angular/core';
+import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import {
   TranslationStore,
+  createSignalCache,
   injectAddTranslations,
   injectDefaultLocale,
   injectDynamicLocale,
@@ -187,6 +188,64 @@ describe('translation-store', () => {
       });
     });
 
+    describe('buildParamKeySignal', () => {
+      beforeEach(() => {
+        store.register('ns', {
+          'en-US': { greet: 'Hello {name}', bye: 'Bye {name}' },
+          'es-ES': { greet: 'Hola {name}', bye: 'Adios {name}' },
+        });
+      });
+
+      it('returns the same signal instance for the same (key, params reference)', () => {
+        const params = { name: 'Alice' };
+        const r1 = store.buildParamKeySignal('ns::MMT_DELIM::greet', params);
+        const r2 = store.buildParamKeySignal('ns::MMT_DELIM::greet', params);
+        expect(r1.signal).toBe(r2.signal);
+        expect(r1.container).toBe(r2.container);
+        expect(r1.signal()).toBe('Hello Alice');
+      });
+
+      it('returns distinct signals when the params object reference differs', () => {
+        const r1 = store.buildParamKeySignal('ns::MMT_DELIM::greet', {
+          name: 'Alice',
+        });
+        const r2 = store.buildParamKeySignal('ns::MMT_DELIM::greet', {
+          name: 'Alice',
+        });
+        expect(r1.signal).not.toBe(r2.signal);
+        // Same key → same container instance even when params reference differs.
+        expect(r1.container).toBe(r2.container);
+        expect(r1.signal()).toBe('Hello Alice');
+        expect(r2.signal()).toBe('Hello Alice');
+      });
+
+      it('shares a single params object across multiple keys (class-field aliasing)', () => {
+        const params = { name: 'Alice' };
+        const greet = store.buildParamKeySignal(
+          'ns::MMT_DELIM::greet',
+          params,
+        );
+        const bye = store.buildParamKeySignal('ns::MMT_DELIM::bye', params);
+        expect(greet.signal).not.toBe(bye.signal);
+        // Different keys → different containers.
+        expect(greet.container).not.toBe(bye.container);
+        expect(greet.signal()).toBe('Hello Alice');
+        expect(bye.signal()).toBe('Bye Alice');
+      });
+
+      it('signal updates reactively when locale changes', () => {
+        const params = { name: 'Alice' };
+        const { signal: sig } = store.buildParamKeySignal(
+          'ns::MMT_DELIM::greet',
+          params,
+        );
+        expect(sig()).toBe('Hello Alice');
+
+        store.locale.set('es-ES');
+        expect(sig()).toBe('Hola Alice');
+      });
+    });
+
     describe('formatMessage', () => {
       beforeEach(() => {
         store.register('ns', {
@@ -231,6 +290,81 @@ describe('translation-store', () => {
         expect(
           store.formatMessage('ns::MMT_DELIM::greet', { name: 'Alice' }),
         ).toBe('Hola Alice');
+      });
+    });
+
+    // End-to-end proof that `t({ ... })` calls behave as if pure in templates:
+    // Angular Ivy emits `ɵɵpureFunctionN` for inline object literals (including
+    // in function-argument position), giving the same params reference back
+    // across CD passes until inputs change. Combined with `paramKeyMap`,
+    // unrelated CD ticks should NOT re-run the ICU formatter.
+    describe('template integration: pure-function memoization', () => {
+      it('does not re-run formatMessageInternal when an unrelated signal triggers CD', () => {
+        store.register('ns', {
+          'en-US': { greet: 'Hello {name}' },
+        });
+
+        @Component({
+          // eslint-disable-next-line @angular-eslint/component-selector
+          selector: 'tpl-host',
+          template: `
+            <span class="g">{{
+              store.formatMessage('ns::MMT_DELIM::greet', { name: name() })
+            }}</span>
+            <span class="u">{{ unrelated() }}</span>
+          `,
+        })
+        class Host {
+          store = inject(TranslationStore);
+          name = signal('Alice');
+          unrelated = signal(0);
+        }
+
+        const spy = vi.spyOn(
+          store as unknown as {
+            formatMessageInternal: (
+              k: string,
+              v?: Record<string, string | number>,
+            ) => string;
+          },
+          'formatMessageInternal',
+        );
+
+        const fixture = TestBed.createComponent(Host);
+        fixture.detectChanges();
+
+        const greetEl = fixture.nativeElement.querySelector(
+          '.g',
+        ) as HTMLElement;
+        expect(greetEl.textContent).toBe('Hello Alice');
+        // One format call for the initial render.
+        expect(spy).toHaveBeenCalledTimes(1);
+
+        // Trigger CD via a signal that's NOT in the params object. Angular's
+        // pureFunction1 must return the cached `{ name: 'Alice' }` reference,
+        // paramKeyMap must hit, and the inner computed must short-circuit.
+        fixture.componentInstance.unrelated.set(1);
+        fixture.detectChanges();
+        fixture.componentInstance.unrelated.set(2);
+        fixture.detectChanges();
+        fixture.componentInstance.unrelated.set(3);
+        fixture.detectChanges();
+        expect(spy).toHaveBeenCalledTimes(1);
+
+        // Changing the params input invalidates pureFunction1 → new object
+        // reference → paramKeyMap miss → fresh format call.
+        fixture.componentInstance.name.set('Bob');
+        fixture.detectChanges();
+        expect(greetEl.textContent).toBe('Hello Bob');
+        expect(spy).toHaveBeenCalledTimes(2);
+
+        // Setting back to 'Alice' is another distinct paramFunction1 output
+        // (the previous obj has been replaced in the LView slot), so it's a
+        // fresh miss. This documents the invalidation granularity.
+        fixture.componentInstance.name.set('Alice');
+        fixture.detectChanges();
+        expect(greetEl.textContent).toBe('Hello Alice');
+        expect(spy).toHaveBeenCalledTimes(3);
       });
     });
   });
@@ -332,6 +466,93 @@ describe('translation-store', () => {
         store.locale.set('sl-SI');
         TestBed.tick();
       }).not.toThrow();
+    });
+  });
+
+  describe('createSignalCache factory', () => {
+    it('strong mode: behaves like a plain Map', () => {
+      const cache = createSignalCache<{ id: number }>(false);
+      const v = { id: 1 };
+      cache.set('a', v);
+      expect(cache.get('a')).toBe(v);
+      expect(cache.get('missing')).toBeUndefined();
+
+      const v2 = { id: 2 };
+      cache.set('a', v2);
+      expect(cache.get('a')).toBe(v2);
+    });
+
+    it('weak mode: get returns the value while a strong reference exists', () => {
+      const cache = createSignalCache<{ id: number }>(true);
+      const v = { id: 1 };
+      cache.set('a', v);
+      // We hold a strong ref via `v`, so deref must succeed.
+      expect(cache.get('a')).toBe(v);
+      expect(cache.get('missing')).toBeUndefined();
+    });
+  });
+
+  describe('releaseCachedSignals (weak-cache opt-in)', () => {
+    const routeMock = {
+      snapshot: { paramMap: convertToParamMap({}) },
+      paramMap: of(convertToParamMap({})),
+    };
+
+    beforeEach(() => {
+      TestBed.resetTestingModule();
+    });
+
+    function configure(releaseCachedSignals: boolean | undefined) {
+      TestBed.configureTestingModule({
+        providers: [
+          provideIntlConfig({
+            defaultLocale: 'en-US',
+            supportedLocales: ['en-US'],
+            releaseCachedSignals,
+          }),
+          { provide: Router, useValue: { options: {} } },
+          { provide: ActivatedRoute, useValue: routeMock },
+        ],
+      });
+      TestBed.runInInjectionContext(() => {
+        injectLocaleInternal().set('en-US');
+      });
+      return TestBed.inject(TranslationStore);
+    }
+
+    it('cacheIsWeak defaults to false when the config flag is unset', () => {
+      const store = configure(undefined);
+      expect(store.cacheIsWeak).toBe(false);
+    });
+
+    it('cacheIsWeak is true when releaseCachedSignals is enabled', () => {
+      const store = configure(true);
+      expect(store.cacheIsWeak).toBe(true);
+    });
+
+    it('weak mode: formatMessage still memoizes simple keys while caller holds the signal', () => {
+      const store = configure(true);
+      store.register('ns', { 'en-US': { title: 'Hello' } });
+
+      // Pin via a local variable so the WeakRef doesn't drop the signal mid-test.
+      const sig = store.buildSimpleKeySignal('ns::MMT_DELIM::title');
+      expect(sig()).toBe('Hello');
+      // Second lookup must hit the same cache entry — pinning keeps the
+      // WeakRef live, and the cache must return the same Signal instance.
+      const sig2 = store.buildSimpleKeySignal('ns::MMT_DELIM::title');
+      expect(sig2).toBe(sig);
+    });
+
+    it('weak mode: formatMessage with params still memoizes per (key, params reference)', () => {
+      const store = configure(true);
+      store.register('ns', { 'en-US': { greet: 'Hello {name}' } });
+
+      const params = { name: 'Alice' };
+      const a = store.buildParamKeySignal('ns::MMT_DELIM::greet', params);
+      const b = store.buildParamKeySignal('ns::MMT_DELIM::greet', params);
+      expect(a.signal).toBe(b.signal);
+      expect(a.container).toBe(b.container);
+      expect(a.signal()).toBe('Hello Alice');
     });
   });
 

@@ -96,6 +96,7 @@ export const appConfig: ApplicationConfig = {
 - **`localeParamName`** — drive the active locale from a route parameter. See [Route-based locale detection](#4-optional-route-based-locale-detection) and [Scenario A](#scenario-a-route-based-locale).
 - **`localeStorage`** — persist the user-selected locale across reloads via a `read` / `write` adapter. See [Dynamic language switching](#5-optional-dynamic-language-switching) and [Scenario B](#scenario-b-dynamic-locale-with-localstorage-persistence). Mutually exclusive with `localeParamName`.
 - **`preloadDefaultLocale: true`** — eagerly load the default-locale bundle so it's available as a synchronous fallback. Rarely needed.
+- **`releaseCachedSignals: true`** — opt into lifecycle-aware caching so cached translation signals can be collected when no live component still uses them. Default `false` is the right choice for almost every app; turn this on only for very large apps with measured memory pressure or when constructing translation keys dynamically. See [Cache lifetime](#cache-lifetime--releasecachedsignals).
 
 ## Usage
 
@@ -232,14 +233,24 @@ import { QuoteTranslator, QuoteTranslate } from './quote.helpers';
   selector: 'app-quote',
   imports: [QuoteTranslator, QuoteTranslate],
   template: `
-    <!-- t() can be called directly in templates for variable-free keys.
-    It is fully reactive & performant enough for this to work well -->
+    <!-- t() is safe to call directly in templates. Variable-free keys and
+         keys with an inline params literal are both memoized internally and
+         reactive to locale changes. -->
     <h1>{{ t('quote.pageTitle') }}</h1>
     <span>{{ t('quote.detail.authorLabel') }}</span>
 
-    <!-- For keys with variables, use t.asSignal() instead (see below).
-         Calling t('key', { ... }) in a template creates a new object literal
-         every change detection cycle, causing recomputation & gc churn -->
+    <!-- Inline params work too. Angular emits ɵɵpureFunctionN for the {...}
+         literal, so the same object reference is handed back across change
+         detection passes when inputs are unchanged — the library keys its
+         cache on that identity, so the ICU formatter only runs when values
+         actually change. See "Translation memoization" in the architecture
+         section for details. -->
+    <span>{{ t('quote.errors.minLength', { min: '5' }) }}</span>
+
+    <!-- t.asSignal() is the right tool when you want to hold a Signal<string>
+         in a class field (e.g. to pass as an @Input) or when params are built
+         from a fresh object each call (structural equality on the params
+         signal short-circuits recomputes). -->
 
     <!-- Pipe validates key & variables match -->
     <span>{{ 'quote.errors.minLength' | translate: { min: '5' } }}</span>
@@ -269,16 +280,17 @@ export class QuoteComponent {
 
 **When to use each API:**
 
-| Scenario                                   | Recommended API                                              |
-| :----------------------------------------- | :----------------------------------------------------------- |
-| Variable-free key in a template            | `{{ t('ns.key') }}`                                          |
-| Variable-free key in class logic           | `this.t('ns.key')`                                           |
-| Key with variables in a template           | `t.asSignal('ns.key', () => ({ var: val() }))`               |
-| Key with variables in class logic          | `this.t.asSignal('ns.key', () => ({ var: val() }))`          |
-| Type-safe pipe (with or without variables) | `'ns.key' \| translate` / `'ns.key' \| translate: vars`      |
-| Structural DOM replacement                 | `<el translate="ns.key">` / `[translate]="['ns.key', vars]"` |
+| Scenario                                                 | Recommended API                                              |
+| :------------------------------------------------------- | :----------------------------------------------------------- |
+| Variable-free key in a template                          | `{{ t('ns.key') }}`                                          |
+| Variable-free key in class logic                         | `this.t('ns.key')`                                           |
+| Key with variables in a template (inline `{...}`)        | `{{ t('ns.key', { var: val() }) }}`                          |
+| Key you want as a `Signal<string>` (class field, inputs) | `this.t.asSignal('ns.key', () => ({ var: val() }))`          |
+| Key with variables in class logic (one-shot read)        | `this.t('ns.key', { var })`                                  |
+| Type-safe pipe (with or without variables)               | `'ns.key' \| translate` / `'ns.key' \| translate: vars`      |
+| Structural DOM replacement                               | `<el translate="ns.key">` / `[translate]="['ns.key', vars]"` |
 
-> **Why not `t(key, vars)` in templates?** Each change detection cycle creates a new object literal for `vars`, so FormatJS re-formats the message even when the values haven't changed. `t.asSignal()` wraps the params in a `computed()` with deep equality, skipping re-evaluation when the underlying values are stable.
+> **Inline `t('ns.key', { ... })` in templates is fine.** Angular Ivy emits `ɵɵpureFunctionN` for inline object literals (including in function-argument position), giving stable reference identity across change-detection passes when the literal's inputs are unchanged. The library keys its params cache on that identity, so unchanged params skip the ICU formatter entirely. Use `t.asSignal()` when you specifically need a `Signal<string>` (e.g. to expose to `@Input`s) or when you're constructing params from a fresh object each call and want the structural-equality short-circuit.
 
 ### 4. [OPTIONAL] Route-Based Locale Detection
 
@@ -568,6 +580,26 @@ When switching locales dynamically, the library:
 2. Loads only the missing translations in parallel
 3. Updates all reactive outputs automatically
 4. Falls back to the default locale if unavailable
+
+### Translation Memoization
+
+Both `t('ns.key')` and `t('ns.key', { ... })` are memoized — the ICU formatter only runs when the active locale changes or when the params object's values change. Repeated change-detection passes are effectively free. `t.asSignal()` is the right tool when you want a `Signal<string>` (class field, `@Input`) or when you're building params from non-stable references and want structural-equality short-circuiting.
+
+### Cache Lifetime & `releaseCachedSignals`
+
+By default, the internal translation-signal caches grow with the set of keys ever read and are never evicted. For almost every app this is the right default — translation keys are a bounded, static set, the cache converges quickly, and the hot path stays as cheap as possible.
+
+For very large apps (tens of thousands of keys) or apps that construct translation keys dynamically, you can opt into lifecycle-aware caching:
+
+```typescript
+provideIntlConfig({
+  defaultLocale: 'en-US',
+  supportedLocales: ['en-US', 'sl-SI'],
+  releaseCachedSignals: true,
+});
+```
+
+When enabled, cached signals are released once no live component is still using them, so the effective memory bound becomes "signals used by currently-mounted components" instead of "all keys ever read." Cost is a few extra nanoseconds per cache hit — imperceptible in practice. Leave it off unless you've measured memory pressure from translation caches.
 
 ## Remote / Unsafe Namespaces
 

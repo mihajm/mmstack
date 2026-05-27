@@ -24,6 +24,26 @@ type BaseConfig = Omit<IntlConfig, 'locale' | 'messages'> & {
   supportedLocales?: string[];
   /** Preloads the default locale ensuring sync fallback, not necessary for most cases as it will lazily load automatically when needed */
   preloadDefaultLocale?: boolean;
+  /**
+   * Opt into lifecycle-aware caching of translation signals. When `true`, the
+   * internal caches hold signals via `WeakRef` and rely on consumers (the `t`
+   * functions returned by `injectNamespaceT` / `injectUnsafeT`) to pin signals
+   * for the lifetime of their injection context (typically a component). When
+   * a consumer is destroyed, signals it pinned become weakly held and may be
+   * collected; the corresponding cache entries are then dropped via
+   * `FinalizationRegistry`.
+   *
+   * Default `false` — caches grow with the set of translation keys ever read
+   * and never shrink. That's fine for almost every app (translation keys are
+   * a bounded set). Turn this on only for very large apps where measured
+   * memory pressure from cached signals matters, or for apps that construct
+   * translation keys dynamically (an anti-pattern, but this contains the leak).
+   *
+   * Cost when enabled: each cache hit goes through `WeakRef.deref()`, each
+   * `t()` consumer holds a `Set` of pinned signals + a `DestroyRef.onDestroy`
+   * hook. Negligible in practice but non-zero.
+   */
+  releaseCachedSignals?: boolean;
 };
 
 type RouteBasedConfig = BaseConfig & {
@@ -179,13 +199,65 @@ function initLocale(src: WritableSignal<string>) {
   return src;
 }
 
+export type SignalCache<V extends WeakKey> = {
+  get(key: string): V | undefined;
+  set(key: string, value: V): void;
+};
+
+/**
+ * Factory for the two signal caches inside `TranslationStore`. In default
+ * (strong) mode it returns a plain `Map` wrapper — entries live for the
+ * lifetime of the store. In weak mode it returns a `Map<string, WeakRef<V>>`
+ * paired with a `FinalizationRegistry` that drops outer entries once their
+ * value is collected. Weak mode relies on consumers (the `t` functions) to
+ * pin values for their own lifetime via a `DestroyRef`-bound `Set`.
+ */
+export function createSignalCache<V extends WeakKey>(
+  weak: boolean,
+): SignalCache<V> {
+  if (!weak) {
+    const map = new Map<string, V>();
+    return {
+      get: (key) => map.get(key),
+      set: (key, value) => {
+        map.set(key, value);
+      },
+    };
+  }
+
+  const map = new Map<string, WeakRef<V>>();
+  const registry = new FinalizationRegistry<string>((key) => {
+    const ref = map.get(key);
+    if (ref && ref.deref() === undefined) map.delete(key);
+  });
+  return {
+    get: (key) => map.get(key)?.deref(),
+    set: (key, value) => {
+      map.set(key, new WeakRef(value));
+      registry.register(value, key);
+    },
+  };
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class TranslationStore {
-  private readonly simpleKeyMap = new Map<string, Signal<string>>();
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
+  /**
+   * Reflects `provideIntlConfig({ releaseCachedSignals })`. Read by the `t`
+   * functions in `register-namespace.ts` to decide whether to pin signals
+   * via a `DestroyRef`-bound `Set`. Public so consumers can build their own
+   * `t`-like helpers without re-reading the config.
+   */
+  readonly cacheIsWeak =
+    this.config?.releaseCachedSignals ?? false;
+  private readonly simpleKeyMap: SignalCache<Signal<string>> =
+    createSignalCache(this.cacheIsWeak);
+  private readonly paramKeyMap: SignalCache<
+    WeakMap<Record<string, string | number>, Signal<string>>
+  > = createSignalCache(this.cacheIsWeak);
   readonly loadQueue = signal<string[]>([]);
   readonly locale: WritableSignal<string>;
   private readonly defaultLocale = injectDefaultLocale();
@@ -313,7 +385,6 @@ export class TranslationStore {
 
       if (!dynamicLocales) return;
 
-      // Register loaded translations
       for (const locale of dynamicLocales.locales) {
         this.register(locale.namespace, {
           [dynamicLocales.locale]: locale.flat,
@@ -342,10 +413,40 @@ export class TranslationStore {
     return sig;
   }
 
+  // Angular Ivy emits ɵɵpureFunctionN for inline object literals in template
+  // expressions, so `{...}` passed to t() in a template returns the same
+  // reference across CD passes until its inputs change. We exploit that by
+  // caching per-(key, paramsObj) computeds, collapsing repeated CD passes to
+  // a memoized signal read instead of a full ICU re-format.
+  //
+  // Returns both the signal and the inner WeakMap container — in `weak` cache
+  // mode the caller must pin BOTH against its own lifetime, otherwise the
+  // FinalizationRegistry on the outer map will reclaim the container as soon
+  // as the only strong reference (the cache's WeakRef) becomes irrelevant.
+  buildParamKeySignal(
+    key: string,
+    values: Record<string, string | number>,
+  ): {
+    signal: Signal<string>;
+    container: WeakMap<Record<string, string | number>, Signal<string>>;
+  } {
+    let container = this.paramKeyMap.get(key);
+    if (!container) {
+      container = new WeakMap();
+      this.paramKeyMap.set(key, container);
+    }
+    let signal = container.get(values);
+    if (!signal) {
+      signal = computed(() => this.formatMessageInternal(key, values));
+      container.set(values, signal);
+    }
+    return { signal, container };
+  }
+
   formatMessage(key: string, values?: Record<string, string | number>) {
     if (values === undefined) return this.buildSimpleKeySignal(key)();
 
-    return this.formatMessageInternal(key, values);
+    return this.buildParamKeySignal(key, values).signal();
   }
 
   private formatMessageInternal(

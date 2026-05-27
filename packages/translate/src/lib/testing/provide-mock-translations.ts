@@ -1,4 +1,4 @@
-import { type Provider, signal } from '@angular/core';
+import { computed, signal, type Provider } from '@angular/core';
 import { createIntl, createIntlCache, type IntlShape } from '@formatjs/intl';
 import { compileTranslation } from '../compile';
 import { type UnknownStringKeyObject } from '../string-key-object.type';
@@ -88,31 +88,40 @@ export function provideMockTranslations(
     intl = createIntl({ locale, messages: mappedMocks }, createIntlCache());
   }
 
+  const formatMessage = (
+    key: string,
+    values?: Record<string, string | number>,
+  ) => {
+    const message = mappedMocks[key];
+
+    if (!message) {
+      // Fallback to echoing the key back in dot notation (more readable for unit assertions).
+      return key.replaceAll('::MMT_DELIM::', '.');
+    }
+
+    if (intl) {
+      return intl.formatMessage({ id: key, defaultMessage: message }, values);
+    }
+
+    return message;
+  };
+
   return [
     {
       provide: TranslationStore,
       useValue: {
         locale: signal(locale),
-        formatMessage: (
+        cacheIsWeak: false,
+        formatMessage,
+        buildSimpleKeySignal: (key: string) =>
+          computed(() => formatMessage(key)),
+        buildParamKeySignal: (
           key: string,
-          values?: Record<string, string | number>,
-        ) => {
-          const message = mappedMocks[key];
-
-          if (!message) {
-            // Fallback to echoing the key back in dot notation (more readable for unit assertions).
-            return key.replaceAll('::MMT_DELIM::', '.');
-          }
-
-          if (intl) {
-            return intl.formatMessage(
-              { id: key, defaultMessage: message },
-              values,
-            );
-          }
-
-          return message;
-        },
+          values: Record<string, string | number>,
+        ) => ({
+          signal: computed(() => formatMessage(key, values)),
+          container: new WeakMap(),
+        }),
         hasLocaleLoaders: () => false,
         register: () => {
           // noop

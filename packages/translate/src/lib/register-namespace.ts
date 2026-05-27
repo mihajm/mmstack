@@ -8,7 +8,7 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import { ResolveFn } from '@angular/router';
+import { type ResolveFn } from '@angular/router';
 import {
   compileTranslation,
   type CompiledTranslation,

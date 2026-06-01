@@ -350,25 +350,6 @@ export function queryResource<TResult, TRaw = TResult>(
     options?.equal,
   );
 
-  const value = options?.cache
-    ? toWritable(
-        computed((): TResult => {
-          resource.value();
-          return cacheEntry()?.value ?? resource.value();
-        }),
-        resource.value.set,
-        resource.value.update,
-      )
-    : resource.value;
-
-  // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
-  const cbEffectRef = effect(() => {
-    const status = resource.status();
-    if (status === 'error')
-      cb.fail(untracked(resource.error) as Error | undefined);
-    else if (status === 'resolved') cb.success();
-  });
-
   const set = (value: TResult) => {
     resource.value.set(value);
     const k = untracked(cacheKey);
@@ -389,6 +370,21 @@ export function queryResource<TResult, TRaw = TResult>(
   const update = (updater: (value: TResult) => TResult) => {
     set(updater(untracked(resource.value)));
   };
+
+  const value = options?.cache
+    ? toWritable(
+        computed((): TResult => cacheEntry()?.value ?? resource.value()),
+        set,
+        update,
+      )
+    : resource.value;
+
+  // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
+  const cbEffectRef = effect(() => {
+    const status = resource.status();
+    if (status === 'error') cb.fail(untracked(resource.error));
+    else if (status === 'resolved') cb.success();
+  });
 
   const client = options?.injector
     ? options.injector.get(HttpClient)

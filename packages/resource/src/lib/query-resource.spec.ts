@@ -469,4 +469,90 @@ describe('queryResource', () => {
     // The request was intercepted and deduplicated/served from cache
     expect(requests).toBe(1);
   });
+
+  it('should reflect value.set writes on a cached resource (not return stale cached body)', async () => {
+    const url = 'https://example.com/value-set-cached';
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'server' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+
+    const initial = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(initial).toEqual({ data: 'server' });
+
+    res.value.set({ data: 'local' } as any);
+    TestBed.tick();
+    expect(res.value()).toEqual({ data: 'local' });
+  });
+
+  it('should reflect value.update writes on a cached resource', async () => {
+    const url = 'https://example.com/value-update-cached';
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ data: string }>(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'server' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+
+    res.value.update((prev) => ({ data: `${prev?.data}-updated` }));
+    TestBed.tick();
+    expect(res.value()).toEqual({ data: 'server-updated' });
+  });
+
+  it('should propagate top-level set into the cache so another consumer sees it', async () => {
+    const url = 'https://example.com/set-propagates-cache';
+    const resA = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'server' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(resA.value, (v) => v !== undefined),
+    );
+
+    resA.set({ data: 'mutated' } as any);
+    TestBed.tick();
+
+    const resB = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'server' }),
+        }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+
+    const seen = await TestBed.runInInjectionContext(() =>
+      until(resB.value, (v) => v !== undefined),
+    );
+    expect(seen).toEqual({ data: 'mutated' });
+  });
 });

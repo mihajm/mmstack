@@ -40,17 +40,43 @@ export type NavConfig<TMeta = Record<string, unknown>> = {
 const token = new InjectionToken<NavConfig>('@mmstack/router-core:nav-config');
 
 /**
- * Provides global configuration for the nav system.
+ * Provides global configuration for the nav system. The factory form runs in
+ * an injection context, so it can use `inject()` to build defaults from app
+ * state.
+ *
+ * @param config Either a literal {@link NavConfig} object or a factory
+ *   `() => NavConfig`. Optional — without it, the nav system uses Angular's
+ *   default `activeMatch` options and renders nothing in scopes that have no
+ *   registered items.
+ * @returns A `Provider` to add to your app's providers array.
  *
  * @example
- * ```typescript
- * provideNavConfig({
- *   activeMatch: { queryParams: 'ignored' },
- *   defaults: [
- *     { label: 'Home', link: '/' },
- *     { label: 'Docs', link: '/docs' },
+ * ```ts
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideRouter(routes),
+ *     provideNavConfig({
+ *       activeMatch: { queryParams: 'ignored' },
+ *       defaults: [
+ *         { label: 'Home', link: '/' },
+ *         { label: 'Docs', link: '/docs' },
+ *       ],
+ *     }),
  *   ],
- * }),
+ * });
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Factory form — read defaults from a service
+ * provideNavConfig(() => {
+ *   const role = inject(AuthStore).role();
+ *   return {
+ *     defaults: {
+ *       main: role === 'admin' ? adminNav : guestNav,
+ *     },
+ *   };
+ * });
  * ```
  */
 export function provideNavConfig(

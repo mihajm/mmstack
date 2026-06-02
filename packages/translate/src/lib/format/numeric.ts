@@ -338,7 +338,13 @@ export { provideFormatPercentDefaults };
 
 /**
  * Inject a context-safe percent formatting function tied to the current injector.
- * Uses the libraries locale signal & provided default configuration to react to locale/config changes
+ * Uses the libraries locale signal & provided default configuration to react to locale/config changes.
+ *
+ * @example
+ * ```ts
+ * const formatPercent = injectFormatPercent();
+ * readonly progressLabel = computed(() => formatPercent(this.progress() / 100));
+ * ```
  */
 export function injectFormatPercent() {
   const defaults = injectFormatPercentOptions();
@@ -489,7 +495,13 @@ export { provideFormatCurrencyDefaults };
 
 /**
  * Inject a context-safe currency formatting function tied to the current injector.
- * Uses the libraries locale signal & provided default configuration to react to locale/config changes
+ * Uses the libraries locale signal & provided default configuration to react to locale/config changes.
+ *
+ * @example
+ * ```ts
+ * const formatCurrency = injectFormatCurrency();
+ * readonly priceLabel = computed(() => formatCurrency(this.price(), 'USD'));
+ * ```
  */
 export function injectFormatCurrency() {
   const defaults = injectFormatCurrencyOptions();

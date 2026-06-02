@@ -57,14 +57,48 @@ export class TitleStore {
 }
 
 /**
+ * Creates an Angular router `ResolveFn<string>` that registers a title for the
+ * route it's attached to. Titles can be static strings, factory functions
+ * (called in an injection context, so they can use `inject()`), or signal
+ * factories (for reactive titles that change when underlying data does).
  *
- * Creates a title resolver function that can be used in Angular's router.
+ * The resolved title flows through any `prefix` configured via
+ * {@link provideTitleConfig}, and is wired into Angular's `Title` service
+ * via an effect. Nested routes pick the most-specific leaf's title; if a
+ * deeper route has no title and `keepLastKnownTitle` is `true` (default),
+ * the previous title is preserved.
  *
- * @param factoryOrValue
- * A function that returns a string or a Signal<string> representing the title or just the string directly.
- * @param awaitValue
- * If `true`, the resolver will wait until the title signal has a value before resolving.
- * Defaults to `false`.
+ * @param factoryOrValue Either a literal string title, a `() => string`
+ *   factory, or a `() => Signal<string>` factory for reactive titles. Factory
+ *   callbacks run inside an injection context, so they can use `inject()`.
+ * @param awaitValue When `true`, the resolver waits until the title signal
+ *   emits a truthy value before resolving — useful for SSR/SEO where the
+ *   resolved title should not be empty. Defaults to `false`.
+ * @returns An Angular `ResolveFn<string>` to wire into a route's `title` field
+ *   (or any other `resolve` slot — the return value isn't usually consumed).
+ *
+ * @example
+ * ```ts
+ * // Static title
+ * { path: 'about', component: AboutComponent, title: createTitle('About us') }
+ *
+ * // Factory using inject()
+ * {
+ *   path: 'users/:id',
+ *   component: UserComponent,
+ *   title: createTitle(() => inject(ActivatedRoute).snapshot.params['id']),
+ * }
+ *
+ * // Reactive title from a signal store
+ * {
+ *   path: 'dashboard',
+ *   component: DashboardComponent,
+ *   title: createTitle(() => {
+ *     const user = inject(UserStore).current;
+ *     return computed(() => `Dashboard – ${user()?.name ?? 'Guest'}`);
+ *   }),
+ * }
+ * ```
  */
 export function createTitle(
   factoryOrValue: (() => string | (() => string)) | string,

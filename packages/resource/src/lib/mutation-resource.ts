@@ -51,11 +51,29 @@ type StatusResult<TResult> =
     };
 
 /**
- * Options for configuring a `mutationResource`.
+ * Options for configuring a `mutationResource`. Inherits from
+ * `QueryResourceOptions` (minus options that don't apply to mutations:
+ * `equal`, `keepPrevious`, `refresh`, `cache`) and adds lifecycle callbacks
+ * (`onMutate`, `onError`, `onSuccess`, `onSettled`) for managing optimistic
+ * updates, rollback, and side effects.
  *
  * @typeParam TResult - The type of the expected result from the mutation.
  * @typeParam TRaw - The raw response type from the HTTP request (defaults to TResult).
  * @typeParam TCTX - The type of the context value returned by `onMutate`.
+ *
+ * @example
+ * ```ts
+ * const options: MutationResourceOptions<User, User, Partial<User>, { previous: User | null }> = {
+ *   onMutate: (patch) => {
+ *     const previous = current();
+ *     current.update((u) => (u ? { ...u, ...patch } : u)); // optimistic
+ *     return { previous };
+ *   },
+ *   onError: (_err, { previous }) => current.set(previous), // rollback
+ *   onSuccess: (saved) => toast.success(`Updated ${saved.name}`),
+ *   queue: true, // serialize requests when offline / circuit open
+ * };
+ * ```
  */
 export type MutationResourceOptions<
   TResult,
@@ -101,10 +119,24 @@ export type MutationResourceOptions<
 };
 
 /**
- * Represents a mutation resource created by `mutationResource`.  Extends `QueryResourceRef`
- * but removes methods that don't make sense for mutations (like `prefetch`, `value`, etc.).
+ * Represents a mutation resource created by `mutationResource`. Extends
+ * `QueryResourceRef` but strips methods that don't make sense for one-off
+ * writes (`prefetch`, `value`, `hasValue`, `set`, `update`) and adds `mutate()`
+ * for triggering a mutation plus `current()` for tracking the in-flight value.
  *
  * @typeParam TResult - The type of the expected result from the mutation.
+ *
+ * @example
+ * ```ts
+ * const updateUser = mutationResource<User, User, Partial<User>>(...);
+ *
+ * effect(() => console.log('mutating:', updateUser.current()));
+ * effect(() => {
+ *   if (updateUser.status() === 'error') toast.error(updateUser.error());
+ * });
+ *
+ * updateUser.mutate({ name: 'Alice' });
+ * ```
  */
 export type MutationResourceRef<
   TResult,
@@ -146,6 +178,36 @@ export type MutationResourceRef<
  * @typeParam TMethod - The HTTP method to be used for the mutation (defaults to `HttpResourceRequest['method']`).
  * @returns A `MutationResourceRef` instance, which provides methods for triggering the mutation
  *          and observing its status.
+ *
+ * @example
+ * ```ts
+ * // Basic PATCH mutation
+ * const updateUser = mutationResource<User, User, Partial<User>>(
+ *   (body) => ({ url: `/api/users/${userId()}`, method: 'PATCH', body }),
+ *   {
+ *     onSuccess: (saved) => toast.success(`Updated ${saved.name}`),
+ *     onError: (err) => toast.error(err),
+ *   },
+ * );
+ *
+ * updateUser.mutate({ name: 'Alice' });
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Optimistic update with rollback via the `ctx` returned from `onMutate`
+ * const updateUser = mutationResource<User, User, Partial<User>, { prev: User | null }>(
+ *   (body) => ({ url: `/api/users/${userId()}`, method: 'PATCH', body }),
+ *   {
+ *     onMutate: (patch) => {
+ *       const prev = current();
+ *       current.update((u) => (u ? { ...u, ...patch } : u));
+ *       return { prev };
+ *     },
+ *     onError: (_err, { prev }) => current.set(prev),
+ *   },
+ * );
+ * ```
  */
 export function mutationResource<
   TResult,

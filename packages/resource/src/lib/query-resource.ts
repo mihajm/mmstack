@@ -1,6 +1,6 @@
 import {
   HttpClient,
-  HttpHeaders,
+  type HttpHeaders,
   httpResource,
   HttpResponse,
   type HttpResourceOptions,
@@ -14,15 +14,15 @@ import {
   inject,
   isDevMode,
   linkedSignal,
-  Signal,
+  type Signal,
   untracked,
-  WritableSignal,
+  type WritableSignal,
 } from '@angular/core';
 import { toWritable } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
   catchValueError,
-  CircuitBreakerOptions,
+  type CircuitBreakerOptions,
   createCircuitBreaker,
   createEqualRequest,
   hashRequest,
@@ -36,7 +36,7 @@ import {
   toResourceObject,
   type RetryOptions,
 } from './util';
-import { CacheEntry } from './util/cache/cache';
+import { type CacheEntry } from './util/cache/cache';
 
 /**
  * Options for configuring caching behavior of a `queryResource`.
@@ -84,7 +84,22 @@ type ResourceCacheOptions =
     };
 
 /**
- * Options for configuring a `queryResource`.
+ * Options for configuring a `queryResource`. Extends Angular's
+ * `HttpResourceOptions` with caching, retries, refresh intervals, circuit
+ * breakers, and lifecycle callbacks. See the linked properties below for the
+ * full list.
+ *
+ * @example
+ * ```ts
+ * const options: QueryResourceOptions<User> = {
+ *   defaultValue: { id: 0, name: 'Anonymous' },
+ *   cache: { ttl: 60_000, staleTime: 10_000 },
+ *   refresh: 30_000,
+ *   retry: { max: 3 },
+ *   circuitBreaker: true,
+ *   onError: (err, retry, isFinal) => isFinal && toast.error(err),
+ * };
+ * ```
  */
 export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
   TResult,
@@ -134,11 +149,38 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
  * The reason a query resource is currently in the `disabled` state, or `null`
  * if it is enabled. Useful for branching UI on cause (e.g. "offline" vs
  * "circuit tripped" vs "nothing to fetch yet").
+ *
+ * @example
+ * ```ts
+ * effect(() => {
+ *   switch (user.disabledReason()) {
+ *     case 'offline':      return toast.warn('You are offline');
+ *     case 'circuit-open': return toast.warn('Service temporarily unavailable');
+ *     case 'no-request':   return; // expected — request signal returned undefined
+ *     case null:           return; // resource is enabled
+ *   }
+ * });
+ * ```
  */
 export type DisabledReason = 'offline' | 'circuit-open' | 'no-request';
 
 /**
- * Represents a resource created by `queryResource`. Extends `HttpResourceRef` with additional properties.
+ * Represents a resource created by `queryResource`. Extends `HttpResourceRef`
+ * with `disabled` / `disabledReason` signals, writable `headers` / `statusCode`
+ * (so optimistic updates can patch them), and `prefetch()` for proactive cache
+ * warm-up.
+ *
+ * @example
+ * ```ts
+ * const user = queryResource<User>(() => `/api/users/${userId()}`);
+ *
+ * effect(() => {
+ *   if (user.status() === 'resolved') console.log(user.value());
+ * });
+ *
+ * // Warm the cache before navigating
+ * onMouseEnter(() => user.prefetch());
+ * ```
  */
 export type QueryResourceRef<TResult> = Omit<
   HttpResourceRef<TResult>,
@@ -181,6 +223,18 @@ export type QueryResourceRef<TResult> = Omit<
  *               `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
  *                `onError`, `circuitBreaker`, and `cache`.  Additionally, when a `defaultValue` is provided, the resource's value will always be defined, even if the underlying HTTP request fails or is disabled.
  * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
+ *
+ * @example
+ * ```ts
+ * const userId = signal(1);
+ *
+ * const user = queryResource<User>(
+ *   () => `/api/users/${userId()}`,
+ *   { defaultValue: { id: 0, name: 'Anonymous' } },
+ * );
+ *
+ * user.value(); // always User — never undefined, even before the first fetch resolves
+ * ```
  */
 export function queryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | string | undefined | void,
@@ -200,6 +254,24 @@ export function queryResource<TResult, TRaw = TResult>(
  *                `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
  *                `onError`, `circuitBreaker`, and `cache`.
  * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
+ *
+ * @example
+ * ```ts
+ * const userId = signal<number | undefined>(undefined);
+ *
+ * const user = queryResource<User>(
+ *   () => userId() ? `/api/users/${userId()}` : undefined,
+ *   {
+ *     cache: { ttl: 60_000, staleTime: 10_000 },
+ *     refresh: 30_000,
+ *     retry: { max: 3 },
+ *   },
+ * );
+ *
+ * user.value();          // User | undefined
+ * user.status();         // 'idle' | 'loading' | 'resolved' | 'error'
+ * user.disabledReason(); // null while enabled; 'offline' / 'circuit-open' / 'no-request' otherwise
+ * ```
  */
 export function queryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | string | undefined | void,

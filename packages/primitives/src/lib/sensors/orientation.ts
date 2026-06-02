@@ -25,6 +25,15 @@ const SSR_FALLBACK: ScreenOrientation = {
  *
  * SSR-safe — returns a constant `portrait-primary / 0°` signal on the server
  * and in environments without `screen.orientation` support.
+ *
+ * @example
+ * ```ts
+ * const screenOrientation = orientation();
+ * effect(() => {
+ *   const { type, angle } = screenOrientation();
+ *   console.log(`${type} at ${angle}°`);
+ * });
+ * ```
  */
 export function orientation(debugName = 'orientation'): Signal<ScreenOrientation> {
   if (

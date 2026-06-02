@@ -69,6 +69,37 @@ type Config = RouteBasedConfig | DynamicConfig;
 
 const CONFIG_TOKEN = new InjectionToken<Config>('mmstack-intl-config');
 
+/**
+ * Configures the `@mmstack/translate` intl layer at app bootstrap. Sets up the
+ * default locale, supported-locale list, format defaults, and (optionally) a
+ * route-based locale param name or a custom locale-storage adapter.
+ *
+ * When `defaultLocale` (or the first entry in `supportedLocales`) is provided,
+ * it's also wired as Angular's `LOCALE_ID` so Angular pipes and CLDR fall
+ * back to the same locale.
+ *
+ * @param config Intl configuration: extends `@formatjs/intl`'s `IntlConfig`
+ *   with `supportedLocales`, `preloadDefaultLocale`, `releaseCachedSignals`,
+ *   and either `localeParamName` (route-based) or `localeStorage` (dynamic).
+ * @returns A providers array to spread into `bootstrapApplication`'s `providers`.
+ *
+ * @example
+ * ```ts
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     ...provideIntlConfig({
+ *       defaultLocale: 'en-US',
+ *       supportedLocales: ['en-US', 'de-DE', 'sl-SI'],
+ *       preloadDefaultLocale: true,
+ *       localeStorage: {
+ *         read: () => localStorage.getItem('locale'),
+ *         write: (locale) => localStorage.setItem('locale', locale),
+ *       },
+ *     }),
+ *   ],
+ * });
+ * ```
+ */
 export function provideIntlConfig(config: Config): Provider[] {
   const providers: Provider[] = [
     {
@@ -106,14 +137,45 @@ export function provideIntlConfig(config: Config): Provider[] {
   return providers;
 }
 
+/**
+ * Returns the intl config object provided via {@link provideIntlConfig}, or
+ * `undefined` if no config was registered. Useful for reading flags like
+ * `preloadDefaultLocale` from inside custom resolvers or services.
+ *
+ * @returns The active intl config, or `undefined` if none was provided.
+ */
 export function injectIntlConfig() {
   return inject(CONFIG_TOKEN, { optional: true }) ?? undefined;
 }
 
+/**
+ * Returns the configured default locale. Falls back to Angular's `LOCALE_ID`
+ * if no `defaultLocale` was set in {@link provideIntlConfig}, and finally to
+ * `'en-US'`.
+ *
+ * @returns The resolved default locale string.
+ *
+ * @example
+ * ```ts
+ * const defaultLocale = injectDefaultLocale(); // e.g. 'en-US'
+ * ```
+ */
 export function injectDefaultLocale() {
   return injectIntlConfig()?.defaultLocale ?? inject(LOCALE_ID) ?? 'en-US';
 }
 
+/**
+ * Returns the array of supported locales as configured via
+ * {@link provideIntlConfig}. If no `supportedLocales` was set, returns an
+ * array containing just the resolved default locale.
+ *
+ * @returns The supported-locales array (never empty).
+ *
+ * @example
+ * ```ts
+ * const locales = injectSupportedLocales(); // e.g. ['en-US', 'de-DE', 'sl-SI']
+ * ```
+ */
 export function injectSupportedLocales() {
   return injectIntlConfig()?.supportedLocales ?? [injectDefaultLocale()];
 }
@@ -518,6 +580,26 @@ export class TranslationStore {
   }
 }
 
+/**
+ * Returns the underlying `IntlShape` instance from `@formatjs/intl` used by
+ * the translation store. Use this when you need direct access to formatjs
+ * APIs (e.g. `formatRelativeTime`, manual `formatMessage` calls with raw ICU
+ * strings) that aren't already wrapped by the `formatX` helpers in this
+ * package.
+ *
+ * @returns The active `IntlShape` instance (signal-backed; updates on locale changes).
+ *
+ * @example
+ * ```ts
+ * const intl = injectIntl();
+ * effect(() => {
+ *   const formatted = intl().formatMessage(
+ *     { id: 'custom.id', defaultMessage: 'Hello {name}' },
+ *     { name: 'Alice' },
+ *   );
+ * });
+ * ```
+ */
 export function injectIntl() {
   return inject(TranslationStore).intl;
 }

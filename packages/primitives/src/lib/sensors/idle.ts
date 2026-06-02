@@ -48,6 +48,14 @@ const serverDate = new Date();
  * activity) resets the timer and flips the signal back to `false`.
  *
  * SSR-safe — always `false` with a frozen `since` date on the server.
+ *
+ * @example
+ * ```ts
+ * const isAway = idle({ ms: 30_000 });
+ * effect(() => {
+ *   if (isAway()) console.log('idle since', isAway.since());
+ * });
+ * ```
  */
 export function idle(opt?: IdleOptions): IdleSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {

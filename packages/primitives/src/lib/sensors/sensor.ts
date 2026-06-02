@@ -370,6 +370,27 @@ type Sensors<TKey extends keyof SensorTypedOptions> = {
   [K in TKey]: SensorTypedOptions[K]['returnType'];
 };
 
+/**
+ * Bulk sensor factory — creates several sensor signals at once and returns
+ * them keyed by sensor type. Convenient when a single consumer needs to react
+ * to multiple browser signals; for a single sensor prefer {@link sensor}
+ * directly.
+ *
+ * @typeParam TType The union of sensor keys being requested.
+ * @param track Array of sensor type keys to create.
+ * @param opt Optional per-sensor options keyed by sensor type.
+ * @returns A record `{ [key]: <SensorReturnType> }` for each requested key.
+ *
+ * @example
+ * ```ts
+ * const { windowSize, networkStatus } = sensors(
+ *   ['windowSize', 'networkStatus'],
+ *   { windowSize: { throttle: 200 } },
+ * );
+ *
+ * effect(() => console.log(windowSize(), networkStatus()));
+ * ```
+ */
 export function sensors<const TType extends keyof SensorTypedOptions>(
   track: TType[],
   opt?: SensorsOptions<TType>,

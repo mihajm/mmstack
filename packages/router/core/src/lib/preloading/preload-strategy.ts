@@ -33,6 +33,44 @@ function noPreload(route: Route) {
   return route.data && route.data['preload'] === false;
 }
 
+/**
+ * Demand-driven preloading strategy for Angular's router. Unlike Angular's
+ * built-in `PreloadAllModules`, this strategy preloads a lazy route only
+ * when something explicitly requests it via {@link PreloadRequester} (e.g.
+ * the `mmLink` directive on hover or visibility, or {@link injectTriggerPreload}
+ * called imperatively).
+ *
+ * Skips preloading when:
+ * - the route has `data.preload === false`
+ * - the network is on `2g` or in `saveData` mode (cheap-data-mode users)
+ * - a load for the same path is already in flight
+ *
+ * Wire this into `provideRouter` to enable the `mmLink` preload pipeline:
+ *
+ * @example
+ * ```ts
+ * import { PreloadStrategy } from '@mmstack/router-core';
+ * import { provideRouter, withPreloading } from '@angular/router';
+ *
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideRouter(routes, withPreloading(PreloadStrategy)),
+ *   ],
+ * });
+ *
+ * // Then in templates, `mmLink` (or `injectTriggerPreload`) requests
+ * // preloads that this strategy executes:
+ * // <a [mmLink]="'/users'">Users</a>
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Opt a route out of preloading:
+ * export const routes: Routes = [
+ *   { path: 'admin', loadChildren: () => import('./admin'), data: { preload: false } },
+ * ];
+ * ```
+ */
 @Injectable({
   providedIn: 'root',
 })

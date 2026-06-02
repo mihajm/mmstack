@@ -30,6 +30,38 @@ function compareObjects(
   return aKeys.every((key) => a[key] === b[key]);
 }
 
+/**
+ * Abstract base directive that renders a translated string into the host
+ * element's `textContent`. Consumers extend this directive once per namespace
+ * to get a typed `translate` input whose keys and parameters are validated
+ * against the namespace's compiled translation.
+ *
+ * The `translate` input accepts either a bare key (for keys with no
+ * parameters) or a `[key, vars]` tuple (for keys with parameters).
+ *
+ * @typeParam TInput The set of keys the consumer wants to allow (often the
+ *   full key set of the namespace, but can be narrowed).
+ * @typeParam T The `CompiledTranslation` produced by {@link createNamespace}.
+ * @typeParam TMap The inferred parameter map (rarely overridden).
+ * @typeParam TKey The intersection of `TInput` and the namespace's keys.
+ *
+ * @example
+ * ```ts
+ * // 1. Define a namespace-specific directive once
+ * @Directive({
+ *   selector: '[appTranslate]',
+ *   inputs: [{ name: 'appTranslate', alias: 'translate' }],
+ * })
+ * export class AppTranslateDirective extends Translate<
+ *   keyof inferCompiledTranslationMap<typeof app.translation> & string,
+ *   typeof app.translation
+ * > {}
+ *
+ * // 2. Use in templates
+ * // <span [appTranslate]="'app.nav.home'"></span>
+ * // <span [appTranslate]="['app.greeting', { name: userName() }]"></span>
+ * ```
+ */
 @Directive()
 export abstract class Translate<
   TInput extends string,

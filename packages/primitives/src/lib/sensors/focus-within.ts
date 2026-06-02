@@ -28,6 +28,15 @@ function unwrap(target: ElementRef<Element> | Element | null): Element | null {
  * Defaults `target` to the current `ElementRef` so it can be used inline in a
  * component's `class` field. SSR-safe — returns a constant `false` signal on
  * the server.
+ *
+ * @example
+ * ```ts
+ * @Component({ ... })
+ * class MenuComponent {
+ *   // Defaults to the host element — flips true when focus is inside.
+ *   readonly hasFocus = focusWithin();
+ * }
+ * ```
  */
 export function focusWithin(
   target: FocusWithinTarget = inject(ElementRef),

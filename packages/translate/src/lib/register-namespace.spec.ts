@@ -1,10 +1,13 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { compileTranslation } from './compile';
+import { createNamespace } from './create-namespace';
 import {
   addSignalFn,
   createT,
   injectUnsafeT,
+  registerNamespace,
+  registerRemoteNamespace,
   resolveTranslationModule,
 } from './register-namespace';
 import { injectLocaleInternal, TranslationStore } from './translation-store';
@@ -302,5 +305,66 @@ describe('resolveTranslationModule', () => {
     expect(() =>
       resolveTranslationModule({ default: 'oops' } as never),
     ).toThrow(/CompiledTranslation/);
+  });
+});
+
+describe('registerNamespace return shape', () => {
+  it('returns a value that supports both tuple and object destructuring', () => {
+    const demo = createNamespace('demo', { hello: 'Hi' });
+
+    const result = registerNamespace(
+      () => Promise.resolve(demo.translation),
+      {},
+    );
+
+    // tuple form
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(2);
+
+    // tuple and object access return the same function references
+    expect(result[0]).toBe(result.injectNamespaceT);
+    expect(result[1]).toBe(result.resolveNamespaceTranslation);
+    expect(typeof result[0]).toBe('function');
+    expect(typeof result[1]).toBe('function');
+
+    // tuple destructure works
+    const [injectT, resolveT] = result;
+    expect(injectT).toBe(result.injectNamespaceT);
+    expect(resolveT).toBe(result.resolveNamespaceTranslation);
+
+    // object destructure still works (back-compat)
+    const { injectNamespaceT, resolveNamespaceTranslation } = result;
+    expect(injectNamespaceT).toBe(result[0]);
+    expect(resolveNamespaceTranslation).toBe(result[1]);
+  });
+});
+
+describe('registerRemoteNamespace return shape', () => {
+  it('returns a value that supports both tuple and object destructuring', () => {
+    const result = registerRemoteNamespace(
+      'remote',
+      () => Promise.resolve({ hello: 'Hi' }),
+      {},
+    );
+
+    // tuple form
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(2);
+
+    // tuple and object access return the same function references
+    expect(result[0]).toBe(result.injectNamespaceT);
+    expect(result[1]).toBe(result.resolveNamespaceTranslation);
+    expect(typeof result[0]).toBe('function');
+    expect(typeof result[1]).toBe('function');
+
+    // tuple destructure works
+    const [injectT, resolveT] = result;
+    expect(injectT).toBe(result.injectNamespaceT);
+    expect(resolveT).toBe(result.resolveNamespaceTranslation);
+
+    // object destructure still works (back-compat)
+    const { injectNamespaceT, resolveNamespaceTranslation } = result;
+    expect(injectNamespaceT).toBe(result[0]);
+    expect(resolveNamespaceTranslation).toBe(result[1]);
   });
 });

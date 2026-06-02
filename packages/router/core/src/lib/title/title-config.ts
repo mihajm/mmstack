@@ -39,7 +39,29 @@ const token = new InjectionToken<InternalTitleConfig>(
 );
 
 /**
- * used to provide the title configuration, will not be applied unless a `createTitle` resolver is used
+ * Provide application-wide configuration for the title subsystem. The config
+ * is only consumed when at least one route uses a {@link createTitle} resolver;
+ * routes without `createTitle` are unaffected.
+ *
+ * @param config Optional {@link TitleConfig}. All fields are optional — pass
+ *   `prefix` to namespace titles (e.g. `"My App – "`), `initialTitle` to
+ *   override the fallback (defaults to the `<title>` from `index.html`), and
+ *   `keepLastKnownTitle: false` to clear the title on navigations to routes
+ *   without a title (the default keeps the previous one).
+ * @returns A `Provider` to add to your app's providers array.
+ *
+ * @example
+ * ```ts
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideRouter(routes),
+ *     provideTitleConfig({
+ *       prefix: (title) => `${title} • My App`,
+ *       keepLastKnownTitle: true,
+ *     }),
+ *   ],
+ * });
+ * ```
  */
 export function provideTitleConfig(config?: TitleConfig): Provider {
   const prefix = config?.prefix ?? '';

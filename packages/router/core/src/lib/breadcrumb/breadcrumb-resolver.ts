@@ -32,17 +32,24 @@ type CreateBreadcrumbOptions = {
 };
 
 /**
- * Creates and registers a breadcrumb for a specific route.
- * This function is designed to be used as an Angular Route `ResolveFn`.
+ * Creates and registers a breadcrumb for a specific route. Designed to be used
+ * as an Angular Route `ResolveFn` in the route's `resolve` map.
  *
- * Accepts a static label (`string`), a static options object, or a factory returning either —
- * use a factory when you need `inject()` for dynamic data.
+ * Accepts a static label, a static options object, or a factory returning
+ * either — use a factory when you need `inject()` to read dynamic data.
  *
- * @param factoryOrValue A static label, a static `CreateBreadcrumbOptions`, or a factory returning either.
+ * @param factoryOrValue One of: a literal label string (shorthand for
+ *   `{ label: <string> }`), a static {@link CreateBreadcrumbOptions} object,
+ *   or a factory `() => string | CreateBreadcrumbOptions` invoked inside an
+ *   injection context (so it can use `inject()`).
+ * @returns An Angular `ResolveFn<void>` to wire into a route's `resolve` map.
+ *   The resolver registers the breadcrumb as a side effect; the resolved value
+ *   itself is unused.
+ *
  * @see CreateBreadcrumbOptions
  *
  * @example
- * ```typescript
+ * ```ts
  * export const appRoutes: Routes = [
  *   {
  *     path: 'home',
@@ -59,7 +66,7 @@ type CreateBreadcrumbOptions = {
  *       breadcrumb: createBreadcrumb(() => {
  *         const userStore = inject(UserStore);
  *         return {
- *           label: () => userStore.user().name ?? 'Loading...',
+ *           label: () => userStore.user().name ?? 'Loading…',
  *         };
  *       }),
  *     },

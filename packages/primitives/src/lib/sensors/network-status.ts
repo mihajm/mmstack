@@ -35,6 +35,14 @@ const serverDate = new Date();
  *
  * @param debugName Optional debug name for the signal.
  * @returns A `NetworkStatusSignal` instance.
+ *
+ * @example
+ * ```ts
+ * const online = networkStatus();
+ * effect(() => {
+ *   if (!online()) console.log('offline since', online.since());
+ * });
+ * ```
  */
 export function networkStatus(
   debugName = 'networkStatus',

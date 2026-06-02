@@ -44,31 +44,33 @@ const token = new InjectionToken<BreadcrumbConfig>(
 
 /**
  * Provides configuration for the breadcrumb system.
- * @param config - A partial `BreadcrumbConfig` object with the desired settings. *
+ *
+ * @param config A partial {@link BreadcrumbConfig}. The `generation` field controls
+ *   automatic label generation: `'manual'` disables it (breadcrumbs only show when
+ *   {@link createBreadcrumb} explicitly registers them); a function provides a
+ *   custom label generator instead of the default route-title-based one.
+ * @returns A `Provider` to add to your app's providers array.
+ *
  * @see BreadcrumbConfig
+ *
  * @example
- * ```typescript
- * // In your app.module.ts or a standalone component's providers:
- * // import { provideBreadcrumbConfig } from './breadcrumb.config'; // Adjust path
- * // import { ResolvedLeafRoute } from './breadcrumb.type'; // Adjust path
+ * ```ts
+ * // Disable automatic generation — breadcrumbs only appear when createBreadcrumb is used
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideRouter(routes),
+ *     provideBreadcrumbConfig({ generation: 'manual' }),
+ *   ],
+ * });
+ * ```
  *
- * // const customLabelStrategy: GenerateBreadcrumbFn = () => {
- * //   return (leaf: ResolvedLeafRoute): string => {
- * //     // Example: Prioritize a 'navTitle' data property
- * //     if (leaf.route.data?.['navTitle']) {
- * //       return leaf.route.data['navTitle'];
- * //     }
- * //     // Fallback to a default mechanism
- * //     return leaf.route.title || leaf.segment.resolved || 'Unnamed';
- * //   };
- * // };
+ * @example
+ * ```ts
+ * // Custom label strategy — outer fn runs in injection context, inner is reactive
+ * const customLabelStrategy = () => (leaf: ResolvedLeafRoute) =>
+ *   leaf.route.data?.['navTitle'] ?? leaf.route.title ?? 'Unnamed';
  *
- * export const appConfig = [
- *  // ...rest
- *  provideBreadcrumbConfig({
- *   generation: customLabelStrategy, // or 'manual' to disable auto-generation
- *  }),
- * ]
+ * provideBreadcrumbConfig({ generation: customLabelStrategy });
  * ```
  */
 export function provideBreadcrumbConfig(config: Partial<BreadcrumbConfig>) {

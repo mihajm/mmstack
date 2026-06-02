@@ -7,7 +7,19 @@ import {
 import { url } from '../url';
 
 /**
- * @internal
+ * A flattened view of one route in the active router chain, used by the
+ * breadcrumb and title subsystems. Each `ResolvedLeafRoute` describes one
+ * "step" in the chain from root to current leaf.
+ *
+ * Exposed publicly because custom breadcrumb generators (see
+ * {@link BreadcrumbConfig}'s `generation` callback) receive instances of
+ * this type and need to read its fields.
+ *
+ * - `route` — the underlying `ActivatedRouteSnapshot`.
+ * - `segment.path` — the route config segment (e.g. `:userId`).
+ * - `segment.resolved` — the resolved value of that segment (e.g. `'42'`).
+ * - `path` — the full route-config path from root (with raw segments like `:userId`).
+ * - `link` — the full resolved URL from root (with substituted values).
  */
 export type ResolvedLeafRoute = {
   route: ActivatedRouteSnapshot;

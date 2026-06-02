@@ -8,8 +8,29 @@ import {
 } from './query-resource';
 
 /**
- * A reference to a manually triggered query resource.  This type extends the standard `QueryResourceRef`
- * with an additional `trigger` method that allows you to manually trigger the resource request.
+ * A reference to a manually triggered query resource. Extends
+ * {@link QueryResourceRef} with a `trigger()` method that runs the request
+ * imperatively and returns a `Promise<TResult>`. Useful when a request should
+ * only happen on user action (search submit, button click) rather than on
+ * every reactive change of the request inputs.
+ *
+ * @example
+ * ```ts
+ * const search = manualQueryResource<SearchResults>(() => ({
+ *   url: '/api/search',
+ *   params: { q: query() },
+ * }));
+ *
+ * async function onSubmit() {
+ *   try {
+ *     const results = await search.trigger();
+ *     showResults(results);
+ *   } catch (err) {
+ *     toast.error('Search failed');
+ *   }
+ * }
+ * ```
+ *
  * @see QueryResourceRef
  */
 export type ManualQueryResourceRef<TResult> = QueryResourceRef<TResult> & {
@@ -29,6 +50,17 @@ export type ManualQueryResourceRef<TResult> = QueryResourceRef<TResult> & {
  *               `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
  *                `onError`, `circuitBreaker`, and `cache`.  Additionally, when a `defaultValue` is provided, the resource's value will always be defined, even if the underlying HTTP request fails or is disabled.
  * @returns An `ManualQueryResourceRef` instance, which extends the basic `QueryResourceRef` with additional features.
+ *
+ * @example
+ * ```ts
+ * const search = manualQueryResource<SearchResults>(
+ *   () => ({ url: '/api/search', params: { q: query() } }),
+ *   { defaultValue: { hits: [], total: 0 } },
+ * );
+ *
+ * // search.value() is always SearchResults (never undefined) thanks to defaultValue.
+ * const results = await search.trigger();
+ * ```
  */
 export function manualQueryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | string | undefined | void,
@@ -48,6 +80,23 @@ export function manualQueryResource<TResult, TRaw = TResult>(
  *                `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
  *                `onError`, `circuitBreaker`, and `cache`.
  * @returns An `ManualQueryResourceRef` instance, which extends the basic `QueryResourceRef` with additional features.
+ *
+ * @example
+ * ```ts
+ * const exportReport = manualQueryResource<Report>(() => ({
+ *   url: '/api/reports/export',
+ *   params: { range: range() },
+ * }));
+ *
+ * async function onExportClick() {
+ *   try {
+ *     const report = await exportReport.trigger();
+ *     download(report);
+ *   } catch (err) {
+ *     toast.error('Export failed');
+ *   }
+ * }
+ * ```
  */
 export function manualQueryResource<TResult, TRaw = TResult>(
   request: () => HttpResourceRequest | string | undefined | void,

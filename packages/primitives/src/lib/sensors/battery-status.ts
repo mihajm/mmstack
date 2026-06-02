@@ -36,6 +36,15 @@ const EVENTS = [
  * Battery Status API. Returns `null` until the underlying `getBattery()`
  * promise resolves, or permanently when the API is unsupported (Firefox /
  * Safari at the time of writing). SSR-safe.
+ *
+ * @example
+ * ```ts
+ * const battery = batteryStatus();
+ * effect(() => {
+ *   const b = battery();
+ *   if (b) console.log(`${Math.round(b.level * 100)}% • charging: ${b.charging}`);
+ * });
+ * ```
  */
 export function batteryStatus(
   debugName = 'batteryStatus',

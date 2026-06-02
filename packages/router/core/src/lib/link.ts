@@ -131,6 +131,25 @@ type MMLinkConfig = {
 
 const configToken = new InjectionToken<MMLinkConfig>('MMSTACK_LINK_CONFIG');
 
+/**
+ * Provide application-wide defaults for the `mmLink` directive. Each `[mmLink]`
+ * instance can still override per-link via its own `preloadOn` / `useMouseDown`
+ * inputs; this just shifts the default.
+ *
+ * @param config Partial override of `MMLinkConfig`. Unset keys fall back to:
+ *   - `preloadOn: 'hover'` — preload triggered when the user hovers a link
+ *   - `useMouseDown: false` — navigation triggered on click (not mousedown)
+ * @returns A `Provider` to add to your app's providers array.
+ *
+ * @example
+ * ```ts
+ * bootstrapApplication(AppComponent, {
+ *   providers: [
+ *     provideMMLinkDefaultConfig({ preloadOn: 'visible', useMouseDown: true }),
+ *   ],
+ * });
+ * ```
+ */
 export function provideMMLinkDefaultConfig(
   config: Partial<MMLinkConfig>,
 ): Provider {
@@ -155,6 +174,36 @@ function injectConfig() {
   };
 }
 
+/**
+ * Drop-in replacement for `[routerLink]` that adds preloading on hover or
+ * visibility, optional mousedown-triggered navigation, and a `beforeNavigate`
+ * hook. Composes with Angular's `RouterLink` via `hostDirectives`, so every
+ * `RouterLink` input (`target`, `queryParams`, `fragment`, etc.) is forwarded.
+ *
+ * Preload behavior:
+ * - `preloadOn: 'hover'` (default) — preload when the user hovers the link
+ * - `preloadOn: 'visible'` — preload when the link scrolls into view
+ * - `preloadOn: null` — disable preloading on this link
+ *
+ * Navigation timing:
+ * - `useMouseDown: false` (default) — navigate on click
+ * - `useMouseDown: true` — navigate on mousedown (shaves ~50ms but breaks if the user
+ *   moves off the link before mouseup)
+ *
+ * Requires {@link PreloadStrategy} to be wired via `provideRouter(routes, withComponentInputBinding(), withPreloading(PreloadStrategy))`.
+ * Set app-wide defaults with {@link provideMMLinkDefaultConfig}.
+ *
+ * @example
+ * ```html
+ * <a [mmLink]="['/users', userId()]">View profile</a>
+ *
+ * <!-- Override per-link -->
+ * <a [mmLink]="'/heavy-page'" preloadOn="visible" useMouseDown>Heavy page</a>
+ *
+ * <!-- React to the preload starting -->
+ * <a [mmLink]="'/checkout'" (preloading)="onPreload()">Checkout</a>
+ * ```
+ */
 @Directive({
   selector: '[mmLink]',
   exportAs: 'mmLink',

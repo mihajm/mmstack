@@ -223,6 +223,73 @@ export function resolveTranslationModule<
   );
 }
 
+/**
+ * Registers a translation namespace and returns helpers for consuming it:
+ *
+ * - `injectNamespaceT()` — an injection helper that yields a type-safe `t(key, vars?)`
+ *   function (plus `t.asSignal(key, vars?)` for reactive keys) bound to this namespace.
+ * - `resolveNamespaceTranslation` — an Angular `ResolveFn` you attach to a route's
+ *   `resolve` so the relevant locale's translations are loaded before the route activates.
+ *
+ * Loaders are lazy: the default-locale translation is loaded only when needed
+ * (or eagerly if `preloadDefaultLocale` is set in the intl config), and each
+ * non-default locale loader runs only when its locale is the active one.
+ *
+ * @typeParam TDefault The `CompiledTranslation` type of the default-locale loader.
+ * @param defaultTranslation Loader for the default locale. May return a
+ *   `CompiledTranslation` directly, or an ES-module-style object exposing one
+ *   as `default` or `translation`.
+ * @param other Map of `locale → loader`, each loader returning a translation
+ *   matching the default's namespace.
+ * @returns A value that destructures either as a tuple
+ *   `[injectFn, resolveFn]` (preferred — lets each call site pick its own
+ *   names per namespace) or as an object
+ *   `{ injectNamespaceT, resolveNamespaceTranslation }` (kept for backwards
+ *   compatibility).
+ *
+ * @example
+ * ```ts
+ * // translations/app.namespace.ts
+ * export const app = createNamespace('app', {
+ *   greeting: 'Hello {name}!',
+ *   nav: { home: 'Home' },
+ * });
+ *
+ * export const appDE = app.createTranslation('de', {
+ *   greeting: 'Hallo {name}!',
+ *   nav: { home: 'Startseite' },
+ * });
+ *
+ * // app-routes.ts — tuple destructure lets you name things per namespace
+ * const [injectAppT, resolveApp] = registerNamespace(
+ *   () => import('./translations/app.namespace').then((m) => m.app.translation),
+ *   {
+ *     de: () => import('./translations/app.namespace').then((m) => m.appDE),
+ *   },
+ * );
+ *
+ * export const routes: Routes = [
+ *   {
+ *     path: ':locale',
+ *     resolve: { _t: resolveApp },
+ *     // ...
+ *   },
+ * ];
+ *
+ * // in a component / service:
+ * class HomeComponent {
+ *   private readonly t = injectAppT();
+ *   readonly greeting = this.t('app.greeting', { name: 'Alice' });
+ *   readonly liveGreeting = this.t.asSignal('app.greeting', () => ({ name: name() }));
+ * }
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Object form still works (back-compat):
+ * const { injectNamespaceT, resolveNamespaceTranslation } = registerNamespace(...);
+ * ```
+ */
 export function registerNamespace<
   TDefault extends CompiledTranslation<UnknownStringKeyObject, string>,
 >(
@@ -346,10 +413,10 @@ export function registerNamespace<
     }
   };
 
-  return {
+  return Object.assign([injectT, resolver] as const, {
     injectNamespaceT: injectT,
     resolveNamespaceTranslation: resolver,
-  };
+  });
 }
 
 type UntypedTFunction<TNS extends string> = {
@@ -361,8 +428,35 @@ type UntypedTFunction<TNS extends string> = {
 };
 
 /**
- * Registers a type-unsafe namespace, meant for remote loading of unknown key-value pairs using mmstack/translate infrastructure
- * The resolver & t function work the same as they would with typed namespaces, but without type safety
+ * Registers a type-unsafe namespace for translations loaded from a remote
+ * source where the key/value shape isn't known at compile time. The resolver
+ * and `t` function work the same as {@link registerNamespace}, except keys are
+ * typed only as `${ns}.${string}` and parameters are `Record<string, string>`
+ * with no per-key validation.
+ *
+ * @typeParam TNS The namespace string literal type.
+ * @param ns The namespace identifier (e.g. `'remote'`).
+ * @param defaultTranslation Loader returning a raw `Record<string, string>` of
+ *   flattened keys → translated values for the default locale.
+ * @param other Map of `locale → loader`, each loader returning the same raw
+ *   record shape.
+ * @returns A value that destructures either as a tuple `[injectFn, resolveFn]`
+ *   or as an object `{ injectNamespaceT, resolveNamespaceTranslation }` (back-compat).
+ *
+ * @example
+ * ```ts
+ * const [injectCmsT, resolveCms] = registerRemoteNamespace(
+ *   'cms',
+ *   () => fetch('/i18n/cms/en.json').then((r) => r.json()),
+ *   {
+ *     de: () => fetch('/i18n/cms/de.json').then((r) => r.json()),
+ *   },
+ * );
+ *
+ * // in a component:
+ * const t = injectCmsT();
+ * t('cms.banner.title', { campaign: 'Summer' }); // typed as string
+ * ```
  */
 export function registerRemoteNamespace<TNS extends string>(
   ns: TNS,
@@ -476,10 +570,10 @@ export function registerRemoteNamespace<TNS extends string>(
     }
   };
 
-  return {
+  return Object.assign([injectT, resolver] as const, {
     injectNamespaceT: injectT,
     resolveNamespaceTranslation: resolver,
-  };
+  });
 }
 
 @Injectable({

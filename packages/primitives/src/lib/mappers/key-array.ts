@@ -23,7 +23,30 @@ import {
  * @param mapFn The mapping function. Receives the item and its index as a Signal.
  * @param options Optional configuration:
  *  - `onDestroy`: A callback invoked when a mapped item is removed from the array.
+ *  - `key`: A custom key extractor for identity matching (e.g. `(item) => item.id`)
+ *    when item references change but conceptual identity is preserved.
  * @returns A `Signal<U[]>` containing the mapped array.
+ *
+ * @example
+ * ```ts
+ * const users = signal([
+ *   { id: 1, name: 'Alice' },
+ *   { id: 2, name: 'Bob' },
+ * ]);
+ *
+ * const rows = keyArray(
+ *   users,
+ *   (user, index) => ({
+ *     label: computed(() => `#${index()} ${user.name}`),
+ *     id: user.id,
+ *   }),
+ *   { key: (u) => u.id },
+ * );
+ *
+ * // Reordering users() rebuilds index signals only — `rows` entries
+ * // are matched by id and reused, not re-created.
+ * users.set([users()[1], users()[0]]);
+ * ```
  */
 export function keyArray<T, U, K>(
   source: Signal<T[]> | (() => T[]),

@@ -153,13 +153,13 @@ export default createQuoteTranslation('sl-SI', {
 
 ### 2. Register the Namespace & Load Translations
 
-Use `registerNamespace` to prepare your namespace definition and obtain the `injectNamespaceT` function and the `resolveNamespaceTranslation` resolver function.
+Use `registerNamespace` to prepare your namespace definition and obtain the `injectT` function plus the route `resolve` function. The return value supports both tuple and object destructuring — tuple destructuring lets each call site pick its own names, which is the recommended form when you have more than one namespace:
 
 ```typescript
 // Example: packages/quote/src/lib/quote.t.ts
 import { registerNamespace } from '@mmstack/translate';
 
-const r = registerNamespace(
+export const [injectQuoteT, resolveQuoteTranslations] = registerNamespace(
   // Default locale (also acts as the fallback).
   () => import('./quote.namespace'),
   {
@@ -168,10 +168,9 @@ const r = registerNamespace(
     // Add more locales as needed...
   },
 );
-
-export const injectQuoteT = r.injectNamespaceT;
-export const resolveQuoteTranslations = r.resolveNamespaceTranslation;
 ```
+
+The object form (`{ injectNamespaceT, resolveNamespaceTranslation }`) still works for backwards compatibility — handy when you only have one namespace and don't need to rename.
 
 Each loader can return either a `CompiledTranslation` directly, or an ES module exposing one as `default` or as a named `translation` export. So all three of these are equivalent:
 
@@ -368,15 +367,12 @@ export const createAppNamespace = ns.createMergedNamespace;
 // common.t.ts
 import { registerNamespace } from '@mmstack/translate';
 
-const r = registerNamespace(
+export const [injectCommonT, resolveCommonTranslations] = registerNamespace(
   () => import('./common.namespace'),
   {
     'sl-SI': () => import('./common-sl.translation'),
   },
 );
-
-export const injectCommonT = r.injectNamespaceT;
-export const resolveCommonTranslations = r.resolveNamespaceTranslation;
 ```
 
 ```typescript
@@ -609,7 +605,7 @@ For cases where you need to load translations from a remote API (where keys aren
 import { registerRemoteNamespace } from '@mmstack/translate';
 
 // Returns an untyped t function: t('any.key')
-const { injectNamespaceT: injectRemoteT } = registerRemoteNamespace(
+const [injectRemoteT] = registerRemoteNamespace(
   'remote',
   () => fetch('/api/en').then((r) => r.json()),
   {
@@ -823,7 +819,7 @@ Migration sketch:
 
 1. Pick a locale strategy and configure `provideIntlConfig` accordingly (see [Example configurations](#example-configurations)).
 2. For each transloco scope: convert the JSON into a `createNamespace('<name>', defaultTranslations)` file plus one `createXTranslation('<locale>', ...)` file per non-default locale.
-3. In each scope's loader module, call `registerNamespace(() => import('./<ns>.namespace'), { ... })` and export the resulting `injectNamespaceT` / `resolveNamespaceTranslation`. Wire the resolver into the matching route.
+3. In each scope's loader module, call `registerNamespace(() => import('./<ns>.namespace'), { ... })` and tuple-destructure the result into your own names (e.g. `export const [injectScopeT, resolveScopeT] = registerNamespace(...)`). Wire the resolver into the matching route.
 4. Replace `TranslocoService.translate` / `translateSignal` calls with the injected typed `t`. Replace the `transloco` pipe and `*transloco` directive with typed subclasses of `Translator` and `Translate`.
 
 ### From ngx-translate

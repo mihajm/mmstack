@@ -1,6 +1,6 @@
 import { Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { mutableStore, store } from './store';
+import { mutableStore, OPAQUE, opaque, store } from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -261,6 +261,52 @@ describe('store', () => {
       const s1 = store({ a: 1 }, { injector });
       const s2 = store({ a: 1 }, { injector });
       expect(s1.a).not.toBe(s2.a);
+    });
+  });
+
+  describe('opaque', () => {
+    it('treats an opaque object as a leaf, not a child store', () => {
+      const inner = opaque({ a: 1, b: 2 });
+      const s = store({ config: inner }, { injector });
+
+      expect(isSignal(s.config)).toBe(true);
+      expect(s.config()).toEqual({ a: 1, b: 2 });
+      // returned whole — same identity, never re-proxied/cloned
+      expect(s.config()).toBe(inner);
+    });
+
+    it('deep-proxies a non-opaque sibling but not the opaque one', () => {
+      const s = store(
+        { plain: { a: 1 }, blob: opaque({ a: 1 }) },
+        { injector },
+      );
+      // plain object descends to a child store (set on a nested signal)
+      s.plain.a.set(9);
+      expect(s().plain.a).toBe(9);
+      // opaque object has no child-store key reachable for descent
+      expect(s.blob()).toEqual({ a: 1 });
+    });
+
+    it('replaces the whole value via set', () => {
+      const s = store({ config: opaque({ a: 1 }) }, { injector });
+      s.config.set(opaque({ a: 9 }));
+      expect(s.config()).toEqual({ a: 9 });
+      expect(s().config).toEqual({ a: 9 });
+    });
+
+    it('keeps the brand non-enumerable', () => {
+      const o = opaque({ a: 1, b: 2 });
+      expect(Object.keys(o)).toEqual(['a', 'b']);
+      expect({ ...o }).toEqual({ a: 1, b: 2 });
+      expect(Object.getOwnPropertyDescriptor(o, OPAQUE)?.enumerable).toBe(false);
+    });
+
+    it('is idempotent', () => {
+      const o = { a: 1 };
+      const once = opaque(o);
+      expect(() => opaque(once)).not.toThrow();
+      expect(opaque(once)).toBe(o);
+      expect(Object.keys(o)).toEqual(['a']);
     });
   });
 });

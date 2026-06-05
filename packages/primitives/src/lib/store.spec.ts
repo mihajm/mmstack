@@ -127,4 +127,140 @@ describe('store', () => {
       expect(val()).toBe(src.a[i++]);
     }
   });
+
+  describe('dynamic property creation', () => {
+    it('adds a property that did not exist on the object', () => {
+      const s = store({} as { a?: number }, { injector });
+      expect(isSignal(s.a)).toBe(true);
+      expect(s.a()).toBeUndefined();
+      s.a.set(5);
+      expect(s()).toEqual({ a: 5 });
+      expect(s.a()).toBe(5);
+    });
+
+    it('the newly created subsignal is reactive', () => {
+      const s = store({} as Record<string, number>, { injector });
+      s['x'].set(1);
+      expect(s['x']()).toBe(1);
+      s['x'].set(2);
+      expect(s['x']()).toBe(2);
+    });
+
+    it('adds a nested property to an existing (empty) object', () => {
+      const s = store({ a: {} as Record<string, number> }, { injector });
+      s.a['x'].set(5);
+      expect(s().a).toEqual({ x: 5 });
+      expect(s.a['x']()).toBe(5);
+    });
+
+    it('mutableStore adds a new property in place', () => {
+      const src = {} as { a?: number };
+      const s = mutableStore(src, { injector });
+      s.a.set(5);
+      expect(s()).toBe(src);
+      expect(src).toEqual({ a: 5 });
+    });
+
+    it('a newly added key shows up in ownKeys', () => {
+      const s = store({} as Record<string, number>, { injector });
+      s['a'].set(1);
+      expect(Object.keys(s)).toContain('a');
+    });
+  });
+
+  describe('vivify', () => {
+    it('is off by default — a deep write through null is dropped', () => {
+      const s = store({ a: null as { b: number } | null }, { injector });
+      s.a.b.set(2);
+      expect(s().a).toBeNull();
+    });
+
+    it('reads through a null path without throwing', () => {
+      const s = store({ a: null as { b: number } | null }, { injector });
+      expect(s.a.b()).toBeUndefined();
+    });
+
+    it("creates a missing object with vivify: 'auto'", () => {
+      const s = store(
+        { a: null as { b: number } | null },
+        { injector, vivify: 'auto' },
+      );
+      s.a.b.set(2);
+      expect(s()).toEqual({ a: { b: 2 } });
+    });
+
+    it("creates nested containers through undefined with vivify: 'auto'", () => {
+      const s = store({} as { a?: { b?: { c: number } } }, {
+        injector,
+        vivify: 'auto',
+      });
+      s.a.b.c.set(3);
+      expect(s()).toEqual({ a: { b: { c: 3 } } });
+    });
+
+    it("creates an array for a numeric key with vivify: 'auto'", () => {
+      const s = store(
+        { a: null as number[] | null },
+        { injector, vivify: 'auto' },
+      );
+      s.a[0].set(5);
+      expect(Array.isArray(s().a)).toBe(true);
+      expect(s().a).toEqual([5]);
+    });
+
+    it('vivifies a mutableStore in place (root reference preserved)', () => {
+      const src = { a: null as { b: number } | null };
+      const s = mutableStore(src, { injector, vivify: 'auto' });
+      s.a.b.set(2);
+      expect(s()).toBe(src);
+      expect(src.a).toEqual({ b: 2 });
+    });
+
+    it("uses the option for genuinely-unknown levels (vivify: 'object')", () => {
+      const s = store(
+        { a: null as Record<string, number> | null },
+        { injector, vivify: 'object' },
+      );
+      s.a['x'].set(5);
+      expect(s().a).toEqual({ x: 5 });
+    });
+
+    it('re-creates a nulled object node as an object (known shape is cached)', () => {
+      const s = store(
+        { a: { b: 1 } as { b: number } | null },
+        { injector, vivify: 'auto' },
+      );
+      expect(s.a.b()).toBe(1); // establish the derivation while `a` is an object
+      s.a.set(null);
+      expect(s().a).toBeNull();
+      s.a.b.set(2); // write through the now-null path
+      expect(s().a).toEqual({ b: 2 });
+    });
+
+    it("honours a known array shape even when the option is 'object'", () => {
+      const s = store(
+        { a: [1, 2, 3] as number[] | null },
+        { injector, vivify: 'object' },
+      );
+      expect(s.a[0]()).toBe(1); // establish array derivations while `a` is an array
+      s.a.set(null);
+      s.a[0].set(9);
+      expect(Array.isArray(s().a)).toBe(true);
+      expect(s().a).toEqual([9]);
+    });
+  });
+
+  describe('proxy cache / cleanup', () => {
+    it('returns a stable proxy for nested paths', () => {
+      const s = store({ a: { b: 1 } }, { injector });
+      expect(s.a).toBe(s.a);
+      expect(s.a.b).toBe(s.a.b);
+    });
+
+    it('does not share cached child proxies across independent stores', () => {
+      const s1 = store({ a: 1 }, { injector });
+      const s2 = store({ a: 1 }, { injector });
+      expect(s1.a).not.toBe(s2.a);
+    });
+  });
 });

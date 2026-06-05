@@ -69,6 +69,14 @@ const upper = derived(user, {
 
 When the source is a `MutableSignal`, the derived signal is also a `MutableSignal` — `derived(state, 'items').mutate(arr => { arr.push(...); return arr })` propagates correctly.
 
+Pass `vivify` on the key/index form to create a missing container when writing through a `null`/`undefined` source — instead of throwing (mutable / array) or dropping the write. Choose `'object'`, `'array'`, `'auto'` (an array for index keys, an object otherwise), or a `() => container` factory; it defaults to off.
+
+```typescript
+const user = signal<{ name: string } | null>(null);
+derived(user, 'name', { vivify: 'object' }).set('Ada');
+// user() === { name: 'Ada' }
+```
+
 ### `store` / `mutableStore`
 
 Proxies an object (or signal of an object) into a tree of `WritableSignal`s — one per property, lazily created and cached via `WeakRef`. Arrays expose indices as signals plus a `.length` signal and `Symbol.iterator`. Mutability propagates: if the root is a `MutableSignal`, every child is too.
@@ -92,7 +100,51 @@ settings.notifications.mutate((n) => {
 });
 ```
 
+**Autovivification (opt-in).** By default, a write through a `null`/`undefined` path is dropped. Pass `vivify` to create the missing intermediate containers instead:
+
+```typescript
+const form = store(
+  { user: null as { address?: { city: string } } | null },
+  { vivify: 'auto' },
+);
+
+form.user.address.city.set('NYC');
+// form() === { user: { address: { city: 'NYC' } } }
+```
+
+Each level's shape is resolved from what's known: a value that is currently an object/array re-creates as that same shape (resolved per path and cached, so it survives the value later being nulled), while genuinely-unknown levels follow your option — `'auto'` (an array for index keys, an object otherwise), `'object'`, `'array'`, or a `() => container` factory. `false` (the default) keeps writes through `null` as no-ops. Adding a key that simply wasn't present on an existing object always works and needs no `vivify`.
+
 Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for those.
+
+### `extend` (scoped overlay)
+
+`store.extend(seed)` (on any store kind) creates a **scoped overlay** — a child store that **shares** the parent's signals for inherited keys (the same `WritableSignal`: writes go through to the parent and parent changes flow down) while keeping the seed and any new keys in a **local layer** that never propagates upward. No diffing, no syncing — local keys simply aren't wired to the parent.
+
+```typescript
+const app = store({ user: { name: 'Alice' }, theme: 'dark' });
+
+const scope = app.extend({ draft: '' }); // inherits user + theme, adds a local draft
+
+scope.user === app.user; // true — the same signal (shared, two-way)
+scope.user.name.set('Bob'); // writes through to the parent
+scope.draft.set('hello'); // local only — `app` never gains `draft`
+scope(); // { user: { name: 'Bob' }, theme: 'dark', draft: 'hello' }
+```
+
+Resolution per key is **local → parent → local**: a seed key (or one set on the scope before it exists on the parent) is local and _shadows_ the parent — and keeps shadowing even if the parent later grows that key; a key that exists only on the parent writes through to it; a brand-new key lands locally. `scope()` is the merged view (local shadowing), and `Object.keys(scope)` / `key in scope` are the union of both layers. `extend` composes — `a.extend(x).extend(y)` chains parents.
+
+The seed may also be a **signal** of the matching kind, so an existing (externally-owned, reactive) signal becomes the local layer:
+
+```typescript
+const draft = signal({ title: '' });
+const scope = app.extend(draft); // writes to scope.title flow out to `draft`, and back in
+```
+
+A few release notes:
+
+- The local layer is a plain store (vivify off). Inherited paths vivify when the _parent_ was created with `vivify`; to autovivify local keys, seed with a vivify-enabled store — `app.extend(store(seed, { vivify: 'auto' }))`.
+- Reserved names — `extend`, `asReadonlyStore`, and the signal methods (`set` / `update` / `mutate` / `inline` / `asReadonly`) — shadow same-named data keys, as on any store.
+- `scope.asReadonlyStore()` returns a read-only **snapshot view** of the merge (reactive reads, no writes); it does not share sub-store identity.
 
 ### `toWritable`
 

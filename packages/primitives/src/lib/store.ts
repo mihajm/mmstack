@@ -16,6 +16,22 @@ import { isMutable, mutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 import { createVivify, isIndexProp, type Vivify } from './util';
 
+/**
+ * Runtime marker + compile-time brand for an opaque value. A `const`-declared `Symbol`
+ * has a `unique symbol` type, so the same symbol serves as both the property key written
+ * by {@link opaque} and the type-level brand carried by {@link Opaque}.
+ */
+export const OPAQUE: unique symbol = Symbol('MMSTACK::OPAQUE');
+
+/**
+ * An object marked via {@link opaque} — the store treats it as an indivisible leaf
+ * (like a `Date`), returning it whole instead of deep-proxying its keys.
+ */
+export type Opaque<T> = T & { readonly [OPAQUE]: true };
+
+/** @internal Strips the opaque brand from the value a leaf signal carries. */
+type Unwrap<T> = T extends { readonly [OPAQUE]: true } ? Omit<T, typeof OPAQUE> : T;
+
 type BaseType =
   | string
   | number
@@ -26,7 +42,9 @@ type BaseType =
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   | Function
   | Date
-  | RegExp;
+  | RegExp
+  // opaque objects route to the leaf branch
+  | { readonly [OPAQUE]: true };
 
 type Key = string | number;
 
@@ -80,6 +98,7 @@ export function isStore<T>(value: unknown): value is SignalStore<T> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') return false;
+  if ((value as any)[OPAQUE] === true) return false; // opaque → leaf
 
   const proto = Object.getPrototypeOf(value);
 
@@ -348,7 +367,7 @@ type MutableSignalStoreObject<T> = Simplify<
   }
 >;
 
-export type SignalStore<T> = Signal<T> &
+export type SignalStore<T> = Signal<Unwrap<T>> &
   (IsAny<T> extends true
     ? SignalStoreObject<T>
     : NonNullable<T> extends BaseType
@@ -357,7 +376,7 @@ export type SignalStore<T> = Signal<T> &
         ? SignalArrayStore<NonNullable<T>>
         : SignalStoreObject<T>);
 
-export type WritableSignalStore<T> = WritableSignal<T> & {
+export type WritableSignalStore<T> = WritableSignal<Unwrap<T>> & {
   readonly asReadonlyStore: () => SignalStore<T>;
 } & (IsAny<T> extends true
     ? WritableSignalStoreObject<T>
@@ -367,7 +386,7 @@ export type WritableSignalStore<T> = WritableSignal<T> & {
         ? WritableArrayStore<NonNullable<T>>
         : WritableSignalStoreObject<T>);
 
-export type MutableSignalStore<T> = MutableSignal<T> & {
+export type MutableSignalStore<T> = MutableSignal<Unwrap<T>> & {
   readonly asReadonlyStore: () => SignalStore<T>;
 } & (IsAny<T> extends true
     ? MutableSignalStoreObject<T>
@@ -684,4 +703,21 @@ export function mutableStore<T extends AnyRecord>(
   },
 ): MutableSignalStore<T> {
   return toStore(mutable(value, opt), opt?.injector, opt?.vivify ?? false);
+}
+
+/**
+ * Marks a plain object as opaque so {@link store} treats it as an indivisible leaf
+ * (returned whole, never deep-proxied) — the same way it treats a `Date` or `RegExp`.
+ * The marker is a non-enumerable symbol, so it never appears in spreads or iteration.
+ * Idempotent. Call before freezing (`defineProperty` fails on a frozen object).
+ *
+ * @example
+ * const s = store({ config: opaque({ theme: 'dark', nested: { a: 1 } }) });
+ * s.config();        // the whole object, not a child store
+ * s.config.set(opaque({ theme: 'light', nested: { a: 2 } }));
+ */
+export function opaque<T extends object>(value: T): Opaque<T> {
+  if ((value as any)[OPAQUE] !== true)
+    Object.defineProperty(value, OPAQUE, { value: true, enumerable: false });
+  return value as Opaque<T>;
 }

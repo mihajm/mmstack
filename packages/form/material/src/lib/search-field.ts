@@ -1,6 +1,5 @@
 import { isPlatformServer, NgTemplateOutlet } from '@angular/common';
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
@@ -62,7 +61,6 @@ export function injectSearchResourceOptions(): QueryResourceOptions<any> {
 
 @Component({
   selector: 'mm-search-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

@@ -84,7 +84,7 @@ export function draggable<TData = void>(
           element: el,
           canDrag: canDragFn,
           getInitialData: () => box(untracked(dataSig)),
-          onDragStart: (e) => {
+          onDragStart: () => {
             dragging.set(true);
           },
           onDrop: () => {

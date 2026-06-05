@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   effect,
@@ -14,7 +13,6 @@ import { SignalErrorValidator, type ToggleState } from './adapters';
 
 @Component({
   selector: 'mm-toggle',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [FormsModule, MatSlideToggle, SignalErrorValidator, MatTooltip],
   host: {

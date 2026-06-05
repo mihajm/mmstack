@@ -1,6 +1,5 @@
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
@@ -45,7 +44,6 @@ import { type ChipsState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-chips-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: {
     class: 'mm-chips-field',

@@ -112,7 +112,9 @@ export function elementSize(
 
     let observer: ResizeObserver | null = null;
     observer = new ResizeObserver(([entry]) => {
+      // eslint-disable-next-line no-useless-assignment
       let width = 0;
+      // eslint-disable-next-line no-useless-assignment
       let height = 0;
 
       const boxOption = opt?.box ?? 'border-box';

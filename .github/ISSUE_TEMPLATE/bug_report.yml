@@ -23,9 +23,7 @@ body:
         - '@mmstack/form-validation'
         - '@mmstack/form-adapters'
         - '@mmstack/form-material'
-        - '@mmstack/table-core (Upcoming)'
-        - '@mmstack/table-client (Upcoming)'
-        - '@mmstack/table-material (Upcoming)'
+        - '@mmstack/translate'
         - 'Other / Not Sure'
       multiple: true
     validations:

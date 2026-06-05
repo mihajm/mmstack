@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   effect,
@@ -16,7 +15,6 @@ import { type BooleanState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-boolean-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [FormsModule, MatCheckbox, SignalErrorValidator, MatTooltip],
   host: {

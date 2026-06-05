@@ -1,6 +1,5 @@
 import { CdkTextareaAutosize } from '@angular/cdk/text-field';
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
@@ -29,7 +28,6 @@ import { SignalErrorValidator, type TextareaState } from './adapters';
 
 @Component({
   selector: 'mm-textarea-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

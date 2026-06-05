@@ -1,6 +1,5 @@
 import {
   booleanAttribute,
-  ChangeDetectionStrategy,
   Component,
   computed,
   effect,
@@ -21,7 +20,6 @@ import { type ButtonGroupState } from './adapters';
 
 @Component({
   selector: 'mm-button-group',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: {
     class: 'mm-button-group',

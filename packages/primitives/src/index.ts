@@ -9,12 +9,12 @@ export * from './lib/pooled';
 export * from './lib/sensors';
 export {
   isStore,
-  store,
   mutableStore,
+  store,
   toStore,
+  type MutableSignalStore,
   type SignalStore,
   type WritableSignalStore,
-  type MutableSignalStore,
 } from './lib/store';
 export * from './lib/stored';
 export { tabSync } from './lib/tabSync';

@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   contentChild,
   effect,
@@ -27,7 +26,6 @@ import { SignalErrorValidator, type StringState } from './adapters';
 
 @Component({
   selector: 'mm-string-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

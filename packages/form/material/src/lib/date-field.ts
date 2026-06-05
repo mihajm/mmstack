@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   contentChild,
   effect,
@@ -32,7 +31,6 @@ import { type DateState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-date-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

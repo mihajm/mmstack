@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
@@ -30,7 +29,6 @@ import { type NumberState, SignalErrorValidator } from './adapters';
 
 @Component({
   selector: 'mm-number-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

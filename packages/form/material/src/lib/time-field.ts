@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   contentChild,
@@ -33,7 +32,6 @@ import { SignalErrorValidator, type TimeState } from './adapters';
 
 @Component({
   selector: 'mm-time-field',
-  changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
     FormsModule,

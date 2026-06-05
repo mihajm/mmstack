@@ -9,12 +9,14 @@ export * from './lib/pooled';
 export * from './lib/sensors';
 export {
   isStore,
-  store,
   mutableStore,
+  opaque,
+  store,
   toStore,
+  type MutableSignalStore,
+  type Opaque,
   type SignalStore,
   type WritableSignalStore,
-  type MutableSignalStore,
 } from './lib/store';
 export * from './lib/stored';
 export { tabSync } from './lib/tabSync';

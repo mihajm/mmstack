@@ -1,5 +1,5 @@
 import type { CreateSignalOptions, Signal } from '@angular/core';
-import { pooled, type Computation, type CreatePooledOptions } from './pooled';
+import { pooled, type Computation, type CreatePooledOptions } from '.';
 
 /**
  * Options for the preset pool helpers. Same shape as

@@ -6,12 +6,20 @@ export * from './lib/mappers';
 export * from './lib/mutable';
 export * from './lib/pipeable/public_api';
 export * from './lib/pooled';
-export * from './lib/provided-pools';
 export * from './lib/sensors';
-export * from './lib/store';
+export {
+  isStore,
+  store,
+  mutableStore,
+  toStore,
+  type SignalStore,
+  type WritableSignalStore,
+  type MutableSignalStore,
+} from './lib/store';
 export * from './lib/stored';
 export { tabSync } from './lib/tabSync';
 export * from './lib/throttled';
 export * from './lib/to-writable';
 export * from './lib/until';
+export type { Vivify, WithVivify } from './lib/util';
 export * from './lib/with-history';

@@ -8,6 +8,146 @@ import {
 } from '@angular/core';
 import { isMutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
+import {
+  createVivify,
+  isIndexProp,
+  type Vivify,
+  type VivifyFn,
+  type WithVivify,
+} from './util';
+
+function createMutableArrayUpdater<T extends any[]>(
+  source: MutableSignal<T>,
+  index: number,
+  vivifyFn: VivifyFn<T>,
+) {
+  return (next: T[number]) =>
+    source.mutate((cur) => {
+      const vivified = vivifyFn(cur, index);
+      if (vivified === null || vivified === undefined) return vivified;
+      vivified[index] = next;
+      return vivified as T;
+    });
+}
+
+function createImmutableArrayUpdater<T extends any[]>(
+  source: WritableSignal<T>,
+  index: number,
+  vivifyFn: VivifyFn<T>,
+) {
+  return (next: T[number]) =>
+    source.update((cur) => {
+      const vivified = vivifyFn(cur, index)?.slice();
+      if (vivified === null || vivified === undefined) return vivified as T;
+      vivified[index] = next;
+      return vivified as T;
+    });
+}
+
+function createMutableObjectUpdater<T extends object, TKey extends keyof T>(
+  source: MutableSignal<T>,
+  key: TKey,
+  vivifyFn: VivifyFn<T>,
+) {
+  return (next: T[TKey]) =>
+    source.mutate((cur) => {
+      const vivified = vivifyFn(cur, key);
+      if (vivified === null || vivified === undefined) return vivified;
+      vivified[key] = next;
+      return vivified;
+    });
+}
+
+function createImmutableObjectUpdater<T extends object, TKey extends keyof T>(
+  source: WritableSignal<T>,
+  key: TKey,
+  vivifyFn: VivifyFn<T>,
+) {
+  return (next: T[TKey]) =>
+    source.update((cur) => {
+      const vivified = vivifyFn(cur, key);
+      if (vivified === null || vivified === undefined) return vivified as T;
+      return { ...vivified, [key]: next } as T;
+    });
+}
+
+function createUpdater<T, U>(
+  source: WritableSignal<T> | MutableSignal<T>,
+  key: PropertyKey,
+  vivify: Vivify<T>,
+): (next: U) => void {
+  const sample = untracked(source);
+
+  // fast path for when vivification is off
+  if (!vivify) {
+    if (Array.isArray(sample) && typeof key === 'number') {
+      const idx = key;
+      return isMutable(source)
+        ? (next: U) =>
+            (source as MutableSignal<any[]>).mutate((cur) => {
+              cur[idx] = next;
+              return cur;
+            })
+        : (next: U) =>
+            (source as WritableSignal<any[]>).update((cur) => {
+              const copy = cur.slice();
+              copy[idx] = next;
+              return copy;
+            });
+    }
+
+    return isMutable(source)
+      ? (next: U) =>
+          (source as MutableSignal<any>).mutate((cur) => {
+            cur[key] = next;
+            return cur;
+          })
+      : (next: U) =>
+          (source as WritableSignal<any>).update((cur) => ({
+            ...cur,
+            [key]: next,
+          }));
+  }
+
+  const present = sample !== null && sample !== undefined;
+  const keyIsIndex = typeof key === 'number' || isIndexProp(key);
+
+  let vivifyOpt: Vivify<T> = vivify;
+
+  if (vivifyOpt === 'auto' || vivifyOpt === true) {
+    vivifyOpt = (
+      (present ? Array.isArray(sample) : keyIsIndex) ? 'array' : 'object'
+    ) as Vivify<T>;
+  }
+
+  const vivifyFn = createVivify(vivifyOpt) as VivifyFn<any>;
+
+  // Route to the array updater whenever the container is (or will be vivified as) an
+  // array, so the updater and the created container agree on shape for a nullish source.
+  const isArray =
+    vivifyOpt === 'array'
+      ? keyIsIndex
+      : vivifyOpt === 'object'
+        ? false
+        : Array.isArray(sample) && typeof key === 'number';
+
+  if (isArray)
+    return isMutable(source)
+      ? createMutableArrayUpdater(
+          source as MutableSignal<any[]>,
+          key as number,
+          vivifyFn,
+        )
+      : createImmutableArrayUpdater(
+          source as WritableSignal<any[]>,
+          key as number,
+          vivifyFn,
+        );
+
+  return isMutable(source)
+    ? createMutableObjectUpdater(source, key, vivifyFn)
+    : createImmutableObjectUpdater(source, key, vivifyFn);
+}
 
 /**
  * Options for creating a derived signal using the full `derived` function signature.
@@ -77,7 +217,10 @@ export function derived<T, U>(
  * @typeParam TKey The key of the property to derive.
  * @param source The source `WritableSignal` (holding an object).
  * @param key The key of the property to derive.
- * @param options Optional signal options for the derived signal.
+ * @param options Optional signal options for the derived signal. Also accepts a
+ * {@link Vivify} `vivify` flag (off by default) that, when set, creates the missing
+ * container instead of dropping a write made through a `null`/`undefined` source —
+ * e.g. `derived(user, 'name', { vivify: 'object' })`. See {@link WithVivify}.
  * @returns A `DerivedSignal` instance.
  *
  * @example
@@ -96,7 +239,7 @@ export function derived<T, U>(
 export function derived<T extends object, TKey extends keyof T>(
   source: MutableSignal<T>,
   key: TKey,
-  opt?: CreateSignalOptions<T[TKey]>,
+  opt?: CreateSignalOptions<T[TKey]> & WithVivify<T>,
 ): DerivedSignal<T, T[TKey]> & MutableSignal<T[TKey]>;
 
 /**
@@ -107,7 +250,10 @@ export function derived<T extends object, TKey extends keyof T>(
  * @typeParam TKey The key of the property to derive.
  * @param source The source `WritableSignal` (holding an object).
  * @param key The key of the property to derive.
- * @param options Optional signal options for the derived signal.
+ * @param options Optional signal options for the derived signal. Also accepts a
+ * {@link Vivify} `vivify` flag (off by default) that, when set, creates the missing
+ * container instead of dropping a write made through a `null`/`undefined` source —
+ * e.g. `derived(user, 'name', { vivify: 'object' })`. See {@link WithVivify}.
  * @returns A `DerivedSignal` instance.
  *
  * @example
@@ -126,7 +272,7 @@ export function derived<T extends object, TKey extends keyof T>(
 export function derived<T extends object, TKey extends keyof T>(
   source: WritableSignal<T>,
   key: TKey,
-  opt?: CreateSignalOptions<T[TKey]>,
+  opt?: CreateSignalOptions<T[TKey]> & WithVivify<T>,
 ): DerivedSignal<T, T[TKey]>;
 
 /**
@@ -154,7 +300,7 @@ export function derived<T extends object, TKey extends keyof T>(
 export function derived<T, U>(
   source: MutableSignal<T>,
   optOrKey: CreateDerivedOptions<T, U> | keyof T,
-  opt?: CreateSignalOptions<U>,
+  opt?: CreateSignalOptions<U> & WithVivify<T>,
 ): DerivedSignal<T, U> & MutableSignal<U>;
 
 /**
@@ -164,7 +310,10 @@ export function derived<T, U>(
  * @typeParam T The type of the source signal's value (must be an array).
  * @param source The source `WritableSignal` (holding an array).
  * @param index The index of the element to derive.
- * @param options Optional signal options for the derived signal.
+ * @param options Optional signal options for the derived signal. Also accepts a
+ * {@link Vivify} `vivify` flag (off by default) that, when set, creates the missing
+ * container instead of dropping a write made through a `null`/`undefined` source —
+ * e.g. `derived(user, 'name', { vivify: 'object' })`. See {@link WithVivify}.
  * @returns A `DerivedSignal` instance.
  *
  * @example
@@ -183,49 +332,29 @@ export function derived<T, U>(
 export function derived<T extends any[]>(
   source: WritableSignal<T>,
   index: number,
-  opt?: CreateSignalOptions<T[number]>,
+  opt?: CreateSignalOptions<T[number]> & WithVivify<T>,
 ): DerivedSignal<T, T[number]>;
 
 export function derived<T, U>(
   source: WritableSignal<T> | MutableSignal<T>,
   optOrKey: CreateDerivedOptions<T, U> | keyof T,
-  opt?: CreateSignalOptions<U>,
+  opt?: CreateSignalOptions<U> & WithVivify<T>,
 ): DerivedSignal<T, U> | (DerivedSignal<T, U> & MutableSignal<U>) {
-  const isArray =
-    Array.isArray(untracked(source)) && typeof optOrKey === 'number';
+  const vivify: Vivify<T> =
+    typeof optOrKey === 'object' ? false : (opt?.vivify ?? false);
 
+  // With vivification the source may legitimately be null/undefined
   const from =
-    typeof optOrKey === 'object' ? optOrKey.from : (v: T) => v[optOrKey] as U;
+    typeof optOrKey === 'object'
+      ? optOrKey.from
+      : vivify
+        ? (v: T) => v?.[optOrKey] as U
+        : (v: T) => v[optOrKey] as U;
 
   const onChange =
     typeof optOrKey === 'object'
       ? optOrKey.onChange
-      : isArray
-        ? isMutable(source)
-          ? (next: U) => {
-              source.mutate((cur) => {
-                (cur as any[])[optOrKey] = next;
-                return cur as T;
-              });
-            }
-          : (next: U) => {
-              source.update((cur) => {
-                const newArray = [...(cur as unknown as any[])];
-                newArray[optOrKey] = next;
-                return newArray as T;
-              });
-            }
-        : isMutable(source)
-          ? (next: U) => {
-              source.mutate((cur) => {
-                (cur as Record<PropertyKey, unknown>)[optOrKey] =
-                  next as T[keyof T];
-                return cur;
-              });
-            }
-          : (next: U) => {
-              source.update((cur) => ({ ...cur, [optOrKey]: next }));
-            };
+      : createUpdater(source, optOrKey, vivify);
 
   const rest = typeof optOrKey === 'object' ? { ...optOrKey, ...opt } : opt;
 

@@ -3,6 +3,7 @@ import {
   inject,
   Injector,
   isDevMode,
+  isSignal,
   signal,
   untracked,
   type CreateSignalOptions,
@@ -13,6 +14,7 @@ import { derived } from './derived';
 import { isWritableSignal } from './mappers/util';
 import { isMutable, mutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
+import { createVivify, isIndexProp, type Vivify } from './util';
 
 type BaseType =
   | string
@@ -31,9 +33,16 @@ type Key = string | number;
 type AnyRecord = Record<Key, any>;
 
 const IS_STORE = Symbol('MMSTACK::IS_STORE');
-const PROXY_CACHE = new WeakMap<
+const SCOPE_PARENT = Symbol('MMSTACK::SCOPE_PARENT');
+
+/**
+ * @internal
+ * Test-only handle on the proxy cache (deliberately NOT re-exported from the public barrel).
+ * Maps a store's backing signal to its lazily-built child proxies, each held via a `WeakRef`.
+ */
+export const PROXY_CACHE = new WeakMap<
   object,
-  Map<PropertyKey, WeakRef<SignalStore<any>>>
+  Map<PropertyKey, WeakRef<Signal<any>>>
 >();
 
 const SIGNAL_FN_PROP = new Set([
@@ -44,7 +53,12 @@ const SIGNAL_FN_PROP = new Set([
   'asReadonly',
 ]);
 
-const PROXY_CLEANUP = new FinalizationRegistry<{
+/**
+ * @internal
+ * Test-only handle on the finalization registry (deliberately NOT re-exported from the public
+ * barrel). Prunes a cache entry once its proxy is reclaimed by the GC.
+ */
+export const PROXY_CLEANUP = new FinalizationRegistry<{
   target: object;
   prop: PropertyKey;
 }>(({ target, prop }) => {
@@ -64,16 +78,32 @@ export function isStore<T>(value: unknown): value is SignalStore<T> {
   );
 }
 
-function isIndexProp(prop: PropertyKey): prop is `${number}` {
-  return typeof prop === 'string' && prop.trim() !== '' && !isNaN(+prop);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') return false;
 
   const proto = Object.getPrototypeOf(value);
 
   return proto === Object.prototype || proto === null;
+}
+
+/**
+ * @internal
+ * Resolves the vivify shape for a node from its current value: a present record/array is a
+ * certainty we keep (cached in the derivation, so it survives the value being nulled); an
+ * unknown value (`null`/`undefined`) defers to the caller's option. Off stays off.
+ */
+function resolveVivify(sample: unknown, option: Vivify): Vivify {
+  if (!option) return false;
+  if (Array.isArray(sample)) return 'array';
+  if (isRecord(sample)) return 'object';
+  return 'auto';
+}
+
+function hasOwnKey(
+  value: object | null | undefined,
+  key: PropertyKey,
+): boolean {
+  return value != null && Object.hasOwn(value, key);
 }
 
 type SignalArrayStore<T extends any[]> = Signal<T> & {
@@ -99,10 +129,12 @@ type MutableArrayStore<T extends any[]> = MutableSignal<T> & {
 function toArrayStore<T extends any[]>(
   source: MutableSignal<T>,
   injector: Injector,
+  vivify: Vivify,
 ): MutableArrayStore<T>;
 function toArrayStore<T extends any[]>(
   source: WritableSignal<T>,
   injector: Injector,
+  vivify: Vivify,
 ): WritableArrayStore<T>;
 
 /**
@@ -112,8 +144,9 @@ function toArrayStore<T extends any[]>(
 function toArrayStore<T extends any[]>(
   source: WritableSignal<T> | MutableSignal<T>,
   injector: Injector,
+  vivify: Vivify,
 ): WritableArrayStore<T> | MutableArrayStore<T> {
-  if (isStore<T>(source)) return source as MutableArrayStore<T>;
+  if (isStore<T>(source)) return source as unknown as MutableArrayStore<T>;
 
   const isMutableSource = isMutable(source);
 
@@ -200,6 +233,9 @@ function toArrayStore<T extends any[]>(
         const valueIsArray = Array.isArray(value);
         const valueIsRecord = isRecord(value);
 
+        const nodeVivify = resolveVivify(value, vivify);
+        const vivifyFn = createVivify(nodeVivify as Vivify);
+
         const equalFn =
           (valueIsRecord || valueIsArray) &&
           isMutableSource &&
@@ -208,14 +244,19 @@ function toArrayStore<T extends any[]>(
             : undefined;
 
         const computation = valueIsRecord
-          ? derived(target, idx as any, { equal: equalFn })
+          ? derived(target, idx as any, {
+              equal: equalFn,
+              vivify: nodeVivify as Vivify,
+            })
           : derived(target, {
               from: (v: any) => v?.[idx],
               onChange: (newValue: any) =>
                 target.update((v: any) => {
-                  if (v === null || v === undefined) return v;
+                  const container = vivifyFn(v, idx);
+                  if (container === null || container === undefined)
+                    return container;
                   try {
-                    v[idx] = newValue;
+                    container[idx] = newValue;
                   } catch (e) {
                     if (isDevMode())
                       console.error(
@@ -223,13 +264,15 @@ function toArrayStore<T extends any[]>(
                         e,
                       );
                   }
-                  return v;
+                  return container;
                 }),
             });
 
-        const proxy = Array.isArray(untracked(computation))
-          ? toArrayStore(computation, injector)
-          : toStore(computation, injector);
+        const childSample = untracked(computation);
+        const childVivify = resolveVivify(childSample, vivify);
+        const proxy = Array.isArray(childSample)
+          ? toArrayStore(computation, injector, childVivify)
+          : toStore(computation, injector, childVivify);
 
         const ref = new WeakRef(proxy);
         storeCache.set(idx, ref);
@@ -242,44 +285,112 @@ function toArrayStore<T extends any[]>(
   }) as MutableArrayStore<T>;
 }
 
+/**
+ * @internal Resolves to `true` only for `any`. In a conditional type, `any` distributes across
+ * *both* branches (`unknown | object`), and `unknown | X` collapses to `unknown` — which would
+ * erase a store's property access and `extend`. Guarding on this routes an `any`-typed store to
+ * the full object shape instead.
+ */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
+ * @internal Flattens an intersection (`A & B & C`) into a single object literal so editor
+ * tooltips show the resolved members instead of the raw intersection chain. Display-only —
+ * structurally identical to its input.
+ */
+type Simplify<T> = { [K in keyof T]: T[K] } & {};
+
+/** @internal The object shape of a readonly store: a child store per key, plus `extend`. */
+type SignalStoreObject<T> = Simplify<
+  Readonly<{
+    [K in keyof Required<T>]: SignalStore<NonNullable<T>[K]>;
+  }> & {
+    readonly extend: {
+      <L extends AnyRecord>(
+        source: Signal<L>,
+      ): SignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+      <L extends AnyRecord>(
+        props: L,
+      ): SignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+    };
+  }
+>;
+
+/** @internal The object shape of a writable store. */
+type WritableSignalStoreObject<T> = Simplify<
+  Readonly<{
+    [K in keyof Required<T>]: WritableSignalStore<NonNullable<T>[K]>;
+  }> & {
+    readonly extend: {
+      <L extends AnyRecord>(
+        source: WritableSignal<L>,
+      ): WritableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+      <L extends AnyRecord>(
+        props: L,
+      ): WritableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+    };
+  }
+>;
+
+/** @internal The object shape of a mutable store. */
+type MutableSignalStoreObject<T> = Simplify<
+  Readonly<{
+    [K in keyof Required<T>]: MutableSignalStore<NonNullable<T>[K]>;
+  }> & {
+    readonly extend: {
+      <L extends AnyRecord>(
+        source: MutableSignal<L>,
+      ): MutableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+      <L extends AnyRecord>(
+        props: L,
+      ): MutableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
+    };
+  }
+>;
+
 export type SignalStore<T> = Signal<T> &
-  (NonNullable<T> extends BaseType
-    ? unknown
-    : NonNullable<T> extends Array<any>
-      ? SignalArrayStore<NonNullable<T>>
-      : Readonly<{ [K in keyof Required<T>]: SignalStore<NonNullable<T>[K]> }>);
+  (IsAny<T> extends true
+    ? SignalStoreObject<T>
+    : NonNullable<T> extends BaseType
+      ? unknown
+      : NonNullable<T> extends Array<any>
+        ? SignalArrayStore<NonNullable<T>>
+        : SignalStoreObject<T>);
 
 export type WritableSignalStore<T> = WritableSignal<T> & {
   readonly asReadonlyStore: () => SignalStore<T>;
-} & (NonNullable<T> extends BaseType
-    ? unknown
-    : NonNullable<T> extends Array<any>
-      ? WritableArrayStore<NonNullable<T>>
-      : Readonly<{
-          [K in keyof Required<T>]: WritableSignalStore<NonNullable<T>[K]>;
-        }>);
+} & (IsAny<T> extends true
+    ? WritableSignalStoreObject<T>
+    : NonNullable<T> extends BaseType
+      ? unknown
+      : NonNullable<T> extends Array<any>
+        ? WritableArrayStore<NonNullable<T>>
+        : WritableSignalStoreObject<T>);
 
 export type MutableSignalStore<T> = MutableSignal<T> & {
   readonly asReadonlyStore: () => SignalStore<T>;
-} & (NonNullable<T> extends BaseType
-    ? unknown
-    : NonNullable<T> extends Array<any>
-      ? MutableArrayStore<NonNullable<T>>
-      : Readonly<{
-          [K in keyof Required<T>]: MutableSignalStore<NonNullable<T>[K]>;
-        }>);
+} & (IsAny<T> extends true
+    ? MutableSignalStoreObject<T>
+    : NonNullable<T> extends BaseType
+      ? unknown
+      : NonNullable<T> extends Array<any>
+        ? MutableArrayStore<NonNullable<T>>
+        : MutableSignalStoreObject<T>);
 
 export function toStore<T extends AnyRecord>(
   source: MutableSignal<T>,
   injector?: Injector,
+  vivify?: Vivify,
 ): MutableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: WritableSignal<T>,
   injector?: Injector,
+  vivify?: Vivify,
 ): WritableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: Signal<T>,
   injector?: Injector,
+  vivify?: Vivify,
 ): SignalStore<T>;
 
 /**
@@ -292,6 +403,7 @@ export function toStore<T extends AnyRecord>(
 export function toStore<T extends AnyRecord>(
   source: Signal<T> | WritableSignal<T> | MutableSignal<T>,
   injector?: Injector,
+  vivify: Vivify = false,
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
   if (isStore<T>(source)) return source;
 
@@ -303,7 +415,8 @@ export function toStore<T extends AnyRecord>(
         // noop
       });
 
-  const isMutableSource = isMutable(writableSource);
+  const isWritableSource = isWritableSignal(source);
+  const isMutableSource = isWritableSource && isMutable(writableSource);
 
   const s = new Proxy(writableSource, {
     has(_: any, prop) {
@@ -329,9 +442,24 @@ export function toStore<T extends AnyRecord>(
       if (prop === IS_STORE) return true;
       if (prop === 'asReadonlyStore')
         return () => {
-          if (!isWritableSignal(source)) return s;
-          return untracked(() => toStore(source.asReadonly(), injector));
+          if (!isWritableSource) return s;
+          return untracked(() =>
+            toStore(source.asReadonly(), injector, vivify),
+          );
         };
+
+      if (prop === 'extend')
+        return (seed: AnyRecord | Signal<AnyRecord>) =>
+          scopedStore(
+            s,
+            seed,
+            isMutableSource
+              ? 'mutable'
+              : isWritableSource
+                ? 'writable'
+                : 'readonly',
+            injector as Injector,
+          );
 
       if (typeof prop === 'symbol' || SIGNAL_FN_PROP.has(prop))
         return target[prop];
@@ -354,6 +482,9 @@ export function toStore<T extends AnyRecord>(
       const valueIsRecord = isRecord(value);
       const valueIsArray = Array.isArray(value);
 
+      const nodeVivify = resolveVivify(value, vivify);
+      const vivifyFn = createVivify(nodeVivify);
+
       const equalFn =
         (valueIsRecord || valueIsArray) &&
         isMutableSource &&
@@ -361,14 +492,16 @@ export function toStore<T extends AnyRecord>(
           ? () => false
           : undefined;
       const computation = valueIsRecord
-        ? derived(target, prop, { equal: equalFn })
+        ? derived(target, prop, { equal: equalFn, vivify: nodeVivify })
         : derived(target, {
             from: (v: any) => v?.[prop],
             onChange: (newValue: any) =>
               target.update((v: any) => {
-                if (v === null || v === undefined) return v;
+                const container = vivifyFn(v, prop);
+                if (container === null || container === undefined)
+                  return container;
                 try {
-                  v[prop] = newValue;
+                  container[prop] = newValue;
                 } catch (e) {
                   if (isDevMode())
                     console.error(
@@ -376,13 +509,15 @@ export function toStore<T extends AnyRecord>(
                       e,
                     );
                 }
-                return v;
+                return container;
               }),
           });
 
-      const proxy = Array.isArray(untracked(computation))
-        ? toArrayStore(computation, injector)
-        : toStore(computation, injector);
+      const childSample = untracked(computation);
+      const childVivify = resolveVivify(childSample, vivify);
+      const proxy = Array.isArray(childSample)
+        ? toArrayStore(computation, injector, childVivify)
+        : toStore(computation, injector, childVivify);
       const ref = new WeakRef(proxy);
       storeCache.set(prop, ref);
       PROXY_CLEANUP.register(proxy, { target, prop }, ref);
@@ -393,6 +528,116 @@ export function toStore<T extends AnyRecord>(
   return s;
 }
 
+type ScopeKind = 'mutable' | 'writable' | 'readonly';
+
+/**
+ * @internal
+ * Backs `store.extend(...)`. Builds a scoped overlay over `parent`: the local layer (the seed
+ * plus any keys created later) is its own signal and `parent` is its own signal, so the getter
+ * routes each key by consulting BOTH — local first, then parent, else local (so a write to an
+ * as-yet-unknown key lands locally). Inherited keys return the parent's own sub-store (shared
+ * identity + two-way), while local keys never propagate upward. A merged `computed` is derived
+ * only for whole-object reads / `has` / iteration — never for routing.
+ */
+function scopedStore(
+  parent: SignalStore<AnyRecord>,
+  seed: AnyRecord | Signal<AnyRecord>,
+  kind: ScopeKind,
+  injector: Injector,
+): SignalStore<AnyRecord> {
+  const local = isSignal(seed)
+    ? toStore(seed as Signal<AnyRecord>, injector)
+    : kind === 'mutable'
+      ? mutableStore(seed, { injector })
+      : kind === 'readonly'
+        ? store(seed, { injector }).asReadonlyStore()
+        : store(seed, { injector });
+
+  const localValue = () => untracked(local) as object;
+  const parentValue = () => untracked(parent) as object;
+
+  const view = computed(() => ({
+    ...parent(),
+    ...local(),
+  }));
+
+  const splitSet = (next: AnyRecord) => {
+    const lv = localValue();
+    const pv = parentValue();
+    for (const key of Reflect.ownKeys(next)) {
+      const layer = hasOwnKey(lv, key)
+        ? local
+        : hasOwnKey(pv, key)
+          ? parent
+          : local;
+      (layer as WritableSignalStore<AnyRecord>)[key as string].set(
+        next[key as string],
+      );
+    }
+  };
+
+  const base = toWritable(
+    view,
+    kind === 'readonly' ? () => undefined : splitSet,
+    undefined,
+    { pure: false },
+  ) as MutableSignal<AnyRecord>;
+
+  if (kind === 'mutable') {
+    base.mutate = (updater: (v: any) => any) =>
+      splitSet(updater(untracked(view)));
+    base.inline = (updater: (v: any) => void) =>
+      base.mutate((prev: any) => {
+        updater(prev);
+        return prev;
+      });
+  }
+
+  const scope: any = new Proxy(base, {
+    get(target, prop) {
+      if (prop === IS_STORE) return true;
+      if (prop === SCOPE_PARENT) return parent;
+      if (prop === 'extend')
+        return (childSeed: AnyRecord | Signal<AnyRecord>) =>
+          scopedStore(scope, childSeed, kind, injector);
+      if (prop === 'asReadonlyStore')
+        return () =>
+          toStore(
+            computed(() => ({ ...parent(), ...local() })),
+            injector,
+          );
+      if (typeof prop === 'symbol' || SIGNAL_FN_PROP.has(prop))
+        return target[prop as keyof typeof target];
+
+      // Route by consulting both signals: local first, then parent, else local (new → local).
+      if (hasOwnKey(localValue(), prop)) return local[prop];
+      if (hasOwnKey(parentValue(), prop)) return parent[prop];
+      return local[prop];
+    },
+    has(_, prop) {
+      return hasOwnKey(localValue(), prop) || hasOwnKey(parentValue(), prop);
+    },
+    ownKeys() {
+      return [
+        ...new Set<string | symbol>([
+          ...Reflect.ownKeys(parentValue()),
+          ...Reflect.ownKeys(localValue()),
+        ]),
+      ];
+    },
+    getOwnPropertyDescriptor(_, prop) {
+      if (hasOwnKey(localValue(), prop) || hasOwnKey(parentValue(), prop))
+        return { enumerable: true, configurable: true };
+      return undefined;
+    },
+    getPrototypeOf() {
+      return Object.prototype;
+    },
+  });
+
+  return scope;
+}
+
 /**
  * Creates a WritableSignalStore from a value.
  * @see {@link toStore}
@@ -401,9 +646,20 @@ export function store<T extends AnyRecord>(
   value: T,
   opt?: CreateSignalOptions<T> & {
     injector?: Injector;
+    /**
+     * Opt-in autovivification: when writing through a `null`/`undefined` path, create the
+     * missing intermediate containers instead of dropping the write. Off by default.
+     *
+     * Levels whose current value is a known object/array re-vivify as that same shape — the
+     * knowledge is captured when the path is first accessed and cached, so it holds even after
+     * the value is later nulled. This option governs only genuinely-unknown (currently
+     * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
+     * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+     */
+    vivify?: Vivify;
   },
 ): WritableSignalStore<T> {
-  return toStore(signal(value, opt), opt?.injector);
+  return toStore(signal(value, opt), opt?.injector, opt?.vivify ?? false);
 }
 
 /**
@@ -414,7 +670,18 @@ export function mutableStore<T extends AnyRecord>(
   value: T,
   opt?: CreateSignalOptions<T> & {
     injector?: Injector;
+    /**
+     * Opt-in autovivification: when writing through a `null`/`undefined` path, create the
+     * missing intermediate containers instead of dropping the write. Off by default.
+     *
+     * Levels whose current value is a known object/array re-vivify as that same shape — the
+     * knowledge is captured when the path is first accessed and cached, so it holds even after
+     * the value is later nulled. This option governs only genuinely-unknown (currently
+     * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
+     * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+     */
+    vivify?: Vivify;
   },
 ): MutableSignalStore<T> {
-  return toStore(mutable(value, opt), opt?.injector);
+  return toStore(mutable(value, opt), opt?.injector, opt?.vivify ?? false);
 }

@@ -1,6 +1,6 @@
 import { Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { mutableStore, OPAQUE, opaque, store } from './store';
+import { isOpaque, mutableStore, OPAQUE, opaque, store } from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -298,7 +298,9 @@ describe('store', () => {
       const o = opaque({ a: 1, b: 2 });
       expect(Object.keys(o)).toEqual(['a', 'b']);
       expect({ ...o }).toEqual({ a: 1, b: 2 });
-      expect(Object.getOwnPropertyDescriptor(o, OPAQUE)?.enumerable).toBe(false);
+      expect(Object.getOwnPropertyDescriptor(o, OPAQUE)?.enumerable).toBe(
+        false,
+      );
     });
 
     it('is idempotent', () => {
@@ -307,6 +309,13 @@ describe('store', () => {
       expect(() => opaque(once)).not.toThrow();
       expect(opaque(once)).toBe(o);
       expect(Object.keys(o)).toEqual(['a']);
+    });
+
+    it('isOpaque identifies opaque objects', () => {
+      const o = opaque({ a: 1 });
+      expect(OPAQUE in o).toBe(true);
+      expect(isOpaque(o)).toBe(true);
+      expect(isOpaque({})).toBe(false);
     });
   });
 });

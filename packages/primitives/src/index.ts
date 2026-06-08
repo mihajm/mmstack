@@ -8,6 +8,7 @@ export * from './lib/pipeable/public_api';
 export * from './lib/pooled';
 export * from './lib/sensors';
 export {
+  isOpaque,
   isStore,
   mutableStore,
   opaque,

@@ -56,12 +56,97 @@ export function opaque<T extends object>(value: T): Opaque<T> {
  *   // value: Opaque<object> — `store` would treat it as an indivisible leaf
  * }
  */
-export function isOpaque(value: unknown): value is Opaque<object> {
+export function isOpaque<T = object>(value: unknown): value is Opaque<T> {
   return (
     typeof value === 'object' &&
     value !== null &&
     (value as any)[OPAQUE] === true
   );
+}
+
+/**
+ * @internal Runtime brand carrying a store node's lazily-built leaf probe. Exported (like
+ * {@link OPAQUE}) only so the `{ readonly [LEAF]: () => boolean }` brand on the store types is
+ * nameable in the emitted declarations — not part of the supported surface; use {@link isLeaf}.
+ */
+export const LEAF: unique symbol = Symbol('@mmstack/primitives::store/LEAF');
+
+/**
+ * @internal Whether a value is a terminal leaf: a concrete non-record/non-array value always is;
+ * `null`/`undefined` is a leaf only when vivification is disabled (with vivify on it can still
+ * materialize a container, so it stays a descendable substore).
+ */
+function isLeafValue(value: unknown, vivifyEnabled: boolean): boolean {
+  if (value == null) return !vivifyEnabled;
+  if (isOpaque(value)) return true; // opaque always wins — even arrays
+  return !Array.isArray(value) && !isRecord(value);
+}
+
+/**
+ * @internal Constant leaf probes for nodes whose leaf-ness is statically known, so the reactive
+ * `computed` can be skipped entirely.
+ */
+function alwaysTrue() {
+  return true;
+}
+function alwaysFalse() {
+  return false;
+}
+
+/**
+ * @internal Attaches a lazy, memoized leaf probe to a store node. The probe (`() => boolean`)
+ * closes over the node's value signal and its (stable) vivify setting, building the backing
+ * `computed` on first call so leaf-ness tracks the live value reactively without taxing every
+ * node access. Idempotent.
+ */
+function markAsLeaf<TSig>(
+  sig: TSig,
+  value: Signal<unknown>,
+  vivifyEnabled: boolean,
+  noUnionLeaves: boolean,
+): TSig & { readonly [LEAF]: () => boolean } {
+  if (typeof (sig as any)[LEAF] !== 'function') {
+    let memo: (() => boolean) | undefined;
+    const probe = () => {
+      if (memo) return memo();
+      const v = untracked(value);
+      memo =
+        isOpaque(v) || (v == null && !vivifyEnabled) || noUnionLeaves
+          ? isLeafValue(v, vivifyEnabled)
+            ? alwaysTrue
+            : alwaysFalse
+          : computed(() => isLeafValue(value(), vivifyEnabled));
+      return memo();
+    };
+    Object.defineProperty(sig, LEAF, {
+      value: probe,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return sig as TSig & { readonly [LEAF]: () => boolean };
+}
+
+/**
+ * Reports whether a store node is currently a **leaf** — a terminal value the store does not
+ * descend into (a primitive, `Date`, `RegExp`, {@link opaque} object, class instance, or a
+ * `null`/`undefined` hole when vivification is off) rather than a record/array substore.
+ *
+ * Leaf-ness reflects the node's **live** value: the probe is reactive and memoized, so calling
+ * `isLeaf` inside a `computed`/`effect` re-evaluates when the node's shape changes.
+ *
+ * @internal Exposed for advanced/niche interop only — not part of the supported public surface
+ * and may change without a major version bump.
+ *
+ * @example
+ * const s = store({ name: 'Ada', address: { city: 'London' } });
+ * isLeaf(s.name);    // true
+ * isLeaf(s.address); // false — a substore
+ */
+export function isLeaf<T = unknown>(
+  value: unknown,
+): value is Signal<T> & { readonly [LEAF]: () => boolean } {
+  return isStore(value) && (value as any)[LEAF]?.() === true;
 }
 
 /**
@@ -80,6 +165,7 @@ type BaseType =
   | number
   | boolean
   | symbol
+  | bigint
   | undefined
   | null
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -192,11 +278,13 @@ function toArrayStore<T extends any[]>(
   source: MutableSignal<T>,
   injector: Injector,
   vivify: Vivify,
+  noUnionLeaves?: boolean,
 ): MutableArrayStore<T>;
 function toArrayStore<T extends any[]>(
   source: WritableSignal<T>,
   injector: Injector,
   vivify: Vivify,
+  noUnionLeaves?: boolean,
 ): WritableArrayStore<T>;
 
 /**
@@ -207,6 +295,7 @@ function toArrayStore<T extends any[]>(
   source: WritableSignal<T> | MutableSignal<T>,
   injector: Injector,
   vivify: Vivify,
+  noUnionLeaves = false,
 ): WritableArrayStore<T> | MutableArrayStore<T> {
   if (isStore<T>(source)) return source as unknown as MutableArrayStore<T>;
 
@@ -332,10 +421,12 @@ function toArrayStore<T extends any[]>(
 
         const childSample = untracked(computation);
         const childVivify = resolveVivify(childSample, vivify);
-        const proxy = Array.isArray(childSample)
-          ? toArrayStore(computation, injector, childVivify)
-          : toStore(computation, injector, childVivify);
+        const proxy =
+          Array.isArray(childSample) && !isOpaque(childSample)
+            ? toArrayStore(computation, injector, childVivify, noUnionLeaves)
+            : toStore(computation, injector, childVivify, noUnionLeaves);
 
+        markAsLeaf(proxy, computation, childVivify !== false, noUnionLeaves);
         const ref = new WeakRef(proxy);
         storeCache.set(idx, ref);
         PROXY_CLEANUP.register(proxy, { target, prop: idx }, ref);
@@ -414,7 +505,7 @@ export type SignalStore<T> = Signal<UnwrapOpqaue<T>> &
   (IsAny<T> extends true
     ? SignalStoreObject<T>
     : NonNullable<T> extends BaseType
-      ? unknown
+      ? { readonly [LEAF]: () => boolean }
       : NonNullable<T> extends Array<any>
         ? SignalArrayStore<NonNullable<T>>
         : SignalStoreObject<T>);
@@ -424,7 +515,7 @@ export type WritableSignalStore<T> = WritableSignal<UnwrapOpqaue<T>> & {
 } & (IsAny<T> extends true
     ? WritableSignalStoreObject<T>
     : NonNullable<T> extends BaseType
-      ? unknown
+      ? { readonly [LEAF]: () => boolean }
       : NonNullable<T> extends Array<any>
         ? WritableArrayStore<NonNullable<T>>
         : WritableSignalStoreObject<T>);
@@ -434,7 +525,7 @@ export type MutableSignalStore<T> = MutableSignal<UnwrapOpqaue<T>> & {
 } & (IsAny<T> extends true
     ? MutableSignalStoreObject<T>
     : NonNullable<T> extends BaseType
-      ? unknown
+      ? { readonly [LEAF]: () => boolean }
       : NonNullable<T> extends Array<any>
         ? MutableArrayStore<NonNullable<T>>
         : MutableSignalStoreObject<T>);
@@ -443,16 +534,19 @@ export function toStore<T extends AnyRecord>(
   source: MutableSignal<T>,
   injector?: Injector,
   vivify?: Vivify,
+  noUnionLeaves?: boolean,
 ): MutableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: WritableSignal<T>,
   injector?: Injector,
   vivify?: Vivify,
+  noUnionLeaves?: boolean,
 ): WritableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: Signal<T>,
   injector?: Injector,
   vivify?: Vivify,
+  noUnionLeaves?: boolean,
 ): SignalStore<T>;
 
 /**
@@ -466,6 +560,7 @@ export function toStore<T extends AnyRecord>(
   source: Signal<T> | WritableSignal<T> | MutableSignal<T>,
   injector?: Injector,
   vivify: Vivify = false,
+  noUnionLeaves = false,
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
   if (isStore<T>(source)) return source;
 
@@ -506,7 +601,7 @@ export function toStore<T extends AnyRecord>(
         return () => {
           if (!isWritableSource) return s;
           return untracked(() =>
-            toStore(source.asReadonly(), injector, vivify),
+            toStore(source.asReadonly(), injector, vivify, noUnionLeaves),
           );
         };
 
@@ -577,9 +672,11 @@ export function toStore<T extends AnyRecord>(
 
       const childSample = untracked(computation);
       const childVivify = resolveVivify(childSample, vivify);
-      const proxy = Array.isArray(childSample)
-        ? toArrayStore(computation, injector, childVivify)
-        : toStore(computation, injector, childVivify);
+      const proxy =
+        Array.isArray(childSample) && !isOpaque(childSample)
+          ? toArrayStore(computation, injector, childVivify, noUnionLeaves)
+          : toStore(computation, injector, childVivify, noUnionLeaves);
+      markAsLeaf(proxy, computation, childVivify !== false, noUnionLeaves);
       const ref = new WeakRef(proxy);
       storeCache.set(prop, ref);
       PROXY_CLEANUP.register(proxy, { target, prop }, ref);
@@ -714,9 +811,22 @@ export function store<T extends AnyRecord>(
      * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
      */
     vivify?: Vivify;
+    /**
+     * Performance opt-in: promise that no node ever switches between leaf and substore (i.e. no
+     * unions mixing a primitive with an object/array). With this on, each node's leaf-ness is
+     * resolved once on the first {@link isLeaf} probe and cached as a constant, skipping the
+     * reactive `computed`. If a node's shape does change anyway, {@link isLeaf} keeps its first
+     * answer. Off by default.
+     */
+    noUnionLeaves?: boolean;
   },
 ): WritableSignalStore<T> {
-  return toStore(signal(value, opt), opt?.injector, opt?.vivify ?? false);
+  return toStore(
+    signal(value, opt),
+    opt?.injector,
+    opt?.vivify ?? false,
+    opt?.noUnionLeaves ?? false,
+  );
 }
 
 /**
@@ -738,7 +848,20 @@ export function mutableStore<T extends AnyRecord>(
      * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
      */
     vivify?: Vivify;
+    /**
+     * Performance opt-in: promise that no node ever switches between leaf and substore (i.e. no
+     * unions mixing a primitive with an object/array). With this on, each node's leaf-ness is
+     * resolved once on the first {@link isLeaf} probe and cached as a constant, skipping the
+     * reactive `computed`. If a node's shape does change anyway, {@link isLeaf} keeps its first
+     * answer. Off by default.
+     */
+    noUnionLeaves?: boolean;
   },
 ): MutableSignalStore<T> {
-  return toStore(mutable(value, opt), opt?.injector, opt?.vivify ?? false);
+  return toStore(
+    mutable(value, opt),
+    opt?.injector,
+    opt?.vivify ?? false,
+    opt?.noUnionLeaves ?? false,
+  );
 }

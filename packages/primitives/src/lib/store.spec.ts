@@ -1,6 +1,14 @@
 import { Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { isOpaque, mutableStore, OPAQUE, opaque, store } from './store';
+import {
+  isLeaf,
+  isOpaque,
+  isStore,
+  mutableStore,
+  OPAQUE,
+  opaque,
+  store,
+} from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -316,6 +324,97 @@ describe('store', () => {
       expect(OPAQUE in o).toBe(true);
       expect(isOpaque(o)).toBe(true);
       expect(isOpaque({})).toBe(false);
+    });
+  });
+
+  describe('isLeaf', () => {
+    it('primitives are leaves; substores are not (but stay stores)', () => {
+      const s = store({ name: 'Ada', user: { city: 'London' } }, { injector });
+      expect(isLeaf(s.name)).toBe(true);
+      expect(isLeaf(s.user)).toBe(false);
+      expect(isStore(s.user)).toBe(true);
+    });
+
+    it('marks nested leaves', () => {
+      const s = store({ user: { name: 'Ada', age: 36 } }, { injector });
+      expect(isLeaf(s.user.name)).toBe(true);
+      expect(isLeaf(s.user.age)).toBe(true);
+    });
+
+    it('arrays are not leaves; primitive elements are, object elements are not', () => {
+      const s = store({ nums: [1, 2, 3], objs: [{ id: 1 }] }, { injector });
+      expect(isLeaf(s.nums)).toBe(false);
+      expect(isLeaf(s.nums[0])).toBe(true);
+      expect(isLeaf(s.objs[0])).toBe(false);
+    });
+
+    it('treats Date, RegExp and opaque objects as leaves', () => {
+      const s = store(
+        { d: new Date(), r: /x/, c: opaque({ a: 1 }) },
+        { injector },
+      );
+      expect(isLeaf(s.d)).toBe(true);
+      expect(isLeaf(s.r)).toBe(true);
+      expect(isLeaf(s.c)).toBe(true);
+    });
+
+    it('opaque wins over arrays — an opaque array is a whole leaf, not an array store', () => {
+      const arr = opaque([1, 2, 3]);
+      const s = store({ tags: arr }, { injector });
+      expect(isLeaf(s.tags)).toBe(true);
+      expect(s.tags()).toBe(arr); // returned whole
+      expect(Object.keys(s.tags)).toEqual([]); // not enumerated as an array store
+    });
+
+    it('null/undefined is a leaf only when vivification is off', () => {
+      const off = store({ a: null as number | null }, { injector });
+      expect(isLeaf(off.a)).toBe(true);
+
+      const on = store(
+        { a: null as { b: number } | null },
+        { injector, vivify: true },
+      );
+      expect(isLeaf(on.a)).toBe(false);
+    });
+
+    it('tracks leaf-ness reactively as the value shape changes', () => {
+      const s = store({ a: 5 as number | { x: number } }, { injector });
+      expect(isLeaf(s.a)).toBe(true);
+      s.a.set({ x: 1 });
+      expect(isLeaf(s.a)).toBe(false);
+      s.a.set(7);
+      expect(isLeaf(s.a)).toBe(true);
+    });
+
+    it('treats bigint as a leaf', () => {
+      const s = store({ n: 10n }, { injector });
+      expect(isLeaf(s.n)).toBe(true);
+    });
+
+    it('noUnionLeaves resolves leaf-ness once (constant, no reactive switching)', () => {
+      const s = store(
+        { a: 5 as number | { x: number } },
+        { injector, noUnionLeaves: true },
+      );
+      expect(isLeaf(s.a)).toBe(true);
+      s.a.set({ x: 1 });
+      // resolved once on the first probe and cached — keeps its first answer
+      expect(isLeaf(s.a)).toBe(true);
+    });
+
+    it('preserves leaf behavior — read, write, stable ref (Option A)', () => {
+      const s = store({ name: 'Ada' }, { injector });
+      expect(s.name()).toBe('Ada');
+      s.name.set('Grace');
+      expect(s.name()).toBe('Grace');
+      expect(s.name).toBe(s.name);
+    });
+
+    it('returns false for non-store values', () => {
+      expect(isLeaf(5)).toBe(false);
+      expect(isLeaf({})).toBe(false);
+      expect(isLeaf(null)).toBe(false);
+      expect(isLeaf(undefined)).toBe(false);
     });
   });
 });

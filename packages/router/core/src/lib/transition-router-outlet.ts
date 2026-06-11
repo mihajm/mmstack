@@ -90,7 +90,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   private arm(): void {
     this.armed = true;
-    this.sawPending = false;
+    this.sawPending = untracked(this.transitionScope.pending);
     // Fallback for an incoming route that loads nothing.
     afterNextRender(
       () => {

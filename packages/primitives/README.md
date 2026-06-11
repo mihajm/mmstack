@@ -319,7 +319,7 @@ Composes with `indexArray` to give each mapped item its own effect that's automa
 
 ## Concurrency & transitions
 
-Angular ships no built-in equivalent of React's `<Suspense>`, `useTransition`, `useOptimistic`, or `<Activity>` — nor Vue's `<keep-alive>`. This is that vocabulary, expressed with Angular signals: keep a stale value on screen while the next one loads, hold a whole subtree until its data settles, pause a hidden tab's background work, freeze the display through a multi-resource update and reveal it in one frame. It's mostly built on `linkedSignal` (the one primitive that hands a computation its own previous output), so the value-holding pieces add no `effect()` and no zone churn.
+The Angular signal-native equivalent of React's `<Suspense>`, `useTransition`, `useOptimistic`, or `<Activity>` — nor Vue's `<keep-alive>`. This is that vocabulary, expressed with Angular signals: keep a stale value on screen while the next one loads, hold a whole subtree until its data settles, pause a hidden tab's background work, freeze the display through a multi-resource update and reveal it in one frame. It's mostly built on `linkedSignal` (the one primitive that hands a computation its own previous output), so the value-holding pieces add no `effect()` and no zone churn.
 
 The pieces compose, but each stands alone — reach for only what you need. `@mmstack/resource` and `@mmstack/router-core` plug into the same machinery (a resource opts into the nearest scope with its `register` option; `<mm-transition-outlet>` turns navigation into a transition).
 
@@ -391,7 +391,10 @@ A **transition scope** is a per-boundary registry of resources whose async state
 
 ```typescript
 import { Component } from '@angular/core';
-import { UnscopedSuspenseBoundary, provideTransitionScope } from '@mmstack/primitives';
+import {
+  UnscopedSuspenseBoundary,
+  provideTransitionScope,
+} from '@mmstack/primitives';
 import { queryResource } from '@mmstack/resource';
 
 @Component({

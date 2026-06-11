@@ -439,10 +439,10 @@ import { queryResource } from '@mmstack/resource';
 @Component({ selector: 'user-profile', template: `{{ user.value()?.name }}` })
 class UserProfile {
   readonly id = input.required<string>();
-  // `register: { suspends: true }` registers into the nearest scope (the
+  // `register: 'suspend'` registers into the nearest scope (the
   // <mm-suspense> above) and blocks its first paint until a value lands.
   readonly user = queryResource<User>(() => `/api/users/${this.id()}`, {
-    register: { suspends: true },
+    register: 'suspend',
   });
 }
 
@@ -461,8 +461,8 @@ class UserPage {
 }
 ```
 
-- `register: true` (or `{ suspends: false }`) — register for the **pending indicator + hold-stale**; does _not_ block first paint. The right choice for in-region data: the boundary shows the held value with `aria-busy`, not a placeholder.
-- `register: { suspends: true }` — register as **suspending**: the boundary holds its placeholder until this resource has a value (full Suspense).
+- `register: 'indicator'` — register for the **pending indicator + hold-stale**; does _not_ block first paint. The right choice for in-region data: the boundary shows the held value with `aria-busy`, not a placeholder.
+- `register: 'suspend'` — register as **suspending**: the boundary holds its placeholder until this resource has a value (full Suspense). The right choice for data the subtree can't render without.
 - `false` / omitted — don't register.
 
 Combine with `keepPrevious: true` so reloads hold the last value instead of flashing empty — then a `<mm-suspense>` shows the placeholder only on the genuine first load, and `startTransition` (from `@mmstack/primitives`) can reveal a multi-resource update in one frame. For navigation, `@mmstack/router-core`'s `<mm-transition-outlet>` keeps the current route on screen until the incoming route's registered resources settle.
@@ -490,7 +490,7 @@ Common options (`register`, `retry`, `circuitBreaker`, `triggerOnSameRequest`) c
 ```typescript
 providers: [
   // Layer 1 — applies to every resource kind.
-  provideResourceOptions({ retry: { max: 2 }, register: true }),
+  provideResourceOptions({ retry: { max: 2 }, register: 'indicator' }),
   // Layer 2 — queries only (inherits + overrides layer 1).
   provideQueryResourceOptions({ circuitBreaker: true }),
   // Layer 2 — mutations only.

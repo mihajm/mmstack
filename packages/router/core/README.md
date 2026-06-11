@@ -561,7 +561,7 @@ export class AppShell {}
 @Component({ selector: 'user-page', template: `…{{ user.value()?.name }}` })
 export class UserPage {
   readonly user = queryResource<User>(() => `/api/users/${this.id()}`, {
-    register: true,
+    register: 'indicator',
   });
 }
 ```

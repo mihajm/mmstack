@@ -23,18 +23,31 @@ function setup(extra: Provider[]) {
 }
 
 describe('resource options injection + auto-register', () => {
-  it('per-call register: true adds the resource to the nearest transition scope', () => {
+  it("per-call register: 'indicator' adds the resource to the nearest transition scope", () => {
     setup([]);
     TestBed.runInInjectionContext(() => {
       const scope = injectTransitionScope();
       expect(scope.resources().length).toBe(0);
-      queryResource(() => 'https://example.test/a', { register: true });
+      queryResource(() => 'https://example.test/a', { register: 'indicator' });
       expect(scope.resources().length).toBe(1);
+      // 'indicator' drives pending/hold-stale but never blanks the boundary.
+      expect(scope.suspended('value')).toBe(false);
     });
   });
 
-  it('provideResourceOptions({ register: true }) makes resources auto-register by default', () => {
-    setup([provideResourceOptions({ register: true })]);
+  it("per-call register: 'suspend' registers as suspending (blocks first paint)", () => {
+    setup([]);
+    TestBed.runInInjectionContext(() => {
+      const scope = injectTransitionScope();
+      queryResource(() => 'https://example.test/a', { register: 'suspend' });
+      expect(scope.resources().length).toBe(1);
+      // no value yet → a suspending resource suspends the boundary's first paint.
+      expect(scope.suspended('value')).toBe(true);
+    });
+  });
+
+  it("provideResourceOptions({ register: 'indicator' }) makes resources auto-register by default", () => {
+    setup([provideResourceOptions({ register: 'indicator' })]);
     TestBed.runInInjectionContext(() => {
       const scope = injectTransitionScope();
       queryResource(() => 'https://example.test/a'); // no per-call register → inherits default
@@ -43,7 +56,7 @@ describe('resource options injection + auto-register', () => {
   });
 
   it('per-call register: false opts out of a provider default', () => {
-    setup([provideResourceOptions({ register: true })]);
+    setup([provideResourceOptions({ register: 'indicator' })]);
     TestBed.runInInjectionContext(() => {
       const scope = injectTransitionScope();
       queryResource(() => 'https://example.test/a', { register: false });
@@ -53,7 +66,7 @@ describe('resource options injection + auto-register', () => {
 
   it('precedence: provideQueryResourceOptions overrides provideResourceOptions', () => {
     setup([
-      provideResourceOptions({ register: true }),
+      provideResourceOptions({ register: 'indicator' }),
       provideQueryResourceOptions({ register: false }),
     ]);
     TestBed.runInInjectionContext(() => {

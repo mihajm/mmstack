@@ -411,7 +411,7 @@ import { queryResource } from '@mmstack/resource';
 export class UserProfile {
   // …so this query registers into it, and the boundary below reads the same scope.
   readonly user = queryResource<User>(() => '/api/users/me', {
-    register: { suspends: true },
+    register: 'suspend',
   });
 }
 ```
@@ -478,12 +478,12 @@ export class UserList {
   private readonly startTransition = injectStartTransition();
   protected readonly search = signal('');
 
-  // `register: { suspends: true }` → this query blocks the boundary's first paint.
+  // `register: 'suspend'` → this query blocks the boundary's first paint.
   // `keepPrevious` holds the rows through every refetch, so a filter change never
   // re-suspends — it just flips the boundary to its [busy] state.
   protected readonly users = queryResource<User[]>(
     () => ({ url: '/api/users', params: { q: this.search() } }),
-    { register: { suspends: true }, keepPrevious: true },
+    { register: 'suspend', keepPrevious: true },
   );
 
   protected filter(q: string) {

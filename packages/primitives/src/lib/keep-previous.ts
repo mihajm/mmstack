@@ -1,11 +1,11 @@
 import {
-  isWritableSignal,
   linkedSignal,
   type CreateSignalOptions,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
 import { isDerivation, type DerivedSignal } from './derived';
+import { isWritableSignal } from './mappers/util';
 import { isMutable, type MutableSignal } from './mutable';
 
 /**

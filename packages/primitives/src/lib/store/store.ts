@@ -1,5 +1,4 @@
 import {
-  isWritableSignal as assertion,
   computed,
   inject,
   Injector,
@@ -12,15 +11,10 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { derived } from '../derived';
+import { isWritableSignal } from '../mappers/util';
 import { isMutable, mutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
 import { createVivify, isIndexProp, type Vivify } from '../util';
-
-export function isWritableSignal<T>(
-  value: Signal<T>,
-): value is WritableSignal<T> {
-  return assertion(value);
-}
 
 /**
  * Runtime marker + compile-time brand for an opaque value. A `const`-declared `Symbol`

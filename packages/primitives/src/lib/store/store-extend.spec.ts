@@ -1,6 +1,6 @@
 import { effect, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { mutable } from './mutable';
+import { mutable } from '../mutable';
 import { mutableStore, store } from './store';
 
 describe('store.extend (scoped overlay)', () => {
@@ -14,10 +14,7 @@ describe('store.extend (scoped overlay)', () => {
 
   describe('inherited keys', () => {
     it('delegates to the parent with shared identity and two-way reactivity', () => {
-      const parent = store(
-        { user: { name: 'Alice' }, count: 0 },
-        { injector },
-      );
+      const parent = store({ user: { name: 'Alice' }, count: 0 }, { injector });
       const scope = parent.extend({ local: true });
 
       // same sub-store instance → true sharing

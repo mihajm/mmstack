@@ -15,10 +15,11 @@ npm install @mmstack/primitives
 
 ## Contents
 
-- [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `toWritable`
+- [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `forkStore`, `toWritable`
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
 - [Effects](#effects) — `nestedEffect`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*`, Suspense (`mm-suspense`), `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -145,6 +146,32 @@ A few release notes:
 - The local layer is a plain store (vivify off). Inherited paths vivify when the _parent_ was created with `vivify`; to autovivify local keys, seed with a vivify-enabled store — `app.extend(store(seed, { vivify: 'auto' }))`.
 - Reserved names — `extend`, `asReadonlyStore`, and the signal methods (`set` / `update` / `mutate` / `inline` / `asReadonly`) — shadow same-named data keys, as on any store.
 - `scope.asReadonlyStore()` returns a read-only **snapshot view** of the merge (reactive reads, no writes); it does not share sub-store identity.
+
+### `forkStore`
+
+`forkStore(base)` creates an **isolated, writable overlay** on a base store. Writes stay _local_ to the fork (the base is untouched); paths the fork hasn't edited read through to the base. `commit()` flushes the fork's value onto the base; `discard()` drops the staged writes. Use it for drafts, edit-and-cancel dialogs, and optimistic branches — anywhere you want a throwaway, structurally-shared copy you can keep or roll back.
+
+```typescript
+import { store, forkStore } from '@mmstack/primitives';
+
+const base = store({ user: { name: 'Alice', age: 30 }, theme: 'dark' });
+
+const draft = forkStore(base);
+draft.store.user.name.set('Bob'); // local only — base still reads 'Alice'
+base.user.name(); // 'Alice'
+
+draft.commit(); // flush the edits onto the base
+base.user.name(); // 'Bob'
+// draft.discard();    // …or throw the edits away
+```
+
+The fork is a full store (`draft.store.user.name(...)`, `extend`, deep reads/writes — everything `store` gives you). It's built on `linkedSignal`: it holds local writes until the **base changes underneath it**, then runs a `strategy` to reconcile:
+
+- **`'fine'`** (default for immutable stores) — per-path 3-way merge: keep the paths the fork edited, take the base's live values for the paths it didn't. Survives concurrent base changes. Relies on copy-on-write reference identity, so it's **unsupported on a mutable base** (in-place mutation defeats it — `fork` warns and falls back to `'coarse'`).
+- **`'coarse'`** — any base change resets the whole fork. Cheapest; correct when the base is held for the fork's lifetime (e.g. a transition). The default for a mutable base.
+- **a `ReconcileFn<T>`** — `(ancestor, mine, theirs) => merged`, for bring-your-own merge (array-by-id, Immer patches, CRDT-ish).
+
+> Pass the same `vivify` / `noUnionLeaves` the base was created with — fork config isn't inherited (it's closed over inside the base), so mismatched config gives the fork different write semantics.
 
 ### `toWritable`
 
@@ -289,6 +316,207 @@ nestedEffect(() => {
 ```
 
 Composes with `indexArray` to give each mapped item its own effect that's automatically torn down when the item is removed — see the doc comments on `nestedEffect` for the pattern.
+
+## Concurrency & transitions
+
+Angular ships no built-in equivalent of React's `<Suspense>`, `useTransition`, `useOptimistic`, or `<Activity>` — nor Vue's `<keep-alive>`. This is that vocabulary, expressed with Angular signals: keep a stale value on screen while the next one loads, hold a whole subtree until its data settles, pause a hidden tab's background work, freeze the display through a multi-resource update and reveal it in one frame. It's mostly built on `linkedSignal` (the one primitive that hands a computation its own previous output), so the value-holding pieces add no `effect()` and no zone churn.
+
+The pieces compose, but each stands alone — reach for only what you need. `@mmstack/resource` and `@mmstack/router-core` plug into the same machinery (a resource opts into the nearest scope with its `register` option; `<mm-transition-outlet>` turns navigation into a transition).
+
+### `keepPrevious`
+
+The foundation of stale-while-revalidate. Wraps a signal so it **holds its last defined value whenever the source becomes `undefined`** — surfacing the previous result instead of flashing empty during a reload.
+
+```typescript
+import { keepPrevious } from '@mmstack/primitives';
+
+const held = keepPrevious(resource.value); // drops to undefined mid-reload → keeps last value
+```
+
+If the source is writable, `set` / `update` / `asReadonly` (and `mutate` / `inline` / `from` for mutable / derived sources) are forwarded through, so it stays a drop-in replacement. `@mmstack/resource` uses it under the hood for its `keepPrevious` option.
+
+### Keep-alive — `MmActivity` / `injectPaused` / `providePaused`
+
+`*mmActivity="visible"` is the Angular analog of React's `<Activity>` / Vue's `<keep-alive>`: the wrapped subtree is **mounted once and kept**. When the condition is false it's hidden (`display:none`) and its change detection is paused — preserving state (scroll, inputs, a `<video>`'s position, loaded data); when true it's shown and CD resumes. It's never destroyed until the directive is.
+
+```html
+<section *mmActivity="tab() === 'editor'">
+  <!-- heavy stateful editor — kept alive across tab switches -->
+</section>
+```
+
+It also provides a **paused context** (= the negation of `visible`) to the subtree. Read it with `injectPaused()` (a `Signal<boolean>`, `true` while hidden); descendants use it to pause effect-driven work. CD-detach pauses _pull-based_ work for free (templates and the computeds they read), but **not** effects or RxJS timers — so polling and `effect()`s inside a hidden tab keep running unless you gate them on `injectPaused()` (or use the pausable primitives / a `PAUSED`-aware resource, which do it for you). `providePaused(signal)` sets up your own boundary; on the server nothing is ever paused (the full tree renders).
+
+### Pausable primitives — `pausableSignal` / `pausableComputed` / `pausableEffect`
+
+Signal/computed/effect that suspend their work while paused. By default they read the ambient paused context (so dropping them inside an `*mmActivity` subtree just works); pass `pause: () => boolean` (a `Signal<boolean>` counts) for an explicit source, or `pause: false` to opt out — which returns the **bare primitive with zero overhead** (no wrapper allocated).
+
+```typescript
+import {
+  pausableSignal,
+  pausableComputed,
+  pausableEffect,
+} from '@mmstack/primitives';
+
+const scroll = pausableSignal(0); // while paused: reads hold; writes land and surface on resume
+const total = pausableComputed(() => expensiveDerive(data())); // holds + does NOT recompute while paused
+pausableEffect(() => poll(url())); // body skipped while paused; deps collapse so a change can't wake it
+```
+
+While paused each one **collapses its dependency set to just the pause predicate**, so an upstream change can't trigger work; on resume it re-tracks and re-runs / recomputes with the latest values. SSR never pauses.
+
+### Suspense — `<mm-suspense>` and the transition scope
+
+A **transition scope** is a per-boundary registry of resources whose async state a boundary coordinates. `<mm-suspense>` provides its own scope, so resources created in its subtree register into it automatically (via `@mmstack/resource`'s `register` option, or `registerResource(ref)` for a hand-rolled `ResourceRef`):
+
+```html
+<mm-suspense>
+  <user-profile />
+  <!-- its queries register here -->
+  <span placeholder>Loading…</span>
+  <!-- shown on FIRST load only -->
+  <span busy>Updating…</span>
+  <!-- shown during a reload, content stays mounted -->
+</mm-suspense>
+```
+
+- **First load** (no value yet) → show the `[placeholder]`.
+- **Reload** (a value is already held via `keepPrevious`) → keep the real content mounted, set `aria-busy`, and optionally show the `[busy]` slot — no flash back to the placeholder.
+
+`type` selects what "not ready" means: `'value'` (default — suspend until a first value lands, then hold through reloads) or `'loading'` (strict — suspend on every in-flight load). When you register a resource you choose whether it `suspends` (blocks first paint — for code/data the subtree can't render without) or only drives the indicator (`suspends: false` — in-region data that should hold-stale, not blank the boundary).
+
+> **Where the resource must live.** Registration resolves the scope _up_ the injector tree, and `<mm-suspense>` provides its scope to its **content children** — so a resource is captured only when it's created _inside_ the boundary (e.g. a component projected between the tags). A query declared on the component that _renders_ `<mm-suspense>` sits above it and won't be seen.
+
+**Single-component variant.** When you'd rather keep the boundary and the resource on the **same** component, provide the scope on that component and use `<mm-unscoped-suspense>`, which **reads an ambient scope** instead of opening its own. Now the scope is an ancestor of both the resource and the boundary:
+
+```typescript
+import { Component } from '@angular/core';
+import { UnscopedSuspenseBoundary, provideTransitionScope } from '@mmstack/primitives';
+import { queryResource } from '@mmstack/resource';
+
+@Component({
+  selector: 'user-profile',
+  imports: [UnscopedSuspenseBoundary],
+  providers: [provideTransitionScope()], // the scope lives on THIS component…
+  template: `
+    <mm-unscoped-suspense>
+      <span placeholder>Loading…</span>
+      {{ user.value()?.name }}
+    </mm-unscoped-suspense>
+  `,
+})
+export class UserProfile {
+  // …so this query registers into it, and the boundary below reads the same scope.
+  readonly user = queryResource<User>(() => '/api/users/me', {
+    register: { suspends: true },
+  });
+}
+```
+
+This is also the pattern for coordinating resources registered _above_ a boundary (e.g. an app-builder page whose connectors register at a higher injector): the outer `provideTransitionScope()` is the shared scope, and any number of `<mm-unscoped-suspense>` boundaries observe it.
+
+### `injectStartTransition`
+
+The analog of React's `useTransition`. `startTransition(fn)` runs your state mutations (which commit immediately); any resource that reloads as a result **holds its value and reveals together once everything settles** — so a multi-resource update lands as one consistent frame instead of a torn mix of new and stale. The returned handle gives you a unified `pending` signal and a `done` promise for imperative coordination (disable a button, await completion).
+
+```typescript
+const startTransition = injectStartTransition();
+
+const t = startTransition(() => filters.set(next)); // queries refetch, view holds stale meanwhile
+button.disabled = t.pending();
+await t.done; // resolves once everything has settled
+```
+
+### `injectStartTransaction`
+
+A transactional generalization of the above. `startTransaction(fn)` **holds the display** at its pre-transaction value while the transaction is in flight, records the writes in an undo log, then either commits on settle or rolls them back via `abort()`. The writes land on _live_ state immediately (so derived signals and connector requests see the new values and refetch) — only the _display_ is frozen, then revealed atomically when everything settles.
+
+```typescript
+const startTransaction = injectStartTransaction();
+
+const t = startTransaction(() => applyBulkEdit()); // live state updates; the displayed grid stays put
+// later: t.abort()  → roll the writes back and release the hold
+await t.done; // committed, display revealed in one frame
+```
+
+### `holdUntilReady`
+
+The **structural** counterpart to `keepPrevious`: where that holds a _value_ through a reload, this holds a _structure_ through a swap. Given a `target` signal and a `ready` predicate, it keeps yielding the previous value until `ready()` is true, then swaps to the current target. Mount the incoming structure off to the side so its resources can settle and flip `ready`, keep showing the held one meanwhile, and let the old one go once `ready` releases the swap. (`@mmstack/router-core`'s `<mm-transition-outlet>` is this pattern applied to routes.)
+
+```typescript
+import { holdUntilReady } from '@mmstack/primitives';
+
+const shown = holdUntilReady(targetView, () => !scope.pending());
+```
+
+### Putting it together
+
+A filterable list that suspends on first load, holds its rows through every filter change, and never flashes empty — combining the Suspense boundary, `keepPrevious`, and a transition. The data comes from [`@mmstack/resource`](https://www.npmjs.com/package/@mmstack/resource), whose `register` option drops a query into the nearest scope.
+
+The list lives **inside** the boundary (so its query and `startTransition` resolve the boundary's scope); the boundary itself is a thin wrapper above it:
+
+```typescript
+import { Component, signal } from '@angular/core';
+import { SuspenseBoundary, injectStartTransition } from '@mmstack/primitives';
+import { queryResource } from '@mmstack/resource';
+
+@Component({
+  selector: 'user-list',
+  template: `
+    <input [value]="search()" (input)="filter($any($event.target).value)" />
+    <ul>
+      @for (u of users.value() ?? []; track u.id) {
+        <li>{{ u.name }}</li>
+      }
+    </ul>
+  `,
+})
+export class UserList {
+  private readonly startTransition = injectStartTransition();
+  protected readonly search = signal('');
+
+  // `register: { suspends: true }` → this query blocks the boundary's first paint.
+  // `keepPrevious` holds the rows through every refetch, so a filter change never
+  // re-suspends — it just flips the boundary to its [busy] state.
+  protected readonly users = queryResource<User[]>(
+    () => ({ url: '/api/users', params: { q: this.search() } }),
+    { register: { suspends: true }, keepPrevious: true },
+  );
+
+  protected filter(q: string) {
+    // One pending/done for the whole update (await it, disable a control…).
+    // With several registered resources, they hold and reveal together — one frame.
+    this.startTransition(() => this.search.set(q));
+  }
+}
+
+@Component({
+  selector: 'users-page',
+  imports: [SuspenseBoundary, UserList],
+  template: `
+    <mm-suspense>
+      <!-- genuine first load -->
+      <span placeholder>Loading users…</span>
+      <!-- a filter change: rows stay, just flagged busy -->
+      <span busy>Updating…</span>
+      <user-list />
+    </mm-suspense>
+  `,
+})
+export class UsersPage {}
+```
+
+What each layer does here:
+
+- **first load** → `<mm-suspense>` shows `Loading users…` (the registered query has no value yet, and it `suspends`);
+- **a filter change** → `keepPrevious` holds the current rows, the boundary sets `aria-busy` and reveals the `[busy]` slot, and `startTransition` hands you one `pending` / `done` for the operation;
+- nothing ever flashes empty between states.
+
+Scale the same machinery outward:
+
+- wrap the page in **`<mm-transition-outlet>`** ([`@mmstack/router-core`](https://www.npmjs.com/package/@mmstack/router-core)) and navigation gets the same hold-and-swap — the old route stays until the incoming route's registered resources settle;
+- put a heavy panel behind **`*mmActivity`** to keep it alive across tab switches, and its `pausable*` / `PAUSED`-aware resources go quiet while it's hidden;
+- need an edit-and-cancel form over that data? **`forkStore`** gives you the throwaway draft.
 
 ## History & persistence
 

@@ -390,6 +390,81 @@ describe('queryResource', () => {
     expect(res.disabled()).toBe(true);
   });
 
+  it('PAUSED holds the value and defers a dependency-change refetch until resume', async () => {
+    let requests = 0;
+    const hidden = signal(false);
+    const id = signal(1);
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ id: number }>(
+        (ctx) =>
+          hidden()
+            ? ctx.paused
+            : {
+                url: `https://example.com/api/${id()}`,
+                context: createTestContext(() => requests++, { id: id() }),
+              },
+        { keepPrevious: true },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(requests).toBe(1);
+    expect(res.value()).toEqual({ id: 1 });
+
+    // pause, then change the dependency — must NOT refetch while paused; value held
+    hidden.set(true);
+    id.set(2);
+    TestBed.tick();
+    await Promise.resolve();
+    expect(requests).toBe(1);
+    expect(res.value()).toEqual({ id: 1 });
+
+    // resume → the deferred change now refetches
+    hidden.set(false);
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => (v as { id: number } | undefined)?.id === 2),
+    );
+    expect(requests).toBe(2);
+    expect(res.value()).toEqual({ id: 2 });
+  });
+
+  it('does not refetch on resume when the request is unchanged', async () => {
+    let requests = 0;
+    const hidden = signal(false);
+    // stable request object → unchanged across pause/resume
+    const reqObj = {
+      url: 'https://example.com/api/stable',
+      context: createTestContext(() => requests++, { ok: true }),
+    };
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ ok: boolean }>(
+        (ctx) => (hidden() ? ctx.paused : reqObj),
+        {
+          keepPrevious: true,
+        },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(requests).toBe(1);
+
+    hidden.set(true);
+    TestBed.tick();
+    await Promise.resolve();
+    hidden.set(false);
+    TestBed.tick();
+    await Promise.resolve();
+
+    expect(requests).toBe(1); // unchanged request → no refetch on resume
+    expect(res.value()).toEqual({ ok: true });
+  });
+
   it('should fetch data when prefetch is called and serve from cache', async () => {
     let requests = 0;
     const url = 'https://example.com/prefetch';
@@ -476,9 +551,12 @@ describe('queryResource', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'server' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'server' },
+          ),
         }),
         { cache: { staleTime: 10000 } },
       ),
@@ -500,9 +578,12 @@ describe('queryResource', () => {
       queryResource<{ data: string }>(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'server' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'server' },
+          ),
         }),
         { cache: { staleTime: 10000 } },
       ),
@@ -523,9 +604,12 @@ describe('queryResource', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'server' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'server' },
+          ),
         }),
         { cache: { staleTime: 10000 } },
       ),
@@ -542,9 +626,12 @@ describe('queryResource', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'server' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'server' },
+          ),
         }),
         { cache: { staleTime: 10000 } },
       ),

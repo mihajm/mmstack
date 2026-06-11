@@ -213,6 +213,46 @@ describe('mutationResource', () => {
     expect(executions).toEqual([1, 2, 3]);
   });
 
+  it('triggerOnSameRequest: an identical mutation fired while one is in flight still triggers a request', async () => {
+    // Regression: without this, the mutation's own request-equality dedup swallowed a repeat
+    // mutate() with an identical body while one was in flight — so the optimistic update applied
+    // but no HTTP fired (the "every other click" symptom). triggerOnSameRequest must defeat it.
+    let requests = 0;
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: { id: number }) => ({
+          url: 'https://example.com/same',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              requests++;
+            },
+            { ok: true },
+            false,
+            100, // slow response → the first stays in flight while the second is fired
+          ),
+        }),
+        { triggerOnSameRequest: true },
+      ),
+    );
+
+    res.mutate({ id: 1 });
+    for (let i = 0; i < 20 && requests < 1; i++) {
+      await new Promise((r) => setTimeout(r));
+      TestBed.tick();
+    }
+    expect(requests).toBe(1); // first request is in flight
+
+    res.mutate({ id: 1 }); // identical body, while #1 has not resolved
+    for (let i = 0; i < 50 && requests < 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+    expect(requests).toBe(2); // the identical in-flight repeat still fired
+  });
+
   it('should abort the mutation when onMutate throws (non-queued)', async () => {
     let requests = 0;
     const hooks: string[] = [];

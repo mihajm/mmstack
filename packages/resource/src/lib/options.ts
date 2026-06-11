@@ -15,17 +15,17 @@ import { type CircuitBreakerOptions, type RetryOptions } from './util';
 
 /**
  * Auto-registration into the nearest transition scope, as a resource OPTION:
- *  - `true` — register for the pending indicator + hold-stale (does NOT block first paint);
- *  - `{ suspends: true }` — register as *suspending* (the boundary holds its placeholder until
- *    this resource has a value), i.e. full Suspense;
- *  - `{ suspends: false }` — same as `true`;
+ *  - `'suspend'` — register as *suspending*: the boundary holds its placeholder until this
+ *    resource has a value (full Suspense). The right choice for data the subtree can't render without;
+ *  - `'indicator'` — register for the pending indicator + hold-stale only (does NOT block first
+ *    paint). The right choice for in-region data: the boundary shows the held value with `aria-busy`;
  *  - `false` / omitted — don't register.
  *
  * Defaultable via `provideResourceOptions` / `provideQueryResourceOptions` and overridable
  * (including opting out with `false`) per call — so a dev can make "all queries participate in
  * transitions" the default and turn it off for the odd one.
  */
-export type TransitionRegistration = boolean | RegisterOptions;
+export type TransitionRegistration = false | 'indicator' | 'suspend';
 
 /** Options common to every resource kind (the base layer for the options-injection system). */
 export type CommonResourceOptions = {
@@ -85,8 +85,7 @@ export function applyResourceRegistration(
   injector?: Injector,
 ): void {
   if (!register) return;
-  const opt: RegisterOptions =
-    register === true ? { suspends: false } : register;
+  const opt: RegisterOptions = { suspends: register === 'suspend' };
   const run = injector
     ? (fn: () => void) => runInInjectionContext(injector, fn)
     : (fn: () => void) => fn();

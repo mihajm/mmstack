@@ -17,6 +17,7 @@ npm install @mmstack/router-core
 - **Reactive router state** — read the current URL, path params, and query params as Angular Signals.
 - **Resolver-driven UI** — declare your document title, breadcrumbs, and one or more nav menus from your `Routes` config; consume them reactively from any component.
 - **Smart preloading** — a `RouterLink` replacement and `PreloadingStrategy` that preload lazy-loaded route modules on hover, visibility, or imperatively.
+- **Transition navigation** — a drop-in `RouterOutlet` that keeps the current route on screen until the incoming route's data settles, then swaps in one frame.
 
 ## Table of contents
 
@@ -31,6 +32,8 @@ npm install @mmstack/router-core
   - [`PreloadStrategy`](#preloadstrategy)
   - [`Link` (`mmLink`)](#link-mmlink)
   - [`injectTriggerPreload`](#injecttriggerpreload)
+- [Transition outlet](#transition-outlet)
+  - [`TransitionRouterOutlet` (`mm-transition-outlet`)](#transitionrouteroutlet-mm-transition-outlet)
 
 ---
 
@@ -530,3 +533,42 @@ export class CommandPaletteComponent {
   }
 }
 ```
+
+---
+
+## Transition outlet
+
+By default a route change unmounts the current view immediately and the incoming view renders in its loading state — a flash of spinners on every navigation. `TransitionRouterOutlet` turns navigation into a **transition**: the current route stays mounted and visible while the incoming route mounts _hidden_ and its data settles, then both swap in one frame. It's the routing application of `@mmstack/primitives`' [`holdUntilReady`](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) / transition-scope machinery — the Angular take on a Suspense-driven route transition.
+
+### `TransitionRouterOutlet` (`mm-transition-outlet`)
+
+A drop-in replacement for `<router-outlet>`. It provides its own transition scope, so the incoming route's resources register **into it** (use `@mmstack/resource`'s `register` option, or `registerResource()` for a hand-rolled `ResourceRef`) and the outlet can tell when the route is ready.
+
+```typescript
+import { Component } from '@angular/core';
+import { TransitionRouterOutlet } from '@mmstack/router-core';
+
+@Component({
+  selector: 'app-shell',
+  imports: [TransitionRouterOutlet],
+  template: `<mm-transition-outlet />`,
+})
+export class AppShell {}
+```
+
+```typescript
+// the incoming route registers its data so the outlet knows when to swap
+@Component({ selector: 'user-page', template: `…{{ user.value()?.name }}` })
+export class UserPage {
+  readonly user = queryResource<User>(() => `/api/users/${this.id()}`, {
+    register: true,
+  });
+}
+```
+
+Behaviour:
+
+- **First navigation** mounts immediately (nothing to hold). After that, the outgoing route holds until the incoming one settles, then swaps and is destroyed — navigation still respects "tree = f(URL)".
+- **Settle = the incoming route's registered resources went in flight and then drained.** A route that registers nothing (or errors) swaps via a microtask fallback, so a data-less or failing route never hangs the hold.
+- **Composes with guards and resolvers** — a denied `canActivate` leaves the current route untouched (nothing held or leaked); a pending `resolve` holds at the router level, then the outlet holds through the data load. Works when nested inside a parent route's outlet too.
+- **`data: { immediateTransition: true }`** on a route opts it out of the hold — it swaps in immediately, even while loading (handy for routes that should show their own skeleton).

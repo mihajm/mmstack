@@ -1,29 +1,38 @@
 import {
   HttpClient,
-  HttpHeaders,
+  type HttpHeaders,
   httpResource,
-  HttpResponse,
   type HttpResourceOptions,
   type HttpResourceRef,
   type HttpResourceRequest,
+  HttpResponse,
 } from '@angular/common/http';
 import {
   computed,
   DestroyRef,
   effect,
   inject,
+  InjectionToken,
+  type Injector,
   isDevMode,
   linkedSignal,
+  type Provider,
+  type ResourceRef,
   ResourceStatus,
-  Signal,
+  type Signal,
   untracked,
-  WritableSignal,
+  type WritableSignal,
 } from '@angular/core';
 import { toWritable } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
+  applyResourceRegistration,
+  type CommonResourceOptions,
+  injectResourceOptions,
+  provideTypedResourceOptions,
+} from './options';
+import {
   catchValueError,
-  CircuitBreakerOptions,
   createCircuitBreaker,
   createEqualRequest,
   hashRequest,
@@ -35,9 +44,8 @@ import {
   retryOnError,
   setCacheContext,
   toResourceObject,
-  type RetryOptions,
 } from './util';
-import { CacheEntry } from './util/cache/cache';
+import { type CacheEntry } from './util/cache/cache';
 
 /**
  * Options for configuring caching behavior of a `queryResource`.
@@ -105,46 +113,62 @@ type ResourceCacheOptions =
 export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
   TResult,
   TRaw
-> & {
-  /**
-   * Whether to keep the previous value of the resource while a refresh is in progress.
-   * Defaults to `false`. Also keeps status & headers while refreshing.
-   */
-  keepPrevious?: boolean;
-  /**
-   * The refresh interval, in milliseconds. If provided, the resource will automatically
-   * refresh its data at the specified interval.
-   */
-  refresh?: number;
-  /**
-   * Options for retrying failed requests.
-   */
-  retry?: RetryOptions;
-  /**
-   * Called on every failed attempt, including each retry.
-   *
-   * @param err - The error from the underlying HTTP request.
-   * @param retryCount - The number of retries that already happened before
-   * this error (`0` on the original failure, `1` after the first retry, etc.).
-   * @param isFinal - `true` when no further retry will be scheduled — either
-   * because retries are exhausted or `retry` was unset/0. Branch on this for
-   * "user actually needs to know" side effects (toasts, error reporting).
-   */
-  onError?: (err: unknown, retryCount: number, isFinal: boolean) => void;
-  /**
-   * Options for configuring a circuit breaker for the resource.
-   */
-  circuitBreaker?: CircuitBreakerOptions | true;
-  /**
-   * Options for enabling and configuring caching for the resource.
-   */
-  cache?: ResourceCacheOptions;
-  /**
-   * Trigger a request every time the request function is triggered, even if the request parameters are the same.
-   * @default false
-   */
-  triggerOnSameRequest?: boolean;
-};
+> &
+  CommonResourceOptions & {
+    /**
+     * Whether to keep the previous value of the resource while a refresh is in progress.
+     * Defaults to `false`. Also keeps status & headers while refreshing.
+     */
+    keepPrevious?: boolean;
+    /**
+     * The refresh interval, in milliseconds. If provided, the resource will automatically
+     * refresh its data at the specified interval.
+     */
+    refresh?: number;
+    /**
+     * Called on every failed attempt, including each retry.
+     *
+     * @param err - The error from the underlying HTTP request.
+     * @param retryCount - The number of retries that already happened before
+     * this error (`0` on the original failure, `1` after the first retry, etc.).
+     * @param isFinal - `true` when no further retry will be scheduled — either
+     * because retries are exhausted or `retry` was unset/0. Branch on this for
+     * "user actually needs to know" side effects (toasts, error reporting).
+     */
+    onError?: (err: unknown, retryCount: number, isFinal: boolean) => void;
+    /**
+     * Options for enabling and configuring caching for the resource.
+     */
+    cache?: ResourceCacheOptions;
+    /**
+     * Comparison of request object
+     */
+    equalRequest?: (a: HttpResourceRequest, b: HttpResourceRequest) => boolean;
+  };
+
+const QUERY_RESOURCE_OPTIONS = new InjectionToken<
+  Partial<QueryResourceOptions<any, any>>
+>('@mmstack/resource:query-resource-options', { factory: () => ({}) });
+
+/**
+ * Layer 2 (query): default options for every `queryResource`, inheriting + overriding the
+ * common defaults from `provideResourceOptions`. Per-call options override these in turn.
+ */
+export function provideQueryResourceOptions(
+  valueOrFn:
+    | Partial<QueryResourceOptions<any, any>>
+    | (() => Partial<QueryResourceOptions<any, any>>),
+): Provider {
+  return provideTypedResourceOptions(QUERY_RESOURCE_OPTIONS, valueOrFn);
+}
+
+function injectQueryResourceOptions(
+  injector?: Injector,
+): Partial<QueryResourceOptions<any, any>> {
+  return injector
+    ? injector.get(QUERY_RESOURCE_OPTIONS)
+    : inject(QUERY_RESOURCE_OPTIONS);
+}
 
 /**
  * The reason a query resource is currently in the `disabled` state, or `null`
@@ -164,6 +188,27 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
  * ```
  */
 export type DisabledReason = 'offline' | 'circuit-open' | 'no-request';
+
+/**
+ * Returned from a resource's request fn to PAUSE it: the resource holds its current value and last
+ * request (so it does not refetch on resume), and stops background work (no polling, no refetch
+ * while paused). Distinct from returning `undefined` (DISABLE), which drops the request — a
+ * disabled resource may refetch when re-enabled, a paused one resumes exactly where it left off.
+ *
+ * The request fn receives a {@link RequestContext} and can just return `ctx.paused`.
+ */
+export const PAUSED: unique symbol = Symbol('@mmstack/resource:paused');
+
+/**
+ * Context passed to a resource's request fn. An object (not positional args) so it can grow
+ * without changing the call signature. Today it carries {@link PAUSED} so the fn can return it.
+ */
+export type RequestContext = { readonly paused: typeof PAUSED };
+
+/** The request fn shape: build a request, or return `undefined` (disable) / `ctx.paused` (pause). */
+export type ResourceRequestFn = (
+  ctx: RequestContext,
+) => HttpResourceRequest | string | undefined | void | typeof PAUSED;
 
 /**
  * Represents a resource created by `queryResource`. Extends `HttpResourceRef`
@@ -238,7 +283,7 @@ export type QueryResourceRef<TResult> = Omit<
  * ```
  */
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | string | undefined | void,
+  request: ResourceRequestFn,
   options: QueryResourceOptions<TResult, TRaw> & {
     defaultValue: NoInfer<TResult>;
   },
@@ -275,14 +320,21 @@ export function queryResource<TResult, TRaw = TResult>(
  * ```
  */
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | string | undefined | void,
+  request: ResourceRequestFn,
   options?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined>;
 
 export function queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | string | undefined | void,
-  options?: QueryResourceOptions<TResult, TRaw>,
+  request: ResourceRequestFn,
+  options0?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
+  // Two-layer option injection: per-call > provideQueryResourceOptions > provideResourceOptions.
+  const options = {
+    ...injectResourceOptions(options0?.injector),
+    ...injectQueryResourceOptions(options0?.injector),
+    ...options0,
+  } as QueryResourceOptions<TResult, TRaw>;
+
   const cache = injectQueryCache<TResult>(options?.injector);
 
   const destroyRef = options?.injector
@@ -300,27 +352,52 @@ export function queryResource<TResult, TRaw = TResult>(
 
   const eq = options?.triggerOnSameRequest
     ? undefined
-    : createEqualRequest(options?.equal);
+    : (options?.equalRequest ?? createEqualRequest());
 
-  const rawRequest = computed(() => request() ?? undefined);
+  const requestCtx: RequestContext = { paused: PAUSED };
+  const rawResult = computed(() => request(requestCtx));
+  const paused = computed(() => rawResult() === PAUSED);
+  const rawRequest = computed(() => {
+    const r = rawResult();
+    return r === PAUSED ? undefined : (r ?? undefined);
+  });
 
   const disabledReason = computed<DisabledReason | null>(() => {
     if (!networkAvailable()) return 'offline';
     if (cb.isOpen()) return 'circuit-open';
+    // PAUSED makes rawRequest undefined, so it reports 'no-request' here (and skips polling),
+    // while stableRequest below HOLDS the last request so the value is kept (no refetch on resume).
     if (!rawRequest()) return 'no-request';
     return null;
   });
 
-  const stableRequest = computed(
-    (): HttpResourceRequest | undefined => {
-      if (disabledReason() !== null) return undefined;
+  // While PAUSED, hold the previous request so httpResource sees no change — it keeps its value and
+  // does NOT refetch. On resume the request is re-evaluated, so it refetches only if it changed.
+  const heldRequest = linkedSignal<
+    { req: HttpResourceRequest | undefined; held: boolean },
+    HttpResourceRequest | undefined
+  >({
+    source: () => {
+      if (paused()) return { req: undefined, held: true };
+      if (disabledReason() !== null) return { req: undefined, held: false };
       const req = rawRequest();
-      if (!req) return undefined;
-      if (typeof req === 'string') return { method: 'GET', url: req };
-      return req;
+      if (!req) return { req: undefined, held: false };
+      if (typeof req === 'string')
+        return { req: { method: 'GET', url: req }, held: false };
+      return { req, held: false };
     },
+    computation: (curr, prev) =>
+      curr.held && prev !== undefined ? prev.value : curr.req,
+  });
+
+  // Dedup via the request-equality (the linkedSignal re-runs on every source tick; this computed
+  // is what actually gates httpResource — so an equal/held request never triggers a refetch).
+  const stableRequest = computed(
+    (): HttpResourceRequest | undefined => heldRequest(),
     {
       equal: (a, b) => {
+        if (a === b) return true;
+        if (a === undefined || b === undefined) return false;
         if (eq) return eq(a, b);
         return a === b;
       },
@@ -414,7 +491,13 @@ export function queryResource<TResult, TRaw = TResult>(
     },
   });
 
-  resource = refresh(resource, destroyRef, options?.refresh);
+  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll.
+  resource = refresh(
+    resource,
+    destroyRef,
+    options?.refresh,
+    () => disabledReason() !== null,
+  );
   resource = retryOnError(resource, options?.retry, options?.onError);
 
   resource = persistResourceValues<TResult>(
@@ -464,7 +547,7 @@ export function queryResource<TResult, TRaw = TResult>(
     ? options.injector.get(HttpClient)
     : inject(HttpClient);
 
-  return {
+  const ref: QueryResourceRef<TResult | undefined> = {
     ...resource,
     value,
     set,
@@ -531,4 +614,13 @@ export function queryResource<TResult, TRaw = TResult>(
       }
     },
   };
+
+  // Auto-register into the nearest transition scope if the (merged) options ask for it.
+  applyResourceRegistration(
+    ref as ResourceRef<unknown>,
+    options.register,
+    options?.injector,
+  );
+
+  return ref;
 }

@@ -10,11 +10,16 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { derived } from './derived';
-import { isWritableSignal } from './mappers/util';
-import { isMutable, mutable, type MutableSignal } from './mutable';
-import { toWritable } from './to-writable';
-import { createVivify, isIndexProp, type Vivify } from './util';
+import { derived } from '../derived';
+import { isMutable, mutable, type MutableSignal } from '../mutable';
+import { toWritable } from '../to-writable';
+import { createVivify, isIndexProp, type Vivify } from '../util';
+
+export function isWritableSignal<T>(
+  value: Signal<T>,
+): value is WritableSignal<T> {
+  return isSignal(value) && typeof (value as any).set === 'function';
+}
 
 /**
  * Runtime marker + compile-time brand for an opaque value. A `const`-declared `Symbol`
@@ -506,7 +511,7 @@ export type SignalStore<T> = Signal<UnwrapOpqaue<T>> &
     ? SignalStoreObject<T>
     : NonNullable<T> extends BaseType
       ? { readonly [LEAF]: () => boolean }
-      : NonNullable<T> extends Array<any>
+      : NonNullable<T> extends any[]
         ? SignalArrayStore<NonNullable<T>>
         : SignalStoreObject<T>);
 
@@ -516,7 +521,7 @@ export type WritableSignalStore<T> = WritableSignal<UnwrapOpqaue<T>> & {
     ? WritableSignalStoreObject<T>
     : NonNullable<T> extends BaseType
       ? { readonly [LEAF]: () => boolean }
-      : NonNullable<T> extends Array<any>
+      : NonNullable<T> extends any[]
         ? WritableArrayStore<NonNullable<T>>
         : WritableSignalStoreObject<T>);
 
@@ -526,7 +531,7 @@ export type MutableSignalStore<T> = MutableSignal<UnwrapOpqaue<T>> & {
     ? MutableSignalStoreObject<T>
     : NonNullable<T> extends BaseType
       ? { readonly [LEAF]: () => boolean }
-      : NonNullable<T> extends Array<any>
+      : NonNullable<T> extends any[]
         ? MutableArrayStore<NonNullable<T>>
         : MutableSignalStoreObject<T>);
 
@@ -739,7 +744,9 @@ function scopedStore(
     view,
     kind === 'readonly' ? () => undefined : splitSet,
     undefined,
-    { pure: false },
+    {
+      pure: false,
+    },
   ) as MutableSignal<AnyRecord>;
 
   if (kind === 'mutable') {

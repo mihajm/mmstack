@@ -4,8 +4,12 @@ import {
   DestroyRef,
   effect,
   inject,
+  InjectionToken,
+  type Injector,
   isDevMode,
   linkedSignal,
+  type Provider,
+  type ResourceRef,
   ResourceStatus,
   type Signal,
   signal,
@@ -13,6 +17,11 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { catchError, combineLatestWith, filter, map, of } from 'rxjs';
+import {
+  applyResourceRegistration,
+  injectResourceOptions,
+  provideTypedResourceOptions,
+} from './options';
 import {
   queryResource,
   type QueryResourceOptions,
@@ -118,6 +127,30 @@ export type MutationResourceOptions<
   equal?: ValueEqualityFn<TMutation>;
 };
 
+const MUTATION_RESOURCE_OPTIONS = new InjectionToken<
+  Partial<MutationResourceOptions<any, any, any, any, any, any>>
+>('@mmstack/resource:mutation-resource-options', { factory: () => ({}) });
+
+/**
+ * Layer 2 (mutation): default options for every `mutationResource`, inheriting + overriding the
+ * common defaults from `provideResourceOptions`. Per-call options override these in turn.
+ */
+export function provideMutationResourceOptions(
+  valueOrFn:
+    | Partial<MutationResourceOptions<any, any, any, any, any, any>>
+    | (() => Partial<MutationResourceOptions<any, any, any, any, any, any>>),
+): Provider {
+  return provideTypedResourceOptions(MUTATION_RESOURCE_OPTIONS, valueOrFn);
+}
+
+function injectMutationResourceOptions(
+  injector?: Injector,
+): Partial<MutationResourceOptions<any, any, any, any, any, any>> {
+  return injector
+    ? injector.get(MUTATION_RESOURCE_OPTIONS)
+    : inject(MUTATION_RESOURCE_OPTIONS);
+}
+
 /**
  * Represents a mutation resource created by `mutationResource`. Extends
  * `QueryResourceRef` but strips methods that don't make sense for one-off
@@ -220,17 +253,43 @@ export function mutationResource<
   request: (
     params: TMutation,
   ) => Omit<NextRequest<TMethod, TMutation>, 'body'> | undefined | void,
-  options: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
+  options0: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
 ): MutationResourceRef<TResult, TMutation, TICTX> {
-  const { onMutate, onError, onSuccess, onSettled, equal, ...rest } = options;
+  // Two-layer option injection: per-call > provideMutationResourceOptions > provideResourceOptions.
+  const options = {
+    ...injectResourceOptions(options0.injector),
+    ...injectMutationResourceOptions(options0.injector),
+    ...options0,
+  } as MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>;
 
-  const requestEqual = createEqualRequest(equal);
+  // `register` is pulled out (and forced off on the inner query below) so the mutation ref is
+  // the only thing registered into the transition scope, not its internal query resource.
+  const {
+    onMutate,
+    onError,
+    onSuccess,
+    onSettled,
+    equal,
+    register,
+    equalRequest,
+    ...rest
+  } = options;
+
+  const requestEqual = equalRequest ?? createEqualRequest(equal);
+
+  // A mutation is an imperative command, so `triggerOnSameRequest` means "fire on EVERY mutate(),
+  // even with an identical body". By default we dedup an identical value/request while one is in
+  // flight (double-click protection); when this is set, both the `next` and `req` dedup are bypassed
+  // so a repeat click isn't silently swallowed mid-flight. (Otherwise it'd be dropped until `next`
+  // resets to NULL on settle — the "every other click" symptom.)
+  const triggerOnSame = options.triggerOnSameRequest ?? false;
 
   const eq = equal ?? Object.is;
   const next = signal<TMutation | typeof NULL_VALUE>(NULL_VALUE, {
     equal: (a, b) => {
       if (a === NULL_VALUE && b === NULL_VALUE) return true;
       if (a === NULL_VALUE || b === NULL_VALUE) return false;
+      if (triggerOnSame) return false;
       return eq(a, b);
     },
   });
@@ -266,7 +325,12 @@ export function mutationResource<
       return request(nr) ?? undefined;
     },
     {
-      equal: requestEqual,
+      equal: (a, b) => {
+        if (a === undefined && b === undefined) return true;
+        if (a === undefined || b === undefined) return false;
+        if (triggerOnSame) return false;
+        return requestEqual(a, b);
+      },
     },
   );
 
@@ -289,7 +353,11 @@ export function mutationResource<
       return request(nr) ?? undefined;
     },
     {
-      equal: requestEqual,
+      equal: (a, b) => {
+        if (a === b) return true;
+        if (a === undefined || b === undefined) return false;
+        return requestEqual(a, b);
+      },
     },
   );
 
@@ -302,7 +370,9 @@ export function mutationResource<
 
   const resource = queryResource<TResult, TRaw>(req, {
     ...rest,
+    register: false, // the mutation ref handles registration; never register the inner query
     circuitBreaker: cb,
+    equalRequest: requestEqual,
     defaultValue: NULL_VALUE as unknown as TResult, // doesnt matter since .value is not accessible
   });
 
@@ -351,7 +421,7 @@ export function mutationResource<
 
   const shouldQueue = options.queue ?? false;
 
-  return {
+  const ref: MutationResourceRef<TResult, TMutation, TICTX> = {
     ...resource,
     destroy: () => {
       statusSub.unsubscribe();
@@ -383,4 +453,12 @@ export function mutationResource<
     // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
     disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
   };
+
+  applyResourceRegistration(
+    ref as unknown as ResourceRef<unknown>,
+    register,
+    options0.injector,
+  );
+
+  return ref;
 }

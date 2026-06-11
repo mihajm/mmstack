@@ -3,18 +3,24 @@ import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { interval } from 'rxjs';
 
-// refresh resource every n miliseconds or don't refresh if undefined provided. 0 also excluded, due to it not being a valid usecase
+// refresh resource every n miliseconds or don't refresh if undefined provided. 0 also excluded, due to it not being a valid usecase.
 export function refresh<T>(
   resource: HttpResourceRef<T>,
   destroyRef: DestroyRef,
   refresh?: number,
+  inactive?: () => boolean,
 ): HttpResourceRef<T> {
   if (!refresh) return resource; // no refresh requested
+
+  const tick = () => {
+    if (inactive?.()) return; // disabled / paused → skip the poll
+    resource.reload();
+  };
 
   // we can use RxJs here as reloading the resource will always be a side effect & as such does not impact the reactive graph in any way.
   let sub = interval(refresh)
     .pipe(takeUntilDestroyed(destroyRef))
-    .subscribe(() => resource.reload());
+    .subscribe(tick);
 
   const reload = (): boolean => {
     sub.unsubscribe(); // do not conflict with manual reload
@@ -24,7 +30,7 @@ export function refresh<T>(
     // resubscribe after manual reload
     sub = interval(refresh)
       .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => resource.reload());
+      .subscribe(tick);
 
     return hasReloaded;
   };

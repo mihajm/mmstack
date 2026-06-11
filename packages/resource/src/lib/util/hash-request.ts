@@ -1,8 +1,4 @@
-import {
-  HttpParams,
-  type HttpRequest,
-  type HttpResourceRequest,
-} from '@angular/common/http';
+import { HttpParams, type HttpRequest, type HttpResourceRequest } from '@angular/common/http';
 import { hash } from './hash-unknown';
 
 type HashableRequest = {
@@ -13,22 +9,15 @@ type HashableRequest = {
   body?: unknown;
 };
 
-function normalizeParams(
-  params: NonNullable<HashableRequest['params']>,
-): string {
-  const p =
-    params instanceof HttpParams
-      ? params
-      : new HttpParams({ fromObject: params });
+function normalizeParams(params: NonNullable<HashableRequest['params']>): string {
+  const p = params instanceof HttpParams ? params : new HttpParams({ fromObject: params });
 
   return p
     .keys()
     .toSorted()
     .map((key) => {
       const encodedKey = encodeURIComponent(key);
-      return (p.getAll(key) ?? [])
-        .map((v) => `${encodedKey}=${encodeURIComponent(v)}`)
-        .join('&');
+      return (p.getAll(key) ?? []).map((v) => `${encodedKey}=${encodeURIComponent(v)}`).join('&');
     })
     .join('&');
 }
@@ -44,20 +33,15 @@ function hashBody(body: unknown): string {
   }
 
   if (typeof FormData !== 'undefined' && body instanceof FormData) {
-    const entries: Array<[string, string]> = [];
+    const entries: [string, string][] = [];
     body.forEach((value, key) => {
       entries.push([key, hashBody(value)]);
     });
-    entries.sort(
-      ([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv),
-    );
+    entries.sort(([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv));
     return `FormData:${entries.map(([k, v]) => `${k}=${v}`).join('&')}`;
   }
 
-  if (
-    typeof URLSearchParams !== 'undefined' &&
-    body instanceof URLSearchParams
-  ) {
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
     const sp = new URLSearchParams(body);
     sp.sort();
     return `URLSearchParams:${sp.toString()}`;

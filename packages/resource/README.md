@@ -21,6 +21,9 @@ It's designed to be opt-in feature by feature: starting with `queryResource()` a
 - [`manualQueryResource`](#manualqueryresource)
 - [Caching](#caching)
 - [Circuit breakers](#circuit-breakers)
+- [Transitions & Suspense](#transitions--suspense)
+- [Pausing a resource](#pausing-a-resource)
+- [Default options (`provideResourceOptions`)](#default-options-provideresourceoptions)
 - [Composition (retry / refresh / keepPrevious)](#composition-retry--refresh--keepprevious)
 - [Recipes](#recipes)
 
@@ -177,12 +180,12 @@ queryResource(() => ({
 
 ```ts
 queryResource<TResult, TRaw = TResult>(
-  request: () => HttpResourceRequest | string | undefined,
+  request: (ctx: RequestContext) => HttpResourceRequest | string | undefined | typeof PAUSED,
   options?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult>
 ```
 
-`request` is a reactive function. Whenever it returns a new value, a new request is made; returning `undefined` disables the resource until the function returns something again.
+`request` is a reactive function. Whenever it returns a new value, a new request is made; returning `undefined` **disables** the resource until the function returns something again. It receives a `RequestContext` whose `paused` token it can return to **pause** instead — see [pausing a resource](#pausing-a-resource).
 
 ### Options
 
@@ -196,7 +199,9 @@ queryResource<TResult, TRaw = TResult>(
 | `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                     |
 | `cache`                | `ResourceCacheOptions`                                 | off                | Enables caching for this resource. See [caching](#caching).                                                    |
 | `triggerOnSameRequest` | `boolean`                                              | `false`            | Re-run even if the request object equals the previous one. Use sparingly.                                      |
+| `register`             | `boolean \| { suspends?: boolean }`                    | `false`            | Auto-register into the nearest transition scope. See [transitions & Suspense](#transitions--suspense).         |
 | `equal`                | `ValueEqualityFn<TResult>`                             | `Object.is`        | Custom equality for the result value (forwarded to `httpResource`).                                            |
+| `equalRequest`         | `(a, b) => boolean`                                    | structural         | Custom equality for the **request** object (controls dedup / refetch). Defaults to a deep structural compare.   |
 | `injector`             | `Injector`                                             | `inject(Injector)` | Use this injector for cache/circuit-breaker resolution. Required if calling outside an injection context.      |
 | `parse`                | `(raw: TRaw) => TResult`                               | identity           | Transform the raw HTTP response. Does not affect cache keys.                                                   |
 
@@ -269,6 +274,16 @@ mutationResource(request, { queue: true });
 ```
 
 Queued mutations sit in a signal-backed queue and execute one at a time. The queue **persists across resource-disabled states** — if the circuit breaker opens or the network drops, queued mutations stay pending and run when the resource recovers. This is intentional for resilience (think "POST goes out when we're back online"), but it does mean a queued mutation can fire long after the user triggered it. Don't enable `queue` if that's surprising in your UX.
+
+### Re-firing with an identical body (`triggerOnSameRequest`)
+
+A mutation is an imperative command, so by default an identical `mutate(body)` while one is in flight is **deduplicated** (double-click protection). When a repeat with the same body _must_ fire — e.g. a "resend" button — set `triggerOnSameRequest: true`, and every `mutate()` fires regardless of whether the body changed.
+
+```typescript
+mutationResource(request, { triggerOnSameRequest: true });
+```
+
+A mutation also honours the `register` option — but it registers the **mutation ref itself** into the transition scope (its internal query is never registered), so a `<mm-suspense>`/transition reacts to the mutation's own `pending` state. See [transitions & Suspense](#transitions--suspense).
 
 ### Return shape (`MutationResourceRef<T, TMutation>`)
 
@@ -409,6 +424,81 @@ authService.refreshToken().subscribe(() => {
 ```
 
 `hardReset()` is also useful for testing — it gives you a "back to factory state" handle without reconstructing the breaker.
+
+## Transitions & Suspense
+
+Resources plug into `@mmstack/primitives`' [transition scope](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) — the machinery behind Suspense boundaries and route transitions. Set `register` and the resource adds itself to the nearest scope (and removes itself on destroy), so a `<mm-suspense>` boundary or a `<mm-transition-outlet>` can coordinate its loading state:
+
+The boundary provides the scope, so the resource has to register from **inside** it — i.e. the data-owning component sits within the `<mm-suspense>` tags (registration resolves the scope up the injector tree). A query declared on the same component that _renders_ the boundary is above it and won't be captured.
+
+```typescript
+import { Component, input } from '@angular/core';
+import { SuspenseBoundary } from '@mmstack/primitives';
+import { queryResource } from '@mmstack/resource';
+
+@Component({ selector: 'user-profile', template: `{{ user.value()?.name }}` })
+class UserProfile {
+  readonly id = input.required<string>();
+  // `register: { suspends: true }` registers into the nearest scope (the
+  // <mm-suspense> above) and blocks its first paint until a value lands.
+  readonly user = queryResource<User>(() => `/api/users/${this.id()}`, {
+    register: { suspends: true },
+  });
+}
+
+@Component({
+  selector: 'user-page',
+  imports: [SuspenseBoundary, UserProfile],
+  template: `
+    <mm-suspense>
+      <span placeholder>Loading…</span>
+      <user-profile [id]="id()" />
+    </mm-suspense>
+  `,
+})
+class UserPage {
+  readonly id = input.required<string>();
+}
+```
+
+- `register: true` (or `{ suspends: false }`) — register for the **pending indicator + hold-stale**; does _not_ block first paint. The right choice for in-region data: the boundary shows the held value with `aria-busy`, not a placeholder.
+- `register: { suspends: true }` — register as **suspending**: the boundary holds its placeholder until this resource has a value (full Suspense).
+- `false` / omitted — don't register.
+
+Combine with `keepPrevious: true` so reloads hold the last value instead of flashing empty — then a `<mm-suspense>` shows the placeholder only on the genuine first load, and `startTransition` (from `@mmstack/primitives`) can reveal a multi-resource update in one frame. For navigation, `@mmstack/router-core`'s `<mm-transition-outlet>` keeps the current route on screen until the incoming route's registered resources settle.
+
+## Pausing a resource
+
+The request fn can return `ctx.paused` (the `PAUSED` token) to **pause** the resource: it holds its current value and last request, stops polling, and does **not** refetch on resume unless the request changed. This is distinct from returning `undefined` (which _disables_ — a disabled resource may refetch when re-enabled; a paused one resumes exactly where it left off). It pairs with keep-alive (`MmActivity` / `injectPaused`) so a hidden tab's queries go quiet without losing their data:
+
+```typescript
+import { injectPaused } from '@mmstack/primitives';
+
+class Panel {
+  private readonly paused = injectPaused(); // true while the tab is hidden by *mmActivity
+
+  readonly data = queryResource<Data>((ctx) =>
+    this.paused() ? ctx.paused : `/api/data/${this.id()}`,
+  );
+}
+```
+
+## Default options (`provideResourceOptions`)
+
+Common options (`register`, `retry`, `circuitBreaker`, `triggerOnSameRequest`) can be defaulted app-wide, with a three-layer precedence — **per-call > type-specific provider > common provider**:
+
+```typescript
+providers: [
+  // Layer 1 — applies to every resource kind.
+  provideResourceOptions({ retry: { max: 2 }, register: true }),
+  // Layer 2 — queries only (inherits + overrides layer 1).
+  provideQueryResourceOptions({ circuitBreaker: true }),
+  // Layer 2 — mutations only.
+  provideMutationResourceOptions({ register: false }),
+];
+```
+
+Each accepts a value or a factory (`() => options`). A per-call option always wins — including opting out of a provider default with `register: false` — so you can make "all queries participate in transitions" the default and turn it off for the odd one.
 
 ## Composition (retry / refresh / keepPrevious)
 

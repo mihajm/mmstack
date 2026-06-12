@@ -6,8 +6,13 @@ import { sensor } from '@mmstack/primitives';
 })
 export class ResourceSensors {
   readonly networkStatus = sensor('networkStatus');
+  readonly pageVisibility = sensor('pageVisibility');
 }
 
 export function injectNetworkStatus() {
   return inject(ResourceSensors).networkStatus;
+}
+
+export function injectPageVisibility() {
+  return inject(ResourceSensors).pageVisibility;
 }

@@ -9,9 +9,16 @@ import {
   type HttpInterceptorFn,
   type HttpRequest,
 } from '@angular/common/http';
-import { PLATFORM_ID, signal, type WritableSignal } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  PLATFORM_ID,
+  runInInjectionContext,
+  signal,
+  type WritableSignal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { until } from '@mmstack/primitives';
+import { providePaused, until } from '@mmstack/primitives';
 import { of, throwError } from 'rxjs';
 import { queryResource } from './query-resource';
 import {
@@ -62,9 +69,11 @@ const testInterceptor: HttpInterceptorFn = (req) => {
 
 describe('queryResource', () => {
   let networkStatusSignal: WritableSignal<boolean>;
+  let pageVisibilitySignal: WritableSignal<DocumentVisibilityState>;
 
   beforeEach(() => {
     networkStatusSignal = signal(true);
+    pageVisibilitySignal = signal<DocumentVisibilityState>('visible');
 
     TestBed.configureTestingModule({
       providers: [
@@ -75,7 +84,10 @@ describe('queryResource', () => {
         provideQueryCache(),
         {
           provide: ResourceSensors,
-          useValue: { networkStatus: networkStatusSignal },
+          useValue: {
+            networkStatus: networkStatusSignal,
+            pageVisibility: pageVisibilitySignal,
+          },
         },
         provideHttpClient(
           withNoXsrfProtection(),
@@ -641,5 +653,169 @@ describe('queryResource', () => {
       until(resB.value, (v) => v !== undefined),
     );
     expect(seen).toEqual({ data: 'mutated' });
+  });
+
+  describe('refresh triggers', () => {
+    async function settle() {
+      for (let i = 0; i < 4; i++) {
+        TestBed.tick();
+        await new Promise((r) => setTimeout(r));
+      }
+      TestBed.tick();
+    }
+
+    it('onFocus: refetches on the hidden → visible transition only', async () => {
+      let requests = 0;
+
+      const res = TestBed.runInInjectionContext(() =>
+        queryResource(
+          () => ({
+            url: 'https://example.com/focus',
+            context: createTestContext(() => {
+              requests++;
+            }, { ok: true }),
+          }),
+          { refresh: { onFocus: true } },
+        ),
+      );
+
+      await TestBed.runInInjectionContext(() =>
+        until(res.value, (v) => v !== undefined),
+      );
+      expect(requests).toBe(1);
+
+      pageVisibilitySignal.set('hidden');
+      await settle();
+      expect(requests).toBe(1); // hiding must not refetch
+
+      pageVisibilitySignal.set('visible');
+      await settle();
+      expect(requests).toBe(2); // regaining focus refetches
+    });
+
+    it('onReconnect: refetches when the browser comes back online', async () => {
+      let requests = 0;
+
+      const res = TestBed.runInInjectionContext(() =>
+        queryResource(
+          () => ({
+            url: 'https://example.com/reconnect',
+            context: createTestContext(() => {
+              requests++;
+            }, { ok: true }),
+          }),
+          { refresh: { onReconnect: true } },
+        ),
+      );
+
+      await TestBed.runInInjectionContext(() =>
+        until(res.value, (v) => v !== undefined),
+      );
+      expect(requests).toBe(1);
+
+      networkStatusSignal.set(false);
+      await settle();
+      expect(requests).toBe(1); // going offline must not refetch
+
+      networkStatusSignal.set(true);
+      await settle();
+      expect(requests).toBe(2); // back online refetches
+    });
+  });
+
+  describe('auto-pausing (pause option)', () => {
+    async function settle() {
+      for (let i = 0; i < 4; i++) {
+        TestBed.tick();
+        await new Promise((r) => setTimeout(r));
+      }
+      TestBed.tick();
+    }
+
+    it('pause: predicate holds the resource while paused, no refetch on resume', async () => {
+      let requests = 0;
+      const paused = signal(true);
+
+      const res = TestBed.runInInjectionContext(() =>
+        queryResource(
+          () => ({
+            url: 'https://example.com/paused',
+            context: createTestContext(() => {
+              requests++;
+            }, { ok: true }),
+          }),
+          { pause: paused },
+        ),
+      );
+
+      await settle();
+      expect(requests).toBe(0); // created paused → nothing fetched
+      expect(res.disabledReason()).toBe('no-request');
+
+      paused.set(false);
+      await settle();
+      expect(requests).toBe(1); // unpaused → fetched
+      expect(res.value()).toEqual({ ok: true });
+
+      paused.set(true);
+      await settle();
+      expect(res.value()).toEqual({ ok: true }); // value held while paused
+
+      paused.set(false);
+      await settle();
+      // resume with an UNCHANGED request → no refetch (PAUSED semantics)
+      expect(requests).toBe(1);
+    });
+
+    it('pause: true follows the ambient Activity boundary', async () => {
+      let requests = 0;
+      const boundaryPaused = signal(true);
+
+      const child = createEnvironmentInjector(
+        [providePaused(boundaryPaused)],
+        TestBed.inject(EnvironmentInjector),
+      );
+
+      const res = runInInjectionContext(child, () =>
+        queryResource(
+          () => ({
+            url: 'https://example.com/activity',
+            context: createTestContext(() => {
+              requests++;
+            }, { ok: true }),
+          }),
+          { pause: true },
+        ),
+      );
+
+      await settle();
+      expect(requests).toBe(0); // boundary paused → held
+
+      boundaryPaused.set(false);
+      await settle();
+      expect(requests).toBe(1); // boundary resumed → fetched
+      expect(res.value()).toEqual({ ok: true });
+    });
+
+    it('pause: true is a no-op outside an Activity boundary', async () => {
+      let requests = 0;
+
+      const res = TestBed.runInInjectionContext(() =>
+        queryResource(
+          () => ({
+            url: 'https://example.com/no-boundary',
+            context: createTestContext(() => {
+              requests++;
+            }, { ok: true }),
+          }),
+          { pause: true },
+        ),
+      );
+
+      await TestBed.runInInjectionContext(() =>
+        until(res.value, (v) => v !== undefined),
+      );
+      expect(requests).toBe(1); // fetches normally — no PAUSED_CONTEXT in scope
+    });
   });
 });

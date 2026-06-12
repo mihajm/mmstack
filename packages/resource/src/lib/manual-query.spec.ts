@@ -147,4 +147,40 @@ describe('manualQueryResource', () => {
 
     await expect(res.trigger()).rejects.toBeInstanceOf(HttpErrorResponse);
   });
+
+  it('a re-trigger resolves with the NEW value, never the previous settled one', async () => {
+    let payload = 'first';
+
+    const res = TestBed.runInInjectionContext(() =>
+      manualQueryResource(() => ({
+        url: 'https://example.com/data',
+        context: createTestContext(
+          () => {
+            /* noop */
+          },
+          // read at request time, so each trigger sees the current payload
+          { data: payload },
+        ),
+      })),
+    );
+
+    const first = await res.trigger();
+    expect(first).toEqual({ data: 'first' });
+
+    payload = 'second';
+
+    // regression: the per-call watcher could observe the PREVIOUS request's
+    // `resolved` status before the new load started, resolving with stale data
+    const second = await res.trigger();
+    expect(second).toEqual({ data: 'second' });
+  });
+
+  it('rejects when the request fn produces no request', async () => {
+    const res = TestBed.runInInjectionContext(() =>
+      manualQueryResource(() => undefined),
+    );
+
+    // a watcher would hang forever — there is no load to observe
+    await expect(res.trigger()).rejects.toThrow('produced no request');
+  });
 });

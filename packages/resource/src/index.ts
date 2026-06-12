@@ -1,3 +1,4 @@
+export * from './lib/infinite-query';
 export * from './lib/manual-query';
 export * from './lib/mutation-resource';
 export * from './lib/options';

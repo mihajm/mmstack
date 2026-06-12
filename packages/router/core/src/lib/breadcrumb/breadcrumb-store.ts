@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, type Signal } from '@angular/core';
-import { mapArray, mutable } from '@mmstack/primitives';
+import { indexArray, mutable } from '@mmstack/primitives';
 import { injectLeafRoutes, type ResolvedLeafRoute } from '../util/leaf.store';
 import {
   type Breadcrumb,
@@ -119,7 +119,7 @@ export class BreadcrumbStore {
   private readonly autoGenerateLabelFn = injectGenerateLabelFn();
   private readonly leafRoutes = injectLeafRoutes();
 
-  private readonly all = mapArray(
+  private readonly all = indexArray(
     this.leafRoutes,
     (leaf) => {
       const stableId = computed(() => leaf().path);

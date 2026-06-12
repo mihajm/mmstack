@@ -314,4 +314,76 @@ describe('hashRequest', () => {
       expect(u8).not.toBe(u16);
     });
   });
+
+  describe('varyHeaders', () => {
+    const token =
+      'Bearer eyJhbGciOiJIUzI1NiJ9.super-secret-token-value.signature';
+
+    it('partitions keys by header value', () => {
+      const a = hashRequest(
+        { url: '/api/me', headers: { Authorization: 'Bearer user-a' } },
+        ['Authorization'],
+      );
+      const b = hashRequest(
+        { url: '/api/me', headers: { Authorization: 'Bearer user-b' } },
+        ['Authorization'],
+      );
+      const same = hashRequest(
+        { url: '/api/me', headers: { Authorization: 'Bearer user-a' } },
+        ['Authorization'],
+      );
+
+      expect(a).not.toBe(b);
+      expect(a).toBe(same);
+    });
+
+    it('NEVER embeds the raw header value — keys get persisted/broadcast', () => {
+      const key = hashRequest({ url: '/api/me', headers: { Authorization: token } }, [
+        'Authorization',
+      ]);
+
+      expect(key).not.toContain(token);
+      expect(key).not.toContain('super-secret-token-value');
+      // the digest segment is hex, fixed width
+      expect(key).toMatch(/:vary\(authorization=[0-9a-f]{16}\)$/);
+    });
+
+    it('treats header names case-insensitively and sorts them', () => {
+      const a = hashRequest(
+        { url: '/x', headers: { authorization: 'v', 'Accept-Language': 'de' } },
+        ['Authorization', 'accept-language'],
+      );
+      const b = hashRequest(
+        { url: '/x', headers: { AUTHORIZATION: 'v', 'accept-language': 'de' } },
+        ['accept-language', 'AUTHORIZATION'],
+      );
+
+      expect(a).toBe(b);
+    });
+
+    it('embeds known-safe content-negotiation headers raw (readable keys)', () => {
+      const key = hashRequest(
+        { url: '/x', headers: { 'Accept-Language': 'de-DE' } },
+        ['Accept-Language'],
+      );
+
+      expect(key).toContain('accept-language=de-DE');
+    });
+
+    it('an absent header still partitions against a present one', () => {
+      const withHeader = hashRequest(
+        { url: '/x', headers: { 'X-Tenant': 'acme' } },
+        ['X-Tenant'],
+      );
+      const without = hashRequest({ url: '/x' }, ['X-Tenant']);
+
+      expect(withHeader).not.toBe(without);
+    });
+
+    it('no varyHeaders → key unchanged (back-compat)', () => {
+      expect(
+        hashRequest({ url: '/api/users', headers: { Authorization: token } }),
+      ).toBe('GET:/api/users:json');
+    });
+  });
 });

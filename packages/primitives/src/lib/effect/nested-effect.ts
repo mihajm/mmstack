@@ -59,7 +59,7 @@ import {
  * ]);
  *
  * // The fine-grained mapped list
- * const mappedUsers = mapArray(
+ * const mappedUsers = indexArray(
  *   users,
  *   (userSignal, index) => {
  *     // 1. Create a fine-grained SIDE EFFECT for *this item*
@@ -80,7 +80,7 @@ import {
  *     };
  *   },
  *   {
- *     // 3. Tell mapArray HOW to clean up when an item is removed, this needs to be manual as it's not a nestedEffect itself
+ *     // 3. Tell indexArray HOW to clean up when an item is removed, this needs to be manual as it's not a nestedEffect itself
  *     onDestroy: (mappedItem) => {
  *       mappedItem.destroyEffect();
  *     }

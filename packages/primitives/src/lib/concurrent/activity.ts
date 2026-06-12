@@ -82,7 +82,9 @@ export class MmActivity {
       );
     }
     for (const node of this.view.rootNodes) {
-      if (node instanceof HTMLElement)
+      // covers HTML and SVG roots; text/comment roots can't be styled — their CD is still
+      // detached, but prefer an element root for true visual hiding
+      if (node instanceof HTMLElement || node instanceof SVGElement)
         node.style.display = visible ? '' : 'none';
     }
     if (visible) this.view.reattach();

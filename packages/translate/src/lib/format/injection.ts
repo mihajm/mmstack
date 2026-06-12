@@ -9,13 +9,20 @@ import {
   injectFormatCurrency,
   injectFormatNumber,
   injectFormatPercent,
+  injectFormatUnit,
   provideFormatCurrencyDefaults,
   provideFormatNumberDefaults,
   provideFormatPercentDefaults,
+  provideFormatUnitDefaults,
 } from './numeric';
+import {
+  injectSelectPlural,
+  provideSelectPluralDefaults,
+} from './plural-rules';
 import type { inferProvideParameter } from './provide-defaults';
 import {
   injectFormatRelativeTime,
+  injectFormatRelativeTimeToNow,
   provideFormatRelativeTimeDefaults,
 } from './relative-time';
 
@@ -29,6 +36,8 @@ type FormatDefaults = {
   number?: inferProvideParameter<typeof provideFormatNumberDefaults>;
   percent?: inferProvideParameter<typeof provideFormatPercentDefaults>;
   currency?: inferProvideParameter<typeof provideFormatCurrencyDefaults>;
+  unit?: inferProvideParameter<typeof provideFormatUnitDefaults>;
+  plural?: inferProvideParameter<typeof provideSelectPluralDefaults>;
 };
 
 /**
@@ -47,7 +56,7 @@ type FormatDefaults = {
  *     ...provideFormatDefaults({
  *       number: { notation: 'compact' },
  *       currency: { display: 'code' },
- *       date: { dateStyle: 'medium' },
+ *       date: { format: 'medium' },
  *     }),
  *   ],
  * });
@@ -64,16 +73,18 @@ export function provideFormatDefaults(cfg: FormatDefaults): Provider[] {
   if (cfg.number) providers.push(provideFormatNumberDefaults(cfg.number));
   if (cfg.percent) providers.push(provideFormatPercentDefaults(cfg.percent));
   if (cfg.currency) providers.push(provideFormatCurrencyDefaults(cfg.currency));
+  if (cfg.unit) providers.push(provideFormatUnitDefaults(cfg.unit));
+  if (cfg.plural) providers.push(provideSelectPluralDefaults(cfg.plural));
 
   return providers;
 }
 
 /**
- * Aggregate injector that returns all seven formatter helpers in a single
- * object: `date`, `displayName`, `list`, `relativeTime`, `number`, `percent`,
- * `currency`. Each is the same function you'd get from the corresponding
- * `injectFormatX()` helper. Useful when a component or service needs several
- * formatters at once.
+ * Aggregate injector that returns all formatter helpers in a single object:
+ * `date`, `displayName`, `list`, `relativeTime`, `relativeTimeToNow`, `number`,
+ * `percent`, `currency`, `plural`. Each is the same function you'd get from the
+ * corresponding `injectFormatX()` helper. Useful when a component or service
+ * needs several formatters at once.
  *
  * @returns An object keyed by formatter name; each value is the matching format function.
  *
@@ -84,7 +95,10 @@ export function provideFormatDefaults(cfg: FormatDefaults): Provider[] {
  *   private readonly fmt = injectFormatters();
  *   readonly total = computed(() => this.fmt.number(this.count()));
  *   readonly revenue = computed(() => this.fmt.currency(this.sales(), 'USD'));
- *   readonly when = computed(() => this.fmt.relativeTime(this.deltaMs(), 'second'));
+ *   // value must already be in the named unit (5 → "in 5 seconds")
+ *   readonly eta = computed(() => this.fmt.relativeTime(this.deltaSeconds(), 'second'));
+ *   // or let the unit be picked automatically from a date/timestamp:
+ *   readonly age = computed(() => this.fmt.relativeTimeToNow(this.createdAt()));
  * }
  * ```
  */
@@ -94,8 +108,11 @@ export function injectFormatters() {
     displayName: injectFormatDisplayName(),
     list: injectFormatList(),
     relativeTime: injectFormatRelativeTime(),
+    relativeTimeToNow: injectFormatRelativeTimeToNow(),
     number: injectFormatNumber(),
     percent: injectFormatPercent(),
     currency: injectFormatCurrency(),
+    unit: injectFormatUnit(),
+    plural: injectSelectPlural(),
   };
 }

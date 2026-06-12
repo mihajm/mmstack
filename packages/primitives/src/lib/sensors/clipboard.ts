@@ -7,6 +7,11 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
 type InternalClipboardSignal = Signal<string> & {
   copy: (value: string) => Promise<void>;
@@ -34,7 +39,12 @@ export type ClipboardSignal = Signal<string> & {
  * in browsers that gate it. Errors from `navigator.clipboard.readText` are
  * swallowed silently to keep the signal value stable.
  */
-export function clipboard(debugName = 'clipboard'): ClipboardSignal {
+export function clipboard(opt?: string | SensorRunOptions): ClipboardSignal {
+  const { debugName = 'clipboard', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createClipboard(debugName));
+}
+
+function createClipboard(debugName: string): ClipboardSignal {
   if (
     isPlatformServer(inject(PLATFORM_ID)) ||
     typeof navigator === 'undefined' ||

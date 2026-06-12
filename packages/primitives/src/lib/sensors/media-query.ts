@@ -7,6 +7,11 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
 /**
  * Creates a read-only signal that reactively tracks whether a CSS media query
@@ -54,8 +59,13 @@ import {
  */
 export function mediaQuery(
   query: string,
-  debugName = 'mediaQuery',
+  opt?: string | SensorRunOptions,
 ): Signal<boolean> {
+  const { debugName = 'mediaQuery', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createMediaQuery(query, debugName));
+}
+
+function createMediaQuery(query: string, debugName: string): Signal<boolean> {
   if (
     isPlatformServer(inject(PLATFORM_ID)) ||
     typeof window === 'undefined' ||
@@ -101,8 +111,10 @@ export function mediaQuery(
  * });
  * ```
  */
-export function prefersDarkMode(debugName?: string): Signal<boolean> {
-  return mediaQuery('(prefers-color-scheme: dark)', debugName);
+export function prefersDarkMode(
+  opt?: string | SensorRunOptions,
+): Signal<boolean> {
+  return mediaQuery('(prefers-color-scheme: dark)', opt);
 }
 
 /**
@@ -130,6 +142,8 @@ export function prefersDarkMode(debugName?: string): Signal<boolean> {
  * });
  * ```
  */
-export function prefersReducedMotion(debugName?: string): Signal<boolean> {
-  return mediaQuery('(prefers-reduced-motion: reduce)', debugName);
+export function prefersReducedMotion(
+  opt?: string | SensorRunOptions,
+): Signal<boolean> {
+  return mediaQuery('(prefers-reduced-motion: reduce)', opt);
 }

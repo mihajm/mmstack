@@ -79,7 +79,6 @@ export function until<T>(
   predicate: (value: T) => boolean,
   options: UntilOptions = {},
 ): Promise<T> {
-  const injector = options.injector ?? inject(Injector);
   return new Promise<T>((resolve, reject) => {
     let effectRef: EffectRef | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -119,6 +118,16 @@ export function until<T>(
     const initialValue = untracked(sourceSignal);
     if (predicate(initialValue)) {
       cleanupAndResolve(initialValue);
+      return;
+    }
+
+    let injector: Injector;
+    try {
+      injector = options.injector ?? inject(Injector);
+    } catch {
+      cleanupAndReject(
+        'until: No injector available — provide options.injector when calling outside an injection context.',
+      );
       return;
     }
 

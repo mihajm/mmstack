@@ -22,14 +22,14 @@ type Expect<T extends true> = T;
 type _map_simple = Expect<
   Equals<
     inferTranslationParamMap<'ns', { key: 'Hello {name}' }>,
-    { 'ns.key': { name: string } }
+    { 'ns.key': { name: string | number } }
   >
 >;
 
 type _map_two_top_level = Expect<
   Equals<
     inferTranslationParamMap<'ns', { key: 'Hi {a} and {b}' }>,
-    { 'ns.key': { a: string; b: string } }
+    { 'ns.key': { a: string | number; b: string | number } }
   >
 >;
 
@@ -58,7 +58,7 @@ type _map_complex_then_trailing_simple = Expect<
       'ns',
       { key: '{c, plural, one {x} other {y}} for {z}' }
     >,
-    { 'ns.key': { c: number; z: string } }
+    { 'ns.key': { c: number; z: string | number } }
   >
 >;
 
@@ -229,7 +229,7 @@ type _withparams_sibling_unaffected = Expect<
         normal: 'Hi {n}';
       }
     >,
-    { 'ns.branded': { x: number }; 'ns.normal': { n: string } }
+    { 'ns.branded': { x: number }; 'ns.normal': { n: string | number } }
   >
 >;
 

@@ -7,6 +7,11 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
 export type BatteryStatus = {
   readonly level: number;
@@ -47,8 +52,13 @@ const EVENTS = [
  * ```
  */
 export function batteryStatus(
-  debugName = 'batteryStatus',
+  opt?: string | SensorRunOptions,
 ): Signal<BatteryStatus | null> {
+  const { debugName = 'batteryStatus', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createBatteryStatus(debugName));
+}
+
+function createBatteryStatus(debugName: string): Signal<BatteryStatus | null> {
   if (
     isPlatformServer(inject(PLATFORM_ID)) ||
     typeof navigator === 'undefined' ||
@@ -62,25 +72,31 @@ export function batteryStatus(
   const abortController = new AbortController();
   inject(DestroyRef).onDestroy(() => abortController.abort());
 
-  (navigator as any).getBattery().then((battery: BatteryManager) => {
-    if (abortController.signal.aborted) return;
+  (navigator as any)
+    .getBattery()
+    .then((battery: BatteryManager) => {
+      if (abortController.signal.aborted) return;
 
-    const read = (): BatteryStatus => ({
-      level: battery.level,
-      charging: battery.charging,
-      chargingTime: battery.chargingTime,
-      dischargingTime: battery.dischargingTime,
-    });
-
-    const onChange = () => state.set(read());
-
-    state.set(read());
-    for (const ev of EVENTS) {
-      battery.addEventListener(ev, onChange, {
-        signal: abortController.signal,
+      const read = (): BatteryStatus => ({
+        level: battery.level,
+        charging: battery.charging,
+        chargingTime: battery.chargingTime,
+        dischargingTime: battery.dischargingTime,
       });
-    }
-  });
+
+      const onChange = () => state.set(read());
+
+      state.set(read());
+      for (const ev of EVENTS) {
+        battery.addEventListener(ev, onChange, {
+          signal: abortController.signal,
+        });
+      }
+    })
+    .catch(() => {
+      // getBattery() rejects (NotAllowedError) when the `battery` permissions-policy is
+      // disallowed, e.g. in cross-origin iframes — stay `null`, same as unsupported.
+    });
 
   return state.asReadonly();
 }

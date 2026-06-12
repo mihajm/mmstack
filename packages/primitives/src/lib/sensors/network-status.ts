@@ -7,6 +7,11 @@ import {
   type Signal,
   signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
 /**
  * @internal used for setting the since signal
@@ -20,7 +25,10 @@ type InternalNetworkStatusSignal = Signal<boolean> & {
  * It's a boolean signal with an attached `since` signal.
  */
 export type NetworkStatusSignal = Signal<boolean> & {
-  /** A signal tracking the timestamp of the last status change. */
+  /**
+   * A signal tracking the timestamp of the last status change. Before any change has
+   * occurred it holds the sensor's creation time, not an actual transition.
+   */
   readonly since: Signal<Date>;
 };
 
@@ -33,7 +41,8 @@ const serverDate = new Date();
  * An additional `since` signal is attached, tracking when the status last changed.
  * It's SSR-safe and automatically cleans up its event listeners.
  *
- * @param debugName Optional debug name for the signal.
+ * @param opt Optional debug name for the signal, or a {@link SensorRunOptions} object
+ * (with an optional `injector` for creation outside an injection context).
  * @returns A `NetworkStatusSignal` instance.
  *
  * @example
@@ -45,8 +54,13 @@ const serverDate = new Date();
  * ```
  */
 export function networkStatus(
-  debugName = 'networkStatus',
+  opt?: string | SensorRunOptions,
 ): NetworkStatusSignal {
+  const { debugName = 'networkStatus', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createNetworkStatus(debugName));
+}
+
+function createNetworkStatus(debugName: string): NetworkStatusSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const sig = computed(() => true, {
       debugName,

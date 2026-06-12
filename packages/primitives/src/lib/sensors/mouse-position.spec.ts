@@ -1,3 +1,4 @@
+import { ElementRef, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { mousePosition } from './mouse-position';
 
@@ -45,6 +46,25 @@ describe('mousePosition', () => {
       vi.advanceTimersByTime(0);
 
       expect(pos()).toEqual({ x: 300, y: 400 });
+    });
+  });
+
+  it('should attach to a signal target once it resolves (viewChild pattern)', () => {
+    TestBed.runInInjectionContext(() => {
+      const el = document.createElement('div');
+      const target = signal<ElementRef<HTMLDivElement> | null>(null);
+      const pos = mousePosition({ target, throttle: 0 });
+
+      expect(pos()).toEqual({ x: 0, y: 0 });
+
+      target.set(new ElementRef(el));
+      TestBed.tick(); // run the attach effect
+
+      const mockEvent = new MouseEvent('mousemove', { clientX: 7, clientY: 9 });
+      el.dispatchEvent(mockEvent);
+      vi.advanceTimersByTime(0);
+
+      expect(pos()).toEqual({ x: 7, y: 9 });
     });
   });
 });

@@ -31,7 +31,7 @@ export type CreateChunkedOptions<T> = {
 /**
  * Creates a new `Signal` that processes an array of items in time-sliced chunks. This is useful for handling large lists without blocking the main thread.
  *
- * The returned signal will initially contain the first `chunkSize` items from the source array. It will then schedule updates to include additional chunks of items based on the specified `duration`.
+ * The returned signal will initially contain the first `chunkSize` items from the source array. It will then schedule updates to include additional chunks of items based on the specified `delay`.
  *
  * @template T The type of items in the array.
  * @param source A `Signal` or a function that returns an array of items to be processed in chunks.
@@ -40,7 +40,7 @@ export type CreateChunkedOptions<T> = {
  *
  * @example
  * const largeList = signal(Array.from({ length: 1000 }, (_, i) => i));
- * const chunkedList = chunked(largeList, { chunkSize: 100, duration: 100 });
+ * const chunkedList = chunked(largeList, { chunkSize: 100, delay: 100 });
  */
 export function chunked<T>(
   source: Signal<T[]> | (() => T[]),
@@ -51,10 +51,17 @@ export function chunked<T>(
   let delayFn: (callback: () => void) => () => void;
 
   if (delay === 'frame') {
-    delayFn = (callback) => {
-      const num = requestAnimationFrame(callback);
-      return () => cancelAnimationFrame(num);
-    };
+    delayFn =
+      typeof requestAnimationFrame === 'function'
+        ? (callback) => {
+            const num = requestAnimationFrame(callback);
+            return () => cancelAnimationFrame(num);
+          }
+        : // SSR: no requestAnimationFrame — approximate a frame with a timeout
+          (cb) => {
+            const num = setTimeout(cb, 16);
+            return () => clearTimeout(num);
+          };
   } else if (delay === 'microtask') {
     delayFn = (cb) => {
       let isCancelled = false;

@@ -19,6 +19,11 @@ export type TransitionRef = {
  *
  * Must be called in an injection context. This is the *async* generalization (Tier 2): it adds
  * no rendering cost and needs no fork — holding direct/sync readers is a separate, deferred tier.
+ *
+ * Caveat: work must go in flight by the first post-write render to be awaited. A loader that
+ * starts later (a debounced request signal, a chained/deferred resource) is not attributable to
+ * this transition — the no-async fallback will have already resolved `done`. Trigger such work
+ * eagerly inside `fn`, or coordinate it separately.
  */
 export function injectStartTransition(): (fn: () => void) => TransitionRef {
   const scope = injectTransitionScope();

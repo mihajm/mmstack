@@ -1,3 +1,4 @@
+import { ApplicationRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { stored } from './stored';
 
@@ -28,23 +29,25 @@ describe('stored', () => {
     });
   });
 
-  it('should store value on set via effect', () => {
-    TestBed.runInInjectionContext(() => {
+  it('should store value on set via effect', async () => {
+    TestBed.runInInjectionContext(async () => {
       const sig = stored('light', { key: 'theme', store: mockStore });
 
       sig.set('dark');
       TestBed.tick();
+      await TestBed.inject(ApplicationRef).whenStable();
 
       expect(mockStore.setItem).toHaveBeenCalledWith('theme', '"dark"');
     });
   });
 
-  it('should remove from store on clear', () => {
-    TestBed.runInInjectionContext(() => {
+  it('should remove from store on clear', async () => {
+    await TestBed.runInInjectionContext(async () => {
       const sig = stored('light', { key: 'theme', store: mockStore });
 
       sig.clear();
       TestBed.tick();
+      await TestBed.inject(ApplicationRef).whenStable();
 
       expect(mockStore.removeItem).toHaveBeenCalledWith('theme');
       expect(sig()).toBe('light'); // Reverts to fallback

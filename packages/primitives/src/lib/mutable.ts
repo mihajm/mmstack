@@ -107,8 +107,11 @@ export function mutable<T>(
 
   sig.mutate = (updater) => {
     cnt++;
-    internalUpdate(updater);
-    cnt--;
+    try {
+      internalUpdate(updater);
+    } finally {
+      cnt--;
+    }
   };
 
   sig.inline = (updater) => {
@@ -141,7 +144,7 @@ export function mutable<T>(
  *   myMutableSignal.mutate(x => x + 1); // This is safe.
  * }
  */
-export function isMutable<T = any>(
+export function isMutable<T = unknown>(
   value: WritableSignal<T>,
 ): value is MutableSignal<T> {
   return 'mutate' in value && typeof value.mutate === 'function';

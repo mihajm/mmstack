@@ -10,6 +10,7 @@ import {
   type Signal,
   untracked,
 } from '@angular/core';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 /**
  * Represents the size of an element.
@@ -22,10 +23,7 @@ export interface ElementSize {
 /**
  * Options for configuring the `elementSize` sensor.
  */
-export type ElementSizeOptions = ResizeObserverOptions & {
-  /** Optional debug name for the internal signal. */
-  debugName?: string;
-};
+export type ElementSizeOptions = ResizeObserverOptions & SensorRunOptions;
 
 function observerSupported() {
   return typeof ResizeObserver !== 'undefined';
@@ -52,10 +50,24 @@ export type ElementSizeSignal = Signal<ElementSize | undefined>;
  * ```
  */
 export function elementSize(
+  target?:
+    | ElementRef<Element>
+    | Element
+    | Signal<ElementRef<Element> | Element | null>,
+  opt?: ElementSizeOptions,
+): ElementSizeSignal {
+  return runInSensorContext(opt?.injector, () =>
+    // the host-element default must resolve INSIDE the sensor context, not as a
+    // parameter default (which would run before the injector wrapper)
+    createElementSize(target ?? inject(ElementRef), opt),
+  );
+}
+
+function createElementSize(
   target:
     | ElementRef<Element>
     | Element
-    | Signal<ElementRef<Element> | Element | null> = inject(ElementRef),
+    | Signal<ElementRef<Element> | Element | null>,
   opt?: ElementSizeOptions,
 ): ElementSizeSignal {
   const getElement = (): Element | null => {
@@ -71,8 +83,8 @@ export function elementSize(
   };
 
   const resolveInitialValue = (): ElementSize | undefined => {
-    if (!observerSupported()) return undefined;
-
+    // measuring needs only getBoundingClientRect — ResizeObserver support gates
+    // live updates, not the initial read
     const el = getElement();
     if (el && el.getBoundingClientRect) {
       const rect = el.getBoundingClientRect();

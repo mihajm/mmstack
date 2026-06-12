@@ -77,4 +77,43 @@ describe('with-history', () => {
     sig.redo(); // current 3
     expect(sig()).toBe(3);
   });
+
+  it('uses a user-provided equal function to gate history entries', () => {
+    const sig = withHistory(signal({ id: 1, label: 'a' }), {
+      equal: (a, b) => a.id === b.id,
+    });
+
+    // same id — considered equal, no history entry, no write
+    sig.set({ id: 1, label: 'b' });
+    expect(sig().label).toBe('a');
+    expect(sig.canUndo()).toBe(false);
+
+    // different id — recorded
+    sig.set({ id: 2, label: 'c' });
+    expect(sig().id).toBe(2);
+    expect(sig.history()).toEqual([{ id: 1, label: 'a' }]);
+  });
+
+  it('accepts the raw-value overload together with equal', () => {
+    // regression: this used to call getSignalEquality on the raw value and throw
+    const sig = withHistory(5, { equal: (a, b) => a === b });
+    sig.set(6);
+    expect(sig()).toBe(6);
+    expect(sig.history()).toEqual([5]);
+  });
+
+  it('undo/redo restore legitimately undefined entries', () => {
+    const sig = withHistory(signal<string | undefined>(undefined));
+
+    sig.set('a');
+    expect(sig.canUndo()).toBe(true);
+
+    sig.undo(); // restores undefined — must pop, not stall
+    expect(sig()).toBeUndefined();
+    expect(sig.canUndo()).toBe(false);
+    expect(sig.canRedo()).toBe(true);
+
+    sig.redo();
+    expect(sig()).toBe('a');
+  });
 });

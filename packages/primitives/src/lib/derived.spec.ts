@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { derived, isDerivation } from './derived';
 import { mutable } from './mutable';
 
@@ -82,6 +82,52 @@ describe('derived', () => {
 
     expect(items().length).toBe(3);
     expect(state().items.length).toBe(3);
+  });
+
+  it('mutate notifies downstream dependents for reference-stable values', () => {
+    const src = mutable({ user: { name: 'John' } });
+    const user = derived(src, 'user');
+    let computes = 0;
+    const name = computed(() => {
+      computes++;
+      return user().name;
+    });
+
+    expect(name()).toBe('John');
+    computes = 0;
+
+    // reference-stable in-place mutation: without the forced recompute inside
+    // the mutate window, `user`'s version never bumps and `name` stays stale
+    user.mutate((u) => {
+      u.name = 'Jane';
+      return u;
+    });
+
+    expect(name()).toBe('Jane');
+    expect(computes).toBe(1);
+  });
+
+  it('mutate restores normal equality even when the updater throws', () => {
+    const src = mutable({ a: { n: 1 } });
+    const a = derived(src, 'a');
+
+    expect(() =>
+      a.mutate(() => {
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+
+    // cnt must be back at 0: same-reference sets are equality-cut again
+    let computes = 0;
+    const reader = computed(() => {
+      computes++;
+      return a();
+    });
+    reader();
+    computes = 0;
+    a.set(a());
+    reader();
+    expect(computes).toBe(0);
   });
 });
 

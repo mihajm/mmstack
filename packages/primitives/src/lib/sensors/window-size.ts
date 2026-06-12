@@ -7,6 +7,7 @@ import {
   type Signal,
 } from '@angular/core';
 import { throttled } from '../throttled';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 /**
  * Represents the dimensions of the window.
@@ -19,13 +20,9 @@ export type WindowSize = {
 };
 
 /**
- * Options for configuring the `mousePosition` sensor.
+ * Options for configuring the `windowSize` sensor.
  */
-export type WindowSizeOptions = {
-  /**
-   * Optional debug name for the internal signal.
-   */
-  debugName?: string;
+export type WindowSizeOptions = SensorRunOptions & {
   /**
    * Optional delay in milliseconds to throttle the updates.
    * @default 100
@@ -92,6 +89,10 @@ export type WindowSizeSignal = Signal<WindowSize> & {
  * ```
  */
 export function windowSize(opt?: WindowSizeOptions): WindowSizeSignal {
+  return runInSensorContext(opt?.injector, () => createWindowSize(opt));
+}
+
+function createWindowSize(opt?: WindowSizeOptions): WindowSizeSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const base = computed(
       () => ({

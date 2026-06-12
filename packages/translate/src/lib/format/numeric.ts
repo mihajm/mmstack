@@ -1,9 +1,32 @@
 import { type Signal } from '@angular/core';
 import { readLocaleUnsafe } from '../translation-store';
 import { createFormatterProvider } from './provide-defaults';
-import { unwrap } from './unwrap';
+import { mergeDefined, unwrap } from './unwrap';
 
 type NumberNotation = 'standard' | 'scientific' | 'engineering' | 'compact';
+
+/** How to display the sign — mirrors `Intl.NumberFormatOptions['signDisplay']`. */
+export type NumberSignDisplay =
+  | 'auto'
+  | 'never'
+  | 'always'
+  | 'exceptZero'
+  | 'negative';
+
+/** Rounding behavior — mirrors the ES2023 `Intl.NumberFormatOptions['roundingMode']`. */
+export type NumberRoundingMode =
+  | 'ceil'
+  | 'floor'
+  | 'expand'
+  | 'trunc'
+  | 'halfCeil'
+  | 'halfFloor'
+  | 'halfExpand'
+  | 'halfTrunc'
+  | 'halfEven';
+
+/** How to display a unit — mirrors `Intl.NumberFormatOptions['unitDisplay']`. */
+export type NumberUnitDisplay = 'short' | 'narrow' | 'long';
 
 type SupportedNumberValue = number | null | undefined;
 
@@ -44,6 +67,16 @@ export type FormatNumberOptions = {
    */
   useGrouping?: boolean;
   /**
+   * How to display the sign (e.g. `'exceptZero'` renders "+5", "-5", "0").
+   * @default 'auto'
+   */
+  signDisplay?: NumberSignDisplay;
+  /**
+   * Rounding behavior when truncating fraction digits (ES2023 Intl).
+   * @default 'halfExpand'
+   */
+  roundingMode?: NumberRoundingMode;
+  /**
    * If the number is not a valid number, return formatted 0. By default formatter returns an empty string
    * @default false
    */
@@ -62,28 +95,41 @@ export type UnsafeFormatNumberOptions = Omit<FormatNumberOptions, 'locale'> & {
   locale?: string;
 };
 
+type NumericFormatterConfig = {
+  minFractionDigits?: number;
+  maxFractionDigits?: number;
+  useGrouping?: boolean;
+  notation?: NumberNotation;
+  currency?: string;
+  display?: CurrencyDisplay;
+  style?: 'currency' | 'percent' | 'unit';
+  signDisplay?: NumberSignDisplay;
+  roundingMode?: NumberRoundingMode;
+  unit?: string;
+  unitDisplay?: NumberUnitDisplay;
+};
+
 function getFormatter(
   locale: string,
-  minFractionDigits: number | undefined,
-  maxFractionDigits: number | undefined,
-  useGrouping?: boolean,
-  notation?: NumberNotation,
-  currency?: string,
-  display?: CurrencyDisplay,
-  style?: 'currency' | 'percent',
+  cfg: NumericFormatterConfig,
 ): Intl.NumberFormat {
-  const cacheKey = `${locale}|${notation ?? 'standard'}|${minFractionDigits}|${maxFractionDigits}|${useGrouping ?? true}|${currency ?? 'none'}|${display ?? 'none'}|${style ?? 'decimal'}`;
+  const cacheKey = `${locale}|${cfg.style ?? 'decimal'}|${cfg.notation ?? 'standard'}|${cfg.minFractionDigits}|${cfg.maxFractionDigits}|${cfg.useGrouping}|${cfg.currency ?? 'none'}|${cfg.display ?? 'none'}|${cfg.signDisplay ?? 'auto'}|${cfg.roundingMode ?? 'halfExpand'}|${cfg.unit ?? 'none'}|${cfg.unitDisplay ?? 'short'}`;
   let formatter = cache.get(cacheKey);
 
   if (!formatter) {
     formatter = new Intl.NumberFormat(locale, {
-      style,
-      notation,
-      minimumFractionDigits: minFractionDigits,
-      maximumFractionDigits: maxFractionDigits,
-      useGrouping,
-      currency,
-      currencyDisplay: display,
+      style: cfg.style,
+      notation: cfg.notation,
+      minimumFractionDigits: cfg.minFractionDigits,
+      maximumFractionDigits: cfg.maxFractionDigits,
+      useGrouping: cfg.useGrouping,
+      currency: cfg.currency,
+      currencyDisplay: cfg.display,
+      signDisplay: cfg.signDisplay,
+      unit: cfg.unit,
+      unitDisplay: cfg.unitDisplay,
+      // roundingMode is ES2023 — may be missing from older lib typings, runtime-safe
+      ...({ roundingMode: cfg.roundingMode } as Intl.NumberFormatOptions),
     });
     cache.set(cacheKey, formatter);
   }
@@ -139,6 +185,8 @@ export function formatNumber(
   let minFractionDigits: number | undefined;
   let maxFractionDigits: number | undefined;
   let useGrouping = true;
+  let signDisplay: NumberSignDisplay | undefined;
+  let roundingMode: NumberRoundingMode | undefined;
 
   if (typeof unwrappedArgs === 'string') {
     locale = unwrappedArgs;
@@ -148,18 +196,21 @@ export function formatNumber(
     minFractionDigits = unwrappedArgs.minFractionDigits;
     maxFractionDigits = unwrappedArgs.maxFractionDigits;
     useGrouping = unwrappedArgs.useGrouping ?? true;
+    signDisplay = unwrappedArgs.signDisplay;
+    roundingMode = unwrappedArgs.roundingMode;
   } else {
     locale = readLocaleUnsafe();
     notation = 'standard';
   }
 
-  return getFormatter(
-    locale,
+  return getFormatter(locale, {
     minFractionDigits,
     maxFractionDigits,
     useGrouping,
     notation,
-  ).format(unwrappedNumber);
+    signDisplay,
+    roundingMode,
+  }).format(unwrappedNumber);
 }
 
 const [provideFormatNumberDefaults, injectFormatNumberOptions] =
@@ -174,6 +225,8 @@ const [provideFormatNumberDefaults, injectFormatNumberOptions] =
       a.minFractionDigits === b.minFractionDigits &&
       a.maxFractionDigits === b.maxFractionDigits &&
       a.useGrouping === b.useGrouping &&
+      a.signDisplay === b.signDisplay &&
+      a.roundingMode === b.roundingMode &&
       a.fallbackToZero === b.fallbackToZero,
   );
 
@@ -207,7 +260,7 @@ export function injectFormatNumber() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,
@@ -308,16 +361,11 @@ export function formatPercent(
     locale = readLocaleUnsafe();
   }
 
-  return getFormatter(
-    locale,
+  return getFormatter(locale, {
     minFractionDigits,
     maxFractionDigits,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    'percent',
-  ).format(unwrappedNumber);
+    style: 'percent',
+  }).format(unwrappedNumber);
 }
 
 const [provideFormatPercentDefaults, injectFormatPercentOptions] =
@@ -363,7 +411,7 @@ export function injectFormatPercent() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,
@@ -384,6 +432,25 @@ export type FormatCurrencyOptions = {
    * @default 'symbol'
    */
   display?: CurrencyDisplay;
+  /**
+   * Minimum number of fraction digits to use (overrides the currency's default).
+   */
+  minFractionDigits?: number;
+  /**
+   * Maximum number of fraction digits to use (overrides the currency's default,
+   * e.g. `0` renders "$1,235" for whole-dollar displays).
+   */
+  maxFractionDigits?: number;
+  /**
+   * How to display the sign (e.g. `'exceptZero'` renders "+$5.00").
+   * @default 'auto'
+   */
+  signDisplay?: NumberSignDisplay;
+  /**
+   * Rounding behavior when truncating fraction digits (ES2023 Intl).
+   * @default 'halfExpand'
+   */
+  roundingMode?: NumberRoundingMode;
   /**
    * If the number is not a valid number, return formatted 0. By default formatter returns an empty string
    * @default false
@@ -455,26 +522,33 @@ export function formatCurrency(
 
   let locale: string;
   let display: CurrencyDisplay = 'symbol';
+  let minFractionDigits: number | undefined;
+  let maxFractionDigits: number | undefined;
+  let signDisplay: NumberSignDisplay | undefined;
+  let roundingMode: NumberRoundingMode | undefined;
 
   if (typeof unwrappedArgs === 'string') {
     locale = unwrappedArgs;
   } else if (isOpt) {
     locale = unwrappedArgs.locale ?? readLocaleUnsafe();
     display = unwrappedArgs.display ?? 'symbol';
+    minFractionDigits = unwrappedArgs.minFractionDigits;
+    maxFractionDigits = unwrappedArgs.maxFractionDigits;
+    signDisplay = unwrappedArgs.signDisplay;
+    roundingMode = unwrappedArgs.roundingMode;
   } else {
     locale = readLocaleUnsafe();
   }
 
-  return getFormatter(
-    locale,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    unwrap(currency),
+  return getFormatter(locale, {
+    minFractionDigits,
+    maxFractionDigits,
+    currency: unwrap(currency),
     display,
-    'currency',
-  ).format(unwrappedValue);
+    style: 'currency',
+    signDisplay,
+    roundingMode,
+  }).format(unwrappedValue);
 }
 
 const [provideFormatCurrencyDefaults, injectFormatCurrencyOptions] =
@@ -484,7 +558,12 @@ const [provideFormatCurrencyDefaults, injectFormatCurrencyOptions] =
       display: 'symbol',
     },
     (a, b) =>
-      a.display === b.display && a.fallbackToZero === b.fallbackToZero,
+      a.display === b.display &&
+      a.minFractionDigits === b.minFractionDigits &&
+      a.maxFractionDigits === b.maxFractionDigits &&
+      a.signDisplay === b.signDisplay &&
+      a.roundingMode === b.roundingMode &&
+      a.fallbackToZero === b.fallbackToZero,
   );
 
 /**
@@ -521,12 +600,157 @@ export function injectFormatCurrency() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,
           };
 
     return formatCurrency(value, currency, opt);
+  };
+}
+
+/**
+ * Options for formatting a measurement unit
+ */
+export type FormatUnitOptions = {
+  /**
+   * How the unit is rendered: `'short'` ("16 km/h"), `'narrow'` ("16km/h"),
+   * `'long'` ("16 kilometers per hour").
+   * @default 'short'
+   */
+  unitDisplay?: NumberUnitDisplay;
+  /**
+   * Minimum number of fraction digits to use
+   */
+  minFractionDigits?: number;
+  /**
+   * Maximum number of fraction digits to use
+   */
+  maxFractionDigits?: number;
+  /**
+   * Whether to use grouping
+   * @default true
+   */
+  useGrouping?: boolean;
+  /**
+   * How to display the sign.
+   * @default 'auto'
+   */
+  signDisplay?: NumberSignDisplay;
+  /**
+   * Rounding behavior when truncating fraction digits (ES2023 Intl).
+   * @default 'halfExpand'
+   */
+  roundingMode?: NumberRoundingMode;
+  /**
+   * If the number is not a valid number, return formatted 0. By default formatter returns an empty string
+   * @default false
+   */
+  fallbackToZero?: boolean;
+  /**
+   * Locale to use for formatting
+   */
+  locale: string;
+};
+
+/**
+ * Formats a number with a measurement unit via `Intl.NumberFormat`'s `unit` style.
+ * Accepts any [ECMA-402 sanctioned unit](https://tc39.es/ecma402/#table-sanctioned-single-unit-identifiers)
+ * or a `-per-` compound (e.g. `'kilometer-per-hour'`).
+ *
+ * @example
+ * formatUnit(16, 'kilometer-per-hour', 'en-US'); // "16 km/h"
+ * formatUnit(2.5, 'liter', { locale: 'de-DE', unitDisplay: 'long' }); // "2,5 Liter"
+ */
+export function formatUnit(
+  value: SupportedNumberValue | Signal<SupportedNumberValue>,
+  unit: string | Signal<string>,
+  optOrLocale:
+    | FormatUnitOptions
+    | Signal<FormatUnitOptions>
+    | string
+    | Signal<string>,
+): string {
+  const unwrappedArgs = unwrap(optOrLocale);
+  const isOpt = typeof unwrappedArgs === 'object';
+  const fallbackToZero = isOpt ? unwrappedArgs.fallbackToZero : undefined;
+  const unwrappedValue = unwrapValue(value, fallbackToZero);
+
+  if (unwrappedValue === null) return '';
+
+  const locale = isOpt ? unwrappedArgs.locale : unwrappedArgs;
+  const opt = isOpt ? unwrappedArgs : undefined;
+
+  return getFormatter(locale, {
+    minFractionDigits: opt?.minFractionDigits,
+    maxFractionDigits: opt?.maxFractionDigits,
+    useGrouping: opt?.useGrouping ?? true,
+    unit: unwrap(unit),
+    unitDisplay: opt?.unitDisplay ?? 'short',
+    style: 'unit',
+    signDisplay: opt?.signDisplay,
+    roundingMode: opt?.roundingMode,
+  }).format(unwrappedValue);
+}
+
+const [provideFormatUnitDefaults, injectFormatUnitOptions] =
+  createFormatterProvider<FormatUnitOptions>(
+    'unit',
+    {
+      unitDisplay: 'short',
+      useGrouping: true,
+    },
+    (a, b) =>
+      a.unitDisplay === b.unitDisplay &&
+      a.minFractionDigits === b.minFractionDigits &&
+      a.maxFractionDigits === b.maxFractionDigits &&
+      a.useGrouping === b.useGrouping &&
+      a.signDisplay === b.signDisplay &&
+      a.roundingMode === b.roundingMode &&
+      a.fallbackToZero === b.fallbackToZero,
+  );
+
+/**
+ * Provide application-wide defaults for unit formatting presets.
+ * @example provideFormatUnitDefaults({ unitDisplay: 'long' })
+ */
+export { provideFormatUnitDefaults };
+
+/**
+ * Inject a context-safe unit formatting function tied to the current injector.
+ * Uses the library's locale signal & provided default configuration to react to locale/config changes.
+ *
+ * @example
+ * ```ts
+ * const formatUnit = injectFormatUnit();
+ * readonly speedLabel = computed(() => formatUnit(this.speed(), 'kilometer-per-hour'));
+ * ```
+ */
+export function injectFormatUnit() {
+  const defaults = injectFormatUnitOptions();
+
+  return (
+    value: SupportedNumberValue | Signal<SupportedNumberValue>,
+    unit: string | Signal<string>,
+    optOrLocale?:
+      | Partial<FormatUnitOptions>
+      | Signal<Partial<FormatUnitOptions>>
+      | string
+      | Signal<string>,
+  ) => {
+    if (!optOrLocale) return formatUnit(value, unit, defaults());
+
+    const unwrapped = unwrap(optOrLocale);
+
+    const opt =
+      typeof unwrapped === 'object'
+        ? mergeDefined(defaults(), unwrapped)
+        : {
+            ...defaults(),
+            locale: unwrapped,
+          };
+
+    return formatUnit(value, unit, opt);
   };
 }

@@ -8,6 +8,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { type DebouncedSignal } from './debounced';
+import { getSignalEquality } from './get-signal-equality';
 import { toWritable } from './to-writable';
 
 /**
@@ -38,6 +39,8 @@ export type CreateThrottledOptions<T> = CreateSignalOptions<T> & {
   /**
    * If `true`, the throttled signal emits the latest pending value at the end
    * of each cooldown window (only when at least one write occurred during it).
+   * Note: with both `leading` and `trailing` set to `false` the throttled view
+   * never updates (writes still reach `.original`).
    * @default true
    */
   trailing?: boolean;
@@ -106,6 +109,7 @@ export function throttle<T>(
   source: WritableSignal<T>,
   opt?: CreateThrottledOptions<T>,
 ): ThrottledSignal<T> {
+  const eq = opt?.equal ?? getSignalEquality(source);
   const ms = opt?.ms ?? 0;
   const leading = opt?.leading ?? false;
   const trailing = opt?.trailing ?? true;
@@ -134,28 +138,29 @@ export function throttle<T>(
       if (leading) fire();
       else pendingTrailing = trailing;
 
-      timeout = setTimeout(() => {
+      const onWindowEnd = () => {
         timeout = undefined;
         if (trailing && pendingTrailing) {
           pendingTrailing = false;
           fire();
+          timeout = setTimeout(onWindowEnd, ms);
         }
-      }, ms);
+      };
+
+      timeout = setTimeout(onWindowEnd, ms);
       return;
     }
 
     if (trailing) pendingTrailing = true;
   };
 
-  const set = (value: T) => {
-    source.set(value);
+  const set = (next: T) => {
+    if (eq(untracked(source), next)) return;
+    source.set(next);
     tick();
   };
 
-  const update = (fn: (prev: T) => T) => {
-    source.update(fn);
-    tick();
-  };
+  const update = (fn: (prev: T) => T) => set(fn(untracked(source)));
 
   const writable = toWritable(
     computed(() => {
@@ -165,7 +170,7 @@ export function throttle<T>(
     set,
     update,
   ) as ThrottledSignal<T>;
-  writable.original = source;
+  writable.original = source.asReadonly();
 
   return writable;
 }

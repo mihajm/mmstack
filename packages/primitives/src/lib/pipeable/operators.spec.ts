@@ -12,7 +12,7 @@ import {
   startWith,
   tap,
 } from './operators';
-import { pipeable } from './pipeble';
+import { pipeable } from './pipeable';
 
 describe('operators', () => {
   describe('select', () => {
@@ -100,6 +100,26 @@ describe('operators', () => {
 
         source.set(4); // even — passes
         expect(evens()).toBe(4);
+      });
+    });
+
+    it('should keep the last passing value across consecutive failures', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(2);
+        const ps = pipeable(source);
+        const evens = ps.pipe(filter((n) => n % 2 === 0));
+
+        expect(evens()).toBe(2);
+
+        source.set(3); // odd — filtered out
+        expect(evens()).toBe(2); // computed here: prev.source becomes 3
+
+        source.set(5); // odd — filtered out again
+        // regression: returning prev.source here would resurrect 3
+        expect(evens()).toBe(2);
+
+        source.set(6);
+        expect(evens()).toBe(6);
       });
     });
 

@@ -64,20 +64,36 @@ export function resolvePause(opt?: PausableOptions): (() => boolean) | null {
   const run = <T>(fn: () => T): T =>
     opt?.injector ? runInInjectionContext(opt.injector, fn) : fn();
 
+  // `inject` requires an injection context even with `optional: true`. A bare
+  // `pausableSignal(0)` (documented as "like `signal`") must degrade to the unwrapped
+  // primitive outside DI, not throw NG0203 — so injection failures fall back gracefully.
+  const tryRun = <T>(fn: () => T, fallback: T): T => {
+    try {
+      return run(fn);
+    } catch {
+      return fallback;
+    }
+  };
+
   const onServer = (): boolean =>
     typeof pause === 'function' && !opt?.injector
       ? typeof globalThis.window === 'undefined'
-      : run(() =>
-          isPlatformServer(
-            inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-          ),
+      : tryRun(
+          () =>
+            isPlatformServer(
+              inject(PLATFORM_ID, { optional: true }) ?? 'browser',
+            ),
+          typeof globalThis.window === 'undefined',
         );
 
   if (typeof pause === 'function') return onServer() ? null : pause;
 
   if (onServer()) return null;
 
-  const paused = run(() => inject(PAUSED_CONTEXT, { optional: true }));
+  const paused = tryRun(
+    () => inject(PAUSED_CONTEXT, { optional: true }),
+    null,
+  );
   if (!paused) {
     if (explicit === true && isDevMode())
       console.warn(
@@ -112,8 +128,9 @@ export function pausableEffect(
 /**
  * Like `signal`, but pausable. While paused, READS hold the last value; writes still land on the
  * underlying signal and surface on resume. Built on the `keepPrevious`/`hold` shape — a
- * `linkedSignal` gated on the pause predicate, with `set`/`update`/`asReadonly` forwarded to the
- * source signal. With no `pause` option it defaults to the ambient `PAUSED_CONTEXT`; `pause: false`
+ * `linkedSignal` gated on the pause predicate, with `set`/`update` forwarded to the source signal.
+ * `asReadonly()` returns the held (gated) view, so both views of the signal agree while paused.
+ * With no `pause` option it defaults to the ambient `PAUSED_CONTEXT`; `pause: false`
  * makes it a plain `signal` — no `linkedSignal` is created.
  *
  * NOTE: while paused, `set(x)` followed by a read returns the *held* (pre-pause) value, not `x` — the
@@ -137,7 +154,8 @@ export function pausableSignal<T>(
 
   read.set = src.set;
   read.update = src.update;
-  read.asReadonly = src.asReadonly;
+  // NOTE: `asReadonly` deliberately stays the linkedSignal's own (the held view) — the
+  // source's readonly view would show live values while the signal itself shows held ones.
 
   return read;
 }

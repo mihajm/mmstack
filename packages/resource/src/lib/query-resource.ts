@@ -13,17 +13,22 @@ import {
   effect,
   inject,
   InjectionToken,
-  type Injector,
+  Injector,
   isDevMode,
   linkedSignal,
   type Provider,
   type ResourceRef,
   ResourceStatus,
+  runInInjectionContext,
   type Signal,
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { toWritable } from '@mmstack/primitives';
+import {
+  injectPaused,
+  type PauseOption,
+  toWritable,
+} from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
   applyResourceRegistration,
@@ -38,14 +43,18 @@ import {
   hashRequest,
   hasSlowConnection,
   injectNetworkStatus,
+  injectPageVisibility,
   injectQueryCache,
   persistResourceValues,
   refresh,
+  type RefreshOptions,
   retryOnError,
   setCacheContext,
   toResourceObject,
 } from './util';
 import { type CacheEntry } from './util/cache/cache';
+
+export { type RefreshOptions } from './util';
 
 /**
  * Options for configuring caching behavior of a `queryResource`.
@@ -90,6 +99,17 @@ type ResourceCacheOptions =
        * @default false - By default, the cache entry is not persisted.
        */
       persist?: boolean;
+      /**
+       * Request headers whose values should partition the cache key — e.g.
+       * `['Authorization']` gives each user their own entries, `['Accept-Language']`
+       * separates per-language responses. Header values are one-way digested into the
+       * key (never embedded raw), so secrets don't end up in persisted/broadcast keys.
+       * Ignored when a custom `hash` function is provided (it owns the key entirely).
+       *
+       * Note: still call `cache.clear()` on logout — the previous user's entries are
+       * unreachable under the new key but linger until their TTL.
+       */
+      varyHeaders?: string[];
     };
 
 /**
@@ -121,10 +141,19 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
      */
     keepPrevious?: boolean;
     /**
-     * The refresh interval, in milliseconds. If provided, the resource will automatically
-     * refresh its data at the specified interval.
+     * Automatic refresh behavior. A number polls every n milliseconds; the object form
+     * composes polling with event-driven triggers:
+     *
+     * ```ts
+     * refresh: 30_000                                  // poll every 30s
+     * refresh: { onFocus: true, onReconnect: true }    // refetch on tab refocus / back-online
+     * refresh: { interval: 60_000, onFocus: true }     // both
+     * ```
+     *
+     * Triggers respect the resource's disabled/paused state (no refetch while
+     * offline, circuit-open, or paused).
      */
-    refresh?: number;
+    refresh?: RefreshOptions;
     /**
      * Called on every failed attempt, including each retry.
      *
@@ -140,6 +169,20 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
      * Options for enabling and configuring caching for the resource.
      */
     cache?: ResourceCacheOptions;
+    /**
+     * Opt-in automatic pausing (off by default — existing behavior unchanged):
+     * - `true` — pause whenever the surrounding Activity boundary (`MmActivity` /
+     *   `providePaused` from `@mmstack/primitives`) is paused. Outside a boundary this
+     *   is a no-op, so it's safe to set app-wide via `provideQueryResourceOptions`.
+     * - a `() => boolean` predicate (a `Signal<boolean>` qualifies) — pause while it
+     *   returns `true`.
+     *
+     * Pausing has the same semantics as returning `ctx.paused` from the request fn:
+     * the resource HOLDS its current value and last request (no refetch on resume if
+     * the request is unchanged) and stops background work (polling, focus/reconnect
+     * triggers). The two compose — either source can pause the resource.
+     */
+    pause?: PauseOption;
     /**
      * Comparison of request object
      */
@@ -186,6 +229,9 @@ function injectQueryResourceOptions(
  *   }
  * });
  * ```
+ *
+ * Note: a PAUSED resource also reports `'no-request'` — it holds its previous value
+ * and request, but no request is currently active.
  */
 export type DisabledReason = 'offline' | 'circuit-open' | 'no-request';
 
@@ -251,7 +297,10 @@ export type QueryResourceRef<TResult> = Omit<
   disabledReason: Signal<DisabledReason | null>;
   /**
    * Prefetches data for the resource, populating the cache if caching is enabled.  This can be
-   * used to proactively load data before it's needed.  If a slow connection is detected, prefetching is skipped.
+   * used to proactively load data before it's needed.
+   *
+   * Resolves immediately without fetching when caching is disabled or a slow
+   * connection is detected (prefetching would compete with user-initiated requests).
    *
    * @param req - Optional partial request parameters to use for the prefetch.  This allows you
    *              to prefetch data with different parameters than the main resource request.
@@ -354,9 +403,21 @@ export function queryResource<TResult, TRaw = TResult>(
     ? undefined
     : (options?.equalRequest ?? createEqualRequest());
 
+  // Opt-in auto-pausing: `true` reads the ambient Activity boundary (no-op outside
+  // one), a predicate is used directly. Composes with the manual `ctx.paused` path.
+  const pauseOpt = options?.pause ?? false;
+  const externallyPaused: () => boolean =
+    pauseOpt === false
+      ? () => false
+      : typeof pauseOpt === 'function'
+        ? pauseOpt
+        : options?.injector
+          ? runInInjectionContext(options.injector, injectPaused)
+          : injectPaused();
+
   const requestCtx: RequestContext = { paused: PAUSED };
   const rawResult = computed(() => request(requestCtx));
-  const paused = computed(() => rawResult() === PAUSED);
+  const paused = computed(() => rawResult() === PAUSED || externallyPaused());
   const rawRequest = computed(() => {
     const r = rawResult();
     return r === PAUSED ? undefined : (r ?? undefined);
@@ -365,9 +426,12 @@ export function queryResource<TResult, TRaw = TResult>(
   const disabledReason = computed<DisabledReason | null>(() => {
     if (!networkAvailable()) return 'offline';
     if (cb.isOpen()) return 'circuit-open';
-    // PAUSED makes rawRequest undefined, so it reports 'no-request' here (and skips polling),
-    // while stableRequest below HOLDS the last request so the value is kept (no refetch on resume).
-    if (!rawRequest()) return 'no-request';
+    // Both pause sources report 'no-request' here — ctx.paused makes rawRequest
+    // undefined, while the external `pause` option still yields a real request, so it
+    // must be checked explicitly. Either way this also stops polling/refresh triggers
+    // (their inactive() guard reads disabledReason), while stableRequest below HOLDS
+    // the last request so the value is kept (no refetch on resume).
+    if (paused() || !rawRequest()) return 'no-request';
     return null;
   });
 
@@ -404,9 +468,13 @@ export function queryResource<TResult, TRaw = TResult>(
     },
   );
 
+  const varyHeaders =
+    typeof options?.cache === 'object' ? options.cache.varyHeaders : undefined;
+
   const hashFn =
     typeof options?.cache === 'object'
-      ? (options.cache.hash ?? hashRequest)
+      ? (options.cache.hash ??
+        ((r: HttpResourceRequest) => hashRequest(r, varyHeaders)))
       : hashRequest;
 
   const staleTime =
@@ -491,12 +559,18 @@ export function queryResource<TResult, TRaw = TResult>(
     },
   });
 
-  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll.
+  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll
+  // or react to focus/reconnect.
   resource = refresh(
     resource,
     destroyRef,
     options?.refresh,
     () => disabledReason() !== null,
+    {
+      injector: options?.injector ?? inject(Injector),
+      visibility: injectPageVisibility(),
+      online: networkAvailable,
+    },
   );
   resource = retryOnError(resource, options?.retry, options?.onError);
 
@@ -512,10 +586,10 @@ export function queryResource<TResult, TRaw = TResult>(
     if (options?.cache && k)
       cache.store(
         k,
+        // statusText omitted — deprecated in Angular (HttpResponse defaults it)
         new HttpResponse({
           body: value,
           status: 200,
-          statusText: 'OK',
         }),
         staleTime,
         ttl,
@@ -524,7 +598,9 @@ export function queryResource<TResult, TRaw = TResult>(
   };
 
   const update = (updater: (value: TResult) => TResult) => {
-    set(updater(untracked(resource.value)));
+    // baseline on the COMPOSED value (cache-preferring): the cache entry can be newer
+    // than resource.value (cross-tab sync, another instance's set)
+    set(updater(untracked(value)));
   };
 
   const value = options?.cache

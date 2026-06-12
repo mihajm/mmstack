@@ -13,6 +13,7 @@ import {
   ResourceStatus,
   type Signal,
   signal,
+  untracked,
   type ValueEqualityFn,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
@@ -27,7 +28,11 @@ import {
   type QueryResourceOptions,
   type QueryResourceRef,
 } from './query-resource';
-import { createCircuitBreaker, createEqualRequest } from './util';
+import {
+  createCircuitBreaker,
+  createEqualRequest,
+  injectQueryCache,
+} from './util';
 
 const NULL_VALUE = Symbol('@mmstack/resource:null');
 
@@ -93,7 +98,7 @@ export type MutationResourceOptions<
   TError = unknown,
 > = Omit<
   QueryResourceOptions<TResult, TRaw>,
-  'equal' | 'onError' | 'keepPrevious' | 'refresh' | 'cache' // we can't keep previous values, refresh or cache mutations as they are meant to be one-off operations
+  'equal' | 'onError' | 'keepPrevious' | 'refresh' | 'cache' | 'pause' // we can't keep previous values, refresh, cache or auto-pause mutations as they are meant to be one-off commands
 > & {
   /**
    * A callback function that is called before the mutation request is made.
@@ -124,6 +129,27 @@ export type MutationResourceOptions<
    * @default false
    */
   queue?: boolean;
+  /**
+   * Cache entries to invalidate after a SUCCESSFUL mutation — the declarative
+   * alternative to calling `injectQueryCache().invalidatePrefix(...)` in `onSuccess`.
+   *
+   * Each string is a URL prefix matched against auto-generated `GET` cache keys
+   * (`GET:${url}:...`): `'/api/posts'` invalidates `/api/posts` with any query params,
+   * plus subpaths like `/api/posts/123` — and all `varyHeaders` variants of each.
+   * Note that plain prefix matching also catches sibling paths sharing the prefix
+   * (`/api/posts-archive`); pass `'/api/posts/'` or the exact URL to narrow.
+   *
+   * Entries keyed by a custom `hash` function follow that function's shape, not the
+   * auto-key shape — invalidate those manually via `injectQueryCache().invalidateWhere`.
+   *
+   * The function form receives the mutation result and the mutated value:
+   * ```ts
+   * invalidates: (saved) => [`/api/posts`, `/api/users/${saved.authorId}`]
+   * ```
+   */
+  invalidates?:
+    | string[]
+    | ((value: NoInfer<TResult>, mutation: NoInfer<TMutation>) => string[]);
   equal?: ValueEqualityFn<TMutation>;
 };
 
@@ -272,8 +298,11 @@ export function mutationResource<
     equal,
     register,
     equalRequest,
+    invalidates,
     ...rest
   } = options;
+
+  const cache = invalidates ? injectQueryCache(options.injector) : undefined;
 
   const requestEqual = equalRequest ?? createEqualRequest(equal);
 
@@ -412,7 +441,25 @@ export function mutationResource<
     )
     .subscribe((result) => {
       if (result.status === 'error') onError?.(result.error, ctx);
-      else onSuccess?.(result.value, ctx);
+      else {
+        onSuccess?.(result.value, ctx);
+
+        if (cache && invalidates) {
+          const mutation = untracked(lastValue);
+          const prefixes =
+            typeof invalidates === 'function'
+              ? invalidates(
+                  result.value,
+                  (mutation === NULL_VALUE ? undefined : mutation) as TMutation,
+                )
+              : invalidates;
+
+          // auto-keys are `${method}:${url}:...` — a `GET:`-prefixed url prefix hits
+          // the url with any params/subpaths and every varyHeaders variant
+          for (const prefix of prefixes)
+            cache.invalidatePrefix(`GET:${prefix}`);
+        }
+      }
 
       onSettled?.(ctx);
       ctx = undefined as TCTX;
@@ -424,14 +471,35 @@ export function mutationResource<
   const ref: MutationResourceRef<TResult, TMutation, TICTX> = {
     ...resource,
     destroy: () => {
+      // queue first — a late queue flush must not poke an already-destroyed resource
+      queueRef.destroy();
       statusSub.unsubscribe();
       resource.destroy();
-      queueRef.destroy();
     },
     mutate: (value, ictx) => {
       if (shouldQueue) {
         return queue.update((q) => [...q, [value, ictx]]);
       } else {
+        // latest-wins: a mutation already in flight gets superseded (its request is
+        // aborted by the request change), so its onSuccess/onError will never fire —
+        // settle its context NOW so optimistic state can be rolled back/cleaned up
+        if (untracked(next) !== NULL_VALUE) {
+          if (isDevMode())
+            console.warn(
+              '[@mmstack/resource]: mutate() called while another mutation was in flight — the previous mutation was superseded (latest-wins) and its onSettled was invoked. Use `queue: true` for sequential mutations.',
+            );
+          try {
+            onSettled?.(ctx);
+          } catch (settleErr) {
+            if (isDevMode())
+              console.error(
+                '[@mmstack/resource]: error thrown in onSettled hook for a superseded mutation',
+                settleErr,
+              );
+          }
+          ctx = undefined as TCTX;
+        }
+
         try {
           ctx = onMutate?.(value, ictx) as TCTX;
           next.set(value);

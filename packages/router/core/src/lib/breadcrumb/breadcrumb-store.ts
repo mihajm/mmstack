@@ -1,11 +1,11 @@
-import { computed, inject, Injectable, Signal } from '@angular/core';
-import { mapArray, mutable } from '@mmstack/primitives';
-import { injectLeafRoutes, ResolvedLeafRoute } from '../util/leaf.store';
+import { computed, inject, Injectable, type Signal } from '@angular/core';
+import { indexArray, mutable } from '@mmstack/primitives';
+import { injectLeafRoutes, type ResolvedLeafRoute } from '../util/leaf.store';
 import {
-  Breadcrumb,
+  type Breadcrumb,
   createInternalBreadcrumb,
   getBreadcrumbInternals,
-  InternalBreadcrumb,
+  type InternalBreadcrumb,
   isInternalBreadcrumb,
 } from './breadcrumb';
 import { injectBreadcrumbConfig } from './breadcrumb-config';
@@ -118,7 +118,7 @@ export class BreadcrumbStore {
   private readonly autoGenerateLabelFn = injectGenerateLabelFn();
   private readonly leafRoutes = injectLeafRoutes();
 
-  private readonly all = mapArray(
+  private readonly all = indexArray(
     this.leafRoutes,
     (leaf) => {
       const stableId = computed(() => leaf().path);

@@ -1,11 +1,14 @@
 import { HttpHeaders, HttpResponse } from '@angular/common/http';
 import {
   computed,
+  DestroyRef,
   inject,
   InjectionToken,
   Injector,
   isDevMode,
+  PLATFORM_ID,
   type Provider,
+  signal,
   type Signal,
   untracked,
 } from '@angular/core';
@@ -96,10 +99,21 @@ export type CacheEntry<T> = {
   updated: number;
   stale: number;
   useCount: number;
+  /** Timestamp of the last read/write — drives LRU eviction. */
+  lastAccessed: number;
   expiresAt: number;
-  timeout: ReturnType<typeof setTimeout>;
+  /** Absent for non-finite/over-int32 TTLs — those rely on lazy expiry instead. */
+  timeout?: ReturnType<typeof setTimeout>;
   key: string;
 };
+
+/**
+ * setTimeout coerces its delay through a signed 32-bit conversion: `Infinity` becomes 0
+ * (immediate!) and anything above 2^31-1 ms (~24.8 days) wraps negative. Entries beyond
+ * this bound get NO timer and rely on lazy expiry (`expiresAt <= now` checks) plus the
+ * periodic sweep instead.
+ */
+const MAX_TIMER_DELAY = 2 ** 31 - 1;
 
 /**
  * Defines the types of cleanup strategies available for the cache.
@@ -126,10 +140,31 @@ export class Cache<T> {
   private readonly internal = mutable(new Map<string, CacheEntry<T>>());
   private readonly cleanupOpt: CleanupType;
   private readonly id = generateID();
+  /** True once async hydration from the persistence layer has completed (or was empty). */
+  private hydrated = false;
+  /** Keys invalidated while hydration was still in flight — must not be resurrected by it. */
+  private readonly hydrationTombstones = new Set<string>();
+
+  private readonly hitCount = signal(0);
+  private readonly missCount = signal(0);
 
   /**
-   * Destroys the cache instance, cleaning up any resources used by the cache.
-   * This method is called automatically when the cache instance is garbage collected.
+   * Read-only cache statistics for debugging/observability — entry count plus
+   * request-level hit/miss counters (counted on direct lookups, e.g. the cache
+   * interceptor's, not on every reactive signal read). Render it in a debug
+   * panel; it intentionally exposes no way to mutate the cache.
+   */
+  readonly stats: Signal<{ size: number; hits: number; misses: number }> =
+    computed(() => ({
+      size: this.internal().size,
+      hits: this.hitCount(),
+      misses: this.missCount(),
+    }));
+
+  /**
+   * Destroys the cache instance, clearing the cleanup interval and closing the
+   * cross-tab channel. Called automatically when the providing injector is destroyed
+   * (wired up by `provideQueryCache`); call it manually for caches you construct yourself.
    */
   readonly destroy: () => void;
 
@@ -151,11 +186,7 @@ export class Cache<T> {
   constructor(
     protected readonly ttl: number = ONE_DAY,
     protected readonly staleTime: number = ONE_HOUR,
-    cleanupOpt: Partial<CleanupType> = {
-      type: 'lru',
-      maxSize: 1000,
-      checkInterval: ONE_HOUR,
-    },
+    cleanupOpt: Partial<CleanupType> = DEFAULT_CLEANUP_OPT,
     syncTabs?: {
       id: string;
       serialize: (value: T) => string;
@@ -174,10 +205,12 @@ export class Cache<T> {
     if (this.cleanupOpt.maxSize <= 0)
       throw new Error('maxSize must be greater than 0');
 
-    // cleanup cache based on provided options regularly
-    const cleanupInterval = setInterval(() => {
-      this.cleanup();
-    }, cleanupOpt.checkInterval);
+    // a non-finite checkInterval disables the sweeper entirely (used by the shared NoopCache)
+    const cleanupInterval = Number.isFinite(this.cleanupOpt.checkInterval)
+      ? setInterval(() => {
+          this.cleanup();
+        }, this.cleanupOpt.checkInterval)
+      : undefined;
 
     let destroySyncTabs = () => {
       // noop
@@ -214,20 +247,11 @@ export class Cache<T> {
           const value = syncTabs.deserialize(msg.entry.value);
           if (value === null) return;
 
-          // Last-write-wins by `updated` timestamp. If our local entry was
-          // written more recently than the broadcast we just received, the
-          // broadcast is stale (in-flight when we wrote locally) — drop it.
+          // Last-write-wins by `updated` timestamp.
           const existing = untracked(this.internal).get(msg.entry.key);
           if (existing && existing.updated >= msg.entry.updated) return;
 
-          this.storeInternal(
-            msg.entry.key,
-            value,
-            msg.entry.stale - msg.entry.updated,
-            msg.entry.expiresAt - msg.entry.updated,
-            true,
-            false,
-          );
+          this.restoreInternal({ ...msg.entry, value });
         } else if (msg.action === 'invalidate') {
           this.invalidateInternal(msg.entry.key, true);
         }
@@ -242,7 +266,7 @@ export class Cache<T> {
     const destroy = () => {
       if (destroyed) return;
       destroyed = true;
-      clearInterval(cleanupInterval);
+      if (cleanupInterval !== undefined) clearInterval(cleanupInterval);
       destroySyncTabs();
     };
 
@@ -253,31 +277,18 @@ export class Cache<T> {
       })
       .then((entries) => {
         if (destroyed) return;
-        // load entries into the cache
-
         const current = untracked(this.internal);
         entries.forEach((entry) => {
           if (current.has(entry.key)) return;
-          this.storeInternal(
-            entry.key,
-            entry.value,
-            entry.stale - entry.updated,
-            entry.expiresAt - entry.updated,
-            true, // like from sync because we dont want to trigger sync or db writes
-          );
+          // a key invalidated while hydration was in flight must stay dead
+          if (this.hydrationTombstones.has(entry.key)) return;
+          this.restoreInternal(entry);
         });
+        this.hydrated = true;
+        this.hydrationTombstones.clear();
       });
 
     this.destroy = destroy;
-
-    // cleanup if object is garbage collected, this is because the cache can be quite large from a memory standpoint & we dont want all that floating garbage
-    const registry = new FinalizationRegistry((id: string) => {
-      if (id === this.id) {
-        destroy();
-      }
-    });
-
-    registry.register(this, this.id);
   }
 
   /** @internal */
@@ -286,31 +297,59 @@ export class Cache<T> {
   ): Signal<(CacheEntry<T> & { isStale: boolean }) | null> {
     const keySignal = computed(() => key());
 
-    return computed(() => {
-      const key = keySignal();
-      if (!key) return null;
-      const found = this.internal().get(key);
+    return computed(
+      () => {
+        const key = keySignal();
+        if (!key) return null;
+        const found = this.internal().get(key);
 
-      const now = Date.now();
+        const now = Date.now();
 
-      if (!found || found.expiresAt <= now) return null;
-      found.useCount++;
-      return {
-        ...found,
-        isStale: found.stale <= now,
-      };
-    });
+        if (!found || found.expiresAt <= now) return null;
+        return {
+          ...found,
+          isStale: found.stale <= now,
+        };
+      },
+      {
+        equal: (a, b) =>
+          a === b ||
+          (!!a &&
+            !!b &&
+            a.key === b.key &&
+            a.value === b.value &&
+            a.updated === b.updated &&
+            a.isStale === b.isStale),
+      },
+    );
+  }
+
+  /** @internal Imperative access bookkeeping for LRU eviction. */
+  private touch(entry: CacheEntry<T>) {
+    entry.lastAccessed = Date.now();
+    entry.useCount++;
   }
 
   /**
-   * Retrieves a cache entry without affecting its usage count (for LRU).  This is primarily
-   * for internal use or debugging.
+   * Retrieves a cache entry directly (non-reactively), updating its access bookkeeping
+   * for LRU eviction.
    * @internal
    * @param key - The key of the entry to retrieve.
    * @returns The cache entry, or `null` if not found or expired.
    */
   getUntracked(key: string): (CacheEntry<T> & { isStale: boolean }) | null {
-    return untracked(this.getInternal(() => key));
+    const found = untracked(this.internal).get(key);
+    const now = Date.now();
+    if (!found || found.expiresAt <= now) {
+      this.missCount.update((c) => c + 1);
+      return null;
+    }
+    this.touch(found);
+    this.hitCount.update((c) => c + 1);
+    return {
+      ...found,
+      isStale: found.stale <= now,
+    };
   }
 
   /**
@@ -343,10 +382,15 @@ export class Cache<T> {
   /**
    * Stores a value in the cache.
    *
+   * NOTE: cached values are shared by reference across all consumers (current and
+   * future cache hits, persistence, cross-tab sync) — do not mutate a value after
+   * storing it or after reading it from the cache.
+   *
    * @param key - The key under which to store the value.
    * @param value - The value to store.
    * @param staleTime - (Optional) The stale time for this entry, in milliseconds. Overrides the default `staleTime`.
    * @param ttl - (Optional) The TTL for this entry, in milliseconds. Overrides the default `ttl`.
+   * @param persist - (Optional) Whether to also write the entry to the persistence layer (IndexedDB). Defaults to `false`.
    */
   store(
     key: string,
@@ -366,33 +410,72 @@ export class Cache<T> {
     fromSync = false,
     persist = false,
   ) {
-    const entry = this.getUntracked(key);
-    if (entry) {
-      clearTimeout(entry.timeout); // stop invalidation
-    }
-
-    const prevCount = entry?.useCount ?? 0;
+    const entry = untracked(this.internal).get(key);
 
     // ttl cannot be less than staleTime
     if (ttl < staleTime) staleTime = ttl;
 
     const now = Date.now();
 
-    const next: Omit<CacheEntry<T>, 'timeout'> = {
-      value,
-      created: entry?.created ?? now,
-      updated: now,
-      useCount: prevCount + 1,
-      stale: now + staleTime,
-      expiresAt: now + ttl,
-      key,
-    };
+    this.setEntry(
+      {
+        value,
+        created: entry?.created ?? now,
+        updated: now,
+        useCount: (entry?.useCount ?? 0) + 1,
+        lastAccessed: now,
+        stale: now + staleTime,
+        expiresAt: now + ttl,
+        key,
+      },
+      fromSync,
+      persist,
+    );
+  }
+
+  /**
+   * @internal
+   * Inserts an entry that already carries ABSOLUTE timestamps — hydration from the
+   * persistence layer and cross-tab sync messages. Never re-anchors freshness to
+   * `Date.now()`, never persists, never broadcasts.
+   */
+  private restoreInternal(
+    entry: Omit<CacheEntry<T>, 'timeout' | 'lastAccessed'> &
+      Partial<Pick<CacheEntry<T>, 'lastAccessed'>>,
+  ) {
+    this.setEntry(
+      {
+        ...entry,
+        // rows persisted by older versions may lack the field
+        lastAccessed: entry.lastAccessed ?? entry.updated,
+      },
+      true,
+      false,
+    );
+  }
+
+  /** @internal Shared writer: arms the expiry timer only within the safe delay range. */
+  private setEntry(
+    next: Omit<CacheEntry<T>, 'timeout'>,
+    fromSync: boolean,
+    persist: boolean,
+  ) {
+    const existing = untracked(this.internal).get(next.key);
+    if (existing) clearTimeout(existing.timeout); // stop the previous invalidation
+
+    const remaining = next.expiresAt - Date.now();
+    // already expired (clock skew on a synced/restored entry) — don't insert
+    if (remaining <= 0) return;
+
+    // Infinity (immutable) or > 2^31-1 would coerce to an IMMEDIATE timeout — such
+    // entries get no timer and rely on lazy expiry + the periodic sweep instead
+    const timeout =
+      Number.isFinite(remaining) && remaining <= MAX_TIMER_DELAY
+        ? setTimeout(() => this.invalidate(next.key), remaining)
+        : undefined;
 
     this.internal.mutate((map) => {
-      map.set(key, {
-        ...next,
-        timeout: setTimeout(() => this.invalidate(key), ttl),
-      });
+      map.set(next.key, { ...next, timeout });
       return map;
     });
 
@@ -442,34 +525,63 @@ export class Cache<T> {
   }
 
   private invalidateInternal(key: string, fromSync = false) {
-    const entry = this.getUntracked(key);
-    if (!entry) return;
-    clearTimeout(entry.timeout);
-    this.internal.mutate((map) => {
-      map.delete(key);
-      return map;
-    });
+    // a key invalidated before async hydration completes must not be resurrected by it
+    if (!this.hydrated) this.hydrationTombstones.add(key);
+
+    const entry = untracked(this.internal).get(key);
+    if (entry) {
+      clearTimeout(entry.timeout);
+      this.internal.mutate((map) => {
+        map.delete(key);
+        return map;
+      });
+    }
     if (!fromSync) {
       this.db.then((db) => db.remove(key));
       this.broadcast({ action: 'invalidate', entry: { key } });
     }
   }
 
-  /** @internal */
+  /**
+   * Removes EVERY entry — memory, persisted rows, and (via broadcast) other tabs.
+   * Call on logout/auth changes so no prior user's responses survive.
+   */
+  clear() {
+    for (const key of Array.from(untracked(this.internal).keys())) {
+      this.invalidateInternal(key);
+    }
+  }
+
+  /** @internal Drops expired entries, then enforces `maxSize` by the configured strategy. */
   private cleanup() {
+    const now = Date.now();
+
+    // expired entries first — their timers may never have fired (throttled background
+    // tabs, or timer-less long-TTL entries)
+    const expired = Array.from(untracked(this.internal).entries()).filter(
+      ([, e]) => e.expiresAt <= now,
+    );
+    if (expired.length) {
+      expired.forEach(([, e]) => clearTimeout(e.timeout));
+      this.internal.mutate((map) => {
+        expired.forEach(([key]) => map.delete(key));
+        return map;
+      });
+    }
+
     if (untracked(this.internal).size <= this.cleanupOpt.maxSize) return;
 
     const sorted = Array.from(untracked(this.internal).entries()).toSorted(
       (a, b) => {
         if (this.cleanupOpt.type === 'lru') {
-          return a[1].useCount - b[1].useCount; // least used first
+          return a[1].lastAccessed - b[1].lastAccessed; // least recently accessed first
         } else {
           return a[1].created - b[1].created; // oldest first
         }
       },
     );
 
-    const keepCount = Math.floor(this.cleanupOpt.maxSize / 2);
+    const keepCount = Math.max(1, Math.floor(this.cleanupOpt.maxSize / 2));
 
     const removed = sorted.slice(0, sorted.length - keepCount);
     const keep = sorted.slice(removed.length, sorted.length);
@@ -558,7 +670,8 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
     return JSON.stringify({
       body: value.body,
       status: value.status,
-      statusText: value.statusText,
+      // statusText intentionally omitted: deprecated in Angular, meaningless under
+      // HTTP/2+ (HttpResponse defaults it to 'OK' on reconstruction)
       headers: headerKeys.length > 0 ? headersRecord : undefined,
       url: value.url,
     });
@@ -578,7 +691,6 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
       return new HttpResponse({
         body: parsed.body,
         status: parsed.status,
-        statusText: parsed.statusText,
         headers: headers,
         url: parsed.url,
       });
@@ -588,61 +700,92 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
     }
   };
 
-  const syncTabsOpt = opt?.syncTabs
-    ? {
-        id: 'mmstack-query-cache-sync',
-        serialize,
-        deserialize,
-      }
-    : undefined;
-
-  const db =
-    opt?.persist === false
-      ? undefined
-      : createSingleStoreDB<string>(
-          'mmstack-query-cache-db',
-          (version) => `query-store_v${version}`,
-          opt?.version,
-        ).then((db): CacheDB<HttpResponse<unknown>> => {
-          return {
-            getAll: () => {
-              return db.getAll().then((entries) => {
-                return entries
-                  .map((entry) => {
-                    const value = deserialize(entry.value);
-                    if (value === null) return null;
-                    return {
-                      ...entry,
-                      value,
-                    };
-                  })
-                  .filter((e) => e !== null);
-              });
-            },
-            store: (entry) => {
-              return db.store({ ...entry, value: serialize(entry.value) });
-            },
-            remove: db.remove,
-          };
-        });
+  // version-suffixed so two deploys with incompatible schemas in adjacent tabs don't
+  // push entries into each other's caches (the `version` option only fences IndexedDB)
+  const syncChannelId = `mmstack-query-cache-sync_v${opt?.version ?? 1}`;
 
   return {
     provide: CLIENT_CACHE_TOKEN,
-    useValue: new Cache(
-      opt?.ttl,
-      opt?.staleTime,
-      opt?.cleanup,
-      syncTabsOpt,
-      db,
-    ),
+    useFactory: () => {
+      const onServer = inject(PLATFORM_ID) === 'server';
+
+      // no IndexedDB / BroadcastChannel on the server — each request gets an
+      // isolated, request-lived, memory-only cache
+      const syncTabsOpt =
+        !onServer && opt?.syncTabs
+          ? {
+              id: syncChannelId,
+              serialize,
+              deserialize,
+            }
+          : undefined;
+
+      const db =
+        onServer || opt?.persist === false
+          ? undefined
+          : createSingleStoreDB<string>(
+              'mmstack-query-cache-db',
+              (version) => `query-store_v${version}`,
+              opt?.version,
+            ).then((db): CacheDB<HttpResponse<unknown>> => {
+              return {
+                getAll: () => {
+                  return db.getAll().then((entries) => {
+                    return entries
+                      .map((entry) => {
+                        const value = deserialize(entry.value);
+                        if (value === null) return null;
+                        return {
+                          ...entry,
+                          value,
+                        };
+                      })
+                      .filter((e) => e !== null);
+                  });
+                },
+                store: (entry) => {
+                  return db.store({ ...entry, value: serialize(entry.value) });
+                },
+                remove: db.remove,
+              };
+            });
+
+      const cache = new Cache(
+        opt?.ttl,
+        opt?.staleTime,
+        opt?.cleanup,
+        syncTabsOpt,
+        db,
+      );
+
+      // release the sweep interval / channel with the providing injector
+      inject(DestroyRef, { optional: true })?.onDestroy(() => cache.destroy());
+
+      return cache;
+    },
   };
 }
 
 class NoopCache<T> extends Cache<T> {
+  constructor() {
+    // Infinity checkInterval → no sweep interval is ever armed, so the shared
+    // instance below never pins a timer
+    super(undefined, undefined, {
+      type: 'lru',
+      maxSize: 200,
+      checkInterval: Infinity,
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   override store(_: string, __: T, ___ = super.staleTime, ____ = super.ttl) {
     // noop
   }
 }
+
+// one shared instance — minting a NoopCache per injectQueryCache() miss would leak
+// an instance (and previously an interval) on every prod call without a provider
+let NOOP_CACHE: NoopCache<unknown> | undefined;
 
 /**
  * Injects the `QueryCache` instance that is used within queryResource.
@@ -682,8 +825,20 @@ export function injectQueryCache<TRaw = unknown>(
       throw new Error(
         'Cache not provided, please add provideQueryCache() to providers array',
       );
-    else return new NoopCache();
+    else return (NOOP_CACHE ??= new NoopCache()) as Cache<HttpResponse<TRaw>>;
   }
 
   return cache as Cache<HttpResponse<TRaw>>;
+}
+
+/**
+ * Injects the cache statistics, including the current size of the cache and the number of hits and misses.
+ *
+ * @param injector - (Optional) The injector to use.  If not provided, the current
+ *                   injection context is used.
+ * @returns A signal containing the cache statistics.
+ */
+export function injectCacheStats(injector?: Injector) {
+  const cache = injectQueryCache(injector);
+  return cache.stats;
 }

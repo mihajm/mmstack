@@ -19,6 +19,7 @@ It's designed to be opt-in feature by feature: starting with `queryResource()` a
 - [`queryResource`](#queryresource)
 - [`mutationResource`](#mutationresource)
 - [`manualQueryResource`](#manualqueryresource)
+- [`infiniteQueryResource`](#infinitequeryresource)
 - [Caching](#caching)
 - [Circuit breakers](#circuit-breakers)
 - [Transitions & Suspense](#transitions--suspense)
@@ -126,15 +127,26 @@ All three return a signal-typed ref — `value()`, `status()`, `error()`, `heade
 
 When the cache interceptor is registered (`createCacheInterceptor()`) and a query resource opts in via `cache`, responses are stored in the shared `Cache` keyed by a string derived from the request.
 
-**Default key**: produced by `hashRequest()` (`util/hash-request.ts`). Composition is `${method}:${url}:${responseType}[:${params}][:${body}]` — sorted query params, stable body hashing (incl. `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer` markers). **It does not include headers or `HttpContext`.**
+**Default key**: produced by `hashRequest()` (`util/hash-request.ts`). Composition is `${method}:${url}:${responseType}[:${params}][:${body}]` — sorted query params, stable body hashing (incl. `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer` markers). **It does not include headers or `HttpContext` by default.**
 
-If two requests should _not_ share a cache entry but the default key would collide (e.g. different `Authorization` headers), pass a custom hash:
+If responses differ per header — different `Authorization` users, `Accept-Language`, a tenant header — opt those headers into the key with `varyHeaders`:
 
 ```typescript
 queryResource<Post>(() => ({ url, headers }), {
   cache: {
-    hash: (req) =>
-      `${hashRequest(req)}:${(req.headers as HttpHeaders | undefined)?.get('Authorization') ?? ''}`,
+    varyHeaders: ['Authorization'], // per-user cache entries
+  },
+});
+```
+
+Header **values are one-way digested** into the key, never embedded raw — cache keys are persisted to IndexedDB and broadcast across tabs, so secrets must not appear in them. (For the same reason, avoid embedding raw header values in a custom `hash` function.) The exception: known-safe content-negotiation headers (`Accept`, `Accept-Language`, `Content-Language`, `Content-Type`) embed their values raw, keeping keys human-readable. Still call `injectQueryCache().clear()` on logout: the previous user's entries are unreachable under the new key, but linger until their TTL.
+
+For full control over the key (ignoring certain params, custom shapes), a custom `hash` remains available and takes precedence over `varyHeaders`:
+
+```typescript
+queryResource<Post>(() => ({ url }), {
+  cache: {
+    hash: (req) => `posts:${new URL(req.url, location.origin).pathname}`,
   },
 });
 ```
@@ -165,6 +177,8 @@ withInterceptors([
 
 Order matters but only weakly: the cache interceptor short-circuits cached responses before they reach the network, the dedupe interceptor coalesces identical in-flight requests so duplicate consumers share one network round-trip. The order above is the safe default.
 
+**Do you still need both?** Yes — they cover different requests. The cache interceptor has built-in single-flight for **cache-enabled** requests (N concurrent readers of the same stale/missing key share one revalidation, keyed by the _cache key_, incl. `varyHeaders`/custom `hash`). The dedupe interceptor covers everything the cache doesn't see: non-cached `queryResource`s, plain `HttpClient` calls, `DELETE`s, etc., keyed by the request hash. Where they overlap, the cache interceptor coalesces upstream and dedupe degrades to a no-op passthrough — installing both is always safe.
+
 Both default to intercepting only GET. Pass an array to extend: `createCacheInterceptor(['GET', 'HEAD'])`.
 
 To opt a single request out of dedup, attach `noDedupe()` to its context:
@@ -193,7 +207,7 @@ queryResource<TResult, TRaw = TResult>(
 | ---------------------- | ------------------------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `defaultValue`         | `TResult`                                              | –                  | Initial value before the first request resolves. When set, `value()` is `TResult`, not `TResult \| undefined`. |
 | `keepPrevious`         | `boolean`                                              | `false`            | Hold the previous `value`, `status`, and `headers` while a refresh is in flight. Powered by `linkedSignal`.    |
-| `refresh`              | `number` (ms)                                          | –                  | Auto-refetch interval.                                                                                         |
+| `refresh`              | `number \| { interval?, onFocus?, onReconnect? }`      | –                  | Auto-refetch: a number polls every n ms; the object form adds event triggers — `onFocus` refetches when the tab becomes visible again, `onReconnect` when the browser comes back online. Triggers respect disabled/paused state. |
 | `retry`                | `number \| { max, backoff }`                           | `0`                | On failure, retry N times with exponential backoff (default 1000ms × 2^n).                                     |
 | `onError`              | `(err, retryCount, isFinal) => void`                   | –                  | Called on **every** failed attempt. `retryCount` is the number of retries already done (`0` on the first failure). `isFinal` is `true` when no further retry will be scheduled — branch on it to separate per-attempt instrumentation from "user-needs-to-know" side effects. |
 | `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                     |
@@ -275,6 +289,23 @@ mutationResource(request, { queue: true });
 
 Queued mutations sit in a signal-backed queue and execute one at a time. The queue **persists across resource-disabled states** — if the circuit breaker opens or the network drops, queued mutations stay pending and run when the resource recovers. This is intentional for resilience (think "POST goes out when we're back online"), but it does mean a queued mutation can fire long after the user triggered it. Don't enable `queue` if that's surprising in your UX.
 
+### Declarative invalidation (`invalidates`)
+
+After a successful mutation, related query caches usually need refreshing. Instead of wiring `injectQueryCache().invalidatePrefix(...)` into `onSuccess` by hand, declare it:
+
+```typescript
+mutationResource((p: Post) => ({ url: '/api/posts', method: 'POST', body: p }), {
+  invalidates: ['/api/posts'], // every cached GET under /api/posts (any params, subpaths, varyHeaders variants)
+});
+
+// or derived from the result:
+mutationResource(request, {
+  invalidates: (saved) => ['/api/posts', `/api/users/${saved.authorId}`],
+});
+```
+
+Strings are URL prefixes matched against auto-generated `GET` keys. Plain prefix matching also catches sibling paths sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` or an exact URL to narrow. Entries keyed by a custom `hash` follow that function's shape instead; invalidate those via `injectQueryCache().invalidateWhere`.
+
 ### Re-firing with an identical body (`triggerOnSameRequest`)
 
 A mutation is an imperative command, so by default an identical `mutate(body)` while one is in flight is **deduplicated** (double-click protection). When a repeat with the same body _must_ fire — e.g. a "resend" button — set `triggerOnSameRequest: true`, and every `mutate()` fires regardless of whether the body changed.
@@ -312,6 +343,46 @@ onSubmit() {
 ```
 
 `.trigger()` re-evaluates the `request()` function and fires. Everything else (`value`, `status`, `error`, retry, cache, etc.) works identically.
+
+## `infiniteQueryResource`
+
+Paginated queries: one page request at a time, accumulated into a `pages` signal. Cursor- and offset-based pagination both fit through `getNextPageParam` — return `null`/`undefined` to signal "no more pages". Each page request inherits the full `queryResource` feature set (per-page caching, retries, circuit breaker, refresh triggers).
+
+```typescript
+const posts = infiniteQueryResource<PostPage, PostPage, number>(
+  ({ pageParam }) => ({ url: '/api/posts', params: { page: pageParam } }),
+  {
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => (last.items.length < 20 ? null : all.length),
+    cache: true,
+  },
+);
+```
+
+```html
+@for (page of posts.pages(); track $index) {
+  @for (post of page.items; track post.id) { ... }
+}
+<button (click)="posts.fetchNextPage()" [disabled]="!posts.hasNextPage()">
+  @if (posts.isFetchingNextPage()) { Loading… } @else { Load more }
+</button>
+```
+
+- `fetchNextPage()` is a no-op while a page is in flight or when exhausted.
+- `reload()` refetches the **current** page — the result replaces its slot instead of appending a duplicate.
+- `reset()` drops all pages and refetches from `initialPageParam`.
+- The request fn receives the same context as `queryResource` plus `pageParam`, so pausing works identically: `({ pageParam, paused }) => (active() ? requestFor(pageParam) : paused)`.
+
+For rendering, compose with the primitives mappers instead of reaching for a built-in projection — `pages` is a plain signal:
+
+```typescript
+// flat item list across pages
+const items = computed(() => posts.pages().flatMap((p) => p.items));
+// stable per-item mappings: appending page 4 doesn't recreate pages 1-3's row VMs
+const rows = keyArray(items, (item) => buildRowVm(item), {
+  key: (item) => item.id,
+});
+```
 
 ## Caching
 
@@ -360,12 +431,16 @@ With `syncTabs: true`, cache invalidations and updates broadcast via `BroadcastC
 
 ```typescript
 const cache = injectQueryCache<MyResponse>();
-cache.invalidate('GET /api/posts'); // drop one entry by key
-cache.invalidateAll(); // drop everything
+cache.invalidate('GET:/api/posts:json'); // drop one entry by exact key
+cache.invalidatePrefix('GET:/api/posts'); // drop every key under a URL prefix
+cache.invalidateWhere((key) => key.includes('userId=42')); // arbitrary predicates
+cache.clear(); // drop EVERYTHING — memory, persisted rows, other tabs
 cache.store(key, value, staleTime, ttl); // imperative write
 ```
 
-Useful for "log out → invalidate all user-scoped queries" or "mutation succeeds → invalidate a specific list."
+Auto-generated keys have the shape `${method}:${url}:${responseType}[:params][:body][:vary]` — prefix matching against `GET:${url}` is the common move. Call `clear()` on logout so no prior user's responses survive. For observability there's a read-only `cache.stats()` signal (`{ size, hits, misses }`) — handy for a debug panel; it deliberately exposes no mutation surface.
+
+Prefer the declarative [`invalidates`](#declarative-invalidation-invalidates) option on `mutationResource` for the common "mutation succeeded → refresh related queries" case.
 
 ## Circuit breakers
 
@@ -483,6 +558,25 @@ class Panel {
 }
 ```
 
+### Auto-pausing (`pause` option)
+
+The manual wiring above is fully automatic with the opt-in `pause` option:
+
+```typescript
+// follow the surrounding Activity boundary (MmActivity / providePaused);
+// a no-op outside one, so this is safe to default app-wide
+readonly data = queryResource<Data>(() => `/api/data/${this.id()}`, {
+  pause: true,
+});
+
+// or drive it from any predicate / Signal<boolean>
+readonly data = queryResource<Data>(() => `/api/data/${this.id()}`, {
+  pause: this.minimized,
+});
+```
+
+Same semantics as `ctx.paused` — value and request held, polling and focus/reconnect triggers stop, no refetch on resume unless the request changed. The two sources compose: either can pause the resource. To make every query in the app Activity-aware, set it once via `provideQueryResourceOptions({ pause: true })`. (Mutations never auto-pause — they're one-off commands; use `queue: true` for deferred execution instead.)
+
 ## Default options (`provideResourceOptions`)
 
 Common options (`register`, `retry`, `circuitBreaker`, `triggerOnSameRequest`) can be defaulted app-wide, with a three-layer precedence — **per-call > type-specific provider > common provider**:
@@ -524,21 +618,39 @@ Practical consequences:
 
 The Quick Start example covers this — `onMutate` returns the previous value as ctx, `onError` restores it. The key detail: read the previous value with `untracked()` so you don't create a spurious dependency.
 
-### Manual invalidation after a mutation
+### Invalidation after a mutation
+
+Declarative — the common case:
+
+```typescript
+mutationResource((p: Post) => ({ url: '/posts', method: 'POST', body: p }), {
+  invalidates: ['/posts'], // every cached GET under /posts, params + subpaths + vary variants
+});
+```
+
+Manual — for predicates the URL-prefix form can't express:
 
 ```typescript
 const cache = injectQueryCache();
-mutationResource((p: Post) => ({ url: '/posts', method: 'POST', body: p }), {
+mutationResource(request, {
   onSuccess: () => {
-    // Drop every paginated `GET /posts*` cache entry in one shot.
-    cache.invalidatePrefix('GET /posts');
-    // Or, for arbitrary predicates:
-    // cache.invalidateWhere((key) => key.includes('/posts'));
+    cache.invalidatePrefix('GET:/posts'); // auto-keys are `${method}:${url}:...`
+    // or: cache.invalidateWhere((key) => key.includes('userId=42'));
   },
 });
 ```
 
-`invalidate(key)` drops a single entry, `invalidatePrefix(prefix)` drops every key starting with the prefix (most common after list-mutating writes), and `invalidateWhere(predicate)` handles anything else. Both bulk variants return the number of entries removed.
+`invalidate(key)` drops a single entry, `invalidatePrefix(prefix)` drops every key starting with the prefix, and `invalidateWhere(predicate)` handles anything else. Both bulk variants return the number of entries removed.
+
+### Refetch on tab focus / reconnect
+
+```typescript
+queryResource(() => ({ url: '/api/notifications' }), {
+  refresh: { onFocus: true, onReconnect: true },
+});
+```
+
+The user switches back to the tab (or the browser comes back online) → the resource refetches, unless it's disabled or paused. Compose with an interval for "poll while visible, refresh immediately on return": `refresh: { interval: 60_000, onFocus: true }`.
 
 ### Prefetch on hover
 

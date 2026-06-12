@@ -7,8 +7,10 @@ import {
   type HttpRequest,
   HttpResponse,
 } from '@angular/common/http';
+import { inject, isDevMode, PLATFORM_ID } from '@angular/core';
 import { map, type Observable, of, tap } from 'rxjs';
 import { hashRequest } from '../hash-request';
+import { sharePending } from '../share-pending';
 import { injectQueryCache } from './cache';
 
 type CacheEntryOptions = {
@@ -44,6 +46,8 @@ type ResolvedCacheControl = {
   noCache: boolean;
   mustRevalidate: boolean;
   immutable: boolean;
+  /** `Cache-Control: private` — cacheable in memory, but must never be persisted. */
+  isPrivate: boolean;
   maxAge: number | null;
   staleWhileRevalidate: number | null;
 };
@@ -59,6 +63,7 @@ function parseCacheControlHeader(
     noCache: false,
     mustRevalidate: false,
     immutable: false,
+    isPrivate: false,
     maxAge: null,
     staleWhileRevalidate: null,
   };
@@ -85,13 +90,17 @@ function parseCacheControlHeader(
       case 'immutable':
         directives.immutable = true;
         break;
+      case 'private':
+        directives.isPrivate = true;
+        break;
       case 'max-age': {
         if (!value) break;
         const parsedValue = parseInt(value, 10);
         if (!isNaN(parsedValue)) directives.maxAge = parsedValue;
         break;
       }
-      case 's-max-age': {
+
+      case 's-maxage': {
         if (!value) break;
         const parsedValue = parseInt(value, 10);
         if (!isNaN(parsedValue)) sMaxAge = parsedValue;
@@ -106,7 +115,7 @@ function parseCacheControlHeader(
     }
   }
 
-  // s-max-age takes precedence over max-age
+  // s-maxage takes precedence over max-age
   if (sMaxAge !== null) directives.maxAge = sMaxAge;
 
   // if no store nothing else is relevant
@@ -116,6 +125,7 @@ function parseCacheControlHeader(
       noCache: false,
       mustRevalidate: false,
       immutable: false,
+      isPrivate: directives.isPrivate,
       maxAge: null,
       staleWhileRevalidate: null,
     };
@@ -144,15 +154,33 @@ function resolveTimings(
       ttl: Infinity,
     };
 
-  if (cacheControl.maxAge !== null) ttl = cacheControl.maxAge * 1000;
+  if (cacheControl.maxAge !== null) {
+    staleTime = cacheControl.maxAge * 1000;
+    if (cacheControl.staleWhileRevalidate !== null) {
+      ttl = staleTime + cacheControl.staleWhileRevalidate * 1000;
+    } else if (ttl !== undefined) {
+      // a configured total lifetime must never undercut the server's fresh window
+      ttl = Math.max(ttl, staleTime);
+    }
+    // no swr + no configured ttl → leave undefined so the cache's default ttl applies
+    // (the entry stays resident past max-age for ETag revalidation)
+  } else if (cacheControl.staleWhileRevalidate !== null) {
+    // swr without max-age: stale immediately, revalidatable for the window
+    staleTime = 0;
+    ttl = cacheControl.staleWhileRevalidate * 1000;
+  }
 
-  if (cacheControl.staleWhileRevalidate !== null)
-    staleTime = cacheControl.staleWhileRevalidate * 1000;
-
-  // if no-cache is set, we must always revalidate
+  // if no-cache is set, we must always revalidate (the entry stays usable for conditional requests until ttl)
   if (cacheControl.noCache || cacheControl.mustRevalidate) staleTime = 0;
 
-  if (ttl !== undefined && staleTime !== undefined && ttl < staleTime) {
+  // option-only path (no server freshness): a misconfigured ttl < staleTime clamps the
+  // fresh window down, mirroring the cache's own internal clamp
+  if (
+    cacheControl.maxAge === null &&
+    ttl !== undefined &&
+    staleTime !== undefined &&
+    ttl < staleTime
+  ) {
     staleTime = ttl;
   }
 
@@ -167,6 +195,10 @@ function resolveTimings(
  * and a background revalidation request is made.  If no cached response is found, the request
  * is made to the server, and the response is cached according to the configured TTL and staleness.
  * The interceptor also respects `Cache-Control` headers from the server.
+ *
+ * Cache-enabled requests are single-flighted per cache key: N concurrent consumers of
+ * the same missing/stale entry share ONE network request. Non-cached requests are not
+ * touched — pair with `createDedupeRequestsInterceptor` to coalesce those as well.
  *
  * @param allowedMethods - An array of HTTP methods for which caching should be enabled.
  *                        Defaults to `['GET', 'HEAD', 'OPTIONS']`.
@@ -191,10 +223,14 @@ export function createCacheInterceptor(
 ): HttpInterceptorFn {
   const CACHE_METHODS = new Set<string>(allowedMethods);
 
+  const inFlight = new Map<string, Observable<HttpEvent<unknown>>>();
+
   return (
     req: HttpRequest<unknown>,
     next: HttpHandlerFn,
   ): Observable<HttpEvent<unknown>> => {
+    if (inject(PLATFORM_ID) === 'server') return next(req);
+
     const cache = injectQueryCache();
 
     if (!CACHE_METHODS.has(req.method)) return next(req);
@@ -210,25 +246,34 @@ export function createCacheInterceptor(
 
     // resource itself handles case of showing stale data...the request must process as this will "refresh said data"
 
-    const eTag = entry?.value.headers.get('ETag');
-    const lastModified = entry?.value.headers.get('Last-Modified');
+    return sharePending(inFlight, key, () => {
+      const eTag = entry?.value.headers.get('ETag');
+      const lastModified = entry?.value.headers.get('Last-Modified');
 
-    if (eTag) {
-      req = req.clone({ setHeaders: { 'If-None-Match': eTag } });
-    }
+      if (eTag) {
+        req = req.clone({ setHeaders: { 'If-None-Match': eTag } });
+      }
 
-    if (lastModified) {
-      req = req.clone({ setHeaders: { 'If-Modified-Since': lastModified } });
-    }
+      if (lastModified) {
+        req = req.clone({ setHeaders: { 'If-Modified-Since': lastModified } });
+      }
 
-    if (opt.bustBrowserCache) {
-      req = req.clone({
-        setParams: { _cb: Date.now().toString() },
-      });
-    }
+      if (opt.bustBrowserCache) {
+        req = req.clone({
+          setParams: { _cb: Date.now().toString() },
+        });
+      }
 
-    return next(req).pipe(
-      tap((event) => {
+      // non-JSON bodies (blob/arraybuffer) cannot survive the JSON persistence layer
+      const persistable = req.responseType === 'json';
+      if (opt.persist && !persistable && isDevMode()) {
+        console.warn(
+          `[@mmstack/resource]: persist was requested for a '${req.responseType}' response — such bodies don't survive JSON serialization, persisting skipped.`,
+        );
+      }
+
+      return next(req).pipe(
+        tap((event) => {
         if (!(event instanceof HttpResponse)) return;
 
         if (event.ok) {
@@ -240,19 +285,25 @@ export function createCacheInterceptor(
             ? opt
             : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
 
-          if (opt.ttl === 0) return; // no point
+          if (ttl === 0) return; // no point
+
+          // `Cache-Control: private` → fine to keep in memory, never on disk
+          const persist =
+            (opt.persist ?? false) &&
+            persistable &&
+            (opt.ignoreCacheControl || !cacheControl.isPrivate);
 
           const parsedResponse = opt.parse
-            ? new HttpResponse({
+            ? // statusText omitted — deprecated in Angular (HttpResponse defaults it)
+              new HttpResponse({
                 body: opt.parse(event.body),
                 headers: event.headers,
                 status: event.status,
-                statusText: event.statusText,
                 url: event.url ?? undefined,
               })
             : event;
 
-          cache.store(key, parsedResponse, staleTime, ttl, opt.persist);
+          cache.store(key, parsedResponse, staleTime, ttl, persist);
           return;
         }
 
@@ -260,12 +311,21 @@ export function createCacheInterceptor(
         // existing entry so subsequent reads within the new freshness window
         // don't trigger another revalidation round-trip.
         if (event.status === 304 && entry) {
+          // ...unless the key was invalidated while this conditional request was in
+          // flight (e.g. by a mutation) — re-storing would resurrect deleted data
+          if (!cache.getUntracked(key)) return;
+
           const cacheControl = parseCacheControlHeader(event);
           const { staleTime, ttl } = opt.ignoreCacheControl
             ? opt
             : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
 
-          cache.store(key, entry.value, staleTime, ttl, opt.persist);
+          const persist =
+            (opt.persist ?? false) &&
+            persistable &&
+            (opt.ignoreCacheControl || !cacheControl.isPrivate);
+
+          cache.store(key, entry.value, staleTime, ttl, persist);
         }
       }),
       map((event) => {
@@ -276,6 +336,7 @@ export function createCacheInterceptor(
 
         return event;
       }),
-    );
+      );
+    });
   };
 }

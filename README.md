@@ -13,7 +13,7 @@ Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of
 
 `@mmstack` provides a suite of libraries to enhance your Angular development experience:
 
-- **[`@mmstack/primitives`](./packages/primitives/README.md):** Foundational utilities and primitives for enhancing Angular Signals (`debounced`, `mutable`, `stored`, `mapArray`, etc.).
+- **[`@mmstack/primitives`](./packages/primitives/README.md):** Foundational utilities and primitives for enhancing Angular Signals (`debounced`, `mutable`, `stored`, `indexArray`, etc.).
 - **[`@mmstack/resource`](./packages/resource/README.md):** Powerful, signal-based primitives for managing asynchronous data fetching and mutations (caching, retries, circuit breakers, etc.).
 - **[`@mmstack/router-core`](./packages/router/core/README.md):** Enhances Angular Router with signal-based state utilities (`queryParam`, `url`), intelligent module preloading (`Link`, `PreloadStrategy`) & headless breadcrumb utilities (`injectBreadcrumbs`, `createBreadcrumb`).
 - **[`@mmstack/form-core`](./packages/form/core/README.md):** Provides the core primitives (`formControl`, `formGroup`, `formArray`) for building flexible, type-safe, signal-based reactive forms.

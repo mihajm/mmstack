@@ -12,7 +12,7 @@ import { PLATFORM_ID, signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { delay, of, throwError } from 'rxjs';
 import { mutationResource } from './mutation-resource';
-import { provideQueryCache, ResourceSensors } from './util';
+import { injectQueryCache, provideQueryCache, ResourceSensors } from './util';
 
 const TEST_CONTEXT = new HttpContextToken<{
   validate: (req: HttpRequest<any>) => void;
@@ -168,6 +168,97 @@ describe('mutationResource', () => {
     await promise;
 
     expect(hooks).toEqual(['onMutate', 'onError', 'onSettled']);
+  });
+
+  it('invalidates matching cache entries after a successful mutation', async () => {
+    const cache = TestBed.runInInjectionContext(() => injectQueryCache());
+    const resp = (body: unknown) => new HttpResponse({ body, status: 200 });
+    cache.store('GET:/api/posts:json', resp([1, 2]));
+    cache.store('GET:/api/posts:json:page=2', resp([3]));
+    cache.store('GET:/api/posts/1:json', resp(1));
+    cache.store('GET:/api/users:json', resp([]));
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: { title: string }) => ({
+          url: '/api/posts',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { ok: true },
+          ),
+        }),
+        {
+          invalidates: ['/api/posts'],
+          onSettled: () => resolve(),
+        },
+      ),
+    );
+
+    res.mutate({ title: 'new post' });
+    await promise;
+
+    // everything under /api/posts is gone — any params, subpaths
+    expect(cache.getUntracked('GET:/api/posts:json')).toBeNull();
+    expect(cache.getUntracked('GET:/api/posts:json:page=2')).toBeNull();
+    expect(cache.getUntracked('GET:/api/posts/1:json')).toBeNull();
+    // unrelated keys survive
+    expect(cache.getUntracked('GET:/api/users:json')).not.toBeNull();
+  });
+
+  it('settles a superseded in-flight mutation before applying the next one (non-queued)', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const settled: unknown[] = [];
+    const succeeded: unknown[] = [];
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: { id: number }) => ({
+          url: `https://example.com/mutate/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { ok: true },
+            false,
+            50, // keep the first mutation in flight
+          ),
+        }),
+        {
+          onMutate: (value) => ({ forId: value.id }),
+          onSuccess: (_, ctx) => succeeded.push(ctx),
+          onSettled: (ctx) => {
+            settled.push(ctx);
+            if (settled.length === 2) resolve();
+          },
+        },
+      ),
+    );
+
+    res.mutate({ id: 1 }); // in flight (50ms)
+    res.mutate({ id: 2 }); // supersedes — regression: id 1's context used to vanish
+
+    await promise;
+
+    // the superseded mutation's context was settled (so optimistic state can be
+    // rolled back), then the winning mutation settled normally
+    expect(settled).toEqual([{ forId: 1 }, { forId: 2 }]);
+    // only the winner gets a success callback
+    expect(succeeded).toEqual([{ forId: 2 }]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('superseded'),
+    );
+    warnSpy.mockRestore();
   });
 
   it('should queue mutations if queue is true', async () => {

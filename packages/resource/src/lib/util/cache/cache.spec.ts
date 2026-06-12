@@ -304,6 +304,8 @@ describe('Cache', () => {
         action: 'store',
         type: 'cache-sync-message',
         cacheId: 'some-other-cache',
+        // NOTE: deliberately no `lastAccessed` — simulates a message from a tab
+        // running an older version; the restore path must default it to `updated`
         entry: {
           key: 'k',
           value: 'newer-from-other-tab',
@@ -332,6 +334,184 @@ describe('Cache', () => {
         cache.destroy();
         cache.destroy();
       }).not.toThrow();
+    });
+  });
+
+  describe('timer-safe TTLs', () => {
+    it('an Infinity ttl (immutable) must NOT self-destruct', () => {
+      const cache = new Cache<string>();
+      cache.store('immutable', 'forever', Infinity, Infinity);
+
+      // regression: setTimeout(…, Infinity) coerces to 0 — the entry used to be
+      // invalidated on the very next tick
+      vi.advanceTimersByTime(60_000);
+
+      const entry = cache.getUntracked('immutable');
+      expect(entry).not.toBeNull();
+      expect(entry!.isStale).toBe(false);
+    });
+
+    it('a ttl beyond the int32 timer bound must not wrap negative', () => {
+      const cache = new Cache<string>();
+      const sixtyDays = 1000 * 60 * 60 * 24 * 60; // > 2^31-1 ms
+      cache.store('long', 'lived', 1000, sixtyDays);
+
+      vi.advanceTimersByTime(10_000);
+
+      expect(cache.getUntracked('long')).not.toBeNull();
+    });
+  });
+
+  describe('clear', () => {
+    it('removes every entry', () => {
+      const cache = new Cache<string>();
+      cache.store('a', '1');
+      cache.store('b', '2');
+      cache.store('c', '3');
+
+      cache.clear();
+
+      expect(cache.getUntracked('a')).toBeNull();
+      expect(cache.getUntracked('b')).toBeNull();
+      expect(cache.getUntracked('c')).toBeNull();
+    });
+  });
+
+  describe('cleanup interval configuration', () => {
+    it('uses the merged defaults when a partial cleanup option omits checkInterval', () => {
+      const spy = vi.spyOn(globalThis, 'setInterval');
+
+      // regression: the raw partial was read directly → setInterval(fn, undefined)
+      // → a ~4ms sweep storm
+      const cache = new Cache<string>(undefined, undefined, { maxSize: 50 });
+
+      const delays = spy.mock.calls.map((c) => c[1]);
+      expect(delays).toContain(1000 * 60 * 60); // merged default: ONE_HOUR
+      expect(delays).not.toContain(undefined);
+
+      cache.destroy();
+      spy.mockRestore();
+    });
+  });
+
+  describe('LRU recency (not frequency)', () => {
+    it('a recently-accessed entry outlives more-frequently-used older ones', () => {
+      const checkInterval = 1000;
+      const cache = new Cache<number>(100000, 50000, {
+        type: 'lru',
+        maxSize: 4,
+        checkInterval,
+      });
+
+      cache.store('a', 1);
+      vi.advanceTimersByTime(10);
+      cache.store('b', 2);
+      // pump b's frequency — under LFU this would protect it
+      cache.getUntracked('b');
+      cache.getUntracked('b');
+      cache.getUntracked('b');
+      vi.advanceTimersByTime(10);
+      cache.store('c', 3);
+      vi.advanceTimersByTime(10);
+      cache.store('d', 4);
+      vi.advanceTimersByTime(10);
+
+      cache.getUntracked('a'); // 'a' becomes the most recently accessed
+      vi.advanceTimersByTime(10);
+      cache.store('e', 5); // exceeds maxSize
+
+      vi.advanceTimersByTime(checkInterval); // sweep: keepCount = floor(4/2) = 2
+
+      expect(cache.getUntracked('a')).not.toBeNull(); // recent access wins
+      expect(cache.getUntracked('e')).not.toBeNull(); // newest write
+      expect(cache.getUntracked('b')).toBeNull(); // frequent but old → evicted
+      expect(cache.getUntracked('c')).toBeNull();
+      expect(cache.getUntracked('d')).toBeNull();
+    });
+  });
+
+  describe('hydration from persistence', () => {
+    function makeStoredEntry(
+      key: string,
+      value: string,
+      opt: { updated: number; stale: number; expiresAt: number },
+    ) {
+      return {
+        key,
+        value,
+        created: opt.updated,
+        updated: opt.updated,
+        useCount: 1,
+        lastAccessed: opt.updated,
+        stale: opt.stale,
+        expiresAt: opt.expiresAt,
+      };
+    }
+
+    it('preserves ABSOLUTE freshness windows instead of re-anchoring to now', async () => {
+      const now = Date.now();
+      // persisted 2h ago: staleTime was 1h (already passed), ttl 3h (1h remaining)
+      const entry = makeStoredEntry('k', 'v', {
+        updated: now - 2 * 60 * 60 * 1000,
+        stale: now - 60 * 60 * 1000,
+        expiresAt: now + 60 * 60 * 1000,
+      });
+
+      const cache = new Cache<string>(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        Promise.resolve({
+          getAll: async () => [entry],
+          store: async () => undefined,
+          remove: async () => undefined,
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(0); // flush hydration microtasks
+
+      const hydrated = cache.getUntracked('k');
+      expect(hydrated).not.toBeNull();
+      // regression: re-anchoring used to make this FRESH for another full hour
+      expect(hydrated!.isStale).toBe(true);
+
+      // and the remaining lifetime is honored, not extended
+      await vi.advanceTimersByTimeAsync(61 * 60 * 1000);
+      expect(cache.getUntracked('k')).toBeNull();
+    });
+
+    it('does not resurrect keys invalidated while hydration was in flight', async () => {
+      const now = Date.now();
+      const entry = makeStoredEntry('k', 'v', {
+        updated: now,
+        stale: now + 60_000,
+        expiresAt: now + 120_000,
+      });
+
+      let resolveGetAll!: (entries: (typeof entry)[]) => void;
+      const cache = new Cache<string>(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        Promise.resolve({
+          getAll: () =>
+            new Promise<(typeof entry)[]>((res) => (resolveGetAll = res)),
+          store: async () => undefined,
+          remove: async () => undefined,
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(0); // let the cache call getAll
+
+      cache.invalidate('k'); // logout-on-boot style invalidation
+
+      resolveGetAll([entry]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // regression: hydration used to re-insert the just-invalidated entry
+      expect(cache.getUntracked('k')).toBeNull();
     });
   });
 });

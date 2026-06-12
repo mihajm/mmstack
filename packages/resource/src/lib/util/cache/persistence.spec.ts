@@ -19,6 +19,7 @@ describe('persistence', () => {
           stale: Date.now() + 1000,
           expiresAt: Date.now() + 5000,
           useCount: 0,
+          lastAccessed: Date.now(),
         }),
       ).resolves.toBeUndefined();
     });

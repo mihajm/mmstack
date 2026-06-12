@@ -134,6 +134,16 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
   const resource = queryResource(req, options);
 
+  // Shared across trigger() calls: a per-call watcher could observe the PREVIOUS
+  // request's `resolved` status before this trigger's load flips the resource to
+  // loading (effect ordering within a flush is unspecified) and resolve with stale
+  // data; concurrent triggers would also cross-resolve each other's promises.
+  let pending: {
+    res: (value: TResult) => void;
+    rej: (err: unknown) => void;
+  }[] = [];
+  let watcher: { destroy: () => void } | null = null;
+
   return {
     ...resource,
     trigger: (override, injectorOverride) => {
@@ -143,16 +153,50 @@ export function manualQueryResource<TResult, TRaw = TResult>(
       }));
 
       return new Promise<TResult>((res, rej) => {
-        const watcher = nestedEffect(
+        if (untracked(req) === undefined) {
+          // the request fn produced nothing — no load will ever start, so a watcher
+          // would hang this promise forever
+          rej(
+            new Error(
+              '[@mmstack/resource]: trigger() produced no request (the request fn returned undefined)',
+            ),
+          );
+          return;
+        }
+
+        pending.push({ res, rej });
+
+        // an active watcher (concurrent trigger) settles ALL pending promises with
+        // the final result of the latest request — TanStack-style latest-wins
+        if (watcher) return;
+
+        // only accept a settle AFTER the load for this trigger has been observed —
+        // the pre-trigger status may still be a stale `resolved`/`error`
+        let sawLoading = false;
+
+        watcher = nestedEffect(
           () => {
             const status = resource.status();
 
-            if (status === 'resolved') {
-              watcher.destroy();
-              res(untracked(resource.value) as TResult);
-            } else if (status === 'error') {
-              watcher.destroy();
-              rej(untracked(resource.error));
+            if (status === 'loading' || status === 'reloading') {
+              sawLoading = true;
+              return;
+            }
+            if (!sawLoading) return;
+
+            if (status === 'resolved' || status === 'error') {
+              const settled = pending;
+              pending = [];
+              watcher?.destroy();
+              watcher = null;
+
+              if (status === 'resolved') {
+                const value = untracked(resource.value) as TResult;
+                settled.forEach((p) => p.res(value));
+              } else {
+                const err = untracked(resource.error);
+                settled.forEach((p) => p.rej(err));
+              }
             }
           },
           { injector: injectorOverride ?? injector },

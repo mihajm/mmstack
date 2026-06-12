@@ -72,19 +72,51 @@ const SAFE_RAW_HEADERS = new Set([
   'content-type',
 ]);
 
+const UNSAFE_HEADER_MESSAGES = new Map<string, string>([
+  [
+    'cookie',
+    "[@mmstack/resource]: varyHeaders includes 'cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on 'Authorization' or a tenant header.",
+  ],
+  [
+    'set-cookie',
+    "[@mmstack/resource]: varyHeaders includes 'set-cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on 'Authorization' or a tenant header.",
+  ],
+  [
+    'authorization',
+    "[@mmstack/resource]: varyHeaders includes 'Authorization'. If your token rotates frequently (e.g., short-lived JWTs), this will cause 100% cache churn on refresh. Consider adding a namespace prefix with the users sub, not using it as a cache-key or using a custom 'cache.hash' function with a stable session/user ID instead.",
+  ],
+  [
+    'x-request-id',
+    "[@mmstack/resource]: varyHeaders includes 'X-Request-ID'. This header is often set to a unique value per-request, which will cause 100% cache churn. Consider removing it from varyHeaders or using a custom 'cache.hash' function that ignores it.",
+  ],
+  [
+    'x-correlation-id',
+    "[@mmstack/resource]: varyHeaders includes 'X-Correlation-ID'. This header is often set to a unique value per-request, which will cause 100% cache churn. Consider removing it from varyHeaders or using a custom 'cache.hash' function that ignores it.",
+  ],
+  [
+    'if-none-match',
+    "[@mmstack/resource]: varyHeaders includes 'If-None-Match'. This header contains ETags that change whenever the server's resource version changes, which will cause cache misses on every update. Consider removing it from varyHeaders or using a custom 'cache.hash' function that ignores it.",
+  ],
+  [
+    'if-modified-since',
+    "[@mmstack/resource]: varyHeaders includes 'If-Modified-Since'. This header contains timestamps that change whenever the server's resource version changes, which will cause cache misses on every update. Consider removing it from varyHeaders or using a custom 'cache.hash' function that ignores it.",
+  ],
+]);
+
 function normalizeVaryHeaders(
   headers: HashableRequest['headers'],
   names: readonly string[],
 ): string {
+  const isDev = isDevMode();
   return names
     .map((n) => n.toLowerCase())
     .toSorted()
     .map((name) => {
-      if (isDevMode() && (name === 'cookie' || name === 'set-cookie')) {
-        console.warn(
-          `[@mmstack/resource]: varyHeaders includes '${name}'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on 'Authorization' or a tenant header.`,
-        );
+      if (isDev) {
+        const warning = UNSAFE_HEADER_MESSAGES.get(name);
+        if (warning) console.warn(warning);
       }
+
       const value = readHeader(headers, name);
       if (value === null) return `${name}=`;
 
@@ -97,15 +129,22 @@ function normalizeVaryHeaders(
     .join('&');
 }
 
-function normalizeParams(params: NonNullable<HashableRequest['params']>): string {
-  const p = params instanceof HttpParams ? params : new HttpParams({ fromObject: params });
+function normalizeParams(
+  params: NonNullable<HashableRequest['params']>,
+): string {
+  const p =
+    params instanceof HttpParams
+      ? params
+      : new HttpParams({ fromObject: params });
 
   return p
     .keys()
     .toSorted()
     .map((key) => {
       const encodedKey = encodeURIComponent(key);
-      return (p.getAll(key) ?? []).map((v) => `${encodedKey}=${encodeURIComponent(v)}`).join('&');
+      return (p.getAll(key) ?? [])
+        .map((v) => `${encodedKey}=${encodeURIComponent(v)}`)
+        .join('&');
     })
     .join('&');
 }
@@ -125,11 +164,16 @@ function hashBody(body: unknown): string {
     body.forEach((value, key) => {
       entries.push([key, hashBody(value)]);
     });
-    entries.sort(([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv));
+    entries.sort(
+      ([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv),
+    );
     return `FormData:${entries.map(([k, v]) => `${k}=${v}`).join('&')}`;
   }
 
-  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+  if (
+    typeof URLSearchParams !== 'undefined' &&
+    body instanceof URLSearchParams
+  ) {
     const sp = new URLSearchParams(body);
     sp.sort();
     return `URLSearchParams:${sp.toString()}`;

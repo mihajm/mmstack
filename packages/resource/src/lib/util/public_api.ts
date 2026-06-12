@@ -7,3 +7,4 @@ export {
   createDedupeRequestsInterceptor,
   noDedupe,
 } from './dedupe-interceptor';
+export { hashRequest } from './hash-request';

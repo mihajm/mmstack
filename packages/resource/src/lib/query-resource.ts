@@ -23,11 +23,16 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { injectPaused, toWritable, type PauseOption } from '@mmstack/primitives';
+import {
+  injectPaused,
+  type PauseOption,
+  toWritable,
+} from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
 import {
   applyResourceRegistration,
   type CommonResourceOptions,
+  type ResourceCacheOptions,
   injectResourceOptions,
   provideTypedResourceOptions,
 } from './options';
@@ -40,6 +45,10 @@ import {
   injectNetworkStatus,
   injectPageVisibility,
   injectQueryCache,
+  mergeCacheOptions,
+  mergeCircuitBreakerOptions,
+  mergeRefreshOptions,
+  mergeRetryOptions,
   persistResourceValues,
   refresh,
   type RefreshOptions,
@@ -47,65 +56,9 @@ import {
   setCacheContext,
   toResourceObject,
 } from './util';
-
-export { type RefreshOptions } from './util';
 import { type CacheEntry } from './util/cache/cache';
 
-/**
- * Options for configuring caching behavior of a `queryResource`.
- * - `true`: Enables caching with default settings.
- * - `{ ttl?: number; staleTime?: number; hash?: (req: HttpResourceRequest) => string; }`:  Configures caching with custom settings.
- */
-type ResourceCacheOptions =
-  | true
-  | {
-      /**
-       * The Time To Live (TTL) for the cached data, in milliseconds. After this time, the cached data is
-       * considered expired and will be refetched.
-       */
-      ttl?: number;
-      /**
-       * The duration, in milliseconds, during which stale data can be served while a revalidation request
-       * is made in the background.
-       */
-      staleTime?: number;
-      /**
-       * A custom function to generate the cache key. Defaults to using the request URL with parameters.
-       * Provide a custom hash function if you need more control over how cache keys are generated,
-       * for instance, to ignore certain query parameters or to use request body for the cache key.
-       */
-      hash?: (req: HttpResourceRequest) => string;
-      /**
-       * Whether to bust the browser cache by appending a unique query parameter to the request URL.
-       * This is useful for ensuring that the latest data is fetched from the server, bypassing any
-       * cached responses in the browser. The unique parameter is removed before calling the cache function, so it does not affect the cache key.
-       * @default false - By default, the resource will not bust the browser cache.
-       */
-      bustBrowserCache?: boolean;
-      /**
-       * Whether to ignore the `Cache-Control` headers from the server when caching responses.
-       * If set to `true`, the resource will not respect any cache directives from the server,
-       * allowing you to control caching behavior entirely through the resource options.
-       * @default false - By default the resource will respect `Cache-Control` headers.
-       */
-      ignoreCacheControl?: boolean;
-      /**
-       * Whether to persist the cache entry in the local DB instance.
-       * @default false - By default, the cache entry is not persisted.
-       */
-      persist?: boolean;
-      /**
-       * Request headers whose values should partition the cache key — e.g.
-       * `['Authorization']` gives each user their own entries, `['Accept-Language']`
-       * separates per-language responses. Header values are one-way digested into the
-       * key (never embedded raw), so secrets don't end up in persisted/broadcast keys.
-       * Ignored when a custom `hash` function is provided (it owns the key entirely).
-       *
-       * Note: still call `cache.clear()` on logout — the previous user's entries are
-       * unreachable under the new key but linger until their TTL.
-       */
-      varyHeaders?: string[];
-    };
+export { type RefreshOptions } from './util';
 
 /**
  * Options for configuring a `queryResource`. Extends Angular's
@@ -373,10 +326,21 @@ export function queryResource<TResult, TRaw = TResult>(
   options0?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
   // Two-layer option injection: per-call > provideQueryResourceOptions > provideResourceOptions.
+  const globalOpts = injectResourceOptions(options0?.injector);
+  const queryOpts = injectQueryResourceOptions(options0?.injector);
+
   const options = {
-    ...injectResourceOptions(options0?.injector),
-    ...injectQueryResourceOptions(options0?.injector),
+    ...globalOpts,
+    ...queryOpts,
     ...options0,
+    cache: mergeCacheOptions(queryOpts.cache, options0?.cache),
+    circuitBreaker: mergeCircuitBreakerOptions(
+      globalOpts.circuitBreaker,
+      queryOpts.circuitBreaker,
+      options0?.circuitBreaker,
+    ),
+    retry: mergeRetryOptions(globalOpts.retry, queryOpts.retry, options0?.retry),
+    refresh: mergeRefreshOptions(queryOpts.refresh, options0?.refresh),
   } as QueryResourceOptions<TResult, TRaw>;
 
   const cache = injectQueryCache<TResult>(options?.injector);

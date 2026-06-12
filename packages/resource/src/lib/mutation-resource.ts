@@ -31,6 +31,8 @@ import {
   createCircuitBreaker,
   createEqualRequest,
   injectQueryCache,
+  mergeCircuitBreakerOptions,
+  mergeRetryOptions,
 } from './util';
 
 const NULL_VALUE = Symbol('@mmstack/resource:null');
@@ -281,10 +283,19 @@ export function mutationResource<
   options0: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
 ): MutationResourceRef<TResult, TMutation, TICTX> {
   // Two-layer option injection: per-call > provideMutationResourceOptions > provideResourceOptions.
+  const globalOpts = injectResourceOptions(options0.injector);
+  const mutOpts = injectMutationResourceOptions(options0.injector);
+
   const options = {
-    ...injectResourceOptions(options0.injector),
-    ...injectMutationResourceOptions(options0.injector),
+    ...globalOpts,
+    ...mutOpts,
     ...options0,
+    circuitBreaker: mergeCircuitBreakerOptions(
+      globalOpts.circuitBreaker,
+      mutOpts.circuitBreaker,
+      options0?.circuitBreaker,
+    ),
+    retry: mergeRetryOptions(globalOpts.retry, mutOpts.retry, options0?.retry),
   } as MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>;
 
   // `register` is pulled out (and forced off on the inner query below) so the mutation ref is

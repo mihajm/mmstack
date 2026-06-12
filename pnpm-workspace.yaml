@@ -4,6 +4,6 @@ allowBuilds:
   esbuild: true
   less: false
   lmdb: true
-  msgpackr-extract: set this to true or false
+  msgpackr-extract: false
   nx: true
   unrs-resolver: false

@@ -8,8 +8,9 @@ import {
   type HttpInterceptorFn,
   type HttpRequest,
 } from '@angular/common/http';
-import { finalize, shareReplay, type Observable } from 'rxjs';
+import { type Observable } from 'rxjs';
 import { hashRequest } from './hash-request';
+import { sharePending } from './share-pending';
 
 const NO_DEDUPE = new HttpContextToken<boolean>(() => false);
 
@@ -38,6 +39,12 @@ export function noDedupe(ctx: HttpContext = new HttpContext()) {
  * If multiple identical requests (same URL and parameters) are made concurrently,
  * only the first request will be sent to the server. Subsequent requests will
  * receive the response from the first request.
+ *
+ * Relationship to `createCacheInterceptor`: the cache interceptor has built-in
+ * single-flight for CACHE-ENABLED requests (keyed by the cache key). This interceptor
+ * covers everything the cache doesn't see — non-cached resources, plain HttpClient
+ * calls, DELETEs — keyed by the request hash. Installing both is the recommended
+ * setup; where they overlap, this one degrades to a no-op passthrough.
  *
  * @param allowed - An array of HTTP methods for which deduplication should be enabled.
  *                  Defaults to `['GET', 'DELETE', 'HEAD', 'OPTIONS']`.
@@ -82,17 +89,6 @@ export function createDedupeRequestsInterceptor(
     if (!DEDUPE_METHODS.has(req.method) || req.context.get(NO_DEDUPE))
       return next(req);
 
-    const key = keyFn(req);
-    const found = inFlight.get(key);
-
-    if (found) return found;
-
-    const request = next(req).pipe(
-      finalize(() => inFlight.delete(key)),
-      shareReplay({ bufferSize: 1, refCount: true }),
-    );
-    inFlight.set(key, request);
-
-    return request;
+    return sharePending(inFlight, keyFn(req), () => next(req));
   };
 }

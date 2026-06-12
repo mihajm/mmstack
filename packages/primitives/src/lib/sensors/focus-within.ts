@@ -10,6 +10,7 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 type FocusWithinTarget =
   | ElementRef<Element>
@@ -39,13 +40,27 @@ function unwrap(target: ElementRef<Element> | Element | null): Element | null {
  * ```
  */
 export function focusWithin(
-  target: FocusWithinTarget = inject(ElementRef),
+  target?: FocusWithinTarget,
+  opt?: SensorRunOptions,
 ): Signal<boolean> {
+  return runInSensorContext(opt?.injector, () =>
+    // the host-element default must resolve INSIDE the sensor context, not as a
+    // parameter default (which would run before the injector wrapper)
+    createFocusWithin(target ?? inject(ElementRef), opt),
+  );
+}
+
+function createFocusWithin(
+  target: FocusWithinTarget,
+  opt?: SensorRunOptions,
+): Signal<boolean> {
+  const debugName = opt?.debugName ?? 'focusWithin';
+
   if (isPlatformServer(inject(PLATFORM_ID))) {
-    return computed(() => false, { debugName: 'focusWithin' });
+    return computed(() => false, { debugName });
   }
 
-  const state = signal(false, { debugName: 'focusWithin' });
+  const state = signal(false, { debugName });
 
   const attach = (el: Element) => {
     state.set(el.contains(document.activeElement));

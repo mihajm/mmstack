@@ -125,8 +125,8 @@ export type StoredSignal<T> = WritableSignal<T> & {
  *
  * @template T The type of value held by the signal and stored (after serialization).
  * @param fallback The default value of type `T` to use when no value is found in storage
- * or when deserialization fails. The signal's value will never be `null` or `undefined`
- * publicly, it will always revert to this fallback.
+ * or when deserialization fails. A stored value (including a legitimate `null` for a
+ * nullable `T`) always round-trips; the fallback only surfaces when the entry is absent.
  * @param options Configuration options (`CreateStoredOptions<T>`). Requires at least the `key`.
  * @returns A `StoredSignal<T>` instance. This signal behaves like a standard `WritableSignal<T>`,
  * but its value is persisted. It includes a `.clear()` method to remove the item from storage
@@ -139,7 +139,8 @@ export type StoredSignal<T> = WritableSignal<T> & {
  * - **Error Handling:** Catches and logs errors during serialization/deserialization in dev mode.
  * - **Tab Sync:** If `syncTabs` is true, listens to `storage` events to keep the signal value
  * consistent across browser tabs using the same key. Cleanup is handled automatically
- * using `DestroyRef`.
+ * using `DestroyRef`. Web Storage only: the `storage` event never fires for custom `store`
+ * adapters, so `syncTabs` has no effect with one.
  * - **Removal:** Use the `.clear()` method on the returned signal to remove the item from storage.
  * Setting the signal to the fallback value will store the fallback value, not remove the item.
  *
@@ -192,23 +193,28 @@ export function stored<T>(
         ? key
         : computed(key);
 
-  const getValue = (key: string): T | null => {
+  // "no stored value" marker — distinct from `null`/`undefined`, so a nullable `T` can
+  // round-trip a legitimate `null` through `set` instead of it acting like `clear()`
+  const EMPTY = Symbol();
+  type Empty = typeof EMPTY;
+
+  const getValue = (key: string): T | Empty => {
     const found = store.getItem(key);
-    if (found === null) return null;
+    if (found === null) return EMPTY;
     try {
       const deserialized = deserialize(found);
-      if (!validate(deserialized)) return null;
+      if (!validate(deserialized)) return EMPTY;
       return deserialized;
     } catch (err) {
       if (isDevMode())
         console.error(`Failed to parse stored value for key "${key}":`, err);
-      return null;
+      return EMPTY;
     }
   };
 
-  const storeValue = (key: string, value: T | null) => {
+  const storeValue = (key: string, value: T | Empty) => {
     try {
-      if (value === null) return store.removeItem(key);
+      if (value === EMPTY) return store.removeItem(key);
       const serialized = serialize(value);
       store.setItem(key, serialized);
     } catch (err) {
@@ -223,11 +229,11 @@ export function stored<T>(
   };
 
   const initialKey = untracked(keySig);
-  const internal = signal(getValue(initialKey), {
+  const internal = signal<T | Empty>(getValue(initialKey), {
     ...opt,
     equal: (a, b) => {
-      if (a === null && b === null) return true;
-      if (a === null || b === null) return false;
+      if (a === EMPTY && b === EMPTY) return true;
+      if (a === EMPTY || b === EMPTY) return false;
       return equal(a, b);
     },
   });
@@ -262,9 +268,13 @@ export function stored<T>(
   if (syncTabs && !isServer) {
     const destroyRef = inject(DestroyRef);
     const sync = (e: StorageEvent) => {
+      // `storage` events only describe Web Storage — ignore events for a different
+      // storage area (or any event when a custom adapter is configured), otherwise an
+      // unrelated localStorage write with the same key string corrupts our state
+      if (e.storageArea !== store) return;
       if (e.key !== untracked(keySig)) return;
 
-      if (e.newValue === null) internal.set(null);
+      if (e.newValue === null) internal.set(EMPTY);
       else internal.set(getValue(e.key));
     };
 
@@ -274,12 +284,15 @@ export function stored<T>(
   }
 
   const writable = toWritable<T>(
-    computed(() => internal() ?? fallback, opt),
+    computed(() => {
+      const v = internal();
+      return v === EMPTY ? fallback : v;
+    }, opt),
     internal.set,
   ) as StoredSignal<T>;
 
   writable.clear = () => {
-    internal.set(null);
+    internal.set(EMPTY);
   };
   writable.key = keySig;
   return writable;

@@ -1,5 +1,6 @@
 export * from './battery-status';
 export * from './clipboard';
+export { type SensorRunOptions } from './sensor-options';
 export * from './element-size';
 export * from './element-visibility';
 export * from './focus-within';

@@ -5,7 +5,7 @@ import {
   type Injector,
 } from '@angular/core';
 import { type Vivify } from '../util';
-import { toStore, type UnwrapOpqaue, type WritableSignalStore } from './store';
+import { toStore, type UnwrapOpaque, type WritableSignalStore } from './store';
 
 /**
  * A 3-way merge of a forked value against a changed base: given the common `ancestor` (the base
@@ -82,11 +82,15 @@ export function merge3<T>(ancestor: T, mine: T, theirs: T): T {
   if (isPlainRecord(mine) && isPlainRecord(theirs) && isPlainRecord(ancestor)) {
     const out: Record<string, unknown> = { ...theirs };
     for (const key of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
-      out[key] = merge3(
+      const merged = merge3(
         (ancestor as Record<string, unknown>)[key],
         (mine as Record<string, unknown>)[key],
         (theirs as Record<string, unknown>)[key],
       );
+      // a key deleted on the fork must commit as ABSENT, not as an explicit `undefined`
+      if (merged === undefined && !(key in (mine as Record<string, unknown>)))
+        delete out[key];
+      else out[key] = merged;
     }
     return out as T;
   }
@@ -133,8 +137,8 @@ export function forkStore<T extends Record<string, any>>(
         ? (merge3 as ReconcileFn<T>)
         : strategy;
 
-  const merge = reconcile as unknown as ReconcileFn<UnwrapOpqaue<T>>;
-  const staged = linkedSignal<UnwrapOpqaue<T>, UnwrapOpqaue<T>>({
+  const merge = reconcile as unknown as ReconcileFn<UnwrapOpaque<T>>;
+  const staged = linkedSignal<UnwrapOpaque<T>, UnwrapOpaque<T>>({
     source: () => base(),
     computation: (theirs, prev) =>
       prev === undefined ? theirs : merge(prev.source, prev.value, theirs),

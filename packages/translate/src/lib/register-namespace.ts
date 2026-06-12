@@ -1,3 +1,4 @@
+import { isPlatformServer } from '@angular/common';
 import {
   computed,
   DestroyRef,
@@ -5,6 +6,9 @@ import {
   Injectable,
   isDevMode,
   isSignal,
+  makeStateKey,
+  PLATFORM_ID,
+  TransferState,
   untracked,
   type Signal,
 } from '@angular/core';
@@ -313,10 +317,6 @@ export function registerNamespace<
 
   const keyMap = new Map<string, string>();
 
-  // Pre-wrap loaders once so the rest of the pipeline — including the
-  // dynamic-locale loader in `TranslationStore`, which reads `.namespace`
-  // and `.flat` directly off the result — always sees a `CompiledTranslation`
-  // regardless of which loader shape the caller used.
   const unwrappedDefault = (): Promise<TDefault> =>
     defaultTranslation().then(resolveTranslationModule);
 
@@ -346,6 +346,9 @@ export function registerNamespace<
   // because `store.register` is idempotent (same payload overwrites with the same
   // value). Do not add locking here.
   let defaultTranslationLoaded = false;
+  // Locales whose translations this namespace already registered — a repeat navigation
+  // must not re-run the loader (and re-register) every time.
+  const loadedLocales = new Set<string>();
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
 
@@ -364,6 +367,13 @@ export function registerNamespace<
 
     if (promise === unwrappedDefault && defaultTranslationLoaded) return;
 
+    // already loaded on a previous navigation — just sync the locale, skip the reload
+    if (tPromise && loadedLocales.has(locale)) {
+      if (locale !== untracked(store.locale)) store.locale.set(locale);
+      return;
+    }
+
+    let loaded = false;
     try {
       const promises = [promise()];
 
@@ -402,14 +412,21 @@ export function registerNamespace<
 
       store.register(ns, toRegister);
 
+      if (t) loadedLocales.add(locale);
       if (promise === unwrappedDefault || defaultT)
         defaultTranslationLoaded = true;
+      loaded = true;
     } catch {
       if (isDevMode()) {
-        console.warn(`Failed to load translation for locale: ${locale}`);
+        console.warn(
+          `Failed to load translation for locale: ${locale} — locale switch skipped.`,
+        );
       }
     } finally {
-      if (locale !== untracked(store.locale)) store.locale.set(locale);
+      // only switch on success — switching to a locale whose load failed would render
+      // wholesale fallbacks (or '') with no signal to the router that anything failed
+      if (loaded && locale !== untracked(store.locale))
+        store.locale.set(locale);
     }
   };
 
@@ -420,10 +437,10 @@ export function registerNamespace<
 }
 
 type UntypedTFunction<TNS extends string> = {
-  (key: `${TNS}.${string}`, args?: Record<string, string>): string;
+  (key: `${TNS}.${string}`, args?: Record<string, string | number>): string;
   asSignal: (
     key: `${TNS}.${string}`,
-    args?: () => Record<string, string>,
+    args?: () => Record<string, string | number>,
   ) => Signal<string>;
 };
 
@@ -465,6 +482,31 @@ export function registerRemoteNamespace<TNS extends string>(
 ) {
   const keyMap = new Map<string, string>();
 
+  // TransferState plumbing: remote translations fetched during SSR are serialized into
+  // the page so hydration doesn't refetch them. Captured lazily from the resolver's
+  // injection context (registration happens at module scope, outside DI); the on-demand
+  // loaders run async without a context, so they use these captured references.
+  let transferState: TransferState | null = null;
+  let onServer = false;
+
+  const loadRaw = (
+    loader: () => Promise<Record<string, string>>,
+    locale: string,
+  ): Promise<Record<string, string>> => {
+    const key = makeStateKey<Record<string, string>>(
+      `@mmstack/translate:${ns}:${locale}`,
+    );
+
+    if (!onServer && transferState?.hasKey(key)) {
+      return Promise.resolve(transferState.get(key, {}));
+    }
+
+    return loader().then((raw) => {
+      if (onServer) transferState?.set(key, raw);
+      return raw;
+    });
+  };
+
   // The dynamic-locale loader in TranslationStore reads `.namespace` and `.flat`
   // off the loader result, so on-demand loaders must return CompiledTranslation.
   // Wrap the raw remote fetchers once here at registration time rather than every
@@ -475,7 +517,9 @@ export function registerRemoteNamespace<TNS extends string>(
       locale: TLocale,
     ) =>
     () =>
-      loader().then((raw) => compileTranslation(raw, ns, locale));
+      loadRaw(loader, locale).then((raw) =>
+        compileTranslation(raw, ns, locale),
+      );
 
   const compiledOther: Record<
     string,
@@ -497,11 +541,15 @@ export function registerRemoteNamespace<TNS extends string>(
     ) as UntypedTFunction<TNS>;
   };
 
-  // See `defaultTranslationLoaded` in `registerNamespace` for rationale —
-  // intentionally racy, safe via idempotent `store.register`.
   let defaultTranslationLoaded = false;
+
+  const loadedLocales = new Set<string>();
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
+
+    // capture for loadRaw — the resolver always runs in an injection context
+    transferState = inject(TransferState, { optional: true });
+    onServer = isPlatformServer(inject(PLATFORM_ID));
 
     const locale = injectResolveParamLocale(snapshot);
 
@@ -519,15 +567,24 @@ export function registerRemoteNamespace<TNS extends string>(
 
     if (promise === defaultTranslation && defaultTranslationLoaded) return;
 
+    // already fetched on a previous navigation — just sync the locale, skip the refetch
+    if (tPromise && loadedLocales.has(locale)) {
+      if (locale !== untracked(store.locale)) store.locale.set(locale);
+      return;
+    }
+
+    let loaded = false;
     try {
-      const promises = [promise()];
+      const requestedLocale =
+        promise === defaultTranslation ? defaultLocale : locale;
+      const promises = [loadRaw(promise, requestedLocale)];
 
       if (
         shouldPreloadDefault &&
         !defaultTranslationLoaded &&
         promise !== defaultTranslation
       )
-        promises.push(defaultTranslation());
+        promises.push(loadRaw(defaultTranslation, defaultLocale));
 
       const translations = await Promise.allSettled(promises);
 
@@ -559,14 +616,20 @@ export function registerRemoteNamespace<TNS extends string>(
 
       store.register(ns, toRegister);
 
+      if (t) loadedLocales.add(locale);
       if (promise === defaultTranslation || defaultT)
         defaultTranslationLoaded = true;
+      loaded = true;
     } catch {
       if (isDevMode()) {
-        console.warn(`Failed to load translation for locale: ${locale}`);
+        console.warn(
+          `Failed to load translation for locale: ${locale} — locale switch skipped.`,
+        );
       }
     } finally {
-      if (locale !== untracked(store.locale)) store.locale.set(locale);
+      // only switch on success — see registerNamespace's resolver for rationale
+      if (loaded && locale !== untracked(store.locale))
+        store.locale.set(locale);
     }
   };
 

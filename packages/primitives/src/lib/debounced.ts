@@ -8,6 +8,7 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
+import { getSignalEquality } from './get-signal-equality';
 import { toWritable } from './to-writable';
 
 /**
@@ -117,6 +118,7 @@ export function debounce<T>(
   source: WritableSignal<T>,
   opt?: CreateDebouncedOptions<T>,
 ): DebouncedSignal<T> {
+  const eq = opt?.equal ?? getSignalEquality(source);
   const ms = opt?.ms ?? 0;
 
   const trigger = signal(false);
@@ -135,21 +137,19 @@ export function debounce<T>(
     // not in injection context & no destroyRef provided opting out of cleanup
   }
 
-  const triggerFn = (next: T) => {
-    if (timeout) clearTimeout(timeout);
-    source.set(next);
+  const set = (next: T) => {
+    const isEqual = eq(untracked(source), next);
+    if (!timeout && isEqual) return; // nothing to do
+    if (timeout) clearTimeout(timeout); // clear pending
+    if (!isEqual) source.set(next);
+
     timeout = setTimeout(() => {
+      timeout = undefined;
       trigger.update((c) => !c);
     }, ms);
   };
 
-  const set = (value: T) => {
-    triggerFn(value);
-  };
-
-  const update = (fn: (prev: T) => T) => {
-    triggerFn(fn(untracked(source)));
-  };
+  const update = (fn: (prev: T) => T) => set(fn(untracked(source)));
 
   const writable = toWritable(
     computed(() => {
@@ -159,7 +159,7 @@ export function debounce<T>(
     set,
     update,
   ) as DebouncedSignal<T>;
-  writable.original = source;
+  writable.original = source.asReadonly();
 
   return writable;
 }

@@ -7,6 +7,11 @@ import {
   type Signal,
   signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
 /**
  * Creates a read-only signal that tracks the page's visibility state.
@@ -16,7 +21,8 @@ import {
  * The primitive is SSR-safe and automatically cleans up its event listeners
  * when the creating context is destroyed.
  *
- * @param debugName Optional debug name for the signal.
+ * @param opt Optional debug name for the signal, or a {@link SensorRunOptions} object
+ * (with an optional `injector` for creation outside an injection context).
  * @returns A read-only `Signal<DocumentVisibilityState>`. On the server,
  * it returns a static signal with a value of `'visible'`.
  *
@@ -45,7 +51,14 @@ import {
  * ```
  */
 export function pageVisibility(
-  debugName = 'pageVisibility',
+  opt?: string | SensorRunOptions,
+): Signal<DocumentVisibilityState> {
+  const { debugName = 'pageVisibility', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createPageVisibility(debugName));
+}
+
+function createPageVisibility(
+  debugName: string,
 ): Signal<DocumentVisibilityState> {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     return computed(() => 'visible', { debugName });

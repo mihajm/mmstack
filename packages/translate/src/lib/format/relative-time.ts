@@ -1,7 +1,7 @@
 import { type Signal } from '@angular/core';
 import { readLocaleUnsafe } from '../translation-store';
 import { createFormatterProvider } from './provide-defaults';
-import { unwrap } from './unwrap';
+import { mergeDefined, unwrap } from './unwrap';
 
 const cache = new Map<string, Intl.RelativeTimeFormat>();
 
@@ -99,12 +99,8 @@ export function formatRelativeTime(
     | Signal<UnsafeFormatRelativeTimeOptions>,
 ): string {
   const unwrappedValue = unwrap(value);
-  if (
-    unwrappedValue === null ||
-    unwrappedValue === undefined ||
-    isNaN(unwrappedValue)
-  )
-    return '';
+  // Number.isFinite also rejects ±Infinity, which Intl.RelativeTimeFormat throws on
+  if (unwrappedValue == null || !Number.isFinite(unwrappedValue)) return '';
 
   const unwrappedUnit = unwrap(unit);
   if (!unwrappedUnit) return '';
@@ -147,6 +143,128 @@ const [provideFormatRelativeTimeDefaults, injectFormatRelativeTimeOptions] =
 export { provideFormatRelativeTimeDefaults };
 
 /**
+ * Reference instants in seconds per unit, used by {@link formatRelativeTimeToNow} to pick
+ * the largest unit whose magnitude is at least 1. Weeks/months use calendar averages
+ * (4.34524 weeks/month), which is the standard approximation for "x ago" displays —
+ * supply an explicit unit via {@link formatRelativeTime} when exactness matters.
+ */
+const DIVISIONS: { amount: number; unit: RelativeTimeUnit }[] = [
+  { amount: 60, unit: 'second' },
+  { amount: 60, unit: 'minute' },
+  { amount: 24, unit: 'hour' },
+  { amount: 7, unit: 'day' },
+  { amount: 4.34524, unit: 'week' },
+  { amount: 12, unit: 'month' },
+  { amount: Infinity, unit: 'year' },
+];
+
+function selectUnit(deltaSeconds: number): {
+  value: number;
+  unit: RelativeTimeUnit;
+} {
+  let duration = deltaSeconds;
+  for (const division of DIVISIONS) {
+    if (Math.abs(duration) < division.amount) {
+      return { value: Math.round(duration), unit: division.unit };
+    }
+    duration /= division.amount;
+  }
+  return { value: Math.round(duration), unit: 'year' };
+}
+
+export type FormatRelativeTimeToNowOptions = FormatRelativeTimeOptions & {
+  /**
+   * The reference instant to diff against, mostly useful for testing.
+   * @default Date.now()
+   */
+  now?: number | Date;
+};
+
+/**
+ * Formats a date/timestamp relative to now ("3 days ago", "in 2 hours"), picking the
+ * largest fitting unit automatically — the `date-fns formatDistanceToNow` ergonomics on
+ * top of `Intl.RelativeTimeFormat`. Invalid/nullish input formats to `''`.
+ *
+ * Pass `numeric: 'auto'` for natural phrasing ("yesterday", "last month") instead of
+ * the default numeric form ("1 day ago").
+ *
+ * @example
+ * formatRelativeTimeToNow(post.createdAt, { locale: 'en-US' }); // "3 days ago"
+ * formatRelativeTimeToNow(due, { locale: 'sl-SI', numeric: 'auto' });
+ */
+export function formatRelativeTimeToNow(
+  date:
+    | Date
+    | string
+    | number
+    | null
+    | undefined
+    | Signal<Date | string | number | null | undefined>,
+  opt: FormatRelativeTimeToNowOptions | Signal<FormatRelativeTimeToNowOptions>,
+): string {
+  const unwrapped = unwrap(date);
+  if (unwrapped == null) return '';
+
+  const d = unwrapped instanceof Date ? unwrapped : new Date(unwrapped);
+  if (isNaN(d.getTime())) return '';
+
+  const o = unwrap(opt);
+  const nowOpt = o.now ?? Date.now();
+  const now = nowOpt instanceof Date ? nowOpt.getTime() : nowOpt;
+
+  const { value, unit } = selectUnit((d.getTime() - now) / 1000);
+  return formatRelativeTime(value, unit, {
+    locale: o.locale,
+    style: o.style,
+    numeric: o.numeric,
+  });
+}
+
+/**
+ * Inject a context-safe "relative to now" formatter tied to the current injector — the
+ * auto-unit sibling of {@link injectFormatRelativeTime}. Reacts to locale/config changes.
+ *
+ * @example
+ * const toNow = injectFormatRelativeTimeToNow();
+ * readonly age = computed(() => toNow(this.createdAt()));
+ */
+export function injectFormatRelativeTimeToNow() {
+  const defaults = injectFormatRelativeTimeOptions();
+
+  return (
+    date:
+      | Date
+      | string
+      | number
+      | null
+      | undefined
+      | Signal<Date | string | number | null | undefined>,
+    optOrLocale?:
+      | Partial<FormatRelativeTimeToNowOptions>
+      | Signal<Partial<FormatRelativeTimeToNowOptions>>
+      | string
+      | Signal<string>,
+  ) => {
+    if (!optOrLocale) return formatRelativeTimeToNow(date, defaults());
+
+    const unwrapped = unwrap(optOrLocale);
+
+    const opt =
+      typeof unwrapped === 'object'
+        ? mergeDefined(
+            defaults() as FormatRelativeTimeToNowOptions,
+            unwrapped,
+          )
+        : {
+            ...defaults(),
+            locale: unwrapped,
+          };
+
+    return formatRelativeTimeToNow(date, opt);
+  };
+}
+
+/**
  * Inject a context-safe relative time formatting function tied to the current injector.
  * Uses the libraries locale signal & provided default configuration to react to locale/config changes
  * @example
@@ -171,7 +289,7 @@ export function injectFormatRelativeTime() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,

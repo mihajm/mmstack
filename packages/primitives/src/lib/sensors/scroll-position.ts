@@ -2,12 +2,16 @@ import { isPlatformServer } from '@angular/common'; // Corrected import
 import {
   computed,
   DestroyRef,
+  effect,
   ElementRef,
   inject,
+  isSignal,
   PLATFORM_ID, // Used for SSR fallback
   type Signal,
+  untracked,
 } from '@angular/core';
 import { throttled } from '../throttled';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 /**
  * Represents the scroll position.
@@ -22,21 +26,25 @@ export type ScrollPosition = {
 /**
  * Options for configuring the `scrollPosition` sensor.
  */
-export type ScrollPositionOptions = {
+export type ScrollPositionOptions = SensorRunOptions & {
   /**
    * The target to listen for scroll events on.
-   * Can be `window` (for page scroll) or an `HTMLElement`/`ElementRef<HTMLElement>`.
+   * Can be `window` (for page scroll), an `HTMLElement`/`ElementRef<HTMLElement>`, or a
+   * `Signal` resolving to one (e.g. a `viewChild` result) — listeners re-attach when the
+   * signal's element changes, and nothing is tracked while it is `null`/`undefined`.
    * @default window
    */
-  target?: Window | HTMLElement | ElementRef<HTMLElement>;
+  target?:
+    | Window
+    | HTMLElement
+    | ElementRef<HTMLElement>
+    | Signal<HTMLElement | ElementRef<HTMLElement> | null | undefined>;
   /**
    * Optional delay in milliseconds to throttle the updates.
    * Scroll events can fire very rapidly.
    * @default 100 // A common default for scroll throttling
    */
   throttle?: number;
-  /** Optional debug name for the internal signal. */
-  debugName?: string;
 };
 
 /**
@@ -76,31 +84,28 @@ export type ScrollPositionSignal = Signal<ScrollPosition> & {
  * selector: 'app-scroll-tracker',
  * template: `
  * <p>Window Scroll: X: {{ windowScroll().x }}, Y: {{ windowScroll().y }}</p>
- * <div #scrollableDiv style="height: 200px; width: 200px; overflow: auto; border: 1px solid black;">
- * <div style="height: 400px; width: 400px;">Scroll me!</div>
- * </div>
- * @if (divScroll()) {
- * <p>Div Scroll: X: {{ divScroll().x }}, Y: {{ divScroll().y }}</p>
- * }
+ * <p>Host Scroll: X: {{ hostScroll().x }}, Y: {{ hostScroll().y }}</p>
  * `
  * })
  * export class ScrollTrackerComponent {
  * readonly windowScroll = scrollPosition(); // Defaults to window
+ * // Signal targets (e.g. viewChild) attach once the element exists:
  * readonly scrollableDiv = viewChild<ElementRef<HTMLDivElement>>('scrollableDiv');
- * readonly divScroll = scrollPosition({ target: this.scrollableDiv() }); // Example with element target
+ * readonly divScroll = scrollPosition({ target: this.scrollableDiv });
  *
  * constructor() {
- * effect(() => {
- * console.log('Window scrolled to:', this.windowScroll());
- * if (this.divScroll()) {
- * console.log('Div scrolled to:', this.divScroll());
- * }
- * });
+ * effect(() => console.log('Window scrolled to:', this.windowScroll()));
  * }
  * }
  * ```
  */
 export function scrollPosition(
+  opt?: ScrollPositionOptions,
+): ScrollPositionSignal {
+  return runInSensorContext(opt?.injector, () => createScrollPosition(opt));
+}
+
+function createScrollPosition(
   opt?: ScrollPositionOptions,
 ): ScrollPositionSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
@@ -123,46 +128,55 @@ export function scrollPosition(
     debugName = 'scrollPosition',
   } = opt || {};
 
-  let element: Window | HTMLElement;
+  const resolve = (
+    t: Window | HTMLElement | ElementRef<HTMLElement> | null | undefined,
+  ): Window | HTMLElement | null => {
+    if (!t) return null;
+    return t instanceof ElementRef ? t.nativeElement : t;
+  };
 
-  let getScrollPosition: () => ScrollPosition;
+  const isWindow = (el: Window | HTMLElement): el is Window =>
+    (el as Window).window === el;
 
-  if (target instanceof Window) {
-    element = target;
+  const readPosition = (el: Window | HTMLElement): ScrollPosition =>
+    isWindow(el)
+      ? {
+          x: el.scrollX ?? el.pageXOffset ?? 0,
+          y: el.scrollY ?? el.pageYOffset ?? 0,
+        }
+      : { x: el.scrollLeft, y: el.scrollTop };
 
-    getScrollPosition = () => {
-      return { x: target.scrollX, y: target.scrollY };
-    };
-  } else if (target instanceof ElementRef) {
-    element = target.nativeElement;
-    getScrollPosition = () => {
-      return {
-        x: target.nativeElement.scrollLeft,
-        y: target.nativeElement.scrollTop,
-      };
-    };
-  } else {
-    element = target;
-    getScrollPosition = () => {
-      return {
-        x: target.scrollLeft,
-        y: target.scrollTop,
-      };
-    };
-  }
+  const initial = resolve(isSignal(target) ? untracked(target) : target);
 
-  const state = throttled<ScrollPosition>(getScrollPosition(), {
-    debugName,
-    equal: (a, b) => a.x === b.x && a.y === b.y,
-    ms: throttle,
-  });
-
-  const onScroll = () => state.set(getScrollPosition());
-  element.addEventListener('scroll', onScroll, { passive: true });
-
-  inject(DestroyRef).onDestroy(() =>
-    element.removeEventListener('scroll', onScroll),
+  const state = throttled<ScrollPosition>(
+    initial ? readPosition(initial) : { x: 0, y: 0 },
+    {
+      debugName,
+      equal: (a, b) => a.x === b.x && a.y === b.y,
+      ms: throttle,
+    },
   );
+
+  if (isSignal(target)) {
+    // re-attach whenever the signal resolves to a (new) element — covers viewChild
+    effect((cleanup) => {
+      const el = resolve(target());
+      if (!el) return;
+      state.set(readPosition(el)); // sync to the new element immediately
+      const onScroll = () => state.set(readPosition(el));
+      el.addEventListener('scroll', onScroll, { passive: true });
+      cleanup(() => el.removeEventListener('scroll', onScroll));
+    });
+  } else {
+    const el = resolve(target);
+    if (el) {
+      const onScroll = () => state.set(readPosition(el));
+      el.addEventListener('scroll', onScroll, { passive: true });
+      inject(DestroyRef).onDestroy(() =>
+        el.removeEventListener('scroll', onScroll),
+      );
+    }
+  }
 
   const base = state.asReadonly() as InternalScrollPositionSignal;
   base.unthrottled = state.original;

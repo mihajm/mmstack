@@ -101,7 +101,7 @@ export const filter =
       source: src,
       computation: (next, prev) => {
         if (predicate(next)) return next;
-        return prev?.source;
+        return prev?.value;
       },
     });
 
@@ -146,7 +146,7 @@ export const filterWith =
     linkedSignal<T, T>({
       source: src,
       computation: (next, prev) =>
-        predicate(next) ? next : (prev?.value ?? initial),
+        predicate(next) ? next : prev ? prev.value : initial,
     });
 
 /**
@@ -207,5 +207,5 @@ export const scan =
   (src) =>
     linkedSignal<T, R>({
       source: src,
-      computation: (next, prev) => reducer(prev?.value ?? seed, next),
+      computation: (next, prev) => reducer(prev ? prev.value : seed, next),
     });

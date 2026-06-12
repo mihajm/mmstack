@@ -117,11 +117,16 @@ export function indexArray<T, U>(
         // noop
       });
 
+  // copy before defaulting `equal` — assigning onto `opt` would mutate a caller-owned
+  // (possibly shared/reused) options object
   if (isWritableSignal(data) && isMutable(data) && !opt.equal) {
-    opt.equal = (a: T, b: T) => {
-      if (typeof a !== typeof b) return false;
-      if (typeof a === 'object' || typeof a === 'function') return false;
-      return a === b;
+    opt = {
+      ...opt,
+      equal: (a: T, b: T) => {
+        if (typeof a !== typeof b) return false;
+        if (typeof a === 'object' || typeof a === 'function') return false;
+        return a === b;
+      },
     };
   }
 

@@ -42,6 +42,10 @@ export function toWritable<T>(
     /**
      * If `true` (the default), the returned signal will be a computed signal that depends on the source signal.
      * If `false`, the returned signal will be a direct wrapper around the source signal without creating a new computed signal.
+     *
+     * CAUTION: with `pure: false` the `set`/`update`/`asReadonly` methods are patched directly
+     * onto the signal object you passed in — every other holder of that signal sees it become
+     * writable. Only use it with a signal you created and own exclusively.
      * @default true
      */
     pure?: boolean;

@@ -155,7 +155,7 @@ function createNoopScope(): TransitionScope {
 }
 
 const TRANSITION_SCOPE = new InjectionToken<TransitionScope>(
-  '@mmstack/resource:transition-scope',
+  '@mmstack/primitives:transition-scope',
 );
 
 /** Provide a fresh transition scope at a boundary so its subtree's resources are tracked independently. */
@@ -169,7 +169,7 @@ export function injectTransitionScope(): TransitionScope {
   if (!scope) {
     if (isDevMode())
       console.warn(
-        '[mmstack/resource] No transition scope in context — registration/tracking here is a no-op. ' +
+        '[mmstack/primitives] No transition scope in context — registration/tracking here is a no-op. ' +
           'Use a <mm-suspense> boundary or provideTransitionScope() in an ancestor.',
       );
     return createNoopScope();

@@ -1,12 +1,12 @@
 import {
   afterNextRender,
+  effect,
   inject,
   Injector,
   type Signal,
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { effect } from '@angular/core';
 import { injectTransitionScope } from './transition-scope';
 
 /**
@@ -76,6 +76,11 @@ export type TransactionRef = {
  * The writes land on LIVE state immediately (so derived variables and connector requests see the
  * new values and refetch); only the *display* is held, via `scope.hold`. Must run in an injection
  * context.
+ *
+ * Caveat: work must go in flight by the first post-write render to be part of the transaction. A
+ * loader that starts later (a debounced request signal, a chained/deferred resource) is not
+ * attributable to it — the no-async fallback will have already committed and released the hold,
+ * after which `abort()` is a no-op. Trigger such work eagerly inside `fn`.
  */
 export function injectStartTransaction(): (fn: () => void) => TransactionRef {
   const scope = injectTransitionScope();
@@ -88,7 +93,16 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
     scope.beginHold();
 
     let finished = false;
+    // eslint-disable-next-line prefer-const -- assigned in try/catch, but needs to be declared here for the `finally` block to see it
     let watcher: { destroy(): void } | undefined;
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+
+    // Every exit path funnels through here, so `done` always settles — including `abort()`
+    // and a throwing transaction body (which would otherwise leak the hold forever and
+    // freeze the boundary with no recovery).
     const finish = (restore: boolean) => {
       if (finished) return;
       finished = true;
@@ -96,34 +110,32 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
       if (restore) txn.restore();
       else txn.clear();
       scope.endHold();
+      resolveDone();
     };
 
-    runInTransaction(txn, fn);
+    try {
+      runInTransaction(txn, fn);
+    } catch (e) {
+      finish(true);
+      throw e;
+    }
 
     let sawPending = false;
-    const done = new Promise<void>((resolve) => {
-      watcher = effect(
-        () => {
-          const p = scope.pending();
-          if (p) sawPending = true;
-          if (sawPending && !p) {
-            finish(false);
-            resolve();
-          }
-        },
-        { injector },
-      );
-      // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
-      afterNextRender(
-        () => {
-          if (!sawPending && !untracked(scope.pending)) {
-            finish(false);
-            resolve();
-          }
-        },
-        { injector },
-      );
-    });
+    watcher = effect(
+      () => {
+        const p = scope.pending();
+        if (p) sawPending = true;
+        if (sawPending && !p) finish(false);
+      },
+      { injector },
+    );
+    // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
+    afterNextRender(
+      () => {
+        if (!sawPending && !untracked(scope.pending)) finish(false);
+      },
+      { injector },
+    );
 
     return {
       pending: scope.pending,

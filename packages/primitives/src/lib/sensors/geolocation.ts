@@ -7,17 +7,17 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
-export type GeolocationOptions = PositionOptions & {
-  /**
-   * If `true`, uses `navigator.geolocation.watchPosition` and updates the
-   * signal continuously. Otherwise a single `getCurrentPosition` call is made.
-   * @default false
-   */
-  watch?: boolean;
-  /** Optional debug name for the produced signal. */
-  debugName?: string;
-};
+export type GeolocationOptions = PositionOptions &
+  SensorRunOptions & {
+    /**
+     * If `true`, uses `navigator.geolocation.watchPosition` and updates the
+     * signal continuously. Otherwise a single `getCurrentPosition` call is made.
+     * @default false
+     */
+    watch?: boolean;
+  };
 
 type InternalGeolocationSignal = Signal<GeolocationPosition | null> & {
   error: Signal<GeolocationPositionError | null>;
@@ -43,6 +43,10 @@ export type GeolocationSignal = Signal<GeolocationPosition | null> & {
  * ```
  */
 export function geolocation(opt?: GeolocationOptions): GeolocationSignal {
+  return runInSensorContext(opt?.injector, () => createGeolocation(opt));
+}
+
+function createGeolocation(opt?: GeolocationOptions): GeolocationSignal {
   if (isPlatformServer(inject(PLATFORM_ID)) || typeof navigator === 'undefined' || !navigator.geolocation) {
     const sig = computed(() => null, {
       debugName: opt?.debugName ?? 'geolocation',

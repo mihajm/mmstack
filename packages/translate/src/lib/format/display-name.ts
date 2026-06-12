@@ -1,7 +1,7 @@
 import { type Signal } from '@angular/core';
 import { readLocaleUnsafe } from '../translation-store';
 import { createFormatterProvider } from './provide-defaults';
-import { unwrap } from './unwrap';
+import { mergeDefined, unwrap } from './unwrap';
 
 const cache = new Map<string, Intl.DisplayNames>();
 
@@ -100,8 +100,8 @@ export function formatDisplayName(
     | UnsafeFormatDisplayNameOptions
     | Signal<UnsafeFormatDisplayNameOptions>,
 ) {
-  const unwrappedValue = unwrap(value);
-  if (!unwrappedValue?.trim()) return '';
+  const trimmed = unwrap(value)?.trim();
+  if (!trimmed) return '';
 
   const unwrappedType = unwrap(type);
   const unwrapped = unwrap(localeOrOpt);
@@ -113,11 +113,16 @@ export function formatDisplayName(
 
   const opt = typeof unwrapped === 'object' ? unwrapped : undefined;
 
-  return (
-    getFormatter(locale, unwrappedType, opt?.style ?? 'long').of(
-      unwrappedValue,
-    ) ?? ''
-  );
+  try {
+    return (
+      getFormatter(locale, unwrappedType, opt?.style ?? 'long').of(trimmed) ??
+      ''
+    );
+  } catch {
+    // Intl.DisplayNames.of throws RangeError on malformed codes (e.g. 'US 1');
+    // coerce to '' like every other formatter does for invalid input
+    return '';
+  }
 }
 
 const [provideFormatDisplayNameDefaults, injectFormatDisplayNameDefaults] =
@@ -159,7 +164,7 @@ export function injectFormatDisplayName() {
     const unwrapped = unwrap(localeOrOpt);
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,

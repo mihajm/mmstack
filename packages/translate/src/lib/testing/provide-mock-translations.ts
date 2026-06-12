@@ -88,6 +88,10 @@ export function provideMockTranslations(
     intl = createIntl({ locale, messages: mappedMocks }, createIntlCache());
   }
 
+  // always available for `injectIntl()` consumers, even when formatValues is off
+  const intlForInjection =
+    intl ?? createIntl({ locale, messages: mappedMocks }, createIntlCache());
+
   const formatMessage = (
     key: string,
     values?: Record<string, string | number>,
@@ -129,12 +133,17 @@ export function provideMockTranslations(
         registerOnDemandLoaders: () => {
           // noop
         },
+        markSwitchIntent: () => {
+          // noop
+        },
         dynamicLocaleLoader: {
           isLoading: signal(false),
           value: signal(null),
           error: signal(null),
         },
         loadQueue: signal([]),
+        // components under test may use the public injectIntl()
+        intl: computed(() => intlForInjection),
       },
     },
   ];

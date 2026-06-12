@@ -5,6 +5,7 @@ export * from './dedupe-interceptor';
 export * from './equality';
 export * from './has-slow-connection';
 export * from './hash-request';
+export * from './merge-options';
 export * from './persist';
 export * from './refresh';
 export * from './retry-on-error';

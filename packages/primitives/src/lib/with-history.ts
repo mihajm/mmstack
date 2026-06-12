@@ -114,9 +114,10 @@ export function withHistory<T>(
   opt?: CreateHistoryOptions<T>,
 ): SignalWithHistory<T> {
   const equal =
-    (opt?.equal ?? isSignal(sourceOrValue))
+    opt?.equal ??
+    (isSignal(sourceOrValue)
       ? getSignalEquality(sourceOrValue as Signal<T>)
-      : Object.is;
+      : Object.is);
 
   const source = isSignal(sourceOrValue)
     ? (sourceOrValue as WritableSignal<T>)
@@ -174,8 +175,8 @@ export function withHistory<T>(
     if (historyStack.length === 0) return;
 
     const valueForRedo = untracked(source);
-    const valueToRestore = historyStack.at(-1);
-    if (valueToRestore === undefined) return;
+    // length checked above — a legitimately `undefined` entry must still restore
+    const valueToRestore = historyStack[historyStack.length - 1] as T;
 
     originalSet.call(source, valueToRestore);
 
@@ -192,8 +193,8 @@ export function withHistory<T>(
     if (redoStack.length === 0) return;
 
     const valueForUndo = untracked(source);
-    const valueToRestore = redoStack.at(-1);
-    if (valueToRestore === undefined) return;
+    // length checked above — a legitimately `undefined` entry must still restore
+    const valueToRestore = redoStack[redoStack.length - 1] as T;
 
     originalSet.call(source, valueToRestore);
 

@@ -1,6 +1,6 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { pipeable, piped } from './pipeble';
+import { pipeable, piped } from './pipeable';
 
 describe('pipeable', () => {
   it('should add pipe and map methods to an existing signal', () => {

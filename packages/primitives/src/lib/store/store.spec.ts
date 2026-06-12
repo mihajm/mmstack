@@ -1,4 +1,4 @@
-import { Injector, isSignal } from '@angular/core';
+import { effect, Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   isLeaf,
@@ -415,6 +415,84 @@ describe('store', () => {
       expect(isLeaf({})).toBe(false);
       expect(isLeaf(null)).toBe(false);
       expect(isLeaf(undefined)).toBe(false);
+    });
+  });
+
+  describe('array element writes (copy-on-write)', () => {
+    it('element set updates the element signal itself (immutable store)', () => {
+      const src = { a: [1, 2, 3] };
+      const s = store(src, { injector });
+      expect(s.a[0]()).toBe(1);
+
+      s.a[0].set(9);
+
+      expect(s.a[0]()).toBe(9);
+      expect(s().a).toEqual([9, 2, 3]);
+      // copy-on-write: the caller's original array must not be mutated
+      expect(src.a).toEqual([1, 2, 3]);
+      expect(s().a).not.toBe(src.a);
+    });
+
+    it('element set notifies effects on the array node (immutable store)', () => {
+      const s = store({ a: [1, 2, 3] }, { injector });
+      let runs = 0;
+      effect(
+        () => {
+          s.a();
+          runs++;
+        },
+        { injector },
+      );
+      TestBed.tick();
+      runs = 0;
+
+      s.a[1].set(20);
+      TestBed.tick();
+      expect(runs).toBe(1);
+      expect(s.a()).toEqual([1, 20, 3]);
+    });
+
+    it('nested object-in-array writes propagate both ways (immutable store)', () => {
+      const s = store({ a: [{ id: 1 }, { id: 2 }] }, { injector });
+      expect(s.a[0].id()).toBe(1);
+
+      s.a[0].id.set(10);
+
+      expect(s.a[0].id()).toBe(10);
+      expect(s.a[0]()).toEqual({ id: 10 });
+      expect(s().a).toEqual([{ id: 10 }, { id: 2 }]);
+    });
+
+    it('element set updates the element signal itself (mutable store)', () => {
+      const src = { a: [1, 2, 3] };
+      const s = mutableStore(src, { injector });
+      expect(s.a[0]()).toBe(1);
+
+      s.a[0].set(9);
+
+      expect(s.a[0]()).toBe(9);
+      expect(s().a).toEqual([9, 2, 3]);
+      // mutable stores update in place by design
+      expect(s().a).toBe(src.a);
+    });
+
+    it('element set notifies effects on the array node (mutable store)', () => {
+      const s = mutableStore({ a: [1, 2, 3] }, { injector });
+      let runs = 0;
+      effect(
+        () => {
+          s.a();
+          runs++;
+        },
+        { injector },
+      );
+      TestBed.tick();
+      runs = 0;
+
+      s.a[1].set(20);
+      TestBed.tick();
+      expect(runs).toBe(1);
+      expect(s.a()).toEqual([1, 20, 3]);
     });
   });
 });

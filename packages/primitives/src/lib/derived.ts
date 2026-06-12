@@ -380,8 +380,17 @@ export function derived<T, U>(
   if (isMutable(source)) {
     sig.mutate = (updater) => {
       cnt++;
-      sig.update(updater);
-      cnt--;
+      try {
+        sig.update(updater);
+        // The wrapped computed evaluates its `equal` lazily — at the next read, which would
+        // normally happen after `cnt` has already dropped back to 0. For a reference-stable
+        // mutation that read compares the same object to itself and the version never bumps,
+        // so dependents are never notified. Reading here, while equality is still suppressed,
+        // forces the recompute (and version bump) inside the mutate window.
+        untracked(sig);
+      } finally {
+        cnt--;
+      }
     };
 
     sig.inline = (updater) => {

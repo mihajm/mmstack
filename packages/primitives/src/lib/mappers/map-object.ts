@@ -27,7 +27,16 @@ function pooledKeys<T extends Record<string, any>>(
     for (const k in val)
       if (Object.prototype.hasOwnProperty.call(val, k)) spare.add(k);
 
-    if (active.size === spare.size && active.isSubsetOf(spare)) return active;
+    if (active.size === spare.size) {
+      let subset = true;
+      for (const k of active) {
+        if (!spare.has(k)) {
+          subset = false;
+          break;
+        }
+      }
+      if (subset) return active;
+    }
 
     const temp = active;
     active = spare;

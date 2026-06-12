@@ -1,4 +1,5 @@
 import { type ElementRef, type Signal } from '@angular/core';
+import { type SensorRunOptions } from './sensor-options';
 import {
   type BatteryStatus,
   batteryStatus,
@@ -32,7 +33,7 @@ import {
   mousePosition,
 } from './mouse-position';
 import { type NetworkStatusSignal, networkStatus } from './network-status';
-import { type ScreenOrientation, orientation } from './orientation';
+import { type ScreenOrientationState, orientation } from './orientation';
 import { pageVisibility } from './page-visibility';
 import {
   type ScrollPositionOptions,
@@ -69,19 +70,19 @@ type SensorTypedOptions = {
     returnType: MousePositionSignal;
   };
   networkStatus: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: NetworkStatusSignal;
   };
   pageVisibility: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: Signal<DocumentVisibilityState>;
   };
   darkMode: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: Signal<boolean>;
   };
   reducedMotion: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: Signal<boolean>;
   };
   scrollPosition: {
@@ -93,7 +94,7 @@ type SensorTypedOptions = {
     returnType: WindowSizeSignal;
   };
   mediaQuery: {
-    opt: { query: string; debugName?: string };
+    opt: SensorRunOptions & { query: string };
     returnType: Signal<boolean>;
   };
   geolocation: {
@@ -101,15 +102,15 @@ type SensorTypedOptions = {
     returnType: GeolocationSignal;
   };
   clipboard: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: ClipboardSignal;
   };
   orientation: {
-    opt: { debugName?: string };
-    returnType: Signal<ScreenOrientation>;
+    opt: SensorRunOptions;
+    returnType: Signal<ScreenOrientationState>;
   };
   batteryStatus: {
-    opt: { debugName?: string };
+    opt: SensorRunOptions;
     returnType: Signal<BatteryStatus | null>;
   };
   idle: {
@@ -117,8 +118,7 @@ type SensorTypedOptions = {
     returnType: IdleSignal;
   };
   focusWithin: {
-    opt: {
-      debugName?: string;
+    opt: SensorRunOptions & {
       target?:
         | ElementRef<Element>
         | Element
@@ -222,14 +222,14 @@ export function sensor(
 /**
  * Creates a sensor signal that tracks the provided media query.
  * @param type Must be `'mediaQuery'`.
- * @param options Optional configuration for the media query sensor, including `query` and `debugName`.
+ * @param options Required configuration for the media query sensor — `query` is mandatory, `debugName` optional.
  * @returns A `Signal<boolean>` which is `true` if the media query currently matches.
  * @see {mediaQuery} for detailed documentation and examples.
  * @example const isDesktop = sensor('mediaQuery', { query: '(min-width: 1024px)' });
  */
 export function sensor(
   type: 'mediaQuery',
-  options?: SensorTypedOptions['mediaQuery']['opt'],
+  options: SensorTypedOptions['mediaQuery']['opt'],
 ): Signal<boolean>;
 
 /**
@@ -283,7 +283,7 @@ export function sensor(
 export function sensor(
   type: 'orientation',
   options?: SensorTypedOptions['orientation']['opt'],
-): Signal<ScreenOrientation>;
+): Signal<ScreenOrientationState>;
 
 /**
  * Creates a sensor signal tracking the system battery status.
@@ -326,17 +326,21 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
     case 'mousePosition':
       return mousePosition(opts);
     case 'networkStatus':
-      return networkStatus(opts?.debugName);
+      return networkStatus(opts);
     case 'pageVisibility':
-      return pageVisibility(opts?.debugName);
+      return pageVisibility(opts);
     case 'darkMode':
     case 'dark-mode':
-      return prefersDarkMode(opts?.debugName);
+      return prefersDarkMode(opts);
     case 'reducedMotion':
     case 'reduced-motion':
-      return prefersReducedMotion(opts?.debugName);
+      return prefersReducedMotion(opts);
     case 'mediaQuery':
-      return mediaQuery(opts.query, opts.debugName);
+      if (typeof opts?.query !== 'string')
+        throw new Error(
+          `sensor('mediaQuery') requires a 'query' option, e.g. sensor('mediaQuery', { query: '(min-width: 1024px)' })`,
+        );
+      return mediaQuery(opts.query, opts);
     case 'windowSize':
       return windowSize(opts);
     case 'scrollPosition':
@@ -348,15 +352,15 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
     case 'geolocation':
       return geolocation(opts);
     case 'clipboard':
-      return clipboard(opts?.debugName);
+      return clipboard(opts);
     case 'orientation':
-      return orientation(opts?.debugName);
+      return orientation(opts);
     case 'batteryStatus':
-      return batteryStatus(opts?.debugName);
+      return batteryStatus(opts);
     case 'idle':
       return idle(opts);
     case 'focusWithin':
-      return focusWithin(opts?.target);
+      return focusWithin(opts?.target, opts);
     default:
       throw new Error(`Unknown sensor type: ${type}`);
   }

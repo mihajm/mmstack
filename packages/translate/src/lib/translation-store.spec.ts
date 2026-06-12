@@ -269,6 +269,12 @@ describe('translation-store', () => {
       });
 
       it('with variables: interpolates and does not populate the simple-key cache', () => {
+        // formatting a parameterized message without values is a (deliberate, here)
+        // FORMAT_ERROR — silence the dev-mode report so the suite output stays clean
+        const errorSpy = vi
+          .spyOn(console, 'error')
+          .mockImplementation(() => undefined);
+
         const result = store.formatMessage('ns::MMT_DELIM::greet', {
           name: 'Alice',
         });
@@ -279,6 +285,8 @@ describe('translation-store', () => {
         expect(store.formatMessage('ns::MMT_DELIM::greet')).toBe(
           'Hello {name}',
         );
+
+        errorSpy.mockRestore();
       });
 
       it('with variables: locale switch produces updated output on next call', () => {
@@ -444,6 +452,9 @@ describe('translation-store', () => {
     });
 
     it('swallows errors thrown from read()', () => {
+      const errorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
       const read = vi.fn(() => {
         throw new Error('boom');
       });
@@ -453,9 +464,14 @@ describe('translation-store', () => {
       expect(() => TestBed.inject(TranslationStore)).not.toThrow();
       const store = TestBed.inject(TranslationStore);
       expect(store.locale()).toBe('en-US');
+      expect(errorSpy).toHaveBeenCalled(); // swallowed, but reported in dev
+      errorSpy.mockRestore();
     });
 
     it('swallows errors thrown from write()', () => {
+      const errorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
       const write = vi.fn(() => {
         throw new Error('boom');
       });
@@ -466,6 +482,8 @@ describe('translation-store', () => {
         store.locale.set('sl-SI');
         TestBed.tick();
       }).not.toThrow();
+      expect(errorSpy).toHaveBeenCalled(); // swallowed, but reported in dev
+      errorSpy.mockRestore();
     });
   });
 
@@ -584,16 +602,165 @@ describe('translation-store', () => {
     });
 
     it('should prevent switching to unsupported locales', () => {
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
       dynamicLocale.set('fr-FR');
       // Should remain the same as fr-FR is not in supportedLocales
       expect(dynamicLocale()).not.toBe('fr-FR');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it('should queue load when switching to supported locale', () => {
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
       dynamicLocale.set('es-ES');
       // Should be queued in loadQueue since there are no loaders yet
       expect(store.loadQueue()).toContain('es-ES');
       // Locale itself doesn't change until loaded (or if it has loaders)
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('dynamic locale loading (queue semantics)', () => {
+    let store: TranslationStore;
+    let dynamicLocale: ReturnType<typeof injectDynamicLocale>;
+
+    const flush = async () => {
+      for (let i = 0; i < 4; i++) {
+        TestBed.tick();
+        await new Promise((r) => setTimeout(r));
+      }
+      TestBed.tick();
+    };
+
+    beforeEach(() => {
+      const routeMock = {
+        snapshot: { paramMap: convertToParamMap({}) },
+        paramMap: of(convertToParamMap({})),
+      };
+      TestBed.configureTestingModule({
+        providers: [
+          provideIntlConfig({
+            defaultLocale: 'en-US',
+            supportedLocales: ['en-US', 'de-DE', 'es-ES'],
+          }),
+          { provide: Router, useValue: { options: {} } },
+          { provide: ActivatedRoute, useValue: routeMock },
+        ],
+      });
+
+      TestBed.runInInjectionContext(() => {
+        injectLocaleInternal().set('en-US');
+        dynamicLocale = injectDynamicLocale();
+        store = TestBed.inject(TranslationStore);
+      });
+    });
+
+    it('a missing-key fallback data load must NOT switch the active locale', async () => {
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
+      store.register('home', { 'de-DE': { greeting: 'Hallo' } });
+      store.locale.set('de-DE');
+
+      // reading a key missing in BOTH locales queues a default-locale DATA load
+      expect(store.formatMessage('home::MMT_DELIM::missingKey')).toBe('');
+      await flush();
+
+      // regression: the dequeue effect used to treat this as a user switch and
+      // flip the whole app back to en-US
+      expect(store.locale()).toBe('de-DE');
+      expect(store.loadQueue()).toEqual([]);
+
+      // the missing key is reported (once) in dev mode
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Missing translation'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('a failed locale load dequeues and a later set() retries', async () => {
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const errorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+
+      let attempts = 0;
+      store.registerOnDemandLoaders('feature', {
+        'es-ES': () => {
+          attempts++;
+          if (attempts === 1) return Promise.reject(new Error('network'));
+          return Promise.resolve({
+            namespace: 'feature',
+            flat: { msg: 'Hola' },
+            locale: 'es-ES',
+          });
+        },
+      });
+
+      dynamicLocale.set('es-ES');
+      await flush();
+
+      // regression: the failed head used to stay queued forever, deadlocking
+      // all future locale switches
+      expect(store.loadQueue()).toEqual([]);
+      expect(store.locale()).toBe('en-US'); // not switched on total failure
+      // ...and the failure is surfaced with retry guidance
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('again will retry'),
+      );
+
+      dynamicLocale.set('es-ES'); // retry
+      await flush();
+
+      expect(attempts).toBe(2);
+      expect(store.locale()).toBe('es-ES');
+      expect(store.formatMessage('feature::MMT_DELIM::msg')).toBe('Hola');
+
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('initial locale propagation to the compat singleton', () => {
+    afterEach(() => {
+      // prevent module-global bleed into other suites
+      TestBed.runInInjectionContext(() => {
+        injectLocaleInternal().set('en-US');
+      });
+    });
+
+    it('the configured default locale reaches the deprecated global on init', () => {
+      const routeMock = {
+        snapshot: { paramMap: convertToParamMap({}) },
+        paramMap: of(convertToParamMap({})),
+      };
+      TestBed.configureTestingModule({
+        providers: [
+          provideIntlConfig({
+            defaultLocale: 'sl-SI',
+            supportedLocales: ['sl-SI', 'en-US'],
+          }),
+          { provide: Router, useValue: { options: {} } },
+          { provide: ActivatedRoute, useValue: routeMock },
+        ],
+      });
+
+      TestBed.inject(TranslationStore); // construct — initLocale runs
+
+      // regression: initLocale used to write the raw signal BEFORE the proxy
+      // wrapped `set`, so the global stayed 'en-US' until the first runtime switch
+      TestBed.runInInjectionContext(() => {
+        expect(injectLocaleInternal()()).toBe('sl-SI');
+      });
     });
   });
 

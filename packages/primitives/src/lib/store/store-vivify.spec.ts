@@ -160,6 +160,34 @@ describe('store vivification (deep / e2e)', () => {
     });
   });
 
+  describe('repeated writes through a vivified hole', () => {
+    it('second write through a vivified object hole stays in sync', () => {
+      const s = store(
+        { a: null as { b: number } | null },
+        { injector, vivify: 'auto' },
+      );
+      s.a.b.set(2);
+      expect(s.a.b()).toBe(2);
+      // once the container exists, the write path must still copy-on-write —
+      // an in-place mutation returns the same reference and goes stale
+      s.a.b.set(3);
+      expect(s.a.b()).toBe(3);
+      expect(s().a).toEqual({ b: 3 });
+    });
+
+    it('second write through a vivified index hole stays in sync', () => {
+      const s = store(
+        { a: null as number[] | null },
+        { injector, vivify: 'auto' },
+      );
+      s.a[0].set(5);
+      expect(s.a[0]()).toBe(5);
+      s.a[0].set(6);
+      expect(s.a[0]()).toBe(6);
+      expect(s().a).toEqual([6]);
+    });
+  });
+
   describe('mutableStore', () => {
     it('vivifies in place (root reference preserved)', () => {
       const src = { a: null as { b: number } | null };

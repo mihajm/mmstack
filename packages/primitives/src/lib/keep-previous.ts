@@ -1,6 +1,7 @@
 import {
   isWritableSignal,
   linkedSignal,
+  untracked,
   type CreateSignalOptions,
   type Signal,
   type WritableSignal,
@@ -41,21 +42,50 @@ export function keepPrevious<T, P>(
   src: WritableSignal<T> | Signal<T> | MutableSignal<T> | DerivedSignal<P, T>,
   opt?: CreateSignalOptions<T>,
 ): WritableSignal<T> | Signal<T> {
+  const mutableSrc = isWritableSignal(src) && isMutable(src);
+
+  // For a mutable source the linkedSignal's equality must be suppressible: a forwarded
+  // `mutate` keeps the same reference, which default equality would otherwise swallow.
+  let cnt = 0;
+  const baseEqual = opt?.equal;
+  const equal = mutableSrc
+    ? (a: T, b: T) =>
+        cnt > 0 ? false : baseEqual ? baseEqual(a, b) : Object.is(a, b)
+    : baseEqual;
+
   const persisted = linkedSignal<T, T>({
     ...opt,
     source: () => src(),
     computation: (next, prev) =>
       next === undefined && prev !== undefined ? prev.value : next,
+    equal,
   });
 
   if (isWritableSignal(src)) {
     persisted.set = src.set;
     persisted.update = src.update;
-    persisted.asReadonly = src.asReadonly;
+    // NOTE: `asReadonly` deliberately stays the linkedSignal's own — returning the
+    // source's readonly view would reintroduce the `undefined` flashes this wrapper exists
+    // to prevent.
 
-    if (isMutable(src)) {
-      (persisted as MutableSignal<T>).mutate = src.mutate;
-      (persisted as MutableSignal<T>).inline = src.inline;
+    if (mutableSrc) {
+      (persisted as MutableSignal<T>).mutate = (updater) => {
+        cnt++;
+        try {
+          src.mutate(updater);
+          // force the recompute while equality is suppressed, so the reference-stable
+          // mutation bumps the wrapper's version (see derived.ts for the same pattern)
+          untracked(persisted);
+        } finally {
+          cnt--;
+        }
+      };
+      (persisted as MutableSignal<T>).inline = (updater) => {
+        (persisted as MutableSignal<T>).mutate((prev) => {
+          updater(prev);
+          return prev;
+        });
+      };
     }
 
     if (isDerivation(src)) {

@@ -183,4 +183,45 @@ describe('injectStartTransaction', () => {
     expect(host.state()).toBe(5);
     expect(host.display()).toBe(5); // hold released, write kept
   });
+
+  it('abort settles the done promise', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+
+    const t = host.start(() => {
+      host.write(2);
+      host.ref.status.set('loading');
+    });
+    await flush(fixture);
+
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+
+    t.abort();
+    await flush(fixture);
+
+    expect(resolved).toBe(true); // `await t.done` must not hang after abort
+  });
+
+  it('a throwing transaction body rolls back and releases the hold', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    expect(host.display()).toBe(1); // baseline read before the txn
+
+    expect(() =>
+      host.start(() => {
+        host.write(2);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    await flush(fixture);
+
+    expect(host.state()).toBe(1); // staged write rolled back
+    expect(host.display()).toBe(1); // hold released — boundary must not stay frozen
+
+    // the scope is still fully usable afterwards
+    host.state.set(3);
+    await flush(fixture);
+    expect(host.display()).toBe(3);
+  });
 });

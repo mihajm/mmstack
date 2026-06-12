@@ -1,7 +1,12 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { formatNumber, formatPercent, formatCurrency } from './numeric';
 import { TranslationStore } from '../translation-store';
+import {
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  formatUnit,
+} from './numeric';
 
 describe('numeric formatting', () => {
   let store: TranslationStore;
@@ -44,7 +49,7 @@ describe('numeric formatting', () => {
         expect(formatNumber(null)).toBe('');
         expect(formatNumber(undefined)).toBe('');
         expect(formatNumber(NaN)).toBe('');
-        
+
         expect(formatNumber(null, { fallbackToZero: true })).toBe('0');
         expect(formatNumber(undefined, { fallbackToZero: true })).toBe('0');
         expect(formatNumber(NaN, { fallbackToZero: true })).toBe('0');
@@ -54,7 +59,7 @@ describe('numeric formatting', () => {
     it('should work with signals', () => {
       const numSignal = signal(1234.5);
       const optSignal = signal({ notation: 'standard' as const });
-      
+
       TestBed.runInInjectionContext(() => {
         expect(formatNumber(numSignal, optSignal)).toBe('1,234.5');
       });
@@ -83,10 +88,12 @@ describe('numeric formatting', () => {
 
     it('should respect decimal places', () => {
       TestBed.runInInjectionContext(() => {
-        expect(formatPercent(0.1234, { minFractionDigits: 1, maxFractionDigits: 1 })).toBe('12.3%');
+        expect(
+          formatPercent(0.1234, { minFractionDigits: 1, maxFractionDigits: 1 }),
+        ).toBe('12.3%');
       });
     });
-    
+
     it('should fallback to zero when requested', () => {
       TestBed.runInInjectionContext(() => {
         expect(formatPercent(null, { fallbackToZero: true })).toBe('0%');
@@ -108,7 +115,9 @@ describe('numeric formatting', () => {
 
     it('should use different display options', () => {
       TestBed.runInInjectionContext(() => {
-        expect(formatCurrency(100, 'USD', { display: 'code' })).toBe('USD 100.00'); // Might contain a non-breaking space
+        expect(formatCurrency(100, 'USD', { display: 'code' })).toBe(
+          'USD 100.00',
+        ); // Might contain a non-breaking space
       });
     });
 
@@ -125,6 +134,67 @@ describe('numeric formatting', () => {
     it('should accept an explicit locale string (SSR-safe overload)', () => {
       // German formatting: "1.234,50 €"
       expect(formatCurrency(1234.5, 'EUR', 'de-DE')).toBe('1.234,50 €');
+    });
+    it('should support fraction-digit control', () => {
+      expect(
+        formatCurrency(1234.56, 'USD', {
+          locale: 'en-US',
+          maxFractionDigits: 0,
+        }),
+      ).toBe('$1,235');
+    });
+
+    it('should support signDisplay', () => {
+      expect(
+        formatCurrency(5, 'USD', {
+          locale: 'en-US',
+          signDisplay: 'exceptZero',
+        }),
+      ).toBe('+$5.00');
+    });
+  });
+
+  describe('modern number options', () => {
+    it('should support signDisplay on plain numbers', () => {
+      expect(
+        formatNumber(5, { locale: 'en-US', signDisplay: 'exceptZero' }),
+      ).toBe('+5');
+      expect(
+        formatNumber(0, { locale: 'en-US', signDisplay: 'exceptZero' }),
+      ).toBe('0');
+    });
+
+    it('should support roundingMode', () => {
+      expect(
+        formatNumber(2.5, {
+          locale: 'en-US',
+          maxFractionDigits: 0,
+          roundingMode: 'floor',
+        }),
+      ).toBe('2');
+      expect(
+        formatNumber(2.5, {
+          locale: 'en-US',
+          maxFractionDigits: 0,
+          roundingMode: 'halfExpand',
+        }),
+      ).toBe('3');
+    });
+  });
+
+  describe('formatUnit', () => {
+    it('formats sanctioned units and -per- compounds', () => {
+      expect(formatUnit(16, 'kilometer-per-hour', 'en-US')).toBe('16 km/h');
+      expect(
+        formatUnit(2.5, 'liter', { locale: 'en-US', unitDisplay: 'long' }),
+      ).toBe('2.5 liters');
+    });
+
+    it('returns empty string for invalid input (unless fallbackToZero)', () => {
+      expect(formatUnit(null, 'liter', 'en-US')).toBe('');
+      expect(
+        formatUnit(null, 'liter', { locale: 'en-US', fallbackToZero: true }),
+      ).toBe('0 L');
     });
   });
 });

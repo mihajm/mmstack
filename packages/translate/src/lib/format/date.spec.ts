@@ -79,6 +79,27 @@ describe('formatDate', () => {
     });
   });
 
+  it('should honor a timeZone supplied inside a custom format object', () => {
+    // midnight UTC — in any negative-offset zone this is still the previous day
+    const date = new Date('2024-06-01T00:30:00Z');
+
+    TestBed.runInInjectionContext(() => {
+      // regression: the trailing `timeZone: undefined` used to clobber format.timeZone
+      const viaFormat = formatDate(date, {
+        locale: 'en-US',
+        format: { dateStyle: 'short', timeZone: 'UTC' },
+      });
+      const viaTz = formatDate(date, {
+        locale: 'en-US',
+        format: { dateStyle: 'short' },
+        tz: 'UTC',
+      });
+
+      expect(viaFormat).toBe(viaTz);
+      expect(viaFormat).toContain('6/1/24');
+    });
+  });
+
   it('should apply different presets correctly', () => {
     const date = new Date('2024-01-01T12:00:00Z');
 

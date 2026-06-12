@@ -50,7 +50,7 @@ type _ns_map = Expect<
     inferCompiledTranslationMap<typeof ns.translation>,
     {
       'quote.pageTitle': void;
-      'quote.greeting': { name: string };
+      'quote.greeting': { name: string | number };
       'quote.detail.authorLabel': void;
       'quote.stats': { count: number };
     }
@@ -148,7 +148,7 @@ type _merged_has_quote_key = Expect<
     inferCompiledTranslationMap<
       typeof quoteWithCommon.translation
     >['quote.greeting'],
-    { name: string }
+    { name: string | number }
   >
 >;
 

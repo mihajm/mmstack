@@ -7,15 +7,27 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import {
+  coerceSensorOptions,
+  runInSensorContext,
+  type SensorRunOptions,
+} from './sensor-options';
 
-export type ScreenOrientation = {
+export type ScreenOrientationState = {
   /** Angle in degrees relative to the natural orientation. */
   readonly angle: number;
   /** One of the four `OrientationType` strings. */
   readonly type: OrientationType;
 };
 
-const SSR_FALLBACK: ScreenOrientation = {
+/**
+ * @deprecated Use {@link ScreenOrientationState} instead — this name shadows the DOM's global
+ * `ScreenOrientation` interface in any module that imports it, silently changing the meaning of
+ * `screen.orientation`-related typings there.
+ */
+export type ScreenOrientation = ScreenOrientationState;
+
+const SSR_FALLBACK: ScreenOrientationState = {
   angle: 0,
   type: 'portrait-primary',
 };
@@ -35,7 +47,14 @@ const SSR_FALLBACK: ScreenOrientation = {
  * });
  * ```
  */
-export function orientation(debugName = 'orientation'): Signal<ScreenOrientation> {
+export function orientation(
+  opt?: string | SensorRunOptions,
+): Signal<ScreenOrientationState> {
+  const { debugName = 'orientation', injector } = coerceSensorOptions(opt);
+  return runInSensorContext(injector, () => createOrientation(debugName));
+}
+
+function createOrientation(debugName: string): Signal<ScreenOrientationState> {
   if (
     isPlatformServer(inject(PLATFORM_ID)) ||
     typeof screen === 'undefined' ||
@@ -46,12 +65,12 @@ export function orientation(debugName = 'orientation'): Signal<ScreenOrientation
 
   const so = screen.orientation;
 
-  const read = (): ScreenOrientation => ({
+  const read = (): ScreenOrientationState => ({
     angle: so.angle,
     type: so.type,
   });
 
-  const state = signal<ScreenOrientation>(read(), {
+  const state = signal<ScreenOrientationState>(read(), {
     debugName,
     equal: (a, b) => a.angle === b.angle && a.type === b.type,
   });

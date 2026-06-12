@@ -4,6 +4,7 @@ import {
   type ActivatedRouteSnapshot,
   Router,
   convertToParamMap,
+  provideRouter,
 } from '@angular/router';
 import { of } from 'rxjs';
 import { injectResolveParamLocale } from './resolver-locale';
@@ -81,7 +82,7 @@ describe('injectResolveParamLocale', () => {
     TestBed.configureTestingModule({
       providers: [
         provideIntlConfig({ localeParamName: 'lang' }),
-        { provide: Router, useValue: { options: {} } },
+        provideRouter([]),
         {
           provide: ActivatedRoute,
           useValue: {

@@ -14,7 +14,12 @@ import { derived } from '../derived';
 import { isWritableSignal } from '../mappers/util';
 import { isMutable, mutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
-import { createVivify, isIndexProp, type Vivify } from '../util';
+import {
+  createVivify,
+  isIndexProp,
+  type Vivify,
+  type VivifyFn,
+} from '../util';
 
 /**
  * Runtime marker + compile-time brand for an opaque value. A `const`-declared `Symbol`
@@ -97,7 +102,8 @@ function alwaysFalse() {
  * @internal Attaches a lazy, memoized leaf probe to a store node. The probe (`() => boolean`)
  * closes over the node's value signal and its (stable) vivify setting, building the backing
  * `computed` on first call so leaf-ness tracks the live value reactively without taxing every
- * node access. Idempotent.
+ * node access. Under `noUnionLeaves` the caller promises shapes never flip, so the probe is
+ * resolved once from the first sample and frozen as a constant. Idempotent.
  */
 function markAsLeaf<TSig>(
   sig: TSig,
@@ -109,13 +115,11 @@ function markAsLeaf<TSig>(
     let memo: (() => boolean) | undefined;
     const probe = () => {
       if (memo) return memo();
-      const v = untracked(value);
-      memo =
-        isOpaque(v) || (v == null && !vivifyEnabled) || noUnionLeaves
-          ? isLeafValue(v, vivifyEnabled)
-            ? alwaysTrue
-            : alwaysFalse
-          : computed(() => isLeafValue(value(), vivifyEnabled));
+      memo = noUnionLeaves
+        ? isLeafValue(untracked(value), vivifyEnabled)
+          ? alwaysTrue
+          : alwaysFalse
+        : computed(() => isLeafValue(value(), vivifyEnabled));
       return memo();
     };
     Object.defineProperty(sig, LEAF, {
@@ -156,7 +160,7 @@ export function isLeaf<T = unknown>(
 export type Opaque<T> = T & { readonly [OPAQUE]: true };
 
 /** @internal Strips the opaque brand from the value a leaf signal carries. */
-export type UnwrapOpqaue<T> = T extends { readonly [OPAQUE]: true }
+export type UnwrapOpaque<T> = T extends { readonly [OPAQUE]: true }
   ? Omit<T, typeof OPAQUE>
   : T;
 
@@ -254,6 +258,46 @@ function hasOwnKey(
   return value != null && Object.hasOwn(value, key);
 }
 
+/**
+ * @internal
+ * Builds the `onChange` for the fallback (non-record container) derivation branch. For an
+ * immutable source the container is copied before the write — returning the same mutated
+ * reference would let the source's equality cut propagation (leaving child signals permanently
+ * stale) and alias the caller's original object, breaking the structural-sharing contract
+ * `forkStore` relies on. For a mutable source the write goes through `mutate`, so the chain's
+ * force-notify engages (plain `update` with the same reference would never notify).
+ */
+function createFallbackOnChange(
+  target: WritableSignal<any> | MutableSignal<any>,
+  prop: PropertyKey,
+  vivifyFn: VivifyFn<any>,
+  isMutableSource: boolean,
+): (newValue: any) => void {
+  const write = (newValue: any) => (v: any) => {
+    const container = vivifyFn(v, prop);
+    if (container === null || container === undefined) return container;
+    const next = isMutableSource
+      ? container
+      : Array.isArray(container)
+        ? container.slice()
+        : isRecord(container)
+          ? { ...container }
+          : container; // non-plain leaf (Date/class instance): legacy in-place attempt
+    try {
+      next[prop] = newValue;
+    } catch (e) {
+      if (isDevMode())
+        console.error(`[store] Failed to set property "${String(prop)}"`, e);
+    }
+    return next;
+  };
+
+  return isMutableSource
+    ? (newValue: any) =>
+        (target as MutableSignal<any>).mutate(write(newValue))
+    : (newValue: any) => target.update(write(newValue));
+}
+
 type SignalArrayStore<T extends any[]> = Signal<T> & {
   readonly [index: number]: SignalStore<T[number]>;
   readonly length: Signal<number>;
@@ -314,7 +358,9 @@ function toArrayStore<T extends any[]>(
         const idx = +prop;
         return idx >= 0 && idx < untracked(lengthSignal);
       }
-      return Reflect.has(untracked(source), prop);
+      const v = untracked(source);
+      // nullish node values are routinely descended with vivify on — `in` must not throw
+      return v == null ? false : Reflect.has(v as object, prop);
     },
     ownKeys() {
       const v = untracked(source);
@@ -354,7 +400,9 @@ function toArrayStore<T extends any[]>(
 
       if (prop === Symbol.iterator) {
         return function* () {
-          for (let i = 0; i < untracked(lengthSignal); i++) {
+          // read length reactively: a spread/for-of inside a computed/effect must re-run
+          // when items are added or removed, not only when already-read elements change
+          for (let i = 0; i < lengthSignal(); i++) {
             yield receiver[i];
           }
         };
@@ -401,22 +449,13 @@ function toArrayStore<T extends any[]>(
             })
           : derived(target, {
               from: (v: any) => v?.[idx],
-              onChange: (newValue: any) =>
-                target.update((v: any) => {
-                  const container = vivifyFn(v, idx);
-                  if (container === null || container === undefined)
-                    return container;
-                  try {
-                    container[idx] = newValue;
-                  } catch (e) {
-                    if (isDevMode())
-                      console.error(
-                        `[store] Failed to set property "${String(idx)}"`,
-                        e,
-                      );
-                  }
-                  return container;
-                }),
+              onChange: createFallbackOnChange(
+                target,
+                idx,
+                vivifyFn,
+                isMutableSource,
+              ),
+              equal: equalFn,
             });
 
         const childSample = untracked(computation);
@@ -501,7 +540,7 @@ type MutableSignalStoreObject<T> = Simplify<
   }
 >;
 
-export type SignalStore<T> = Signal<UnwrapOpqaue<T>> &
+export type SignalStore<T> = Signal<UnwrapOpaque<T>> &
   (IsAny<T> extends true
     ? SignalStoreObject<T>
     : NonNullable<T> extends BaseType
@@ -510,7 +549,7 @@ export type SignalStore<T> = Signal<UnwrapOpqaue<T>> &
         ? SignalArrayStore<NonNullable<T>>
         : SignalStoreObject<T>);
 
-export type WritableSignalStore<T> = WritableSignal<UnwrapOpqaue<T>> & {
+export type WritableSignalStore<T> = WritableSignal<UnwrapOpaque<T>> & {
   readonly asReadonlyStore: () => SignalStore<T>;
 } & (IsAny<T> extends true
     ? WritableSignalStoreObject<T>
@@ -520,7 +559,7 @@ export type WritableSignalStore<T> = WritableSignal<UnwrapOpqaue<T>> & {
         ? WritableArrayStore<NonNullable<T>>
         : WritableSignalStoreObject<T>);
 
-export type MutableSignalStore<T> = MutableSignal<UnwrapOpqaue<T>> & {
+export type MutableSignalStore<T> = MutableSignal<UnwrapOpaque<T>> & {
   readonly asReadonlyStore: () => SignalStore<T>;
 } & (IsAny<T> extends true
     ? MutableSignalStoreObject<T>
@@ -552,6 +591,13 @@ export function toStore<T extends AnyRecord>(
 /**
  * Converts a Signal into a deep-observable Store.
  * Accessing nested properties returns a derived Signal of that path.
+ *
+ * @remarks
+ * A child's *container kind* (array store vs object store) is resolved when the child is
+ * first accessed and cached with the proxy. Leaf↔substore flips are tracked reactively, but a
+ * union-typed node that later flips between an array and a record keeps its original trap set —
+ * if you need that, re-model the union as `{ kind: ..., value: ... }` instead.
+ *
  * @example
  * const state = store({ user: { name: 'John' } });
  * const nameSignal = state.user.name; // WritableSignal<string>
@@ -652,22 +698,13 @@ export function toStore<T extends AnyRecord>(
         ? derived(target, prop, { equal: equalFn, vivify: nodeVivify })
         : derived(target, {
             from: (v: any) => v?.[prop],
-            onChange: (newValue: any) =>
-              target.update((v: any) => {
-                const container = vivifyFn(v, prop);
-                if (container === null || container === undefined)
-                  return container;
-                try {
-                  container[prop] = newValue;
-                } catch (e) {
-                  if (isDevMode())
-                    console.error(
-                      `[store] Failed to set property "${String(prop)}"`,
-                      e,
-                    );
-                }
-                return container;
-              }),
+            onChange: createFallbackOnChange(
+              target,
+              prop,
+              vivifyFn,
+              isMutableSource,
+            ),
+            equal: equalFn,
           });
 
       const childSample = untracked(computation);

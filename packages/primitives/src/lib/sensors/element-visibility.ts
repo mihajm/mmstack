@@ -9,15 +9,14 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 /**
  * Options for configuring the `elementVisibility` sensor, extending
  * standard `IntersectionObserverInit` options.
  */
-export type ElementVisibilityOptions = IntersectionObserverInit & {
-  /** Optional debug name for the internal signal. */
-  debugName?: string;
-};
+export type ElementVisibilityOptions = IntersectionObserverInit &
+  SensorRunOptions;
 
 function observerSupported() {
   return typeof IntersectionObserver !== 'undefined';
@@ -89,10 +88,24 @@ export type ElementVisibilitySignal = Signal<
  * ```
  */
 export function elementVisibility(
+  target?:
+    | ElementRef<Element>
+    | Element
+    | Signal<ElementRef<Element> | Element | null>,
+  opt?: ElementVisibilityOptions,
+): ElementVisibilitySignal {
+  return runInSensorContext(opt?.injector, () =>
+    // the host-element default must resolve INSIDE the sensor context, not as a
+    // parameter default (which would run before the injector wrapper)
+    createElementVisibility(target ?? inject(ElementRef), opt),
+  );
+}
+
+function createElementVisibility(
   target:
     | ElementRef<Element>
     | Element
-    | Signal<ElementRef<Element> | Element | null> = inject(ElementRef),
+    | Signal<ElementRef<Element> | Element | null>,
   opt?: ElementVisibilityOptions,
 ): ElementVisibilitySignal {
   if (isPlatformServer(inject(PLATFORM_ID)) || !observerSupported()) {

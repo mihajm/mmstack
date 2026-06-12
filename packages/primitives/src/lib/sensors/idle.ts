@@ -7,8 +7,9 @@ import {
   signal,
   type Signal,
 } from '@angular/core';
+import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
-export type IdleOptions = {
+export type IdleOptions = SensorRunOptions & {
   /**
    * Milliseconds of user inactivity before the signal flips to `true`.
    * @default 60_000
@@ -19,8 +20,6 @@ export type IdleOptions = {
    * @default ['mousemove','keydown','touchstart','scroll','visibilitychange']
    */
   events?: string[];
-  /** Optional debug name for the produced signal. */
-  debugName?: string;
 };
 
 type InternalIdleSignal = Signal<boolean> & {
@@ -28,7 +27,10 @@ type InternalIdleSignal = Signal<boolean> & {
 };
 
 export type IdleSignal = Signal<boolean> & {
-  /** Timestamp of the last idle/active transition. */
+  /**
+   * Timestamp of the last idle/active transition. Before any transition has occurred it
+   * holds the sensor's creation time, not an actual transition.
+   */
   readonly since: Signal<Date>;
 };
 
@@ -58,6 +60,10 @@ const serverDate = new Date();
  * ```
  */
 export function idle(opt?: IdleOptions): IdleSignal {
+  return runInSensorContext(opt?.injector, () => createIdle(opt));
+}
+
+function createIdle(opt?: IdleOptions): IdleSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const sig = computed(() => false, {
       debugName: opt?.debugName ?? 'idle',

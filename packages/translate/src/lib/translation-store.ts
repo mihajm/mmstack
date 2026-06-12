@@ -13,10 +13,16 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import {
+  type ActivatedRouteSnapshot,
+  NavigationEnd,
+  Router,
+} from '@angular/router';
 import { createIntl, createIntlCache, type IntlConfig } from '@formatjs/intl';
+import { filter, map } from 'rxjs';
 import { type CompiledTranslation } from './compile';
 import { prependDelim } from './delim';
-import { pathParam } from './path-param';
 import { type UnknownStringKeyObject } from './string-key-object.type';
 
 type BaseConfig = Omit<IntlConfig, 'locale' | 'messages'> & {
@@ -221,6 +227,24 @@ function isDynamicConfig(
   return !!cfg && 'localeStorage' in cfg && !!cfg.localeStorage;
 }
 
+/**
+ * @internal
+ * Reads `key` from the deepest route of a snapshot tree — the deepest match wins,
+ * mirroring `paramsInheritanceStrategy: 'always'` semantics from the root's perspective.
+ */
+function readDeepestParam(
+  root: ActivatedRouteSnapshot,
+  key: string,
+): string | null {
+  let cur: ActivatedRouteSnapshot | null = root;
+  let found: string | null = null;
+  while (cur) {
+    found = cur.paramMap.get(key) ?? found;
+    cur = cur.firstChild;
+  }
+  return found;
+}
+
 function initLocale(src: WritableSignal<string>) {
   const config = injectIntlConfig();
   const defaultValue = injectDefaultLocale();
@@ -313,8 +337,7 @@ export class TranslationStore {
    * via a `DestroyRef`-bound `Set`. Public so consumers can build their own
    * `t`-like helpers without re-reading the config.
    */
-  readonly cacheIsWeak =
-    this.config?.releaseCachedSignals ?? false;
+  readonly cacheIsWeak = this.config?.releaseCachedSignals ?? false;
   private readonly simpleKeyMap: SignalCache<Signal<string>> =
     createSignalCache(this.cacheIsWeak);
   private readonly paramKeyMap: SignalCache<
@@ -329,6 +352,13 @@ export class TranslationStore {
     [this.defaultLocale]: {},
   });
   private attemptedFallbackLoad = false;
+  /**
+   * Locales queued purely to fetch fallback DATA (missing-key default-locale loads).
+   * Completing such a load must never change the user's active locale.
+   */
+  private readonly dataOnlyLoads = new Set<string>();
+  /** Keys already warned about in dev mode, so a missing key logs once, not per render. */
+  private readonly warnedMissingKeys = new Set<string>();
 
   private readonly onDemandLoaders = new Map<
     string,
@@ -410,6 +440,17 @@ export class TranslationStore {
   readonly intl = computed(() =>
     createIntl(
       {
+        // Default error handling, overridable via the config's own `onError`:
+        // MISSING_TRANSLATION is the DESIGNED fallback path here — the store always
+        // supplies the default-locale message as `defaultMessage` — so formatjs's
+        // default screaming-stack-trace handler is pure noise for it, in tests AND
+        // in production. Real errors (e.g. FORMAT_ERROR from a missing variable)
+        // still surface in dev mode.
+        onError: (err) => {
+          if ((err as { code?: string })?.code === 'MISSING_TRANSLATION')
+            return;
+          if (isDevMode()) console.error(err);
+        },
         ...this.nonMessageConfig(),
         messages: this.messages(),
       },
@@ -418,10 +459,24 @@ export class TranslationStore {
   );
 
   constructor() {
-    this.locale = proxyToGlobalSingleton(initLocale(signal('en-US')));
+    this.locale = initLocale(proxyToGlobalSingleton(signal('en-US')));
     const paramName = this.config?.localeParamName;
     if (paramName) {
-      const param = pathParam(paramName);
+      const router = inject(Router);
+      const param = toSignal(
+        router.events.pipe(
+          filter((e) => e instanceof NavigationEnd),
+          map(() =>
+            readDeepestParam(router.routerState.snapshot.root, paramName),
+          ),
+        ),
+        {
+          initialValue: readDeepestParam(
+            router.routerState.snapshot.root,
+            paramName,
+          ),
+        },
+      );
 
       effect(() => {
         const loc = param();
@@ -431,8 +486,11 @@ export class TranslationStore {
           untracked(this.loadQueue).includes(loc)
         )
           return;
-        if (this.hasLocaleLoaders(loc)) this.locale.set(loc);
-        else this.loadQueue.update((q) => [...q, loc]);
+        // loaders exist → queue the load (the dequeue effect switches once data lands);
+        // no loaders → nothing to load, switch directly
+        if (this.hasLocaleLoaders(loc))
+          this.loadQueue.update((q) => [...q, loc]);
+        else this.locale.set(loc);
       });
     }
 
@@ -453,16 +511,24 @@ export class TranslationStore {
         });
       }
 
-      const hasTranslations =
-        dynamicLocales.locales.length > 0 ||
-        this.translations()[dynamicLocales.locale];
+      const requested = dynamicLocales.locale;
+      const dataOnly = this.dataOnlyLoads.delete(requested);
 
-      if (hasTranslations) {
-        this.loadQueue.update((q) =>
-          q.filter((l) => l !== dynamicLocales.locale),
+      // ALWAYS dequeue
+      this.loadQueue.update((q) => q.filter((l) => l !== requested));
+
+      const hasTranslations =
+        dynamicLocales.locales.length > 0 || !!this.translations()[requested];
+
+      if (!hasTranslations && !dataOnly && isDevMode()) {
+        console.warn(
+          `[Translate] No translations could be loaded for locale "${requested}" — locale not switched. ` +
+            `Calling locale.set('${requested}') again will retry.`,
         );
-        this.locale.set(dynamicLocales.locale);
       }
+
+      // a fallback DATA load must never change the user's active locale
+      if (!dataOnly && hasTranslations) this.locale.set(requested);
     });
   }
 
@@ -521,12 +587,23 @@ export class TranslationStore {
       '';
 
     if (!message) {
+      if (isDevMode() && !this.warnedMissingKeys.has(key)) {
+        this.warnedMissingKeys.add(key);
+        console.warn(
+          `[Translate] Missing translation for key "${key}" (locale "${untracked(this.locale)}", fallback "${this.defaultLocale}") — rendering ''.`,
+        );
+      }
+
       if (this.attemptedFallbackLoad) return '';
 
       this.attemptedFallbackLoad = true;
       untracked(() => {
-        if (!this.loadQueue().includes(this.defaultLocale))
+        if (!this.loadQueue().includes(this.defaultLocale)) {
+          // data-only: fetch the default locale's messages as fallback content
+          // WITHOUT switching the app's active locale to it
+          this.dataOnlyLoads.add(this.defaultLocale);
           this.loadQueue.update((q) => [...q, this.defaultLocale]);
+        }
       });
       return '';
     }
@@ -571,6 +648,17 @@ export class TranslationStore {
     loaders: Record<string, () => Promise<any>>,
   ) {
     this.onDemandLoaders.set(namespace, loaders);
+    // new loaders can satisfy keys that previously had nothing to fall back to —
+    // allow the missing-key fallback to attempt another default-locale load
+    this.attemptedFallbackLoad = false;
+  }
+
+  /**
+   * @internal Upgrade a queued data-only load into a user locale switch — used when
+   * `locale.set(x)` is called while `x` is already in flight as a fallback data load.
+   */
+  markSwitchIntent(locale: string) {
+    this.dataOnlyLoads.delete(locale);
   }
 
   hasLocaleLoaders(locale: string): boolean {
@@ -639,11 +727,14 @@ export function injectDynamicLocale(): WritableSignal<string> & {
       : (locale: string) => supportedLocales.includes(locale);
 
   const set = (value: string) => {
-    if (
-      value === untracked(source) ||
-      untracked(store.loadQueue).includes(value)
-    )
+    if (value === untracked(source)) return;
+
+    if (untracked(store.loadQueue).includes(value)) {
+      // already in flight — if it was queued as a fallback DATA load, upgrade it to a
+      // user switch so the locale flips once the load completes
+      store.markSwitchIntent(value);
       return;
+    }
 
     if (!inSupportedLocales(value)) {
       if (isDevMode())

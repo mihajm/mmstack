@@ -5,18 +5,22 @@ import {
   inject,
   Injectable,
   PLATFORM_ID,
+  untracked,
+  type OnDestroy,
   type WritableSignal,
 } from '@angular/core';
 
 @Injectable({
   providedIn: 'root',
 })
-export class MessageBus {
+export class MessageBus implements OnDestroy {
   private readonly channel = new BroadcastChannel('mmstack-tab-sync-bus');
-  private readonly listeners = new Map<string, (ev: MessageEvent) => void>();
+  private readonly listeners = new Map<
+    string,
+    Set<(ev: MessageEvent) => void>
+  >();
 
   subscribe<T>(id: string, listener: (data: T) => void) {
-    this.unsubscribe(id); // Ensure no duplicate listeners
     const wrapped = (ev: MessageEvent) => {
       try {
         if (ev.data?.id === id) listener(ev.data?.value);
@@ -25,22 +29,36 @@ export class MessageBus {
       }
     };
     this.channel.addEventListener('message', wrapped);
-    this.listeners.set(id, wrapped);
+    let set = this.listeners.get(id);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(id, set);
+    }
+    set.add(wrapped);
 
     return {
-      unsub: (() => this.unsubscribe(id)).bind(this),
-      post: ((value: T) => this.channel.postMessage({ id, value })).bind(this),
+      unsub: () => {
+        this.channel.removeEventListener('message', wrapped);
+        const cur = this.listeners.get(id);
+        if (!cur) return;
+        cur.delete(wrapped);
+        if (cur.size === 0) this.listeners.delete(id);
+      },
+      post: (value: T) => this.channel.postMessage({ id, value }),
     };
   }
 
-  private unsubscribe(id: string) {
-    const listener = this.listeners.get(id);
-    if (!listener) return;
-    this.channel.removeEventListener('message', listener);
-    this.listeners.delete(id);
+  ngOnDestroy(): void {
+    this.channel.close();
+    this.listeners.clear();
   }
 }
 
+/**
+ * @deprecated The generated id hashes the call-site stack line, which collides when a shared
+ * helper calls {@link tabSync} for multiple signals and diverges across minified builds during
+ * a rolling deploy. Pass an explicit `{ id }` instead.
+ */
 export function generateDeterministicID(): string {
   const stack = new Error().stack;
   if (stack) {
@@ -80,7 +98,7 @@ export type SyncSignalOptions = {
 };
 
 /**
- * @example tabSync(signal('dark), {id: 'theme})
+ * @example tabSync(signal('dark'), { id: 'theme' })
  */
 export function tabSync<T extends WritableSignal<any>>(
   sig: T,
@@ -113,10 +131,8 @@ export function tabSync<T extends WritableSignal<any>>(
  *
  * @example
  * ```typescript
- * // Basic usage - auto-generates channel ID from call site
- * const theme = tabSync(signal('dark'));
- *
- * // With explicit ID (recommended for production)
+ * // With explicit ID (recommended)
+ * const theme = tabSync(signal('dark'), { id: 'theme' });
  * const userPrefs = tabSync(signal({ lang: 'en' }), { id: 'user-preferences' });
  *
  * // Changes in one tab will sync to all other tabs
@@ -128,6 +144,7 @@ export function tabSync<T extends WritableSignal<any>>(
  * - Uses a single BroadcastChannel for all synchronized signals
  * - Automatically cleans up listeners when the injection context is destroyed
  * - Initial signal value after sync setup is not broadcasted to prevent loops
+ * - Received values are not re-broadcast, so tabs never echo each other's updates
  *
  */
 export function tabSync<T extends WritableSignal<any>>(
@@ -141,7 +158,20 @@ export function tabSync<T extends WritableSignal<any>>(
 
   const bus = inject(MessageBus);
 
-  const { unsub, post } = bus.subscribe(id, (next) => sig.set(next));
+  // The last value applied from a remote tab. The outbound effect skips (exactly) the run
+  // caused by that write — without this, an inbound object (a fresh structured clone, so
+  // never reference-equal) would be re-posted, and two tabs would ping-pong forever.
+  const NONE = Symbol();
+  let received: unknown = NONE;
+
+  const { unsub, post } = bus.subscribe(id, (next) => {
+    const before = untracked(sig);
+    received = next;
+    sig.set(next);
+    // Equality-suppressed write (e.g. an identical primitive): no effect run will follow,
+    // so clear the marker — it must not swallow a later, genuinely local change.
+    if (untracked(sig) === before) received = NONE;
+  });
 
   let first = false;
 
@@ -151,6 +181,11 @@ export function tabSync<T extends WritableSignal<any>>(
       first = true;
       return;
     }
+    if (val === received) {
+      received = NONE;
+      return;
+    }
+    received = NONE;
     post(val);
   });
 

@@ -73,7 +73,7 @@ export function pipeable<TSig extends Signal<any>>(
 }
 
 /**
- * Create a new **writable** signal and return it as a `PipableSignal`.
+ * Create a new **writable** signal and return it as a `PipeableSignal`.
  *
  * The returned value is a `WritableSignal<T>` with `.set`, `.update`, `.asReadonly`
  * still available (via intersection type), plus a chainable `.pipe(...)`.

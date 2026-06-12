@@ -1,3 +1,3 @@
 export * from './operators';
-export * from './pipeble';
+export * from './pipeable';
 export * from './types';

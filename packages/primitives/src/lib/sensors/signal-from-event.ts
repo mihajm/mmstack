@@ -97,11 +97,19 @@ export function signalFromEvent<TEvent extends Event, U>(
     else state.set(event as TEvent);
   };
 
-  const { destroyRef: providedDestroyRef, ...listenerOpts } = opt ?? {};
+  const {
+    destroyRef: providedDestroyRef,
+    // strip non-listener keys so they don't leak into addEventListener options
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    injector: _injector,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    debugName: _debugName,
+    ...listenerOpts
+  } = opt ?? {};
 
   if (isSignal(target)) {
     const targetSig = target;
-    effect(
+    const effectRef = effect(
       (cleanup) => {
         const resolved = unwrap(targetSig());
         if (!resolved) return;
@@ -112,6 +120,9 @@ export function signalFromEvent<TEvent extends Event, U>(
       },
       { injector },
     );
+    // honor an explicit destroyRef for signal targets too — the effect would otherwise
+    // only follow the injector's lifetime, contradicting the documented option
+    providedDestroyRef?.onDestroy(() => effectRef.destroy());
   } else {
     const resolved = unwrap(target);
     if (resolved) {

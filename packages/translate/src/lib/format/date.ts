@@ -1,7 +1,7 @@
 import { type Signal } from '@angular/core';
 import { readLocaleUnsafe } from '../translation-store';
 import { createFormatterProvider } from './provide-defaults';
-import { unwrap } from './unwrap';
+import { mergeDefined, unwrap } from './unwrap';
 
 const FORMAT_PRESETS = {
   short: { dateStyle: 'short', timeStyle: 'short' },
@@ -74,9 +74,14 @@ function getFormatter(
   let formatter = cache.get(cacheKey);
 
   if (!formatter) {
+    // widen: the presets `satisfies` clause keeps literal types whose union has no
+    // `timeZone` member, but a caller-supplied options object may legally carry one
+    const base: Intl.DateTimeFormatOptions =
+      typeof format === 'string' ? FORMAT_PRESETS[format] : format;
     formatter = new Intl.DateTimeFormat(locale, {
-      ...(typeof format === 'string' ? FORMAT_PRESETS[format] : format),
-      timeZone,
+      ...base,
+      // an explicit `timeZone: undefined` would clobber a user-supplied format.timeZone
+      timeZone: timeZone ?? base.timeZone,
     });
     cache.set(cacheKey, formatter);
   }
@@ -186,7 +191,7 @@ export function injectFormatDate() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,

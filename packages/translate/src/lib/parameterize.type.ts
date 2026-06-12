@@ -48,7 +48,7 @@ export type extractParams<T extends string> =
     ? Var extends `${infer _}, ${infer __}`
       ? extractComplexParam<`{${Var}}${End}`>
       : IsSimpleIdent<Var> extends true
-        ? [Var, string] | extractParams<End>
+        ? [Var, string | number] | extractParams<End>
         : extractParams<End>
     : never;
 

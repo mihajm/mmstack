@@ -157,7 +157,7 @@ type SignalPipe<In> = {
  * @see {@link SignalPipe}
  * @example
  * ```ts
- * import { piped } from '@ngrx/signals';
+ * import { piped } from '@mmstack/primitives';
  *
  * const count = piped(1);
  *

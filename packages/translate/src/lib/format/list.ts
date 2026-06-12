@@ -1,7 +1,7 @@
 import { type Signal } from '@angular/core';
 import { readLocaleUnsafe } from '../translation-store';
 import { createFormatterProvider } from './provide-defaults';
-import { unwrap } from './unwrap';
+import { mergeDefined, unwrap } from './unwrap';
 
 type ListType = 'conjunction' | 'disjunction' | 'unit';
 type ListStyle = 'long' | 'short' | 'narrow';
@@ -160,7 +160,7 @@ export function injectFormatList() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? { ...defaults(), ...unwrapped }
+        ? mergeDefined(defaults(), unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,

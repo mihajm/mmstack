@@ -2,7 +2,7 @@ import { type Signal, type ValueEqualityFn } from '@angular/core';
 import { SIGNAL } from '@angular/core/primitives/signals';
 
 /**
- * @interal
+ * @internal
  */
 export function getSignalEquality<T>(sig: Signal<T>): ValueEqualityFn<T> {
   const internal = sig[SIGNAL] as {

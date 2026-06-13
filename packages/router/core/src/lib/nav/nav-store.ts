@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { mutable } from '@mmstack/primitives';
+import { navigationEndTick } from '../url';
 import { injectLeafRoutes } from '../util';
 import {
   createInternalNavItem,
@@ -37,6 +38,13 @@ export class NavStore {
   private readonly router = inject(Router);
   private readonly config = injectNavConfig();
   private readonly injector = inject(EnvironmentInjector);
+  /**
+   * @internal
+   * ONE shared navigation signal for every nav item's `active` computation —
+   * threaded into `createInternalNavItem` so items never open their own
+   * `Router.events` subscriptions (which would accrete per registration).
+   */
+  readonly trackNavigation = navigationEndTick(this.router);
   private readonly defaultsCache = new Map<
     ScopeName,
     AnyInternalNavItem[] | null
@@ -123,6 +131,7 @@ export class NavStore {
             NEVER_TRUE,
             NEVER_TRUE,
             `${prefix}#${i}`,
+            this.trackNavigation,
           ),
         ) as AnyInternalNavItem[];
       }),

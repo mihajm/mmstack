@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { type Route, Router } from '@angular/router';
-import { firstValueFrom, of } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
 import { findPath } from '../util';
 import { PreloadRequester } from './preload-requester';
 import { PreloadStrategy } from './preload-strategy';
@@ -139,5 +139,81 @@ describe('PreloadStrategy', () => {
     await firstValueFrom(obs$, { defaultValue: 'completed' });
 
     expect(loadSpy).not.toHaveBeenCalled(); // Returns EMPTY because of loading.has('home')
+  });
+
+  it('should complete the preload() observable immediately even when never requested', async () => {
+    const loadSpy = vi.fn().mockReturnValue(of(true));
+    const obs$ = strategy.preload({ path: 'home' } as any as Route, loadSpy);
+
+    // never call startPreload — must still complete: RouterPreloader concatMaps
+    // these per navigation, so a hanging observable would stall registration of
+    // every lazy route discovered after this one
+    await expect(
+      firstValueFrom(obs$, { defaultValue: 'completed' }),
+    ).resolves.toBe('completed');
+    expect(loadSpy).not.toHaveBeenCalled();
+  });
+
+  it('should check the connection at request time, not registration time', () => {
+    const loadSpy = vi.fn().mockReturnValue(of(true));
+    strategy.preload({ path: 'home' } as any as Route, loadSpy);
+
+    (globalThis as any).window.navigator.connection.effectiveType = '2g';
+    requester.startPreload('home');
+    expect(loadSpy).not.toHaveBeenCalled();
+
+    // connection recovered — the same registration can now load
+    (globalThis as any).window.navigator.connection.effectiveType = '4g';
+    requester.startPreload('home');
+    expect(loadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should load each path at most once', () => {
+    const loadSpy = vi.fn().mockReturnValue(of(true));
+    strategy.preload({ path: 'home' } as any as Route, loadSpy);
+
+    requester.startPreload('home');
+    requester.startPreload('home');
+
+    expect(loadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should allow a retry after a failed load', () => {
+    const loadSpy = vi
+      .fn()
+      .mockReturnValueOnce(throwError(() => new Error('chunk fetch failed')))
+      .mockReturnValue(of(true));
+    strategy.preload({ path: 'home' } as any as Route, loadSpy);
+
+    requester.startPreload('home');
+    expect(loadSpy).toHaveBeenCalledTimes(1); // failed
+
+    requester.startPreload('home');
+    expect(loadSpy).toHaveBeenCalledTimes(2); // retried, succeeded
+
+    requester.startPreload('home');
+    expect(loadSpy).toHaveBeenCalledTimes(2); // done — no further loads
+  });
+
+  it('should delay the load by data.preloadDelay (hover intent)', () => {
+    vi.useFakeTimers();
+    try {
+      const loadSpy = vi.fn().mockReturnValue(of(true));
+      strategy.preload(
+        { path: 'home', data: { preloadDelay: 150 } } as any as Route,
+        loadSpy,
+      );
+
+      requester.startPreload('home');
+      expect(loadSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(149);
+      expect(loadSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(loadSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

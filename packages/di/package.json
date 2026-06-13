@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/di",
-  "version": "22.0.0",
+  "version": "22.0.1",
   "keywords": [
     "angular",
     "dependency injection",

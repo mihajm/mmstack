@@ -1,11 +1,15 @@
 import {
+  Component,
   computed,
+  Directive,
+  HostAttributeToken,
   Injectable,
   InjectionToken,
   signal,
   type Signal,
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { injectLazy } from './inject-lazy';
 
 describe('injectLazy', () => {
@@ -78,6 +82,30 @@ describe('injectLazy', () => {
       assert(getToken !== undefined, 'getToken is not defined');
       return getToken();
     }).toThrow();
+  });
+
+  it('should lazily resolve a HostAttributeToken', () => {
+    // eslint-disable-next-line @angular-eslint/directive-selector
+    @Directive({ selector: '[lazyAttr]' })
+    class LazyAttrDirective {
+      readonly getRole = injectLazy(new HostAttributeToken('role'));
+    }
+
+    @Component({
+      template: `<div lazyAttr role="button"></div>`,
+      imports: [LazyAttrDirective],
+    })
+    class HostCmp {}
+
+    const fixture = TestBed.createComponent(HostCmp);
+    fixture.detectChanges();
+
+    const dir = fixture.debugElement
+      .query(By.directive(LazyAttrDirective))
+      .injector.get(LazyAttrDirective);
+
+    expect(dir.getRole()).toBe('button');
+    expect(dir.getRole()).toBe('button'); // cached
   });
 
   it('should correctly handle reactive contexts', () => {

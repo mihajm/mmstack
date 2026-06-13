@@ -6,7 +6,6 @@ import {
   type Router,
   UrlTree,
 } from '@angular/router';
-import { url as currentUrl } from '../url';
 
 /**
  * Description of a single navigation item.
@@ -163,6 +162,7 @@ export function createInternalNavItem<TMeta = Record<string, unknown>>(
   parentDisabled: Signal<boolean>,
   parentHidden: Signal<boolean>,
   fallbackId: string,
+  trackNavigation: Signal<unknown>,
 ): InternalNavItem<TMeta> {
   const label = wrap(input.label);
   const ariaLabel = input.ariaLabel ? wrap(input.ariaLabel) : label;
@@ -199,6 +199,7 @@ export function createInternalNavItem<TMeta = Record<string, unknown>>(
         disabled,
         hidden,
         `${fallbackId}.${i}`,
+        trackNavigation,
       ),
   );
 
@@ -211,7 +212,6 @@ export function createInternalNavItem<TMeta = Record<string, unknown>>(
     ...input.activeMatch,
   };
 
-  const trackNavigation = currentUrl(router);
   const finalOptions: IsActiveMatchOptions = {
     paths: 'subset',
     fragment: 'ignored',

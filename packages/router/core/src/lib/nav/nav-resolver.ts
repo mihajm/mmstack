@@ -90,6 +90,7 @@ export function createNavItems<TMeta = Record<string, unknown>>(
         NEVER_TRUE,
         NEVER_TRUE,
         `${routePath}#${i}`,
+        store.trackNavigation,
       ),
     );
 

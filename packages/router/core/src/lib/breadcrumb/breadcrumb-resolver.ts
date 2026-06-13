@@ -1,5 +1,6 @@
 import { computed, inject } from '@angular/core';
 import {
+  type ActivatedRouteSnapshot,
   createUrlTreeFromSnapshot,
   Router,
   type ResolveFn,
@@ -41,8 +42,10 @@ import { Breadcrumb, createInternalBreadcrumb } from './breadcrumb';
  *
  * @param factoryOrValue One of: a literal label string (shorthand for
  *   `{ label: <string> }`), a static {@link CreateBreadcrumbOptions} object,
- *   or a factory `() => string | CreateBreadcrumbOptions` invoked inside an
- *   injection context (so it can use `inject()`).
+ *   or a factory `(route) => string | CreateBreadcrumbOptions` invoked inside an
+ *   injection context (so it can use `inject()`) and receiving the route's
+ *   `ActivatedRouteSnapshot` — params/data are idiomatically reachable:
+ *   `createBreadcrumb((route) => 'Order ' + route.params['id'])`.
  * @returns An Angular `ResolveFn<void>` to wire into a route's `resolve` map.
  *   The resolver registers the breadcrumb as a side effect; the resolved value
  *   itself is unused.
@@ -77,7 +80,7 @@ import { Breadcrumb, createInternalBreadcrumb } from './breadcrumb';
  */
 export function createBreadcrumb(
   factoryOrValue:
-    | (() => CreateBreadcrumbOptions | string)
+    | ((route: ActivatedRouteSnapshot) => CreateBreadcrumbOptions | string)
     | string
     | CreateBreadcrumbOptions,
 ): ResolveFn<void> {
@@ -85,8 +88,8 @@ export function createBreadcrumb(
     typeof factoryOrValue === 'string'
       ? (): CreateBreadcrumbOptions => ({ label: factoryOrValue })
       : typeof factoryOrValue === 'function'
-        ? (): CreateBreadcrumbOptions => {
-            const result = factoryOrValue();
+        ? (route: ActivatedRouteSnapshot): CreateBreadcrumbOptions => {
+            const result = factoryOrValue(route);
             return typeof result === 'string' ? { label: result } : result;
           }
         : () => factoryOrValue;
@@ -98,14 +101,11 @@ export function createBreadcrumb(
 
     const fp = resolver(route);
 
-    const tree = createUrlTreeFromSnapshot(
-      route,
-      [],
-      route.queryParams,
-      route.fragment,
-    );
+    // path only — query params / fragment must NOT be baked into a breadcrumb link
+    // (they'd be frozen at resolve time; the store overlays the live leaf link anyway)
+    const tree = createUrlTreeFromSnapshot(route, []);
 
-    const provided = factory();
+    const provided = factory(route);
 
     const link = computed(() => router.serializeUrl(tree));
 

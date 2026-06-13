@@ -1,6 +1,7 @@
 import { computed, inject, Injectable, type Signal } from '@angular/core';
 import { indexArray, mutable } from '@mmstack/primitives';
 import { injectLeafRoutes, type ResolvedLeafRoute } from '../util/leaf.store';
+import { createStagedApply } from '../util/staged-apply';
 import {
   type Breadcrumb,
   createInternalBreadcrumb,
@@ -30,7 +31,13 @@ function parsePathSegment(pathSegment: string): string {
 }
 
 function generateLabel(leaf: ResolvedLeafRoute): string {
-  const title = leaf.route.title ?? leaf.route.data?.['title'];
+  // read the RAW config title, not the resolved one — for routes using createTitle the
+  // resolved title has already been run through the configured parser/prefix, which
+  // would leak "App - Home" style strings into breadcrumbs
+  const configTitle = leaf.route.routeConfig?.title;
+  const title =
+    (typeof configTitle === 'string' ? configTitle : undefined) ??
+    leaf.route.data?.['title'];
 
   if (title && typeof title === 'string') return title;
   if (leaf.segment.path.includes(':')) return leaf.segment.resolved;
@@ -123,27 +130,47 @@ export class BreadcrumbStore {
     (leaf) => {
       const stableId = computed(() => leaf().path);
 
+      const cache: {
+        id: string | null;
+        auto: InternalBreadcrumb | null;
+        found: InternalBreadcrumb | null;
+        wrapped: InternalBreadcrumb | null;
+      } = { id: null, auto: null, found: null, wrapped: null };
+
       return exposeActiveSignal(
-        computed(
-          () => {
-            const id = stableId();
+        computed(() => {
+          const id = stableId();
 
-            const found = this.map().get(id);
+          if (cache.id !== id) {
+            cache.id = id;
+            cache.auto = null;
+            cache.found = null;
+            cache.wrapped = null;
+          }
 
-            if (!found)
-              return autoGenerateBreadcrumb(id, leaf, this.autoGenerateLabelFn);
+          const found = this.map().get(id);
 
-            if (!id.includes(':')) return found;
+          if (!found) {
+            cache.found = null;
+            cache.wrapped = null;
+            return (cache.auto ??= autoGenerateBreadcrumb(
+              id,
+              leaf,
+              this.autoGenerateLabelFn,
+            ) as InternalBreadcrumb);
+          }
 
-            return {
+          // ALL registered crumbs get the live leaf link
+          if (cache.found !== found) {
+            cache.found = found;
+            cache.wrapped = {
               ...found,
               link: computed(() => leaf().link),
             };
-          },
-          {
-            equal: (a, b) => a.id === b.id,
-          },
-        ),
+          }
+
+          return cache.wrapped as InternalBreadcrumb;
+        }),
         this.isManual,
       );
     },
@@ -158,8 +185,14 @@ export class BreadcrumbStore {
 
   readonly unwrapped = computed(() => this.crumbs().map((c) => c()));
 
+  // staged: a breadcrumb registered during a navigation must not appear (or replace an
+  // existing label) until that navigation actually commits — see createStagedApply
+  private readonly stagedApply = createStagedApply<InternalBreadcrumb>(
+    (id, breadcrumb) => this.map.inline((m) => m.set(id, breadcrumb)),
+  );
+
   register(breadcrumb: InternalBreadcrumb) {
-    this.map.inline((m) => m.set(breadcrumb.id, breadcrumb));
+    this.stagedApply(breadcrumb.id, breadcrumb);
   }
 }
 
@@ -179,7 +212,7 @@ export class BreadcrumbStore {
  *    <ol>
  *      @for (crumb of breadcrumbs(); track crumb.id) {
  *        <li>
- *          <a [href]="crumb.link()" [attr.aria-label]="crumb.ariaLabel()">{{ crumb.label() }}</a>
+ *          <a [routerLink]="crumb.link()" [attr.aria-label]="crumb.ariaLabel()">{{ crumb.label() }}</a>
  *        </li>
  *      }
  *    </ol>

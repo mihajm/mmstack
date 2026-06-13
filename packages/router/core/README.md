@@ -23,6 +23,7 @@ npm install @mmstack/router-core
 
 - [Reactive router state](#reactive-router-state)
   - [`url`](#url)
+  - [`navigationEndTick`](#navigationendtick)
   - [`queryParam`](#queryparam)
 - [Resolver-driven UI](#resolver-driven-ui)
   - [Title — `createTitle`](#title)
@@ -62,15 +63,29 @@ export class HeaderComponent {
 }
 ```
 
+### `navigationEndTick`
+
+A monotonically increasing counter signal that ticks on every **successful navigation** — including navigations whose resulting URL string equals the previous one (initial landing on `/`, `onSameUrlNavigation: 'reload'`, redirects back to the same URL). Use it instead of the URL string to key recomputation of anything derived from router state snapshots.
+
+```typescript
+const tick = navigationEndTick(inject(Router));
+const leaf = computed(() => {
+  tick(); // recompute per navigation, even same-URL reloads
+  let r = router.routerState.snapshot.root;
+  while (r.firstChild) r = r.firstChild;
+  return r;
+});
+```
+
 ### `queryParam`
 
 A `WritableSignal` that two-way binds with a URL query parameter.
 
 - Reading returns the current value (or `null` if absent).
-- Setting to a string updates the URL.
-- Setting to `null` removes the parameter.
+- Setting updates the URL; setting `null` removes the parameter.
 - Reacts to external navigation changes.
 - Uses `queryParamsHandling: 'merge'`, so unrelated params survive updates.
+- Each `set()` navigates immediately. Opt into `batch: true` to coalesce several same-tick writes into one navigation (otherwise each write rebuilds from the pre-navigation URL and only the last survives).
 
 ```typescript
 import { Component } from '@angular/core';
@@ -91,6 +106,30 @@ import { queryParam } from '@mmstack/router-core';
 export class SearchPageComponent {
   protected readonly searchTerm = queryParam('q');
 }
+```
+
+#### Typed & tuned params
+
+The second argument accepts options for typed params and write behavior:
+
+- **`parse` / `serialize`** — convert between the URL string and a typed value. Provide both and the signal becomes `WritableSignal<T | null>` (`parse` runs on present params; an absent param reads as `null` directly; `serialize` returning `null` removes the param).
+- **`replaceUrl`** — write without creating a history entry (right call for type-ahead search boxes). Under `batch`, a history entry is kept unless _every_ batched writer opted out.
+- **`debounce`** — milliseconds to debounce writes (reads stay instant).
+- **`batch`** — coalesce same-tick writes into a single navigation (default `false`; see above). Useful when resetting several params together.
+- **`route`** — bind to a specific `ActivatedRoute` instead of the injected one.
+
+```typescript
+// number-typed page param
+readonly page = queryParam<number>('page', {
+  parse: (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  },
+  serialize: (n) => (n <= 1 ? null : String(n)), // page 1 keeps the URL clean
+});
+
+// debounced type-ahead search, no history spam while typing
+readonly q = queryParam('q', { replaceUrl: true, debounce: 300 });
 ```
 
 ---
@@ -117,6 +156,13 @@ export const appRoutes: Routes = [
       import('./about.component').then((m) => m.AboutComponent),
   },
   {
+    path: 'users/:id',
+    // factories receive the route's ActivatedRouteSnapshot
+    title: createTitle((route) => `User ${route.params['id']}`),
+    loadComponent: () =>
+      import('./user.component').then((m) => m.UserComponent),
+  },
+  {
     path: 'products/:id',
     // Signal-driven title — the inner function becomes a computed under the hood.
     title: createTitle(() => {
@@ -128,6 +174,8 @@ export const appRoutes: Routes = [
   },
 ];
 ```
+
+Title (and breadcrumb/nav) registrations made during a navigation are **staged** — they apply when the navigation commits (`NavigationEnd`) and are dropped if it's cancelled or errors, so a guard-rejected navigation can never flip the document title.
 
 #### Configuration (optional)
 
@@ -216,12 +264,12 @@ export const appRoutes: Routes = [
     path: 'users/:userId',
     component: UserProfileComponent,
     resolve: {
-      breadcrumb: createBreadcrumb(() => {
+      // the factory receives the route's ActivatedRouteSnapshot
+      breadcrumb: createBreadcrumb((route) => {
         const userStore = inject(UserStore);
         return {
-          label: () => userStore.currentUser().name ?? 'Loading...',
-          ariaLabel: () =>
-            `View profile for ${userStore.currentUser().name ?? 'user'}`,
+          label: () =>
+            userStore.user(route.params['userId'])()?.name ?? 'Loading...',
         };
       }),
     },
@@ -465,9 +513,10 @@ A custom `PreloadingStrategy` that defers preloading until something asks for a 
 
 - Listens for preload requests triggered by `Link` / `injectTriggerPreload`.
 - Path-matches the requested URL against the route config (supports route params, matrix params, and wildcards).
-- Skips preloading on slow connections (`effectiveType: '2g'`) or when the browser reports `saveData`.
+- Skips preloading on slow connections (`effectiveType: '2g'`) or when the browser reports `saveData` — evaluated at request time, so conditions improving later aren't locked out.
 - Respects `data: { preload: false }` on a route config to opt that route out.
-- Deduplicates: each path is preloaded at most once.
+- `data: { preloadDelay: 150 }` debounces hover-intent — the load starts that many ms after the first request, so accidental pointer flybys don't fetch chunks.
+- Deduplicates: each path is preloaded at most once (failed loads may retry on the next request).
 
 Provide it alongside `provideRouter`:
 
@@ -486,6 +535,10 @@ The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds pr
 
 - **`preloadOn`** — `input<'hover' | 'visible' | null>()` (default: `'hover'`). `null` disables preloading.
 - **`preloading`** — `output<void>()` fires when the route is queued for preload (before the JS actually loads).
+- **`useMouseDown`** — navigate on mousedown instead of click (shaves ~50–100ms off perceived latency). The press's own click event is swallowed, so the navigation runs exactly once; keyboard activation still works.
+- **`beforeNavigate`** — `input<() => void>()` hook invoked just before an SPA navigation triggered by this link. Modified/middle clicks and `target="_blank"` links are left to the browser and skip the hook.
+
+App-wide defaults for `preloadOn` / `useMouseDown` can be set once via `provideMMLinkDefaultConfig({ ... })`.
 
 Replace existing `routerLink`s with `mmLink` to opt them in:
 
@@ -571,4 +624,35 @@ Behaviour:
 - **First navigation** mounts immediately (nothing to hold). After that, the outgoing route holds until the incoming one settles, then swaps and is destroyed — navigation still respects "tree = f(URL)".
 - **Settle = the incoming route's registered resources went in flight and then drained.** A route that registers nothing (or errors) swaps via a microtask fallback, so a data-less or failing route never hangs the hold.
 - **Composes with guards and resolvers** — a denied `canActivate` leaves the current route untouched (nothing held or leaked); a pending `resolve` holds at the router level, then the outlet holds through the data load. Works when nested inside a parent route's outlet too.
+- **Interruptions re-target the hold** — navigating again before the incoming route settles destroys the half-loaded view; the stable view stays visible until the new destination settles.
 - **`data: { immediateTransition: true }`** on a route opts it out of the hold — it swaps in immediately, even while loading (handy for routes that should show their own skeleton).
+
+#### View Transitions
+
+The swap can be wrapped in the browser's [View Transitions API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) — the old view cross-fades (or whatever your `::view-transition-*` CSS says) into the new one. Feature-detected: browsers without `document.startViewTransition` fall back to the instant swap.
+
+**Standalone** — just set the attribute:
+
+```html
+<mm-transition-outlet viewTransition />
+```
+
+**Alongside Angular's router view transitions** — wrap Angular's option with `mmRouterViewTransitions()` and it just works, no attribute needed:
+
+```ts
+import { provideRouter, withViewTransitions } from '@angular/router';
+import { mmRouterViewTransitions } from '@mmstack/router-core';
+
+provideRouter(routes, withViewTransitions(mmRouterViewTransitions()));
+```
+
+```html
+<mm-transition-outlet />
+```
+
+Why the wrapper is needed: Angular fires its transition at route **activation**, but under this outlet activation is visually inert — the incoming view mounts _hidden_ and the real visual change happens later, at the **swap** (once the route's data settles). So for routes the outlet holds, Angular's activation-time transition would be an invisible no-op that just freezes the page for its duration. `mmRouterViewTransitions()` coordinates the two:
+
+- **Non-held routes** (first navigation, `data.immediateTransition`, routes that load nothing) — Angular transitions them normally; the swap is synchronous with activation.
+- **Held routes** — Angular's inert transition is skipped, and the outlet fires the real one at the swap. The same `::view-transition-*` CSS applies to both.
+
+Your own `onViewTransitionCreated` / `skipInitialTransition` options are preserved (pass them to `mmRouterViewTransitions({ ... })`). To opt a specific outlet out even when router view transitions are enabled app-wide, set `[viewTransition]="false"`.

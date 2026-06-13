@@ -25,6 +25,15 @@ type NonOptionalInjectOptions = Omit<InjectOptions, 'optional'> & {
  * Useful for services that are expensive to construct, or for breaking
  * circular dependency chains in component fields.
  *
+ * Note: this defers *instantiation* of an already-bundled token. To defer
+ * *loading the code itself*, use Angular's native `injectAsync` (v22+), which
+ * dynamically imports the token's module: `injectAsync(() => import('./heavy'))`.
+ * The two compose well — `injectAsync` for the bundle boundary, `injectLazy`
+ * for construction timing.
+ *
+ * The getter resolves against the injector captured at creation; calling it
+ * after that injector is destroyed throws (as a direct `inject` would).
+ *
  * @typeParam T The type of the resolved dependency.
  * @param token The dependency token to inject.
  * @returns A getter function that returns the lazily resolved dependency.
@@ -141,11 +150,12 @@ export function injectLazy<T>(
 
   return () => {
     if (instance === UNINITIALIZED_SYMBOL)
-      instance = runInInjectionContext(injector, () => {
-        return options
-          ? inject(token as any, options as any)
-          : inject(token as any);
-      });
+      instance = runInInjectionContext(injector, () =>
+        inject<T | string>(
+          token as ProviderToken<T | string>,
+          (options ?? {}) as InjectOptions & { optional: true },
+        ),
+      );
 
     return instance as T | string | null;
   };

@@ -17,21 +17,43 @@ This library provides the following utilities:
 
 - `injectable` - Creates a typed InjectionToken with inject and provide helper functions for type-safe dependency injection.
 - `injectLazy` - Defers the resolution and instantiation of a token until it is actually accessed.
-- `createRunInInjectionContext` - Captures an injection context securely and returns a runner function, useful for `inject()` inside async callbacks.
-- `rootInjectable` - Creates a lazily-initialized root-level injectable that maintains a singleton instance.
+- `createRunInInjectionContext` - Captures an injection context and returns a runner function, useful for `inject()` inside async callbacks.
+- `rootInjectable` - Creates a lazily-initialized root-level injectable that maintains a per-application singleton instance.
 - `createScope` - Creates a dependency injection scope that caches singletons based on the factory function.
+- `provideAs` - Tiny helper that builds a `useValue` or `useFactory` provider depending on what you hand it.
+
+## When to use what
+
+Angular's own DI primitives cover a lot of ground — these helpers are thin, named conveniences on top of them, and a couple of Angular's newer built-ins may already be exactly what you need:
+
+| You want to…                                                                | Reach for                                                              |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Inject a service, normally                                                  | Angular's `inject()`                                                    |
+| A class singleton for the whole app                                          | Angular's `@Injectable({ providedIn: 'root' })`                         |
+| A typed token + provide/inject pair without the `InjectionToken` boilerplate | `injectable` (think `createContext` for Angular)                        |
+| Defer **constructing** an already-bundled service until first use            | `injectLazy`                                                            |
+| Defer **loading the code** for a service (lazy chunk) until first use        | Angular's native `injectAsync` (v22+) — no helper needed here 🎉         |
+| A factory-built (non-class) app-wide singleton                               | `rootInjectable`                                                        |
+| A whole family of factory-built singletons scoped to a component subtree     | `createScope`                                                           |
+| Run `inject()` later, in a callback that lost the context                    | `createRunInInjectionContext` (or Angular's `runInInjectionContext`)    |
+
+`injectLazy` and `injectAsync` compose nicely: `injectAsync` gets the code onto the page, `injectLazy` decides when an instance is constructed.
+
+### A note on SSR
+
+Fallbacks (`injectable`'s `fallback`/`lazyFallback`) and `rootInjectable` singletons are implemented as **token factories**, which Angular caches *per root injector*. That means every application — including every server-side request, which gets its own root injector — lazily constructs its own instance. Module-scope definition, per-app state: you can define these at the top of a file without anything leaking between requests, tests, or multiple apps on one page.
 
 ---
 
 ## injectable
 
-Creates a typed InjectionToken with convenient, type-safe inject and provider functions, eliminating boilerplate and ensuring type safety throughout your dependency injection flow. It returns a tuple of `[injectFn, provideFn]` that work together seamlessly.
+Creates a typed InjectionToken with convenient, type-safe inject and provider functions, eliminating boilerplate and ensuring type safety throughout your dependency injection flow. It returns a tuple of `[injectFn, provideFn, token]` that work together seamlessly (the raw token is there for interop — destructure it only when you need it).
 
-The `injectable` function supports three patterns:
+The `injectable` function supports four patterns:
 
 1. **Basic** - Returns `T | null` when not provided
-2. **With Fallback** - Returns a default value when not provided, can be either
-3. **With Lazy Fallback** - Same as with fallback, but the fallback iz lazily evaluated, useful for expensive fallbacks or ones that require injection
+2. **With Fallback** - Returns a default value when not provided
+3. **With Lazy Fallback** - Same as with fallback, but the fallback is lazily evaluated — useful for expensive fallbacks or ones that require injection. Evaluated at most once *per application* (SSR-safe, see the note above).
 4. **With Error** - Throws a custom error message when not provided
 
 ### Basic Usage
@@ -183,6 +205,20 @@ export class FormComponent {
 }
 ```
 
+### Interop: the raw token
+
+The third tuple element is the underlying `InjectionToken` — handy for `deps` arrays, `Injector.create`, or `TestBed.overrideProvider`:
+
+```typescript
+const [injectApi, provideApi, API_TOKEN] = injectable<ApiClient>('Api');
+
+// In a classic factory provider elsewhere:
+{ provide: OTHER, useFactory: (api: ApiClient) => new Other(api), deps: [API_TOKEN] }
+
+// In a test:
+TestBed.overrideProvider(API_TOKEN, { useValue: fakeApi });
+```
+
 ### Advanced: Scoped Context Pattern
 
 Create context-like dependency injection patterns:
@@ -241,9 +277,11 @@ export class FormActionsComponent {
 
 ## injectLazy
 
-Defers the resolution and instantiation of an injection token until the returned getter function is actually called. 
+Defers the resolution and instantiation of an injection token until the returned getter function is actually called.
 
 Angular's native `inject()` resolves and instantiates dependencies immediately during the construction phase. If a service is heavily resource-intensive but only needed conditionally (like an export service or a complex editor), `injectLazy` allows you to capture the injection context immediately while delaying instantiation. The resolved value is cached, acting as a standard scoped singleton on subsequent calls.
+
+> **`injectLazy` vs Angular's `injectAsync` (v22+):** they solve adjacent problems. `injectAsync(() => import('./heavy'))` defers *loading the code* (a separate bundle chunk) and returns a `Promise`; `injectLazy(Heavy)` defers *constructing* an already-bundled service and stays synchronous. If your goal is bundle size, use `injectAsync` — it's built in, no helper needed. If your goal is construction timing (or you need a sync getter), `injectLazy` is the fit. They also compose.
 
 ### Basic Usage
 
@@ -515,6 +553,46 @@ export class ChildComponent {
   item = useFeatureItem();
 }
 ```
+
+Each subtree that provides the scope gets its **own** set of instances — two sibling `<app-feature>` components don't share anything.
+
+### Overrides (testing / Storybook)
+
+The provide function accepts `overrides` — pairs of `[injectFn, replacementFactory]` that swap a specific registration at that boundary only. Dependents resolve the override transitively:
+
+```typescript
+const [register, provideFeatureScope] = createScope('FeatureScope');
+
+const injectLogger = register(() => inject(RealLogger));
+const injectWorker = register(() => createWorker(injectLogger()));
+
+// In a test or story — same scope, stubbed logger:
+TestBed.configureTestingModule({
+  providers: [
+    provideFeatureScope({
+      overrides: [[injectLogger, () => ({ log: () => void 0 })]],
+    }),
+  ],
+});
+// injectWorker() now receives the stub too
+```
+
+---
+
+## provideAs
+
+A tiny convenience that builds a provider from either a plain value (`useValue`) or a zero-arg factory (`useFactory`). The factory branch runs in an injection context, so it can use `inject()`:
+
+```typescript
+import { provideAs } from '@mmstack/di';
+
+providers: [
+  provideAs(RETRY_COUNT, 3), // useValue
+  provideAs(API_CONFIG, () => ({ baseUrl: inject(BASE_URL) })), // useFactory, inject() works
+];
+```
+
+> **Heads up:** functions are *always* treated as factories. If your token holds a function type, wrap the value: `provideAs(VALIDATOR, () => myValidatorFn)` — passing it bare would call it as a factory.
 
 ---
 

@@ -60,15 +60,17 @@ describe('queryParam', () => {
     expect(q()).toBe(null);
   });
 
-  it('should navigate on set', () => {
+  it('should navigate on set (synchronously, by default)', () => {
     const q = TestBed.runInInjectionContext(() => queryParam('q'));
 
     q.set('zoneless');
 
+    // default: each set navigates immediately, no microtask
     expect(routerMock.navigate).toHaveBeenCalledWith([], {
       relativeTo: activatedRouteMock,
       queryParams: { q: 'zoneless' },
       queryParamsHandling: 'merge',
+      replaceUrl: false,
     });
   });
 
@@ -77,10 +79,47 @@ describe('queryParam', () => {
 
     q.set(null);
 
+    // `merge` PRESERVES absent keys — removal must patch an explicit null
     expect(routerMock.navigate).toHaveBeenCalledWith([], {
       relativeTo: activatedRouteMock,
-      queryParams: {},
+      queryParams: { q: null },
       queryParamsHandling: 'merge',
+      replaceUrl: false,
+    });
+  });
+
+  it('should NOT coalesce same-tick writes by default (one navigation each)', () => {
+    const [q, filter] = TestBed.runInInjectionContext(() => [
+      queryParam('q'),
+      queryParam('filter'),
+    ]);
+
+    q.set('signals');
+    filter.set('active');
+
+    expect(routerMock.navigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('should batch same-tick writes into a single navigation when batch: true', async () => {
+    const [q, filter] = TestBed.runInInjectionContext(() => [
+      queryParam('q', { batch: true }),
+      queryParam('filter', { batch: true, replaceUrl: true }),
+    ]);
+
+    q.set('signals');
+    filter.set('active');
+
+    // nothing yet — coalesced writes flush on a microtask
+    expect(routerMock.navigate).not.toHaveBeenCalled();
+    await Promise.resolve();
+
+    expect(routerMock.navigate).toHaveBeenCalledTimes(1);
+    expect(routerMock.navigate).toHaveBeenCalledWith([], {
+      relativeTo: activatedRouteMock,
+      queryParams: { q: 'signals', filter: 'active' },
+      queryParamsHandling: 'merge',
+      // only skips the history entry when EVERY writer in the batch opted in
+      replaceUrl: false,
     });
   });
 

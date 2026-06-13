@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { type PreloadingStrategy, type Route, Router } from '@angular/router';
-import { EMPTY, filter, finalize, type Observable, switchMap, take } from 'rxjs';
+import { EMPTY, type Observable, switchMap, timer } from 'rxjs';
 import { createRoutePredicate, findPath } from '../util';
 import { PreloadRequester } from './preload-requester';
 
@@ -33,6 +34,17 @@ function noPreload(route: Route) {
   return route.data && route.data['preload'] === false;
 }
 
+function preloadDelay(route: Route): number {
+  const delay = route.data?.['preloadDelay'];
+  return typeof delay === 'number' && delay > 0 ? delay : 0;
+}
+
+type RegisteredLoader = {
+  predicate: (path: string) => boolean;
+  load: () => Observable<unknown>;
+  delay: number;
+};
+
 /**
  * Demand-driven preloading strategy for Angular's router. Unlike Angular's
  * built-in `PreloadAllModules`, this strategy preloads a lazy route only
@@ -40,10 +52,18 @@ function noPreload(route: Route) {
  * the `mmLink` directive on hover or visibility, or {@link injectTriggerPreload}
  * called imperatively).
  *
+ * `preload()` itself completes immediately — loaders are registered and
+ * triggered on demand. This keeps `RouterPreloader`'s internal queue moving,
+ * so lazy routes discovered by later navigations register correctly too.
+ *
  * Skips preloading when:
  * - the route has `data.preload === false`
  * - the network is on `2g` or in `saveData` mode (cheap-data-mode users)
- * - a load for the same path is already in flight
+ * - a load for the same path is already in flight (or already loaded)
+ *
+ * Set `data.preloadDelay` (milliseconds) on a route to debounce hover-intent:
+ * the load starts only after the delay elapses following the first request —
+ * useful to avoid loading on accidental pointer flybys.
  *
  * Wire this into `provideRouter` to enable the `mmLink` preload pipeline:
  *
@@ -65,9 +85,10 @@ function noPreload(route: Route) {
  *
  * @example
  * ```ts
- * // Opt a route out of preloading:
+ * // Opt a route out of preloading / add hover-intent delay:
  * export const routes: Routes = [
  *   { path: 'admin', loadChildren: () => import('./admin'), data: { preload: false } },
+ *   { path: 'reports', loadChildren: () => import('./reports'), data: { preloadDelay: 150 } },
  * ];
  * ```
  */
@@ -75,23 +96,57 @@ function noPreload(route: Route) {
   providedIn: 'root',
 })
 export class PreloadStrategy implements PreloadingStrategy {
+  private readonly loaders = new Map<string, RegisteredLoader>();
   private readonly loading = new Set<string>();
   private readonly router = inject(Router);
   private readonly req = inject(PreloadRequester);
 
+  constructor() {
+    this.req.preloadRequested$
+      .pipe(takeUntilDestroyed())
+      .subscribe((path) => this.trigger(path));
+  }
+
   preload(route: Route, load: () => Observable<any>): Observable<any> {
-    if (noPreload(route) || hasSlowConnection()) return EMPTY;
+    if (!noPreload(route)) {
+      const fp = findPath(this.router.config, route);
+      // (re-)register the loader; actual loading happens on demand in trigger().
+      // Returning EMPTY (completing immediately) is load-bearing: RouterPreloader
+      // concatMaps these per navigation — a never-completing observable here would
+      // stall registration of every lazy route discovered after this one.
+      if (!this.loading.has(fp)) {
+        this.loaders.set(fp, {
+          predicate: createRoutePredicate(fp),
+          load,
+          delay: preloadDelay(route),
+        });
+      }
+    }
 
-    const fp = findPath(this.router.config, route);
+    return EMPTY;
+  }
 
-    if (this.loading.has(fp)) return EMPTY;
+  private trigger(path: string): void {
+    if (this.loaders.size === 0 || hasSlowConnection()) return;
 
-    const predicate = createRoutePredicate(fp);
-    return this.req.preloadRequested$.pipe(
-      filter((path) => path === fp || predicate(path)),
-      take(1),
-      switchMap(() => load()),
-      finalize(() => this.loading.delete(fp)),
-    );
+    for (const [fp, loader] of this.loaders) {
+      if (this.loading.has(fp)) continue;
+      if (path !== fp && !loader.predicate(path)) continue;
+
+      this.loading.add(fp);
+
+      const load$ =
+        loader.delay > 0
+          ? timer(loader.delay).pipe(switchMap(() => loader.load()))
+          : loader.load();
+
+      load$.subscribe({
+        // loaded — drop the loader; `loading` keeps the path marked done so a
+        // re-registration before Angular flags the route as loaded can't re-fire
+        complete: () => this.loaders.delete(fp),
+        // failed (e.g. chunk fetch error) — allow a retry on the next request
+        error: () => this.loading.delete(fp),
+      });
+    }
   }
 }

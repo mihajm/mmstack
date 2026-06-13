@@ -31,6 +31,7 @@ type ProviderFn<T> = {
 type InjectFns<T> = [
   (opt?: Omit<InjectOptions, 'optional'>) => T,
   ProviderFn<T>,
+  InjectionToken<T>,
 ];
 
 type FallbackInjectableOptions<T> = {
@@ -54,13 +55,17 @@ type InjectableOptions<T> =
   | ErrorMessageInjectableOptions;
 
 /**
- * Creates a typed `InjectionToken` plus a tuple of `[inject, provide]` helpers.
- * Without configuration, the inject helper returns `T | null` when the token
- * hasn't been provided.
+ * Creates a typed `InjectionToken` plus a tuple of `[inject, provide, token]`
+ * helpers. Without configuration, the inject helper returns `T | null` when the
+ * token hasn't been provided.
+ *
+ * The third tuple element is the raw `InjectionToken` — useful for interop:
+ * `deps: [token]` in other providers, `TestBed.overrideProvider(token, ...)`,
+ * or `Injector.create` arrays. Destructure it only when you need it.
  *
  * @typeParam T The type of the value the token holds.
  * @param token Unique token identifier (used as the token's debug name).
- * @returns A tuple `[injectFn, provideFn]` for type-safe dependency injection.
+ * @returns A tuple `[injectFn, provideFn, token]` for type-safe dependency injection.
  *
  * @example
  * ```ts
@@ -71,6 +76,10 @@ type InjectableOptions<T> =
  *
  * // In a consumer:
  * const theme = injectTheme(); // 'dark' | 'light' | null
+ *
+ * // Need the raw token? It's the third element:
+ * const [injectApi, provideApi, API_TOKEN] = injectable<Api>('Api');
+ * TestBed.overrideProvider(API_TOKEN, { useValue: fakeApi });
  * ```
  */
 export function injectable<T>(token: string): InjectFns<T | null>;
@@ -83,7 +92,7 @@ export function injectable<T>(token: string): InjectFns<T | null>;
  * @typeParam T The type of the value the token holds.
  * @param token Unique token identifier.
  * @param opt Configuration with `fallback` value (evaluated immediately).
- * @returns A tuple `[injectFn, provideFn]` for type-safe dependency injection.
+ * @returns A tuple `[injectFn, provideFn, token]` for type-safe dependency injection.
  *
  * @example
  * ```ts
@@ -101,14 +110,19 @@ export function injectable<T>(
 
 /**
  * Creates a typed `InjectionToken` with a *lazy* fallback. The fallback
- * factory runs on first access (and only once) when the token isn't
- * provided — useful when constructing the default is expensive or has its
- * own dependencies.
+ * factory runs on first access — and only once **per application** — when the
+ * token isn't provided. Useful when constructing the default is expensive or
+ * has its own dependencies: the factory runs in an injection context, so it
+ * can use `inject()`.
+ *
+ * The fallback is implemented as the token's own factory, which Angular caches
+ * per root injector — every app (and every SSR request) lazily constructs its
+ * own instance, so nothing leaks across apps, tests, or server requests.
  *
  * @typeParam T The type of the value the token holds.
  * @param token Unique token identifier.
  * @param opt Configuration with `lazyFallback` factory (deferred until needed).
- * @returns A tuple `[injectFn, provideFn]` for type-safe dependency injection.
+ * @returns A tuple `[injectFn, provideFn, token]` for type-safe dependency injection.
  *
  * @example
  * ```ts
@@ -127,10 +141,14 @@ export function injectable<T>(
  * the token isn't provided. Use this when "no provider" is genuinely a bug
  * rather than a permitted state.
  *
+ * Note: explicitly providing `null` is indistinguishable from "not provided"
+ * and will also throw — provide a non-null sentinel if "intentionally empty"
+ * is a state you need.
+ *
  * @typeParam T The type of the value the token holds.
  * @param token Unique token identifier.
  * @param opt Configuration with `errorMessage` to throw on missing provider.
- * @returns A tuple `[injectFn, provideFn]` for type-safe dependency injection.
+ * @returns A tuple `[injectFn, provideFn, token]` for type-safe dependency injection.
  *
  * @example
  * ```ts
@@ -149,12 +167,14 @@ export function injectable<T>(
 /**
  * Creates a typed `InjectionToken` with a baked-in factory used as the lazy
  * fallback. The factory runs in an injection context, so it can use
- * `inject()` to compose dependencies.
+ * `inject()` to compose dependencies — and it runs once per application
+ * (Angular caches token factories per root injector), so SSR requests and
+ * parallel apps each get their own instance.
  *
  * @typeParam T The type of the value the factory produces.
  * @param fn Factory function evaluated lazily on first inject if no override is provided.
  * @param name Optional token name (used as the debug name).
- * @returns A tuple `[injectFn, provideFn]` for type-safe dependency injection.
+ * @returns A tuple `[injectFn, provideFn, token]` for type-safe dependency injection.
  *
  * @example
  * ```ts
@@ -184,8 +204,6 @@ export function injectable<T>(
         ? undefined
         : optOrString;
 
-  const injectionToken = new InjectionToken<T>(token);
-
   const options = opt as
     | Partial<
         FallbackInjectableOptions<T> &
@@ -194,27 +212,38 @@ export function injectable<T>(
       >
     | undefined;
 
-  let fallback: T | undefined | null = options?.fallback;
+  const hasFallback =
+    options !== undefined &&
+    ('fallback' in options || 'lazyFallback' in options);
 
-  const initFallback =
-    options?.lazyFallback ?? (() => options?.fallback ?? null);
-
-  const fallbackFn = () => {
-    if (fallback === undefined) fallback = initFallback();
-    return fallback;
-  };
+  // The fallback lives on the token itself: Angular caches token factories PER ROOT
+  // INJECTOR, so every application (and every SSR request) lazily gets its own
+  // instance. Memoizing in this closure instead would be module-level state — the
+  // first app's fallback (and anything it inject()-ed) would leak into every other
+  // app, test, and server request.
+  const injectionToken = hasFallback
+    ? new InjectionToken<T>(token, {
+        factory: options?.lazyFallback ?? (() => options?.fallback as T),
+      })
+    : new InjectionToken<T>(token);
 
   const injectFn = (iOpt?: Omit<InjectOptions, 'optional'>) => {
-    const injected =
-      inject(injectionToken, {
-        ...iOpt,
-        optional: true,
-      }) ?? fallbackFn();
+    const injected = inject(injectionToken, {
+      ...iOpt,
+      optional: true,
+    });
 
-    if (injected === null && options?.errorMessage)
-      throw new Error(options.errorMessage);
+    // strict null check: an explicitly provided `undefined` is a provided value,
+    // not a missing one (`??` would silently hand it to the fallback)
+    if (injected !== null) return injected as T;
 
-    return injected as T;
+    // a constrained lookup (`self`/`skipSelf`) can miss the provider — the bare
+    // lookup reaches the root injector, where the fallback factory lives
+    if (hasFallback) return inject(injectionToken) as T;
+
+    if (options?.errorMessage) throw new Error(options.errorMessage);
+
+    return null as T;
   };
 
   const provideFn = (
@@ -234,5 +263,5 @@ export function injectable<T>(
     };
   };
 
-  return [injectFn, provideFn];
+  return [injectFn, provideFn, injectionToken];
 }

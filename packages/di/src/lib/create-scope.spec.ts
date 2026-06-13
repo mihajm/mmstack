@@ -1,4 +1,9 @@
-import { inject } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  inject,
+  runInInjectionContext,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { createScope } from './create-scope';
 
@@ -97,6 +102,81 @@ describe('createScope', () => {
       expect(() => useA()).toThrowError(
         '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "A"'
       );
+    });
+  });
+
+  it('should fall back to the factory function name in circular errors', () => {
+    const [registerScope, provideScope] = createScope('myScope');
+
+    TestBed.configureTestingModule({ providers: [provideScope()] });
+
+    function namedFactory(): unknown {
+      return useB();
+    }
+    const useA: () => unknown = registerScope(namedFactory);
+    const useB: () => unknown = registerScope(() => useA());
+
+    TestBed.runInInjectionContext(() => {
+      expect(() => useA()).toThrowError(
+        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "namedFactory"'
+      );
+    });
+  });
+
+  it('should give each providing boundary its OWN instances (sibling isolation)', () => {
+    const [registerScope, provideScope] = createScope('isolated');
+
+    let factoryCalls = 0;
+    const useItem = registerScope(() => ({ id: ++factoryCalls }));
+
+    TestBed.configureTestingModule({});
+    const parent = TestBed.inject(EnvironmentInjector);
+
+    // two sibling boundaries — e.g. two component subtrees each providing the scope
+    const a = createEnvironmentInjector([provideScope()], parent);
+    const b = createEnvironmentInjector([provideScope()], parent);
+
+    const itemA = runInInjectionContext(a, useItem);
+    const itemB = runInInjectionContext(b, useItem);
+
+    expect(itemA).not.toBe(itemB); // isolated per boundary
+    expect(runInInjectionContext(a, useItem)).toBe(itemA); // cached within a boundary
+    expect(factoryCalls).toBe(2);
+  });
+
+  it('should support overriding a registration at the provide boundary', () => {
+    const [registerScope, provideScope] = createScope('overridable');
+
+    const useLogger = registerScope(() => ({ kind: 'real' }), 'logger');
+    const useConsumer = registerScope(() => ({ logger: useLogger() }));
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideScope({
+          overrides: [[useLogger, () => ({ kind: 'stub' })]],
+        }),
+      ],
+    });
+
+    TestBed.runInInjectionContext(() => {
+      expect(useLogger().kind).toBe('stub');
+      // transitively: dependents resolve the override too
+      expect(useConsumer().logger.kind).toBe('stub');
+    });
+  });
+
+  it('should throw when an override target was not registered in the scope', () => {
+    const [registerScope, provideScope] = createScope('strict');
+
+    const useReal = registerScope(() => 1);
+    const foreign = (() => 0) as () => number;
+
+    TestBed.configureTestingModule({
+      providers: [provideScope({ overrides: [[foreign, () => 2]] })],
+    });
+
+    TestBed.runInInjectionContext(() => {
+      expect(() => useReal()).toThrowError(/Override target is not registered/);
     });
   });
 });

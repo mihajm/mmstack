@@ -181,21 +181,58 @@ describe('link primitives & directive', () => {
       expect(component.beforeNavigate).not.toHaveBeenCalled();
     });
 
-    it('should call routeLink.onClick and beforeNavigate on click if useMouseDown = false', () => {
+    it('should call beforeNavigate and navigate exactly once on click if useMouseDown = false', () => {
       component.useMouseDown = false;
       fixture.detectChanges();
 
       linkElement.dispatchEvent(new MouseEvent('click', { button: 0 }));
 
-      expect(component.beforeNavigate).toHaveBeenCalled();
+      expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
+      // navigation is RouterLink's own listener — delegating used to navigate TWICE
+      expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
     });
 
-    it('should ignore click if useMouseDown = true', () => {
+    it('should swallow the click that follows a mousedown navigation if useMouseDown = true', () => {
       component.useMouseDown = true;
       fixture.detectChanges();
 
-      linkElement.dispatchEvent(new MouseEvent('click', { button: 0 }));
+      linkElement.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
+      expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
 
+      const click = new MouseEvent('click', { button: 0, cancelable: true });
+      linkElement.dispatchEvent(click);
+
+      // the press already navigated on mousedown — its click must not navigate again
+      expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
+      expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
+      expect(click.defaultPrevented).toBe(true);
+    });
+
+    it('should still navigate on a bare click (keyboard activation) if useMouseDown = true', () => {
+      component.useMouseDown = true;
+      fixture.detectChanges();
+
+      // no preceding mousedown — e.g. Enter on a focused link
+      linkElement.dispatchEvent(
+        new MouseEvent('click', { button: 0, cancelable: true }),
+      );
+
+      // falls through to RouterLink's own click handling — exactly one navigation
+      expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
+      expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not fire beforeNavigate for modified clicks', () => {
+      component.useMouseDown = false;
+      fixture.detectChanges();
+
+      linkElement.dispatchEvent(
+        new MouseEvent('click', { button: 0, ctrlKey: true }),
+      );
+      linkElement.dispatchEvent(new MouseEvent('click', { button: 1 }));
+
+      // browser-default navigations (new tab / middle click) skip the hook
       expect(component.beforeNavigate).not.toHaveBeenCalled();
     });
 

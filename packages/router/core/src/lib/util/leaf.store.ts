@@ -4,7 +4,7 @@ import {
   Router,
   RouterStateSnapshot,
 } from '@angular/router';
-import { url } from '../url';
+import { navigationEndTick } from '../url';
 
 /**
  * A flattened view of one route in the active router chain, used by the
@@ -31,6 +31,17 @@ export type ResolvedLeafRoute = {
   link: string;
 };
 
+/**
+ * Known limitations (by design, documented rather than handled):
+ * - Only the PRIMARY outlet chain is walked. Routes rendered in named (auxiliary)
+ *   outlets don't contribute leaves — their titles/breadcrumbs/nav registrations
+ *   are keyed by paths that never appear in this chain, so they simply stay inert.
+ * - Registrations in the title/breadcrumb/nav stores are keyed by route-config
+ *   paths and are NOT evicted when the config changes via `Router.resetConfig`.
+ *   Stale entries are only reachable if the new config reuses the same path —
+ *   in which case re-resolving overwrites them. Apps that hot-swap configs with
+ *   overlapping paths but different meaning should re-register via resolvers.
+ */
 function leafRoutes(): Signal<ResolvedLeafRoute[]> {
   const router = inject(Router);
 
@@ -39,7 +50,6 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
   ): ResolvedLeafRoute[] => {
     const routes: ResolvedLeafRoute[] = [];
     let route: ActivatedRouteSnapshot | null = snapshot.root;
-    const processed = new Set<string>();
 
     while (route) {
       const allSegments = route.pathFromRoot.flatMap(
@@ -50,12 +60,6 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
 
       const path = router.serializeUrl(router.parseUrl(segments.join('/')));
 
-      if (processed.has(path)) {
-        route = route.firstChild;
-        continue;
-      }
-      processed.add(path);
-
       const parts = route.pathFromRoot
         .flatMap((snap) => snap.url ?? [])
         .map((u) => u.path)
@@ -63,7 +67,7 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
 
       const link = router.serializeUrl(router.parseUrl(parts.join('/')));
 
-      routes.push({
+      const entry: ResolvedLeafRoute = {
         route,
         segment: {
           path: segments.at(-1) ?? '',
@@ -71,17 +75,28 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
         },
         path,
         link,
-      });
-      route = route.firstChild;
+      };
+
+      // empty-path children serialize to the same path as their parent — keep the
+      // DEEPEST snapshot so the component-bearing child's `title`/`data` win over
+      // the shell parent's
+      const existingIdx = routes.findIndex((r) => r.path === path);
+      if (existingIdx >= 0) routes[existingIdx] = entry;
+      else routes.push(entry);
+
+      // walk the PRIMARY outlet — an aux outlet's child can sort first in `children`
+      route =
+        route.children?.find((c) => c.outlet === 'primary') ??
+        route.firstChild;
     }
 
     return routes;
   };
 
-  const currentUrl = url();
+  const tick = navigationEndTick(router);
 
   const leafRoutes = computed(() => {
-    currentUrl();
+    tick();
     return getLeafRoutes(router.routerState.snapshot);
   });
 

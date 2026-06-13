@@ -8,9 +8,13 @@ import {
   type Signal,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { ResolveFn } from '@angular/router';
+import {
+  type ActivatedRouteSnapshot,
+  type ResolveFn,
+} from '@angular/router';
 import { mutable, until } from '@mmstack/primitives';
 import { injectLeafRoutes, injectSnapshotPathResolver } from '../util';
+import { createStagedApply } from '../util/staged-apply';
 import { injectTitleConfig } from './title-config';
 
 @Injectable({
@@ -18,6 +22,11 @@ import { injectTitleConfig } from './title-config';
 })
 export class TitleStore {
   private readonly map = mutable<Map<string, Signal<string>>>(new Map());
+  // registrations land during the resolve phase — stage them so a cancelled navigation
+  // can't flip the document title early (flush on NavigationEnd, drop on Cancel/Error)
+  private readonly stagedApply = createStagedApply<Signal<string>>(
+    (id, titleFn) => this.map.inline((m) => m.set(id, titleFn)),
+  );
 
   constructor() {
     const { keepLastKnown, initialTitle } = injectTitleConfig();
@@ -52,7 +61,7 @@ export class TitleStore {
   }
 
   register(id: string, titleFn: Signal<string>) {
-    this.map.inline((m) => m.set(id, titleFn));
+    this.stagedApply(id, titleFn);
   }
 }
 
@@ -68,9 +77,11 @@ export class TitleStore {
  * deeper route has no title and `keepLastKnownTitle` is `true` (default),
  * the previous title is preserved.
  *
- * @param factoryOrValue Either a literal string title, a `() => string`
- *   factory, or a `() => Signal<string>` factory for reactive titles. Factory
- *   callbacks run inside an injection context, so they can use `inject()`.
+ * @param factoryOrValue Either a literal string title, a factory returning a
+ *   string, or a factory returning a `Signal<string>` for reactive titles.
+ *   Factory callbacks run inside an injection context (so they can use
+ *   `inject()`) and receive the route's `ActivatedRouteSnapshot`, making
+ *   params/data idiomatically reachable: `createTitle((route) => route.params['id'])`.
  * @param awaitValue When `true`, the resolver waits until the title signal
  *   emits a truthy value before resolving — useful for SSR/SEO where the
  *   resolved title should not be empty. Defaults to `false`.
@@ -82,11 +93,11 @@ export class TitleStore {
  * // Static title
  * { path: 'about', component: AboutComponent, title: createTitle('About us') }
  *
- * // Factory using inject()
+ * // Factory receiving the route snapshot
  * {
  *   path: 'users/:id',
  *   component: UserComponent,
- *   title: createTitle(() => inject(ActivatedRoute).snapshot.params['id']),
+ *   title: createTitle((route) => `User ${route.params['id']}`),
  * }
  *
  * // Reactive title from a signal store
@@ -101,7 +112,9 @@ export class TitleStore {
  * ```
  */
 export function createTitle(
-  factoryOrValue: (() => string | (() => string)) | string,
+  factoryOrValue:
+    | ((route: ActivatedRouteSnapshot) => string | (() => string))
+    | string,
   awaitValue = false,
 ): ResolveFn<string> {
   const factory =
@@ -114,7 +127,7 @@ export function createTitle(
 
     const { parser } = injectTitleConfig();
 
-    const resolved = factory();
+    const resolved = factory(route);
 
     const titleSignal =
       typeof resolved === 'string'

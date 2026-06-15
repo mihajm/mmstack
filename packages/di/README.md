@@ -17,6 +17,8 @@ This library provides the following utilities:
 
 - `injectable` - Creates a typed InjectionToken with inject and provide helper functions for type-safe dependency injection.
 - `injectLazy` - Defers the resolution and instantiation of a token until it is actually accessed.
+- `injectAsync` - Lazily loads a service's code chunk (a dynamic `import()`) and resolves it from DI on first access. A v19+ port of Angular v22's `injectAsync` that additionally works for non-root services and adds prefetch/scoping options.
+- `provideLazy` - Registers a lazy dependency against a token: drop its provider into any `providers` array and inject a memoized async getter deep in the tree, without statically importing the module.
 - `createRunInInjectionContext` - Captures an injection context and returns a runner function, useful for `inject()` inside async callbacks.
 - `rootInjectable` - Creates a lazily-initialized root-level injectable that maintains a per-application singleton instance.
 - `createScope` - Creates a dependency injection scope that caches singletons based on the factory function.
@@ -32,12 +34,16 @@ Angular's own DI primitives cover a lot of ground — these helpers are thin, na
 | A class singleton for the whole app                                          | Angular's `@Injectable({ providedIn: 'root' })`                         |
 | A typed token + provide/inject pair without the `InjectionToken` boilerplate | `injectable` (think `createContext` for Angular)                        |
 | Defer **constructing** an already-bundled service until first use            | `injectLazy`                                                            |
-| Defer **loading the code** for a service (lazy chunk) until first use        | Angular's native `injectAsync` (v22+) — no helper needed here 🎉         |
+| Lazy-load the code for a `providedIn: 'root'` / `@Service()` service (v22+)   | Angular's native `injectAsync` — built in, nothing needed here 🎉        |
+| Lazy-load a service that **isn't** root-provided, or support v19–v21          | `injectAsync` (this lib)                                                |
+| Register a lazy dependency in a `providers` array and inject it deep in the tree | `provideLazy`                                                        |
 | A factory-built (non-class) app-wide singleton                               | `rootInjectable`                                                        |
 | A whole family of factory-built singletons scoped to a component subtree     | `createScope`                                                           |
 | Run `inject()` later, in a callback that lost the context                    | `createRunInInjectionContext` (or Angular's `runInInjectionContext`)    |
 
-`injectLazy` and `injectAsync` compose nicely: `injectAsync` gets the code onto the page, `injectLazy` decides when an instance is constructed.
+**Native `injectAsync` vs this one.** On Angular v22+, if the lazily-loaded service is auto-provided (`@Injectable({ providedIn: 'root' })` or `@Service()`), Angular's built-in `injectAsync` is all you need. Reach for **this** library's `injectAsync` when either is true: you're on **v19–v21** (no built-in), or the service **isn't** root-provided — a plain `@Injectable()`, or one you want scoped to a component/route. Native rejects those; this one auto-provides and scopes them (and adds `optional`, `prefetch`, `providedWith`, and lifecycle-tied teardown). `provideLazy` builds on it for the "provide once, inject anywhere below" pattern.
+
+`injectLazy` and `injectAsync` also compose: `injectAsync` gets the code onto the page, `injectLazy` decides when an instance is constructed.
 
 ### A note on SSR
 
@@ -281,7 +287,7 @@ Defers the resolution and instantiation of an injection token until the returned
 
 Angular's native `inject()` resolves and instantiates dependencies immediately during the construction phase. If a service is heavily resource-intensive but only needed conditionally (like an export service or a complex editor), `injectLazy` allows you to capture the injection context immediately while delaying instantiation. The resolved value is cached, acting as a standard scoped singleton on subsequent calls.
 
-> **`injectLazy` vs Angular's `injectAsync` (v22+):** they solve adjacent problems. `injectAsync(() => import('./heavy'))` defers *loading the code* (a separate bundle chunk) and returns a `Promise`; `injectLazy(Heavy)` defers *constructing* an already-bundled service and stays synchronous. If your goal is bundle size, use `injectAsync` — it's built in, no helper needed. If your goal is construction timing (or you need a sync getter), `injectLazy` is the fit. They also compose.
+> **`injectLazy` vs `injectAsync`:** they solve adjacent problems. `injectAsync(() => import('./heavy'))` defers *loading the code* (a separate bundle chunk) and returns a `Promise`; `injectLazy(Heavy)` defers *constructing* an already-bundled service and stays synchronous. If your goal is bundle size, use [`injectAsync`](#injectasync). If your goal is construction timing (or you need a sync getter), `injectLazy` is the fit. They also compose.
 
 ### Basic Usage
 
@@ -316,6 +322,101 @@ const getOptionalDep = injectLazy(MyToken, { optional: true });
 // Later...
 const dep = getOptionalDep(); // MyToken | null
 ```
+
+---
+
+## injectAsync
+
+Lazily loads a service's code chunk via a dynamic `import()` and resolves it from DI on first access — a v19+ port of Angular v22's native [`injectAsync`](https://angular.dev/api/core/injectAsync). It returns a memoized getter; the loader runs at most once, and the resolved instance is cached. Must be called in an injection context.
+
+**Use the native one when you can.** On Angular v22+, if the service is auto-provided (`@Injectable({ providedIn: 'root' })` or `@Service()`), reach for Angular's built-in `injectAsync` — nothing here is needed. This implementation exists for the cases the built-in can't cover:
+
+- **Angular v19–v21**, which have no `injectAsync` at all.
+- **Services that aren't root-provided** — a plain `@Injectable()`, or one you want scoped to a component/route. The native API _requires_ `providedIn: 'root'` / `@Service()` because it resolves via `injector.get(token)`. This version instead does a behavioral probe: if the token resolves through normal DI you get that instance (identical to native, including the root singleton); otherwise, if it's a class, it's **auto-provided** in a child injector scoped to — and destroyed with — the target injector.
+
+### Basic Usage
+
+```typescript
+import { Component } from '@angular/core';
+import { injectAsync } from '@mmstack/di';
+
+@Component({
+  selector: 'app-editor',
+  template: `<button (click)="preview()">Preview</button>`,
+})
+export class EditorComponent {
+  // MarkdownService lives in its own chunk — not loaded until preview() runs.
+  private readonly markdown = injectAsync(() =>
+    import('./markdown.service').then((m) => m.MarkdownService),
+  );
+
+  async preview(src: string) {
+    const svc = await this.markdown(); // loads + resolves on first call, cached after
+    return svc.render(src);
+  }
+}
+```
+
+A default-export module works too — `injectAsync(() => import('./markdown.service'))` when `MarkdownService` is the module's `default` export.
+
+### Options
+
+`injectAsync(loader, options?)` accepts:
+
+- **`optional`, `self`, `skipSelf`, `host`** — the same `InjectOptions` flags as `injectLazy`. `{ optional: true }` widens the getter to `Promise<T | null>` (returned when a token loader has no provider; a loaded _class_ always resolves).
+- **`prefetch`** — eagerly load ahead of the first access. Pass `'idle'`, a millisecond deadline (`number`), or a custom `() => Promise<void>` trigger. Only runs in the browser, and is skipped on slow / data-saver connections.
+- **`providedWith`** — an `Injector` (or `InjectionToken<Injector>`) to resolve/auto-provide against, instead of the call-site injector. This is the knob `provideLazy` builds on.
+
+```typescript
+// Prefetch the chunk when the browser goes idle:
+private readonly heavy = injectAsync(
+  () => import('./heavy.service').then((m) => m.HeavyService),
+  { prefetch: 'idle' },
+);
+```
+
+> **SSR:** `injectAsync` holds no module-level state — everything is captured per-call (per request), and `prefetch` is a no-op on the server. Like the native API, the in-flight import is **not** registered with `PendingTasks`, so it won't hold server rendering — it's meant for interaction-time services, not render-blocking data.
+
+---
+
+## provideLazy
+
+Registers a lazily-loaded dependency against a token and returns a `[injectFn, provideFn, token]` tuple. The provided value is a **loader** (a dynamic `import()`) rather than an eager value — so you can declare a lazy dependency in a route's (or component's) `providers` and inject it deep in the tree, without that consumer statically importing the module.
+
+It's built on `injectAsync`, so it inherits auto-provisioning, lifecycle-tied teardown, and the options above. **Scope-shared:** every consumer under the same provider boundary shares one instance and one in-flight load — the resolver is built once at the provide site, matching what putting something in `providers` means.
+
+```typescript
+import { Component } from '@angular/core';
+import { Routes } from '@angular/router';
+import { provideLazy } from '@mmstack/di';
+
+const [injectMarkdown, provideMarkdown] = provideLazy<MarkdownService>('Markdown');
+
+// Register the lazy dependency at a route boundary:
+const routes: Routes = [
+  {
+    path: 'docs',
+    providers: [
+      provideMarkdown(() => import('./markdown.service').then((m) => m.MarkdownService)),
+    ],
+    loadComponent: () => import('./docs.component'),
+  },
+];
+
+// Consume it anywhere under that route — no static import of the module:
+@Component({
+  selector: 'app-docs',
+  template: `...`,
+})
+export class DocsComponent {
+  private readonly markdown = injectMarkdown(); // () => Promise<MarkdownService>, memoized & shared
+  async preview(src: string) {
+    return (await this.markdown()).render(src);
+  }
+}
+```
+
+`injectFn()` accepts `{ optional: true }` (resolves `null` if no loader was provided rather than throwing), and the third tuple element is the raw loader `InjectionToken` — handy for `TestBed.overrideProvider(token, { useValue: mockLoader })`.
 
 ---
 

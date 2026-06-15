@@ -337,24 +337,27 @@ export function mutationResource<
 
   let ctx: TCTX = undefined as TCTX;
 
-  const queueRef = effect(() => {
-    const nextInQueue = queue().at(0);
-    if (nextInQueue === undefined || next() !== NULL_VALUE) return;
-    queue.update((q) => q.slice(1));
-    const [value, ictx] = nextInQueue;
-    try {
-      ctx = onMutate?.(value, ictx) as TCTX;
-      next.set(value);
-    } catch (mutationErr) {
-      ctx = undefined as TCTX;
-      next.set(NULL_VALUE);
-      if (isDevMode())
-        console.error(
-          '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
-          mutationErr,
-        );
-    }
-  });
+  const queueRef = effect(
+    () => {
+      const nextInQueue = queue().at(0);
+      if (nextInQueue === undefined || next() !== NULL_VALUE) return;
+      queue.update((q) => q.slice(1));
+      const [value, ictx] = nextInQueue;
+      try {
+        ctx = onMutate?.(value, ictx) as TCTX;
+        next.set(value);
+      } catch (mutationErr) {
+        ctx = undefined as TCTX;
+        next.set(NULL_VALUE);
+        if (isDevMode())
+          console.error(
+            '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
+            mutationErr,
+          );
+      }
+    },
+    { injector: options.injector },
+  );
 
   const req = computed(
     (): HttpResourceRequest | undefined => {
@@ -419,12 +422,14 @@ export function mutationResource<
     ? options.injector.get(DestroyRef)
     : inject(DestroyRef);
 
-  const error$ = toObservable(resource.error);
-  const value$ = toObservable(resource.value).pipe(
-    catchError(() => of(NULL_VALUE)),
-  );
+  const error$ = toObservable(resource.error, { injector: options.injector });
+  const value$ = toObservable(resource.value, {
+    injector: options.injector,
+  }).pipe(catchError(() => of(NULL_VALUE)));
 
-  const statusSub = toObservable(resource.status)
+  const statusSub = toObservable(resource.status, {
+    injector: options.injector,
+  })
     .pipe(
       combineLatestWith(error$, value$),
       map(

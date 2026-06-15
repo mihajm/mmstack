@@ -7,11 +7,18 @@ import {
   Injector,
   isDevMode,
   PLATFORM_ID,
-  type DefaultExport,
   type InjectOptions,
   type ProviderToken,
   type Type,
 } from '@angular/core';
+
+interface DefaultExport<T> {
+  /**
+   * Default exports are bound under the name `"default"`, per the ES Module spec:
+   * https://tc39.es/ecma262/#table-export-forms-mapping-to-exportentry-records
+   */
+  default: T;
+}
 
 // Sentinel distinguishing "not provided anywhere" from a legitimately provided
 // null/undefined/falsy value during the resolution probe.

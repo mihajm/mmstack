@@ -115,11 +115,6 @@ export class TransitionRouterOutlet extends RouterOutlet {
       return;
     }
 
-    // Transition: the captured outgoing view stays on screen; hide the live incoming
-    // view until its resources settle.
-    // If Angular's router view transitions are active, its activation-time transition
-    // would be inert here (the incoming view activates hidden) and would just freeze the
-    // page for its duration — skip it; we fire the real transition at the swap instead.
     this.routerViewTransitions.active?.skipTransition?.();
     this.hiddenIncoming = this.incomingRootNodes();
     this.setHidden(this.hiddenIncoming, true);
@@ -132,12 +127,6 @@ export class TransitionRouterOutlet extends RouterOutlet {
       return;
     }
 
-    // An interrupting navigation mid-hold: the current activation is still HIDDEN and
-    // half-loaded — destroy it normally and keep the held (stable, visible) view on
-    // screen; the hold simply re-targets to whatever activates next. Destroying it
-    // (rather than capturing it) also unregisters its resources from the transition
-    // scope, so the next arm() only tracks the new incoming view — a captured-but-alive
-    // half-loaded view would keep the scope pending and deadlock the next swap.
     if (this.held) {
       this.hiddenIncoming = null;
       this.resetArm();
@@ -146,9 +135,6 @@ export class TransitionRouterOutlet extends RouterOutlet {
       return;
     }
 
-    // Capture the outgoing view instead of destroying it — via the PUBLIC detach
-    // contract, which clears `activated` exactly like deactivate() would, but hands us
-    // the ComponentRef. The router's subsequent activateWith then proceeds normally.
     const env = this.currentEnv;
     const ref = super.detach();
     this.container.insert(ref.hostView);
@@ -209,9 +195,6 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private commitSwap(): void {
     if (!this.held) return;
 
-    // explicit input wins (incl. an explicit `false` to force-disable); otherwise follow
-    // the app-level router-view-transitions setting, read lazily here because `enabled`
-    // only flips true once the first router transition has fired
     const useViewTransition =
       this.viewTransition() ?? this.routerViewTransitions.enabled;
 

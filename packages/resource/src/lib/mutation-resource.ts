@@ -14,6 +14,7 @@ import {
   signal,
   untracked,
   type ValueEqualityFn,
+  type WritableSignal,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { catchError, combineLatestWith, filter, map, of } from 'rxjs';
@@ -64,6 +65,18 @@ type StatusResult<TResult> =
       status: 'resolved';
       value: TResult;
     };
+
+/**
+ * Object form of the `queue` option. Enabling the queue serializes mutations
+ * into a FIFO that runs one-at-a-time.
+ */
+export type MutationQueueOptions = {
+  /**
+   * Reactive queue key. When its returned value changes, the *pending* (not-yet-fired)
+   * queued mutations are dropped; an in-flight mutation is unaffected. e.g. `key: () => selectedId()`.
+   */
+  key?: () => string | number;
+};
 
 /**
  * Options for configuring a `mutationResource`. Inherits from
@@ -126,10 +139,13 @@ export type MutationResourceOptions<
    */
   onSettled?: (ctx: NoInfer<TCTX>) => void;
   /**
-   * Whether to queue the mutation requests and execute them in series. For example if network is unavailable or circuit breaker is open.
+   * Queue mutations and run them one-at-a-time in series, instead of latest-wins
+   * superseding (e.g. while offline or the circuit breaker is open). Pass
+   * {@link MutationQueueOptions} for a reactive `key` that resets the pending queue.
+   * The pending queue can also be cleared via `ref.clearQueue()`.
    * @default false
    */
-  queue?: boolean;
+  queue?: boolean | MutationQueueOptions;
   /**
    * Cache entries to invalidate after a SUCCESSFUL mutation — the declarative
    * alternative to calling `injectQueryCache().invalidatePrefix(...)` in `onSuccess`.
@@ -218,6 +234,11 @@ export type MutationResourceRef<
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
   current: Signal<TMutation | null>;
+  /**
+   * Drops all *pending* queued mutations; an in-flight mutation is unaffected.
+   * Noops when `queue` is not enabled.
+   */
+  clearQueue: () => void;
 };
 
 /**
@@ -333,15 +354,26 @@ export function mutationResource<
     },
   });
 
-  const queue = signal<[TMutation, TICTX | undefined][]>([]);
+  const queueEnabled = !!options.queue;
+  const queueKeyFn =
+    typeof options.queue === 'object' ? options.queue.key : undefined;
+
+  const queue = linkedSignal<
+    string | number | undefined,
+    WritableSignal<[TMutation, TICTX | undefined][]>
+  >({
+    source: () => queueKeyFn?.(),
+    computation: () => signal<[TMutation, TICTX | undefined][]>([]),
+  });
 
   let ctx: TCTX = undefined as TCTX;
 
   const queueRef = effect(
     () => {
-      const nextInQueue = queue().at(0);
+      const q = queue(); // subscribe to swaps (key change / clearQueue)
+      const nextInQueue = q().at(0); // subscribe to contents
       if (nextInQueue === undefined || next() !== NULL_VALUE) return;
-      queue.update((q) => q.slice(1));
+      q.update((arr) => arr.slice(1));
       const [value, ictx] = nextInQueue;
       try {
         ctx = onMutate?.(value, ictx) as TCTX;
@@ -481,8 +513,6 @@ export function mutationResource<
       next.set(NULL_VALUE);
     });
 
-  const shouldQueue = options.queue ?? false;
-
   const ref: MutationResourceRef<TResult, TMutation, TICTX> = {
     ...resource,
     destroy: () => {
@@ -492,8 +522,8 @@ export function mutationResource<
       resource.destroy();
     },
     mutate: (value, ictx) => {
-      if (shouldQueue) {
-        return queue.update((q) => [...q, [value, ictx]]);
+      if (queueEnabled) {
+        return queue().update((arr) => [...arr, [value, ictx]]);
       } else {
         // latest-wins: a mutation already in flight gets superseded (its request is
         // aborted by the request change), so its onSuccess/onError will never fire —
@@ -533,6 +563,10 @@ export function mutationResource<
       const nv = next();
       return nv === NULL_VALUE ? null : nv;
     }),
+    clearQueue: () => {
+      if (!queueEnabled) return;
+      queue.set(signal<[TMutation, TICTX | undefined][]>([]));
+    },
     // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
     disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
   };

@@ -304,6 +304,142 @@ describe('mutationResource', () => {
     expect(executions).toEqual([1, 2, 3]);
   });
 
+  it('clearQueue() discards pending queued mutations; the in-flight one still settles', async () => {
+    const executions: number[] = [];
+    let settledCount = 0;
+    let successCount = 0;
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/clear/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { queued: body },
+            false,
+            50,
+          ),
+        }),
+        {
+          queue: true,
+          onSuccess: () => {
+            successCount++;
+          },
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
+    );
+
+    res.mutate(1);
+    res.mutate(2);
+    res.mutate(3);
+
+    // let the queue effect dequeue + fire the head request
+    for (let i = 0; i < 20 && executions.length < 1; i++) {
+      await new Promise((r) => setTimeout(r));
+      TestBed.tick();
+    }
+    expect(executions).toEqual([1]); // only the head is in flight
+
+    res.clearQueue(); // drop pending 2 & 3
+
+    // wait for the in-flight #1 to settle
+    for (let i = 0; i < 50; i++) {
+      if (settledCount === 1) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+
+    // give any erroneously-retained queued mutations a chance to fire
+    await new Promise((r) => setTimeout(r, 30));
+    TestBed.tick();
+
+    expect(executions).toEqual([1]); // 2 & 3 never ran
+    expect(successCount).toBe(1); // in-flight #1 still resolved
+    expect(settledCount).toBe(1);
+  });
+
+  it('queue.key change discards pending queued mutations; the in-flight one still settles', async () => {
+    const executions: number[] = [];
+    let settledCount = 0;
+    let successCount = 0;
+    const key = signal('a');
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: number) => ({
+          url: `https://example.com/key/${body}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              executions.push(body);
+            },
+            { queued: body },
+            false,
+            50,
+          ),
+        }),
+        {
+          queue: { key: () => key() },
+          onSuccess: () => {
+            successCount++;
+          },
+          onSettled: () => {
+            settledCount++;
+          },
+        },
+      ),
+    );
+
+    res.mutate(1);
+    res.mutate(2);
+    res.mutate(3);
+
+    for (let i = 0; i < 20 && executions.length < 1; i++) {
+      await new Promise((r) => setTimeout(r));
+      TestBed.tick();
+    }
+    expect(executions).toEqual([1]);
+
+    key.set('b'); // reset the queue → drop pending 2 & 3
+    TestBed.tick();
+
+    for (let i = 0; i < 50; i++) {
+      if (settledCount === 1) break;
+      await new Promise((r) => setTimeout(r, 10));
+      TestBed.tick();
+    }
+
+    await new Promise((r) => setTimeout(r, 30));
+    TestBed.tick();
+
+    expect(executions).toEqual([1]);
+    expect(successCount).toBe(1);
+    expect(settledCount).toBe(1);
+  });
+
+  it('clearQueue() is a noop when the queue is not enabled', () => {
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource((body: number) => ({
+        url: `https://example.com/noqueue/${body}`,
+        method: 'POST',
+        body,
+        context: createTestContext(() => {
+          /* noop */
+        }, { ok: true }),
+      })),
+    );
+
+    expect(() => res.clearQueue()).not.toThrow();
+  });
+
   it('triggerOnSameRequest: an identical mutation fired while one is in flight still triggers a request', async () => {
     // Regression: without this, the mutation's own request-equality dedup swallowed a repeat
     // mutate() with an identical body while one was in flight — so the optimistic update applied

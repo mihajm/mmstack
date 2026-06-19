@@ -18,8 +18,8 @@
   "peerDependencies": {
     "@angular/common": ">=22 <23",
     "@angular/core": ">=22 <23",
-    "@atlaskit/pragmatic-drag-and-drop": "~1.8.0",
-    "@atlaskit/pragmatic-drag-and-drop-hitbox": "~1.2.0"
+    "@atlaskit/pragmatic-drag-and-drop": "~2.0.1",
+    "@atlaskit/pragmatic-drag-and-drop-hitbox": "~2.0.0"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/dnd",
   "sideEffects": false

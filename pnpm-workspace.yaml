@@ -7,3 +7,12 @@ allowBuilds:
   msgpackr-extract: false
   nx: true
   unrs-resolver: false
+minimumReleaseAgeExclude:
+  - '@angular-devkit/architect@0.2200.3'
+  - '@angular-devkit/core@22.0.3'
+  - '@angular-devkit/schematics@22.0.3'
+  - '@angular/build@22.0.3'
+  - '@angular/cli@22.0.3'
+  - '@angular/ssr@22.0.3'
+  - '@schematics/angular@22.0.3'
+  - '@types/node@26.0.0'

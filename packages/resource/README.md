@@ -316,13 +316,41 @@ mutationResource(request, { triggerOnSameRequest: true });
 
 A mutation also honours the `register` option — but it registers the **mutation ref itself** into the transition scope (its internal query is never registered), so a `<mm-suspense>`/transition reacts to the mutation's own `pending` state. See [transitions & Suspense](#transitions--suspense).
 
+### File uploads & progress (`multipart/form-data`)
+
+There's no special upload API — return a `FormData` body and `HttpClient` sets the `multipart/form-data` boundary for you. Opt into upload progress with `reportProgress: true` and read the `progress` signal (an `HttpProgressEvent`).
+
+```typescript
+const upload = mutationResource<UploadResult, UploadResult, FormData>((form) => ({
+  url: '/api/upload',
+  method: 'POST',
+  body: form,
+  reportProgress: true, // opt in to progress events
+}));
+
+// trigger it:
+const form = new FormData();
+form.append('file', file);
+upload.mutate(form);
+
+// derive a percentage in a computed / template:
+readonly pct = computed(() => {
+  const p = upload.progress();
+  return p?.total ? Math.round((p.loaded / p.total) * 100) : null;
+});
+```
+
+`FormData`, `File`, and `Blob` bodies are hashed structurally for dedup/cache keys (a `File` by name + type + size + lastModified), so distinct files never collide. To re-upload the **same** file while one is already in flight, pair it with `triggerOnSameRequest: true`.
+
 ### Return shape (`MutationResourceRef<T, TMutation>`)
 
-| Member                                        | Type                        | Notes                                                  |
-| --------------------------------------------- | --------------------------- | ------------------------------------------------------ |
-| `mutate`                                      | `(value, ctx?) => void`     | Trigger the mutation.                                  |
-| `current`                                     | `Signal<TMutation \| null>` | The value currently being mutated (or `null` if idle). |
-| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`    | –                                                      |
+| Member                                        | Type                                       | Notes                                                  |
+| --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
+| `mutate`                                      | `(value, ctx?) => void`                    | Trigger the mutation.                                  |
+| `current`                                     | `Signal<TMutation \| null>`                | The value currently being mutated (or `null` if idle). |
+| `progress`                                    | `Signal<HttpProgressEvent \| undefined>`   | Upload/download progress when `reportProgress: true`.  |
+| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                   | –                                                      |
+| `headers` / `statusCode`                      | as in `QueryResourceRef`                   | Response metadata, when available.                     |
 
 (Mutations deliberately don't expose `value`, `hasValue`, `set`, `update`, or `prefetch` — those don't make sense for one-off writes.)
 

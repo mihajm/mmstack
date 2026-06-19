@@ -40,20 +40,6 @@ const NULL_VALUE = Symbol('@mmstack/resource:null');
 
 /**
  * @internal
- * Helper type for inferring the request body type based on the HTTP method.
- */
-type NextRequest<
-  TMethod extends HttpResourceRequest['method'],
-  TMutation,
-> = TMethod extends 'DELETE' | 'delete'
-  ? Omit<HttpResourceRequest, 'body' | 'method'> & { method: TMethod }
-  : Omit<HttpResourceRequest, 'body' | 'method'> & {
-      body: TMutation;
-      method: TMethod;
-    };
-
-/**
- * @internal
  * Helper type for tracking mutation status.
  */
 type StatusResult<TResult> =
@@ -290,17 +276,50 @@ export type MutationResourceRef<
  * );
  * ```
  */
+// DELETE — the returned request carries no `body`.
 export function mutationResource<
   TResult,
   TRaw = TResult,
   TMutation = TResult,
   TCTX = void,
   TICTX = TCTX,
-  TMethod extends HttpResourceRequest['method'] = HttpResourceRequest['method'],
 >(
   request: (
     params: TMutation,
-  ) => Omit<NextRequest<TMethod, TMutation>, 'body'> | undefined | void,
+  ) =>
+    | (Omit<HttpResourceRequest, 'body' | 'method'> & {
+        method: 'DELETE' | 'delete';
+      })
+    | undefined
+    | void,
+  options0?: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>,
+): MutationResourceRef<TResult, TMutation, TICTX>;
+
+// Body methods (POST/PUT/PATCH/…) — `body` is required and typed as `TMutation`.
+export function mutationResource<
+  TResult,
+  TRaw = TResult,
+  TMutation = TResult,
+  TCTX = void,
+  TICTX = TCTX,
+>(
+  request: (
+    params: TMutation,
+  ) =>
+    | (Omit<HttpResourceRequest, 'body'> & { body: TMutation })
+    | undefined
+    | void,
+  options0?: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>,
+): MutationResourceRef<TResult, TMutation, TICTX>;
+
+export function mutationResource<
+  TResult,
+  TRaw = TResult,
+  TMutation = TResult,
+  TCTX = void,
+  TICTX = TCTX,
+>(
+  request: (params: TMutation) => HttpResourceRequest | undefined | void,
   options0: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
 ): MutationResourceRef<TResult, TMutation, TICTX> {
   // Two-layer option injection: per-call > provideMutationResourceOptions > provideResourceOptions.

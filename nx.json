@@ -56,6 +56,9 @@
     "@nx/angular:library": {
       "linter": "eslint",
       "unitTestRunner": "vitest-angular"
+    },
+    "@nx/angular:component": {
+      "style": "css"
     }
   },
   "plugins": [

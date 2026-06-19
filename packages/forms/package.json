@@ -1,0 +1,20 @@
+{
+  "name": "@mmstack/forms",
+  "version": "22.0.0",
+  "keywords": [
+    "signal",
+    "forms"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/forms"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/forms",
+  "peerDependencies": {
+    "@angular/core": ">=22 <23",
+    "@angular/forms": ">=22 <23"
+  },
+  "sideEffects": false
+}

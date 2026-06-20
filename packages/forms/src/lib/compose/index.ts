@@ -1,0 +1,14 @@
+export {
+  compose,
+  composition,
+  injectField,
+  injectFieldRef,
+  raw,
+  type Composition,
+  type FieldProjection,
+  type FieldProjector,
+  type FieldRef,
+  type Projectable,
+  type Projected,
+  type RawProjection,
+} from './compose';

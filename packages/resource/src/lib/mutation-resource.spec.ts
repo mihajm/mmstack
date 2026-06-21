@@ -11,7 +11,7 @@ import {
 import { PLATFORM_ID, signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { delay, of, throwError } from 'rxjs';
-import { mutationResource } from './mutation-resource';
+import { MutationCancelledError, mutationResource } from './mutation-resource';
 import { injectQueryCache, provideQueryCache, ResourceSensors } from './util';
 
 const TEST_CONTEXT = new HttpContextToken<{
@@ -769,5 +769,290 @@ describe('mutationResource', () => {
     expect(settledCount).toBe(2);
     // Ordered executions happened after coming online
     expect(executions).toEqual([1, 2]);
+  });
+
+  describe('mutateAsync', () => {
+    it('resolves with the parsed result on success', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource((body: { id: number }) => ({
+          url: `https://example.com/async/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(() => {
+            /* noop */
+          }, { saved: true }),
+        })),
+      );
+
+      await expect(res.mutateAsync({ id: 1 })).resolves.toEqual({
+        saved: true,
+      });
+      expect(res.current()).toBeNull();
+    });
+
+    it('rejects with the error on failure', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource((body: any) => ({
+          url: 'https://example.com/async-fail',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            null,
+            true,
+          ),
+        })),
+      );
+
+      await expect(res.mutateAsync({ data: 'x' })).rejects.toBeInstanceOf(
+        HttpErrorResponse,
+      );
+    });
+
+    it('still runs lifecycle hooks alongside the promise', async () => {
+      const hooks: string[] = [];
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (body: { id: number }) => ({
+            url: `https://example.com/async-hooks/${body.id}`,
+            method: 'POST',
+            body,
+            context: createTestContext(() => {
+              /* noop */
+            }, { ok: true }),
+          }),
+          {
+            onMutate: () => hooks.push('onMutate'),
+            onSuccess: () => hooks.push('onSuccess'),
+            onSettled: () => hooks.push('onSettled'),
+          },
+        ),
+      );
+
+      await res.mutateAsync({ id: 1 });
+      expect(hooks).toEqual(['onMutate', 'onSuccess', 'onSettled']);
+    });
+
+    it('rejects the superseded promise with MutationCancelledError; the winner resolves', async () => {
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource((body: { id: number }) => ({
+          url: `https://example.com/async-supersede/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { id: body.id },
+            false,
+            50, // keep #1 in flight
+          ),
+        })),
+      );
+
+      const first = res.mutateAsync({ id: 1 });
+      const second = res.mutateAsync({ id: 2 }); // supersedes #1
+
+      const err = (await first.catch((e) => e)) as MutationCancelledError;
+      expect(err).toBeInstanceOf(MutationCancelledError);
+      expect(err.type).toBe('superseded');
+      await expect(second).resolves.toEqual({ id: 2 });
+
+      warnSpy.mockRestore();
+    });
+
+    it('rejects with the thrown error when onMutate throws', async () => {
+      const errSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const boom = new Error('boom');
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (body: { id: number }) => ({
+            url: `https://example.com/async-throw/${body.id}`,
+            method: 'POST',
+            body,
+            context: createTestContext(() => {
+              /* noop */
+            }, { ok: true }),
+          }),
+          {
+            onMutate: () => {
+              throw boom;
+            },
+          },
+        ),
+      );
+
+      await expect(res.mutateAsync({ id: 1 })).rejects.toBe(boom);
+      expect(res.current()).toBeNull();
+
+      errSpy.mockRestore();
+    });
+
+    it('rejects with MutationCancelledError when request() returns undefined', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource<{ ok: true }, { ok: true }, number>((body) =>
+          body > 0
+            ? {
+                url: `https://example.com/async-undef/${body}`,
+                method: 'POST',
+                body,
+                context: createTestContext(() => {
+                  /* noop */
+                }, { ok: true }),
+              }
+            : undefined,
+        ),
+      );
+
+      const err = (await res
+        .mutateAsync(0)
+        .catch((e) => e)) as MutationCancelledError;
+      expect(err).toBeInstanceOf(MutationCancelledError);
+      expect(err.type).toBe('no-request');
+      expect(res.current()).toBeNull();
+    });
+
+    it('resolves each queued mutation in order', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (body: number) => ({
+            url: `https://example.com/async-queue/${body}`,
+            method: 'POST',
+            body,
+            context: createTestContext(
+              () => {
+                /* noop */
+              },
+              { n: body },
+              false,
+              10,
+            ),
+          }),
+          { queue: true },
+        ),
+      );
+
+      const results: unknown[] = [];
+      const p1 = res.mutateAsync(1).then((r) => results.push(r));
+      const p2 = res.mutateAsync(2).then((r) => results.push(r));
+
+      for (let i = 0; i < 50; i++) {
+        if (results.length === 2) break;
+        await new Promise((r) => setTimeout(r, 10));
+        TestBed.tick();
+      }
+
+      await Promise.all([p1, p2]);
+      expect(results).toEqual([{ n: 1 }, { n: 2 }]);
+    });
+
+    it('rejects queued promises dropped by clearQueue; the in-flight one resolves', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (body: number) => ({
+            url: `https://example.com/async-clear/${body}`,
+            method: 'POST',
+            body,
+            context: createTestContext(
+              () => {
+                /* noop */
+              },
+              { n: body },
+              false,
+              50,
+            ),
+          }),
+          { queue: true },
+        ),
+      );
+
+      const p1 = res.mutateAsync(1);
+      const p2 = res.mutateAsync(2);
+      const p3 = res.mutateAsync(3);
+
+      // let the head dequeue + fire
+      for (let i = 0; i < 20 && res.current() === null; i++) {
+        await new Promise((r) => setTimeout(r));
+        TestBed.tick();
+      }
+
+      res.clearQueue(); // drop pending 2 & 3
+
+      await expect(p2).rejects.toMatchObject({ type: 'queue-cleared' });
+      await expect(p3).rejects.toMatchObject({ type: 'queue-cleared' });
+      await expect(p1).resolves.toEqual({ n: 1 });
+    });
+
+    it('rejects pending promises with type "queue-key-changed" on a key change', async () => {
+      const key = signal('a');
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (body: number) => ({
+            url: `https://example.com/async-key/${body}`,
+            method: 'POST',
+            body,
+            context: createTestContext(
+              () => {
+                /* noop */
+              },
+              { n: body },
+              false,
+              50,
+            ),
+          }),
+          { queue: { key: () => key() } },
+        ),
+      );
+
+      const p1 = res.mutateAsync(1);
+      const p2 = res.mutateAsync(2);
+
+      // let the head dequeue + fire
+      for (let i = 0; i < 20 && res.current() === null; i++) {
+        await new Promise((r) => setTimeout(r));
+        TestBed.tick();
+      }
+
+      key.set('b'); // reset the queue → drop pending 2
+      TestBed.tick();
+
+      await expect(p2).rejects.toMatchObject({ type: 'queue-key-changed' });
+      await expect(p1).resolves.toEqual({ n: 1 });
+    });
+
+    it('rejects an outstanding promise when the resource is destroyed', async () => {
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource((body: { id: number }) => ({
+          url: `https://example.com/async-destroy/${body.id}`,
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { ok: true },
+            false,
+            50,
+          ),
+        })),
+      );
+
+      const pending = res.mutateAsync({ id: 1 });
+      res.destroy();
+
+      const err = (await pending.catch((e) => e)) as MutationCancelledError;
+      expect(err).toBeInstanceOf(MutationCancelledError);
+      expect(err.type).toBe('destroyed');
+    });
   });
 });

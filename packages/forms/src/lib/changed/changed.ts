@@ -1,5 +1,6 @@
 import {
   computed,
+  effect,
   type Signal,
   signal,
   untracked,
@@ -131,13 +132,41 @@ function nodeChanged(
 }
 
 /**
- * Managed metadata key carrying per-node change tracking. Its `create` runs at field-node
- * construction (in the node's injection context), snapshotting the baseline and building the
- * delegating `changed` computed.
+ * Per-node tracking config, threaded to each node's {@link CHANGED} entry via the tracking rule
+ * (see {@link applyTracking}). Lets the global key honor per-form {@link TrackChangesOptions}.
+ * `root` is set only on the field `trackChanges` is applied to, so a single subtree-wide effect is
+ * wired there rather than one per node.
  */
-export const CHANGED = createManagedMetadataKey<ChangedEntry, undefined>(
-  (state) => {
+type TrackConfig = {
+  /** Seed the baseline from the initial values, so `changed` is meaningful without a manual commit. */
+  readonly autoCommit: boolean;
+  /** Whether this is the field `trackChanges` was applied to (the auto-commit effect lives here). */
+  readonly root: boolean;
+};
+
+/**
+ * Managed metadata key carrying per-node change tracking. Its `create` runs at field-node
+ * construction (in the node's injection context), building the delegating `changed` computed.
+ *
+ * The baseline can't be read during `create` — reading `state.value()` there routes through the
+ * parent's `childrenMap` computation and self-cycles. So auto-commit is a one-shot `effect` on the
+ * root tracked field (`cfg.root`): its first (and only) run is post-construction, where the
+ * lifecycle-safe {@link commitChanges} tree-walk can snapshot the initial values; it then disposes
+ * itself. `commit()` writes the baseline directly (explicit re-baseline via {@link commitChanges} /
+ * reconcile).
+ */
+export const CHANGED = createManagedMetadataKey<ChangedEntry, TrackConfig>(
+  (state, data) => {
     const initial: WritableSignal<unknown> = signal(undefined);
+    const cfg = untracked(data);
+
+    if (cfg?.root && cfg.autoCommit) {
+      const ref = effect(() => {
+        commitChanges(state.fieldTree);
+        ref.destroy();
+      });
+    }
+
     return {
       initial,
       changed: computed(() => nodeChanged(state, initial), {
@@ -165,34 +194,63 @@ export function changedWith<T>(path: SchemaPath<T>, fn: ChangedFn<T>): void {
   metadata(path, CHANGED_WITH, () => fn as ChangedFn);
 }
 
-function applyTracking(path: SchemaPath<unknown>, shape: unknown): void {
-  metadata(path, CHANGED, () => undefined);
+function applyTracking(
+  path: SchemaPath<unknown>,
+  shape: unknown,
+  cfg: TrackConfig,
+): void {
+  metadata(path, CHANGED, () => cfg);
+  const child: TrackConfig = cfg.root ? { ...cfg, root: false } : cfg;
   if (Array.isArray(shape)) {
     applyEach(path as SchemaPath<unknown[]>, (itemPath) =>
       shape.length
-        ? applyTracking(itemPath as SchemaPath<unknown>, shape[0])
-        : metadata(itemPath as SchemaPath<unknown>, CHANGED, () => undefined),
+        ? applyTracking(itemPath as SchemaPath<unknown>, shape[0], child)
+        : metadata(itemPath as SchemaPath<unknown>, CHANGED, () => child),
     );
   } else if (isRecord(shape)) {
     const p = path as unknown as Record<string, SchemaPath<unknown>>;
-    for (const key of Object.keys(shape)) applyTracking(p[key], shape[key]);
+    for (const key of Object.keys(shape))
+      applyTracking(p[key], shape[key], child);
   }
 }
+
+/** Options for {@link trackChanges}. */
+export type TrackChangesOptions = {
+  /**
+   * Skip the automatic initial baseline. Tracking still attaches, but every field reads as
+   * `changed` until you establish the baseline yourself with {@link commitChanges} — the right
+   * choice when the form's initial data arrives asynchronously and you want to commit it explicitly
+   * once it lands. Default `false` (the model's initial value is the baseline).
+   */
+  manualCommit?: boolean;
+};
 
 /**
  * One-call change tracking: a schema fn that attaches per-field tracking to every field, so
  * `injectChanged()` / the {@link changed} projector work anywhere in the form.
  *
+ * By default the model's initial value is adopted as the baseline (no manual {@link commitChanges}
+ * needed) — pass `{ manualCommit: true }` to defer that to an explicit call (e.g. for
+ * async-loaded data).
+ *
  * @example
  * ```ts
- * f = form(model, trackChanges(model));
+ * f = form(model, trackChanges(model));                       // auto-baseline on init
+ * f = form(model, trackChanges(model, { manualCommit: true })); // commit yourself once data lands
  * // or alongside an existing schema:
  * f = form(model, (p) => { required(p.name); trackChanges(model)(p); });
  * ```
  */
-export function trackChanges<T>(model: WritableSignal<T>): SchemaFn<T> {
+export function trackChanges<T>(
+  model: WritableSignal<T>,
+  opts?: TrackChangesOptions,
+): SchemaFn<T> {
   const shape = untracked(model);
-  return (path) => applyTracking(path as SchemaPath<unknown>, shape);
+  const cfg: TrackConfig = {
+    autoCommit: !opts?.manualCommit,
+    root: true,
+  };
+  return (path) => applyTracking(path as SchemaPath<unknown>, shape, cfg);
 }
 
 /** Projector: whether the bound field differs from its baseline. Composable in `compose`. */

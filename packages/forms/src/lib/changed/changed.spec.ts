@@ -63,6 +63,18 @@ function setup(schema?: SchemaFn<Model>) {
   });
 }
 
+// No explicit commitChanges — exercises the automatic baseline / option behavior.
+// Ticks so the root tracking effect runs its first (seeding) pass.
+function setupAuto(opts?: { manualCommit?: boolean; commitOnSubmit?: boolean }) {
+  const r = TestBed.runInInjectionContext(() => {
+    const model = signal<Model>(initial());
+    const f = form(model, trackChanges(model, opts));
+    return { model, f };
+  });
+  TestBed.tick(); // run the auto-commit / commit-on-submit effect's first pass
+  return r;
+}
+
 describe('change tracking', () => {
   describe('defaults', () => {
     it('reports nothing changed initially, at every level', () => {
@@ -423,6 +435,36 @@ describe('change tracking', () => {
       );
       reconcile(f, { ...initial(), name: 'srv' });
       expect(model().name).toBe('ann+srv');
+    });
+  });
+
+  describe('auto-commit (default)', () => {
+    it('adopts the initial model value as the baseline without commitChanges', () => {
+      const { f } = setupAuto();
+      expect(changedOf(f)).toBe(false);
+      expect(changedOf(f.name)).toBe(false);
+      expect(changedOf(f.profile.address.city)).toBe(false);
+      expect(changedOf(f.contacts[0])).toBe(false);
+    });
+
+    it('still tracks edits against the auto baseline', () => {
+      const { f } = setupAuto();
+      f.name().value.set('bob');
+      expect(changedOf(f.name)).toBe(true);
+      expect(changedOf(f)).toBe(true);
+      expect(changedOf(f.profile)).toBe(false);
+    });
+  });
+
+  describe('manualCommit', () => {
+    it('leaves pre-filled fields reading changed until commitChanges establishes the baseline', () => {
+      const { f } = setupAuto({ manualCommit: true });
+      expect(changedOf(f.name)).toBe(true); // baseline undefined vs 'ann'
+      expect(changedOf(f)).toBe(true);
+
+      commitChanges(f);
+      expect(changedOf(f)).toBe(false);
+      expect(changedOf(f.name)).toBe(false);
     });
   });
 });

@@ -124,26 +124,29 @@ leaves compare against their own baseline, containers aggregate, with an `Object
 change only walks its own spine.
 
 ```typescript
-import { trackChanges, commitChanges, injectChanged } from '@mmstack/forms';
+import { trackChanges, injectChanged } from '@mmstack/forms';
 
 @Component({ /* ... */ })
 class Editor {
   readonly model = signal<User>(emptyUser());
-  readonly f = form(this.model, trackChanges(this.model));
-
-  constructor() {
-    // Establish the baseline once the initial data is in place.
-    commitChanges(this.f);
-  }
+  readonly f = form(this.model, trackChanges(this.model)); // baseline = the model's initial value
 }
 
 // any control:
 readonly changed = injectChanged(); // Signal<boolean> for this field
 ```
 
-> **`commitChanges` defines the baseline.** Per-field baselines are captured eagerly when you call it
-> (not at control mount — that would be too early for async-loaded data). Call it after the form's
-> initial data is ready, and again after a successful save to mark the new "saved" state.
+> **The baseline is established automatically.** By default `trackChanges` adopts the model's initial
+> value as the baseline (captured just after construction), so `changed` is meaningful with no extra
+> wiring. Two options tune this:
+>
+> `trackChanges(model, { manualCommit: true })` skips the automatic baseline and lets you call
+> [`commitChanges`](#reset--reconcile) yourself — the right choice when the initial data arrives
+> **asynchronously** and you want to commit it explicitly once it lands (until then every field reads
+> as `changed`).
+>
+> You can call `commitChanges(f)` at any time to (re-)baseline to the current values — e.g. after a
+> successful save (in your `submit()` action's success path) to mark the new "saved" state.
 
 Default equality is `Object.is` at leaves (delegate-down for objects/arrays). Override per path:
 

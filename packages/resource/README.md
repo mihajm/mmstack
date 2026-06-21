@@ -279,6 +279,22 @@ mutationResource(
 
 The `TCTX` returned from `onMutate` flows into `onError` / `onSuccess` / `onSettled`. The optional `initialCtx` second arg to `.mutate(value, initialCtx)` flows into `onMutate` as its second argument.
 
+### Awaiting a mutation (`mutateAsync`)
+
+`.mutate()` is fire-and-forget. When you need to `await` the outcome — a form submit handler, an async validator — use `.mutateAsync()`, which returns a `Promise` that resolves with the result or rejects with the error. The lifecycle hooks still run exactly as with `.mutate()`.
+
+```typescript
+try {
+  const saved = await createPost.mutateAsync(post);
+  router.navigate(['/posts', saved.id]);
+} catch (e) {
+  if (e instanceof MutationCancelledError) return; // never ran — see below
+  toast.error('Failed to save');
+}
+```
+
+If the mutation never completes — superseded by a newer one (latest-wins), dropped from the queue (`clearQueue()` / a `key` change), abandoned on `destroy()`, or its `request()` returned `undefined` — the promise rejects with a `MutationCancelledError` whose `.type` (`MutationCancellationReason`) tells you which. Awaiters that don't expect cancellation should rethrow it. (Plain `.mutate()` has no promise, so it never produces an unhandled rejection.)
+
 ### Queuing
 
 By default, calling `.mutate()` while another mutation is in flight starts immediately — concurrent mutations run in parallel. With `queue: true`, mutations are serialized:
@@ -346,7 +362,8 @@ readonly pct = computed(() => {
 
 | Member                                        | Type                                       | Notes                                                  |
 | --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
-| `mutate`                                      | `(value, ctx?) => void`                    | Trigger the mutation.                                  |
+| `mutate`                                      | `(value, ctx?) => void`                    | Trigger the mutation (fire-and-forget).               |
+| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`        | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`. |
 | `current`                                     | `Signal<TMutation \| null>`                | The value currently being mutated (or `null` if idle). |
 | `progress`                                    | `Signal<HttpProgressEvent \| undefined>`   | Upload/download progress when `reportProgress: true`.  |
 | `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                   | –                                                      |

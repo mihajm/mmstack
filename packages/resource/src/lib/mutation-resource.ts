@@ -40,6 +40,41 @@ import {
 const NULL_VALUE = Symbol('@mmstack/resource:null');
 
 /**
+ * Why a {@link MutationResourceRef.mutateAsync} promise was cancelled — a closed
+ * set so consumers can branch on the cause without parsing the message:
+ * - `'superseded'`: a newer mutation replaced it (latest-wins).
+ * - `'queue-cleared'`: dropped from the queue by `clearQueue()`.
+ * - `'queue-key-changed'`: dropped from the queue by a reactive `key` change.
+ * - `'destroyed'`: the resource was destroyed while it was pending/in flight.
+ * - `'no-request'`: `request()` returned `undefined`, so nothing was sent.
+ */
+export type MutationCancellationReason =
+  | 'superseded'
+  | 'queue-cleared'
+  | 'queue-key-changed'
+  | 'destroyed'
+  | 'no-request';
+
+/**
+ * Rejection reason for a {@link MutationResourceRef.mutateAsync} promise whose
+ * mutation never completed. The {@link MutationCancelledError.type} discriminant
+ * carries the cause ({@link MutationCancellationReason}); the message is a
+ * human-readable elaboration of it.
+ *
+ * Only `mutateAsync` promises reject with this; plain `mutate()` calls have no
+ * promise and so produce no (potentially unhandled) rejection.
+ */
+export class MutationCancelledError extends Error {
+  constructor(
+    readonly type: MutationCancellationReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'MutationCancelledError';
+  }
+}
+
+/**
  * @internal
  * Helper type for tracking mutation status.
  */
@@ -217,6 +252,18 @@ export type MutationResourceRef<
    */
   mutate: (value: TMutation, ctx?: TICTX) => void;
   /**
+   * Executes the mutation and returns a `Promise`
+   *
+   * If the mutation never completes — superseded by a newer `mutate`/`mutateAsync`
+   * (latest-wins), dropped from the queue (`clearQueue` / queue `key` change),
+   * abandoned on `destroy()`, or its `request()` returned `undefined` — the
+   * promise rejects with a {@link MutationCancelledError}.
+   *
+   * @param value The mutation value (usually the request body).
+   * @param ctx An optional initial context value that will be passed to the `onMutate` callback.
+   */
+  mutateAsync: (value: TMutation, ctx?: TICTX) => Promise<TResult>;
+  /**
    * A signal that holds the current mutation request, or `null` if no mutation is in progress.
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
@@ -285,9 +332,7 @@ export function mutationResource<
   TCTX = void,
   TICTX = TCTX,
 >(
-  request: (
-    params: TMutation,
-  ) =>
+  request: (params: TMutation) =>
     | (Omit<HttpResourceRequest, 'body' | 'method'> & {
         method: 'DELETE' | 'delete';
       })
@@ -357,11 +402,6 @@ export function mutationResource<
 
   const requestEqual = equalRequest ?? createEqualRequest(equal);
 
-  // A mutation is an imperative command, so `triggerOnSameRequest` means "fire on EVERY mutate(),
-  // even with an identical body". By default we dedup an identical value/request while one is in
-  // flight (double-click protection); when this is set, both the `next` and `req` dedup are bypassed
-  // so a repeat click isn't silently swallowed mid-flight. (Otherwise it'd be dropped until `next`
-  // resets to NULL on settle — the "every other click" symptom.)
   const triggerOnSame = options.triggerOnSameRequest ?? false;
 
   const eq = equal ?? Object.is;
@@ -378,38 +418,31 @@ export function mutationResource<
   const queueKeyFn =
     typeof options.queue === 'object' ? options.queue.key : undefined;
 
+  type QueueEntry = [
+    TMutation,
+    TICTX | undefined,
+    PromiseWithResolvers<TResult> | undefined,
+  ];
+
   const queue = linkedSignal<
     string | number | undefined,
-    WritableSignal<[TMutation, TICTX | undefined][]>
+    WritableSignal<QueueEntry[]>
   >({
     source: () => queueKeyFn?.(),
-    computation: () => signal<[TMutation, TICTX | undefined][]>([]),
-  });
-
-  let ctx: TCTX = undefined as TCTX;
-
-  const queueRef = effect(
-    () => {
-      const q = queue(); // subscribe to swaps (key change / clearQueue)
-      const nextInQueue = q().at(0); // subscribe to contents
-      if (nextInQueue === undefined || next() !== NULL_VALUE) return;
-      q.update((arr) => arr.slice(1));
-      const [value, ictx] = nextInQueue;
-      try {
-        ctx = onMutate?.(value, ictx) as TCTX;
-        next.set(value);
-      } catch (mutationErr) {
-        ctx = undefined as TCTX;
-        next.set(NULL_VALUE);
-        if (isDevMode())
-          console.error(
-            '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
-            mutationErr,
+    computation: (_key, prev) => {
+      // On a queue key change the previous pending entries are dropped — reject any
+      // mutateAsync promises waiting on them so awaiters don't hang.
+      if (prev)
+        for (const [, , deferred] of untracked(prev.value))
+          deferred?.reject(
+            new MutationCancelledError(
+              'queue-key-changed',
+              'mutation dropped: queue key changed before it ran',
+            ),
           );
-      }
+      return signal<QueueEntry[]>([]);
     },
-    { injector: options.injector },
-  );
+  });
 
   const req = computed(
     (): HttpResourceRequest | undefined => {
@@ -426,6 +459,84 @@ export function mutationResource<
         return requestEqual(a, b);
       },
     },
+  );
+
+  let ctx: TCTX = undefined as TCTX;
+  let currentDeferred: PromiseWithResolvers<TResult> | undefined;
+
+  const begin = (
+    value: TMutation,
+    ictx: TICTX | undefined,
+    deferred: PromiseWithResolvers<TResult> | undefined,
+  ) => {
+    let nextCtx: TCTX;
+    try {
+      nextCtx = onMutate?.(value, ictx) as TCTX;
+    } catch (mutationErr) {
+      // match legacy mutate(): the throw aborts the mutation and resets state
+      ctx = undefined as TCTX;
+      next.set(NULL_VALUE);
+      deferred?.reject(mutationErr);
+      if (isDevMode())
+        console.error(
+          '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
+          mutationErr,
+        );
+      return;
+    }
+
+    ctx = nextCtx;
+    currentDeferred = deferred;
+    next.set(value);
+
+    if (deferred && untracked(req) === undefined) {
+      ctx = undefined as TCTX;
+      currentDeferred = undefined;
+      next.set(NULL_VALUE);
+      deferred.reject(
+        new MutationCancelledError(
+          'no-request',
+          'mutation not sent: request() returned undefined',
+        ),
+      );
+    }
+  };
+
+  const supersedeInFlight = () => {
+    if (untracked(next) === NULL_VALUE) return;
+    if (isDevMode())
+      console.warn(
+        '[@mmstack/resource]: mutate() called while another mutation was in flight — the previous mutation was superseded (latest-wins) and its onSettled was invoked. Use `queue: true` for sequential mutations.',
+      );
+    try {
+      onSettled?.(ctx);
+    } catch (settleErr) {
+      if (isDevMode())
+        console.error(
+          '[@mmstack/resource]: error thrown in onSettled hook for a superseded mutation',
+          settleErr,
+        );
+    }
+    currentDeferred?.reject(
+      new MutationCancelledError(
+        'superseded',
+        'mutation superseded by a newer mutation (latest-wins)',
+      ),
+    );
+    currentDeferred = undefined;
+    ctx = undefined as TCTX;
+  };
+
+  const queueRef = effect(
+    () => {
+      const q = queue(); // subscribe to swaps (key change / clearQueue)
+      const nextInQueue = q().at(0); // subscribe to contents
+      if (nextInQueue === undefined || next() !== NULL_VALUE) return;
+      q.update((arr) => arr.slice(1));
+      const [value, ictx, deferred] = nextInQueue;
+      begin(value, ictx, deferred);
+    },
+    { injector: options.injector },
   );
 
   const lastValue = linkedSignal<
@@ -507,8 +618,13 @@ export function mutationResource<
       takeUntilDestroyed(destroyRef),
     )
     .subscribe((result) => {
-      if (result.status === 'error') onError?.(result.error, ctx);
-      else {
+      const deferred = currentDeferred;
+      currentDeferred = undefined;
+
+      if (result.status === 'error') {
+        onError?.(result.error, ctx);
+        deferred?.reject(result.error);
+      } else {
         onSuccess?.(result.value, ctx);
 
         if (cache && invalidates) {
@@ -521,11 +637,11 @@ export function mutationResource<
                 )
               : invalidates;
 
-          // auto-keys are `${method}:${url}:...` — a `GET:`-prefixed url prefix hits
-          // the url with any params/subpaths and every varyHeaders variant
           for (const prefix of prefixes)
             cache.invalidatePrefix(`GET:${prefix}`);
         }
+
+        deferred?.resolve(result.value);
       }
 
       onSettled?.(ctx);
@@ -539,45 +655,34 @@ export function mutationResource<
       // queue first — a late queue flush must not poke an already-destroyed resource
       queueRef.destroy();
       statusSub.unsubscribe();
+      // reject any outstanding mutateAsync promises so awaiters don't hang
+      const cancelled = new MutationCancelledError(
+        'destroyed',
+        'mutation abandoned: resource destroyed',
+      );
+      currentDeferred?.reject(cancelled);
+      currentDeferred = undefined;
+      for (const [, , deferred] of untracked(queue)())
+        deferred?.reject(cancelled);
       resource.destroy();
     },
     mutate: (value, ictx) => {
       if (queueEnabled) {
-        return queue().update((arr) => [...arr, [value, ictx]]);
-      } else {
-        // latest-wins: a mutation already in flight gets superseded (its request is
-        // aborted by the request change), so its onSuccess/onError will never fire —
-        // settle its context NOW so optimistic state can be rolled back/cleaned up
-        if (untracked(next) !== NULL_VALUE) {
-          if (isDevMode())
-            console.warn(
-              '[@mmstack/resource]: mutate() called while another mutation was in flight — the previous mutation was superseded (latest-wins) and its onSettled was invoked. Use `queue: true` for sequential mutations.',
-            );
-          try {
-            onSettled?.(ctx);
-          } catch (settleErr) {
-            if (isDevMode())
-              console.error(
-                '[@mmstack/resource]: error thrown in onSettled hook for a superseded mutation',
-                settleErr,
-              );
-          }
-          ctx = undefined as TCTX;
-        }
-
-        try {
-          ctx = onMutate?.(value, ictx) as TCTX;
-          next.set(value);
-        } catch (mutationErr) {
-          ctx = undefined as TCTX;
-          next.set(NULL_VALUE);
-          if (isDevMode())
-            console.error(
-              '[@mmstack/resource]: error thrown in onMutate hook, mutation was not applied',
-              mutationErr,
-            );
-        }
+        queue().update((arr) => [...arr, [value, ictx, undefined]]);
+        return;
       }
+      supersedeInFlight();
+      begin(value, ictx, undefined);
+    },
+    mutateAsync: (value, ictx) => {
+      const deferred = Promise.withResolvers<TResult>();
+      if (queueEnabled) {
+        queue().update((arr) => [...arr, [value, ictx, deferred]]);
+      } else {
+        supersedeInFlight();
+        begin(value, ictx, deferred);
+      }
+      return deferred.promise;
     },
     current: computed(() => {
       const nv = next();
@@ -585,7 +690,16 @@ export function mutationResource<
     }),
     clearQueue: () => {
       if (!queueEnabled) return;
-      queue.set(signal<[TMutation, TICTX | undefined][]>([]));
+      const dropped = untracked(queue)();
+      queue.set(signal<QueueEntry[]>([]));
+      // reject mutateAsync promises whose entries we just dropped
+      for (const [, , deferred] of dropped)
+        deferred?.reject(
+          new MutationCancelledError(
+            'queue-cleared',
+            'mutation dropped: queue cleared before it ran',
+          ),
+        );
     },
     // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
     disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),

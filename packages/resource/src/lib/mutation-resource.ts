@@ -171,14 +171,17 @@ export type MutationResourceOptions<
    * Cache entries to invalidate after a SUCCESSFUL mutation — the declarative
    * alternative to calling `injectQueryCache().invalidatePrefix(...)` in `onSuccess`.
    *
-   * Each string is a URL prefix matched against auto-generated `GET` cache keys
-   * (`GET:${url}:...`): `'/api/posts'` invalidates `/api/posts` with any query params,
-   * plus subpaths like `/api/posts/123` — and all `varyHeaders` variants of each.
+   * Each string is a URL prefix matched against the request URL of every cached
+   * entry, regardless of HTTP method: `'/api/posts'` invalidates `/api/posts` with
+   * any query params, plus subpaths like `/api/posts/123` — and all `varyHeaders`
+   * variants of each — across GET/HEAD/OPTIONS/POST or whatever methods you cache.
    * Note that plain prefix matching also catches sibling paths sharing the prefix
    * (`/api/posts-archive`); pass `'/api/posts/'` or the exact URL to narrow.
    *
-   * Entries keyed by a custom `hash` function follow that function's shape, not the
-   * auto-key shape — invalidate those manually via `injectQueryCache().invalidateWhere`.
+   * Keys built by a custom `cache.hash` that merely *prepends* a namespace (e.g. a
+   * tenant/`sub` for per-user persistent caches) are still matched — the URL is
+   * recovered structurally. Keys that abandon the auto shape entirely need an
+   * a custom invalidateMatcher (or manual `injectQueryCache().invalidateWhere`).
    *
    * The function form receives the mutation result and the mutated value:
    * ```ts
@@ -188,6 +191,11 @@ export type MutationResourceOptions<
   invalidates?:
     | string[]
     | ((value: NoInfer<TResult>, mutation: NoInfer<TMutation>) => string[]);
+  /**
+   * override for how {@link MutationResourceOptions.invalidates} URL
+   * prefixes map onto cache keys — given a prefix, return a key predicate.
+   */
+  invalidateMatcher?: (urlPrefix: string) => (key: string) => boolean;
   equal?: ValueEqualityFn<TMutation>;
 };
 
@@ -383,8 +391,6 @@ export function mutationResource<
     retry: mergeRetryOptions(globalOpts.retry, mutOpts.retry, options0?.retry),
   } as MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>;
 
-  // `register` is pulled out (and forced off on the inner query below) so the mutation ref is
-  // the only thing registered into the transition scope, not its internal query resource.
   const {
     onMutate,
     onError,
@@ -394,6 +400,7 @@ export function mutationResource<
     register,
     equalRequest,
     invalidates,
+    invalidateMatcher,
     ...rest
   } = options;
 
@@ -637,7 +644,7 @@ export function mutationResource<
               : invalidates;
 
           for (const prefix of prefixes)
-            cache.invalidatePrefix(`GET:${prefix}`);
+            cache.invalidateUrlPrefix(prefix, invalidateMatcher);
         }
 
         deferred?.resolve(result.value);

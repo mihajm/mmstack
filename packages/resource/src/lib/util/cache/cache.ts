@@ -13,6 +13,7 @@ import {
   untracked,
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
+import { extractUrlFromKey } from '../hash-request';
 import { type CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
 
 function generateID() {
@@ -144,6 +145,9 @@ export class Cache<T> {
   private hydrated = false;
   /** Keys invalidated while hydration was still in flight — must not be resurrected by it. */
   private readonly hydrationTombstones = new Set<string>();
+
+  /** Dev-only: ensures the "foreign keys, no matcher" hint in invalidateUrlPrefix fires at most once. */
+  private warnedForeignKeys = false;
 
   private readonly hitCount = signal(0);
   private readonly missCount = signal(0);
@@ -508,6 +512,64 @@ export class Cache<T> {
    */
   invalidatePrefix(prefix: string): number {
     return this.invalidateWhere((key) => key.startsWith(prefix));
+  }
+
+  /**
+   * Invalidates every cache entry whose *request URL* starts with `urlPrefix`,
+   * regardless of HTTP method. This is the engine behind `mutationResource`'s
+   * `invalidates` option: `'/api/posts'` clears `/api/posts` with any query
+   * params, subpaths like `/api/posts/123`, and all `varyHeaders` variants —
+   * across GET/HEAD/OPTIONS/POST or any other cached method. Returns the number
+   * of entries removed.
+   *
+   * Unlike {@link invalidatePrefix} (which matches the raw key from its start),
+   * this extracts the URL field from the auto-generated key shape, so it is not
+   * fooled by the leading method token nor by a namespace a custom `cache.hash`
+   * prepends (e.g. `tenant:…`). Plain prefix matching still catches siblings
+   * sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` to narrow.
+   *
+   * Keys produced by a custom `hash` that don't follow the auto shape won't be
+   * matched by the default; pass `match` to describe how a URL prefix maps onto
+   * your key format. In dev mode, if a default-matcher call removes nothing and
+   * every cached key is foreign-shaped, this logs a one-time hint pointing at the
+   * `match` escape hatch (a likely sign of a custom `hash` with no matcher wired up).
+   *
+   * @param urlPrefix - URL prefix to match.
+   * @param match - Optional custom matcher: given the prefix, returns a key predicate.
+   *
+   * @example
+   * cache.invalidateUrlPrefix('/api/posts');
+   * // custom key scheme:
+   * cache.invalidateUrlPrefix('/api/posts', (p) => (k) => k.includes(`|url=${p}`));
+   */
+  invalidateUrlPrefix(
+    urlPrefix: string,
+    match?: (urlPrefix: string) => (key: string) => boolean,
+  ): number {
+    if (match) return this.invalidateWhere(match(urlPrefix));
+
+    let sawAutoKey = false;
+    const removed = this.invalidateWhere((key) => {
+      const url = extractUrlFromKey(key);
+      if (url === null) return false; // foreign-shaped key
+      sawAutoKey = true;
+      return url.startsWith(urlPrefix);
+    });
+
+    if (
+      isDevMode() &&
+      !this.warnedForeignKeys &&
+      removed === 0 &&
+      !sawAutoKey &&
+      untracked(this.internal).size > 0
+    ) {
+      this.warnedForeignKeys = true;
+      console.warn(
+        `[@mmstack/resource] invalidateUrlPrefix('${urlPrefix}') matched nothing, and no cached key follows the default key shape. If you use a custom 'cache.hash', pass an 'invalidateMatcher' (mutationResource) / 'match' (invalidateUrlPrefix) so invalidation can locate your keys.`,
+      );
+    }
+
+    return removed;
   }
 
   /**

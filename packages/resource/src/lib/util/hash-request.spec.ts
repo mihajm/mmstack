@@ -1,21 +1,23 @@
 import { HttpParams } from '@angular/common/http';
-import { hashRequest } from './hash-request';
+import { extractUrlFromKey, hashRequest, KEY_DELIMITER as D } from './hash-request';
 
 describe('hashRequest', () => {
   describe('base composition', () => {
-    it('returns method:url:responseType when no params/body', () => {
+    it('returns method/url/responseType when no params/body', () => {
       expect(hashRequest({ method: 'GET', url: '/api/users' })).toBe(
-        'GET:/api/users:json',
+        `GET${D}/api/users${D}json`,
       );
     });
 
     it('defaults method to GET', () => {
-      expect(hashRequest({ url: '/api/users' })).toBe('GET:/api/users:json');
+      expect(hashRequest({ url: '/api/users' })).toBe(
+        `GET${D}/api/users${D}json`,
+      );
     });
 
     it('defaults responseType to json', () => {
       expect(hashRequest({ method: 'POST', url: '/api/users' })).toBe(
-        'POST:/api/users:json',
+        `POST${D}/api/users${D}json`,
       );
     });
 
@@ -37,7 +39,7 @@ describe('hashRequest', () => {
     it('sorts plain object params alphabetically', () => {
       expect(
         hashRequest({ url: '/api/users', params: { z: '1', a: '2', m: '3' } }),
-      ).toBe('GET:/api/users:json:a=2&m=3&z=1');
+      ).toBe(`GET${D}/api/users${D}json${D}a=2&m=3&z=1`);
     });
 
     it('is insensitive to param key order', () => {
@@ -64,13 +66,13 @@ describe('hashRequest', () => {
     it('expands array param values as repeated entries', () => {
       expect(
         hashRequest({ url: '/api/items', params: { ids: ['1', '2', '3'] } }),
-      ).toBe('GET:/api/items:json:ids=1&ids=2&ids=3');
+      ).toBe(`GET${D}/api/items${D}json${D}ids=1&ids=2&ids=3`);
     });
 
     it('joins array param values as comma-separated', () => {
       expect(
         hashRequest({ url: '/api/items', params: { ids: ['1', '2', '3'] } }),
-      ).toBe('GET:/api/items:json:ids=1&ids=2&ids=3');
+      ).toBe(`GET${D}/api/items${D}json${D}ids=1&ids=2&ids=3`);
     });
 
     it('handles HttpParams instance', () => {
@@ -95,7 +97,7 @@ describe('hashRequest', () => {
     it('preserves repeated HttpParams values per key', () => {
       const params = new HttpParams().append('tag', 'x').append('tag', 'y');
       const result = hashRequest({ url: '/api/data', params });
-      expect(result).toBe('GET:/api/data:json:tag=x&tag=y');
+      expect(result).toBe(`GET${D}/api/data${D}json${D}tag=x&tag=y`);
     });
 
     it('encodes HttpParams keys and values', () => {
@@ -108,10 +110,10 @@ describe('hashRequest', () => {
   describe('body', () => {
     it('omits body segment when body is null/undefined', () => {
       expect(hashRequest({ url: '/api/x', body: null })).toBe(
-        'GET:/api/x:json',
+        `GET${D}/api/x${D}json`,
       );
       expect(hashRequest({ url: '/api/x', body: undefined })).toBe(
-        'GET:/api/x:json',
+        `GET${D}/api/x${D}json`,
       );
     });
 
@@ -345,7 +347,9 @@ describe('hashRequest', () => {
       expect(key).not.toContain(token);
       expect(key).not.toContain('super-secret-token-value');
       // the digest segment is hex, fixed width
-      expect(key).toMatch(/:vary\(authorization=[0-9a-f]{16}\)$/);
+      expect(key).toMatch(
+        new RegExp(`${D}vary\\(authorization=[0-9a-f]{16}\\)$`),
+      );
     });
 
     it('treats header names case-insensitively and sorts them', () => {
@@ -383,7 +387,32 @@ describe('hashRequest', () => {
     it('no varyHeaders → key unchanged (back-compat)', () => {
       expect(
         hashRequest({ url: '/api/users', headers: { Authorization: token } }),
-      ).toBe('GET:/api/users:json');
+      ).toBe(`GET${D}/api/users${D}json`);
     });
+  });
+});
+
+describe('extractUrlFromKey', () => {
+  it('recovers the URL from an auto-generated key regardless of method', () => {
+    expect(extractUrlFromKey(hashRequest({ url: '/api/posts' }))).toBe(
+      '/api/posts',
+    );
+    expect(
+      extractUrlFromKey(hashRequest({ method: 'POST', url: '/api/posts' })),
+    ).toBe('/api/posts');
+  });
+
+  it('recovers the URL even with trailing param/body/vary segments', () => {
+    const key = hashRequest({ url: '/api/posts', params: { page: '1' } });
+    expect(extractUrlFromKey(key)).toBe('/api/posts');
+  });
+
+  it('recovers the URL when a namespace is prepended with non-delimiter chars', () => {
+    const namespaced = `tenant123:${hashRequest({ url: '/api/posts' })}`;
+    expect(extractUrlFromKey(namespaced)).toBe('/api/posts');
+  });
+
+  it('returns null for keys without the delimiter (foreign hash shape)', () => {
+    expect(extractUrlFromKey('some-custom-opaque-key')).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { hashRequest } from '../hash-request';
 import { Cache } from './cache';
 
 describe('Cache', () => {
@@ -8,6 +9,7 @@ describe('Cache', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('should store and retrieve a value', () => {
@@ -82,6 +84,76 @@ describe('Cache', () => {
     expect(cache.getUntracked('user:42:profile')).toBeNull();
     expect(cache.getUntracked('user:42:settings')).toBeNull();
     expect(cache.getUntracked('user:99:profile')).not.toBeNull();
+  });
+
+  describe('invalidateUrlPrefix', () => {
+    it('matches by URL regardless of method, plus params and subpaths', () => {
+      const cache = new Cache<string>();
+      const list = hashRequest({ url: '/api/posts' });
+      const page2 = hashRequest({ url: '/api/posts', params: { page: '2' } });
+      const detail = hashRequest({ url: '/api/posts/1' });
+      const search = hashRequest({ method: 'POST', url: '/api/posts', body: { q: 'x' } });
+      const users = hashRequest({ url: '/api/users' });
+      [list, page2, detail, search, users].forEach((k) => cache.store(k, 'v'));
+
+      const removed = cache.invalidateUrlPrefix('/api/posts');
+
+      expect(removed).toBe(4);
+      expect(cache.getUntracked(list)).toBeNull();
+      expect(cache.getUntracked(page2)).toBeNull();
+      expect(cache.getUntracked(detail)).toBeNull();
+      expect(cache.getUntracked(search)).toBeNull();
+      expect(cache.getUntracked(users)).not.toBeNull();
+    });
+
+    it('recovers the URL even when a namespace is prepended (default extractor)', () => {
+      const cache = new Cache<string>();
+      const key = `tenant-7:${hashRequest({ url: '/api/posts' })}`;
+      cache.store(key, 'v');
+
+      expect(cache.invalidateUrlPrefix('/api/posts')).toBe(1);
+      expect(cache.getUntracked(key)).toBeNull();
+    });
+
+    it('uses a custom matcher for fully-foreign key schemes', () => {
+      const cache = new Cache<string>();
+      cache.store('tenant-7|url=/api/posts', 'v');
+      cache.store('tenant-7|url=/api/users', 'v');
+
+      const removed = cache.invalidateUrlPrefix(
+        '/api/posts',
+        (urlPrefix) => (key) => key.includes(`|url=${urlPrefix}`),
+      );
+
+      expect(removed).toBe(1);
+      expect(cache.getUntracked('tenant-7|url=/api/posts')).toBeNull();
+      expect(cache.getUntracked('tenant-7|url=/api/users')).not.toBeNull();
+    });
+
+    it('dev-warns once when nothing matched and every key is foreign-shaped', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const cache = new Cache<string>();
+      cache.store('totally-custom-key-a', 'v');
+      cache.store('totally-custom-key-b', 'v');
+
+      expect(cache.invalidateUrlPrefix('/api/posts')).toBe(0);
+      expect(cache.invalidateUrlPrefix('/api/users')).toBe(0);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('invalidateMatcher');
+    });
+
+    it('does NOT warn when an auto-shape key exists (default is working)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const cache = new Cache<string>();
+      cache.store(hashRequest({ url: '/api/users' }), 'v');
+      cache.store('totally-custom-key', 'v');
+
+      // zero matches for this prefix, but auto-shape keys are present → no hint
+      expect(cache.invalidateUrlPrefix('/api/posts')).toBe(0);
+
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   it('should auto-expire entries after TTL', () => {

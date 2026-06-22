@@ -311,7 +311,7 @@ After a successful mutation, related query caches usually need refreshing. Inste
 
 ```typescript
 mutationResource((p: Post) => ({ url: '/api/posts', method: 'POST', body: p }), {
-  invalidates: ['/api/posts'], // every cached GET under /api/posts (any params, subpaths, varyHeaders variants)
+  invalidates: ['/api/posts'], // every cached entry under /api/posts (any method, params, subpaths, varyHeaders variants)
 });
 
 // or derived from the result:
@@ -320,7 +320,7 @@ mutationResource(request, {
 });
 ```
 
-Strings are URL prefixes matched against auto-generated `GET` keys. Plain prefix matching also catches sibling paths sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` or an exact URL to narrow. Entries keyed by a custom `hash` follow that function's shape instead; invalidate those via `injectQueryCache().invalidateWhere`.
+Strings are URL prefixes matched against the request URL of every cached entry, regardless of HTTP method (so a POST-bodied search cached under the same URL is cleared too). Plain prefix matching also catches sibling paths sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` or an exact URL to narrow. Keys a custom `hash` merely *prepends* a namespace to (e.g. a tenant/`sub`) are still matched; keys that abandon the auto shape entirely need an `invalidateMatcher: (urlPrefix) => (key) => boolean` (set per-mutation or globally via `provideMutationResourceOptions`), or manual `injectQueryCache().invalidateWhere`.
 
 ### Re-firing with an identical body (`triggerOnSameRequest`)
 
@@ -476,14 +476,14 @@ With `syncTabs: true`, cache invalidations and updates broadcast via `BroadcastC
 
 ```typescript
 const cache = injectQueryCache<MyResponse>();
-cache.invalidate('GET:/api/posts:json'); // drop one entry by exact key
-cache.invalidatePrefix('GET:/api/posts'); // drop every key under a URL prefix
+cache.invalidateUrlPrefix('/api/posts'); // drop every entry under a URL prefix, any method
 cache.invalidateWhere((key) => key.includes('userId=42')); // arbitrary predicates
+cache.invalidatePrefix('raw-key-prefix'); // match the raw key string from its start
 cache.clear(); // drop EVERYTHING — memory, persisted rows, other tabs
 cache.store(key, value, staleTime, ttl); // imperative write
 ```
 
-Auto-generated keys have the shape `${method}:${url}:${responseType}[:params][:body][:vary]` — prefix matching against `GET:${url}` is the common move. Call `clear()` on logout so no prior user's responses survive. For observability there's a read-only `cache.stats()` signal (`{ size, hits, misses }`) — handy for a debug panel; it deliberately exposes no mutation surface.
+Auto-generated keys have the shape `${method}${SEP}${url}${SEP}${responseType}[${SEP}params][${SEP}body][${SEP}vary]`, where `SEP` is a content-rare control-character delimiter (treat keys as opaque — don't hand-build them). `invalidateUrlPrefix(urlPrefix)` is the common move: it recovers the URL field structurally, so it matches **any** HTTP method and even keys a custom `cache.hash` prepends a namespace to. For a fully-custom key scheme it takes an optional `match` (`(urlPrefix) => (key) => boolean`). Call `clear()` on logout so no prior user's responses survive. For observability there's a read-only `cache.stats()` signal (`{ size, hits, misses }`) — handy for a debug panel; it deliberately exposes no mutation surface.
 
 Prefer the declarative [`invalidates`](#declarative-invalidation-invalidates) option on `mutationResource` for the common "mutation succeeded → refresh related queries" case.
 
@@ -669,7 +669,7 @@ Declarative — the common case:
 
 ```typescript
 mutationResource((p: Post) => ({ url: '/posts', method: 'POST', body: p }), {
-  invalidates: ['/posts'], // every cached GET under /posts, params + subpaths + vary variants
+  invalidates: ['/posts'], // every cached entry under /posts, any method + params + subpaths + vary variants
 });
 ```
 

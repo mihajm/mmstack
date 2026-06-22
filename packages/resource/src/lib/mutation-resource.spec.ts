@@ -13,6 +13,7 @@ import { TestBed } from '@angular/core/testing';
 import { delay, of, throwError } from 'rxjs';
 import { MutationCancelledError, mutationResource } from './mutation-resource';
 import { injectQueryCache, provideQueryCache, ResourceSensors } from './util';
+import { hashRequest } from './util/hash-request';
 
 const TEST_CONTEXT = new HttpContextToken<{
   validate: (req: HttpRequest<any>) => void;
@@ -173,10 +174,17 @@ describe('mutationResource', () => {
   it('invalidates matching cache entries after a successful mutation', async () => {
     const cache = TestBed.runInInjectionContext(() => injectQueryCache());
     const resp = (body: unknown) => new HttpResponse({ body, status: 200 });
-    cache.store('GET:/api/posts:json', resp([1, 2]));
-    cache.store('GET:/api/posts:json:page=2', resp([3]));
-    cache.store('GET:/api/posts/1:json', resp(1));
-    cache.store('GET:/api/users:json', resp([]));
+    const list = hashRequest({ url: '/api/posts' });
+    const listPage2 = hashRequest({ url: '/api/posts', params: { page: '2' } });
+    const detail = hashRequest({ url: '/api/posts/1' });
+    // a POST-bodied read (e.g. a search endpoint) cached under the same URL
+    const search = hashRequest({ method: 'POST', url: '/api/posts', body: { q: 'x' } });
+    const users = hashRequest({ url: '/api/users' });
+    cache.store(list, resp([1, 2]));
+    cache.store(listPage2, resp([3]));
+    cache.store(detail, resp(1));
+    cache.store(search, resp([1]));
+    cache.store(users, resp([]));
 
     const { promise, resolve } = Promise.withResolvers<void>();
 
@@ -203,12 +211,51 @@ describe('mutationResource', () => {
     res.mutate({ title: 'new post' });
     await promise;
 
-    // everything under /api/posts is gone — any params, subpaths
-    expect(cache.getUntracked('GET:/api/posts:json')).toBeNull();
-    expect(cache.getUntracked('GET:/api/posts:json:page=2')).toBeNull();
-    expect(cache.getUntracked('GET:/api/posts/1:json')).toBeNull();
+    // everything under /api/posts is gone — any params, subpaths, ANY method
+    expect(cache.getUntracked(list)).toBeNull();
+    expect(cache.getUntracked(listPage2)).toBeNull();
+    expect(cache.getUntracked(detail)).toBeNull();
+    expect(cache.getUntracked(search)).toBeNull();
     // unrelated keys survive
-    expect(cache.getUntracked('GET:/api/users:json')).not.toBeNull();
+    expect(cache.getUntracked(users)).not.toBeNull();
+  });
+
+  it('invalidates namespace-prefixed keys (custom hash) via invalidateMatcher', async () => {
+    const cache = TestBed.runInInjectionContext(() => injectQueryCache());
+    const resp = (body: unknown) => new HttpResponse({ body, status: 200 });
+    // a fully-custom key scheme the default extractor can't read
+    cache.store('tenant-7|url=/api/posts', resp([1, 2]));
+    cache.store('tenant-7|url=/api/users', resp([]));
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    const res = TestBed.runInInjectionContext(() =>
+      mutationResource(
+        (body: { title: string }) => ({
+          url: '/api/posts',
+          method: 'POST',
+          body,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { ok: true },
+          ),
+        }),
+        {
+          invalidates: ['/api/posts'],
+          invalidateMatcher: (urlPrefix) => (key) =>
+            key.includes(`|url=${urlPrefix}`),
+          onSettled: () => resolve(),
+        },
+      ),
+    );
+
+    res.mutate({ title: 'new post' });
+    await promise;
+
+    expect(cache.getUntracked('tenant-7|url=/api/posts')).toBeNull();
+    expect(cache.getUntracked('tenant-7|url=/api/users')).not.toBeNull();
   });
 
   it('settles a superseded in-flight mutation before applying the next one (non-queued)', async () => {

@@ -17,6 +17,36 @@ type HashableRequest = {
 };
 
 /**
+ * Top-level field separator for auto-generated cache keys. ASCII Unit Separator
+ * (`\x1f`) is deliberately content-rare: it never occurs in HTTP method tokens,
+ * URLs, or `encodeURIComponent`/digest output (params, vary headers, body hash),
+ * so the structural layout stays unambiguous even when a custom `cache.hash`
+ * *prepends* a namespace with ordinary chars (e.g. `tenant:${hashRequest(req)}`).
+ * Survives `JSON.stringify` (IndexedDB persistence) and `structuredClone`
+ * (cross-tab broadcast) intact.
+ */
+export const KEY_DELIMITER = '\x1f';
+
+/**
+ * Recovers the URL portion of an auto-generated cache key — the segment between
+ * the 1st and 2nd {@link KEY_DELIMITER} (the key shape is
+ * `method␟url␟responseType[␟…]`). Returns `null` when the key has no delimiter
+ * (e.g. produced by a custom `hash` that doesn't follow this shape).
+ *
+ * A namespace prepended with non-delimiter chars collapses into segment 0
+ * (`tenant:GET`), so the URL remains segment 1 — method-agnostic and
+ * namespacing-tolerant by construction.
+ */
+export function extractUrlFromKey(key: string): string | null {
+  const start = key.indexOf(KEY_DELIMITER);
+  if (start === -1) return null;
+  const end = key.indexOf(KEY_DELIMITER, start + 1);
+  return end === -1
+    ? key.slice(start + 1)
+    : key.slice(start + 1, end);
+}
+
+/**
  * @internal
  * One-way ~64-bit digest from two independent FNV-1a passes. Used for header VALUES in
  * cache keys: keys are persisted (IndexedDB) and broadcast cross-tab, so raw values
@@ -194,7 +224,9 @@ function hashBody(body: unknown): string {
  * Builds a stable cache/dedupe key from an HTTP request shape (accepts both
  * `HttpRequest` and `HttpResourceRequest`).
  *
- * Key composition: `${method}:${url}:${responseType}[:${params}][:${body}][:${vary}]`
+ * Key composition: `${method}␟${url}␟${responseType}[␟${params}][␟${body}][␟${vary}]`,
+ * where `␟` is {@link KEY_DELIMITER} (ASCII Unit Separator) — a content-rare top-level
+ * separator. Sub-fields inside `params`/`vary` keep their own `&`/`=` delimiters.
  * - `method` defaults to `'GET'`, `responseType` to `'json'` (Angular defaults).
  * - Query params are sorted alphabetically and URL-encoded for stability.
  * - Body hashing handles `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer`
@@ -213,12 +245,14 @@ export function hashRequest(
 ): string {
   const method = req.method ?? 'GET';
   const responseType = req.responseType ?? 'json';
-  const base = `${method}:${req.url}:${responseType}`;
+  const base = `${method}${KEY_DELIMITER}${req.url}${KEY_DELIMITER}${responseType}`;
 
-  const params = req.params ? `:${normalizeParams(req.params)}` : '';
-  const body = req.body != null ? `:${hashBody(req.body)}` : '';
+  const params = req.params
+    ? `${KEY_DELIMITER}${normalizeParams(req.params)}`
+    : '';
+  const body = req.body != null ? `${KEY_DELIMITER}${hashBody(req.body)}` : '';
   const vary = varyHeaders?.length
-    ? `:vary(${normalizeVaryHeaders(req.headers, varyHeaders)})`
+    ? `${KEY_DELIMITER}vary(${normalizeVaryHeaders(req.headers, varyHeaders)})`
     : '';
 
   return base + params + body + vary;

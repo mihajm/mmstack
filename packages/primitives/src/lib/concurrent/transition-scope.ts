@@ -3,6 +3,7 @@ import {
   DestroyRef,
   inject,
   InjectionToken,
+  type Injector,
   isDevMode,
   linkedSignal,
   signal,
@@ -175,6 +176,65 @@ export function injectTransitionScope(): TransitionScope {
   }
 
   return scope;
+}
+
+/**
+ * A transition scope that can be re-pointed at a delegate target at runtime. Reads and
+ * commit/hold follow the current target; `add`/`remove` pin to the target that was current
+ * at add-time, so re-pointing between a resource's registration and its destroy-time removal
+ * never strands it in the wrong scope. With no target it behaves as a plain own-scope.
+ */
+export type ForwardingTransitionScope = TransitionScope & {
+  setTarget(target: TransitionScope | null): void;
+};
+
+export function createForwardingScope(): ForwardingTransitionScope {
+  const own = createTransitionScope();
+  const target = signal<TransitionScope | null>(null);
+  const eff = () => target() ?? own;
+  const owners = new Map<ResourceRef<any>, TransitionScope>();
+
+  return {
+    setTarget: (t) => target.set(t),
+    resources: computed(() => eff().resources()),
+    pending: computed(() => eff().pending()),
+    suspended: (type) => eff().suspended(type),
+    add: (ref, opt) => {
+      const t = untracked(target) ?? own;
+      owners.set(ref, t);
+      t.add(ref, opt);
+    },
+    remove: (ref) => {
+      const t = owners.get(ref) ?? untracked(target) ?? own;
+      t.remove(ref);
+      owners.delete(ref);
+    },
+    commit: <T>(value: Signal<T>): Signal<T> =>
+      linkedSignal<{ v: T; settled: boolean }, T>({
+        source: () => ({ v: value(), settled: !eff().pending() }),
+        computation: (curr, prev) =>
+          curr.settled || prev === undefined ? curr.v : prev.value,
+      }),
+    holding: computed(() => eff().holding()),
+    beginHold: () => (untracked(target) ?? own).beginHold(),
+    endHold: () => (untracked(target) ?? own).endHold(),
+    hold: <T>(value: Signal<T>): Signal<T> =>
+      linkedSignal<{ v: T; held: boolean }, T>({
+        source: () => ({ v: value(), held: eff().holding() }),
+        computation: (curr, prev) =>
+          prev !== undefined && curr.held ? prev.value : curr.v,
+      }),
+  };
+}
+
+/** Provide a forwarding transition scope at a boundary (used by the transition outlet). */
+export function provideForwardingTransitionScope(): Provider {
+  return { provide: TRANSITION_SCOPE, useFactory: createForwardingScope };
+}
+
+/** Read the transition scope reachable from `injector`, or null if none is provided there. */
+export function getTransitionScope(injector: Injector): TransitionScope | null {
+  return injector.get(TRANSITION_SCOPE, null);
 }
 
 /**

@@ -2,21 +2,25 @@ import {
   afterNextRender,
   booleanAttribute,
   type ComponentRef,
+  computed,
   DestroyRef,
   Directive,
   effect,
   type EmbeddedViewRef,
-  type EnvironmentInjector,
+  EnvironmentInjector,
   inject,
   Injector,
   input,
+  type ResourceRef,
   untracked,
   ViewContainerRef,
 } from '@angular/core';
 import { type ActivatedRoute, RouterOutlet } from '@angular/router';
 import {
+  type ForwardingTransitionScope,
+  getTransitionScope,
   injectTransitionScope,
-  provideTransitionScope,
+  provideForwardingTransitionScope,
 } from '@mmstack/primitives';
 import { RouterViewTransitions } from './view-transition';
 
@@ -43,19 +47,28 @@ import { RouterViewTransitions } from './view-transition';
  *
  * Set `data: { immediateTransition: true }` on a route to skip holding for it.
  *
- * NOTE: the outlet-level transition scope aggregates both views' resources during the
- * hold; long-running background work (e.g. a poll) from the outgoing view can delay the
- * swap. Per-view scopes are a planned enhancement.
+ * The outlet provides a *forwarding* transition scope: per navigation it re-points at the
+ * incoming route's own scope when the route opts in (via `provideRouteData`/
+ * `provideTransitionScope()` in its `providers`), giving true per-view isolation — the
+ * held view's resources live in the outgoing route's scope and can't delay the swap. Routes
+ * that don't opt in share the outlet's own scope, where the swap is attributed to the
+ * incoming view by snapshotting the outgoing refs.
  */
 @Directive({
   // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'mm-transition-outlet',
-  providers: [provideTransitionScope()],
+  providers: [provideForwardingTransitionScope()],
 })
 export class TransitionRouterOutlet extends RouterOutlet {
-  private readonly transitionScope = injectTransitionScope();
+  private readonly forwarder =
+    injectTransitionScope() as ForwardingTransitionScope;
+  private readonly transitionScope = this.forwarder;
   private readonly container = inject(ViewContainerRef);
   private readonly outletInjector = inject(Injector);
+  /** Scope inherited from the outlet's own env injector — used to tell "route opted in" from "inherited". */
+  private readonly inheritedScope = getTransitionScope(
+    inject(EnvironmentInjector),
+  );
 
   private readonly routerViewTransitions = inject(RouterViewTransitions);
 
@@ -89,11 +102,24 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private sawPending = false;
   private armed = false;
 
+  /** Resources held by the OUTGOING view, snapshotted at activation so the swap ignores them. */
+  private outgoingRefs = new Set<ResourceRef<any>>();
+
+  /** In-flight state of the INCOMING view only — what the swap waits on, so outgoing background work can't block it. */
+  private readonly incomingPending = computed(() => {
+    for (const ref of this.transitionScope.resources()) {
+      if (this.outgoingRefs.has(ref)) continue;
+      const s = ref.status();
+      if (s === 'loading' || s === 'reloading') return true;
+    }
+    return false;
+  });
+
   constructor() {
     super();
-    // Swap once the incoming's requests have gone in flight and then settled.
+    // Swap once the incoming view's requests have gone in flight and then settled.
     effect(() => {
-      const pending = this.transitionScope.pending();
+      const pending = this.incomingPending();
       untracked(() => {
         if (!this.armed) return;
         if (pending) this.sawPending = true;
@@ -105,6 +131,18 @@ export class TransitionRouterOutlet extends RouterOutlet {
   override activateWith(route: ActivatedRoute, env: EnvironmentInjector): void {
     const hadHeld = !!this.held;
     this.currentEnv = env;
+
+    // Must run before super.activateWith so the incoming view's resources register into the right scope.
+    const routeScope = getTransitionScope(env);
+    const usingRouteScope =
+      routeScope !== null && routeScope !== this.inheritedScope;
+    this.forwarder.setTarget(usingRouteScope ? routeScope : null);
+
+    // A per-route scope already isolates the incoming view; the shared scope needs the
+    // outgoing refs snapshotted so the swap ignores them.
+    this.outgoingRefs = usingRouteScope
+      ? new Set()
+      : new Set(untracked(this.transitionScope.resources));
 
     // base bookkeeping stays INTACT: isActivated/activatedRoute now reflect this route
     super.activateWith(route, env);
@@ -171,14 +209,14 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   private arm(): void {
     this.armed = true;
-    this.sawPending = untracked(this.transitionScope.pending);
+    this.sawPending = untracked(this.incomingPending);
     // Fallback for an incoming route that loads nothing.
     afterNextRender(
       () => {
         if (
           this.armed &&
           !this.sawPending &&
-          !untracked(this.transitionScope.pending)
+          !untracked(this.incomingPending)
         ) {
           this.commitSwap();
         }
@@ -190,6 +228,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private resetArm(): void {
     this.armed = false;
     this.sawPending = false;
+    this.outgoingRefs.clear();
   }
 
   private commitSwap(): void {

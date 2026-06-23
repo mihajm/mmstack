@@ -1,6 +1,6 @@
 import { computed, type ResourceRef, signal, type ResourceStatus } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createTransitionScope } from './transition-scope';
+import { createForwardingScope, createTransitionScope } from './transition-scope';
 
 // Minimal fake matching the bits the scope reads: status(), isLoading(), hasValue().
 function fakeResource(status: ResourceStatus, value: unknown): ResourceRef<unknown> {
@@ -138,6 +138,63 @@ describe('createTransitionScope', () => {
       (b as any).status.set('resolved');
       expect(ca()).toBe('a1');
       expect(cb()).toBe('b1');
+    });
+  });
+});
+
+describe('createForwardingScope', () => {
+  it('with no target it behaves as its own scope', () => {
+    TestBed.runInInjectionContext(() => {
+      const fwd = createForwardingScope();
+      expect(fwd.pending()).toBe(false);
+
+      const a = fakeResource('loading', undefined);
+      fwd.add(a);
+      expect(fwd.pending()).toBe(true);
+      expect(fwd.resources().length).toBe(1);
+
+      fwd.remove(a);
+      expect(fwd.pending()).toBe(false);
+      expect(fwd.resources().length).toBe(0);
+    });
+  });
+
+  it('reads delegate to the current target and react to re-pointing', () => {
+    TestBed.runInInjectionContext(() => {
+      const fwd = createForwardingScope();
+      const a = createTransitionScope();
+      const b = createTransitionScope();
+      a.add(fakeResource('loading', undefined));
+      b.add(fakeResource('resolved', 1));
+
+      fwd.setTarget(a);
+      expect(fwd.pending()).toBe(true); // a is loading
+      expect(fwd.resources().length).toBe(1);
+
+      fwd.setTarget(b);
+      expect(fwd.pending()).toBe(false); // b is settled
+      expect(fwd.resources().length).toBe(1);
+
+      fwd.setTarget(null);
+      expect(fwd.resources().length).toBe(0); // back to the empty own-scope
+    });
+  });
+
+  it('add/remove pin to the target current at add-time (re-point cannot strand a ref)', () => {
+    TestBed.runInInjectionContext(() => {
+      const fwd = createForwardingScope();
+      const a = createTransitionScope();
+      const b = createTransitionScope();
+
+      const ref = fakeResource('loading', undefined);
+      fwd.setTarget(a);
+      fwd.add(ref); // lands in a
+      expect(a.resources().length).toBe(1);
+
+      fwd.setTarget(b); // re-point BEFORE the ref is removed
+      fwd.remove(ref); // must remove from a (where it was added), not b
+      expect(a.resources().length).toBe(0);
+      expect(b.resources().length).toBe(0);
     });
   });
 });

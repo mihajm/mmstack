@@ -22,7 +22,7 @@ import {
   withComponentInputBinding,
   withViewTransitions,
 } from '@angular/router';
-import { registerResource } from '@mmstack/primitives';
+import { provideTransitionScope, registerResource } from '@mmstack/primitives';
 import { render } from '@testing-library/angular';
 import { TransitionRouterOutlet } from './transition-router-outlet';
 import {
@@ -799,6 +799,241 @@ describe('TransitionRouterOutlet', () => {
   });
 });
 
+describe('TransitionRouterOutlet — per-view attribution', () => {
+  const A_REF = new InjectionToken<FakeRef>('attr-a-ref');
+  const C_REF = new InjectionToken<FakeRef>('attr-c-ref');
+
+  @Component({ selector: 'route-a', template: `route-A` })
+  class RA {
+    constructor() {
+      registerResource(inject(A_REF), { suspends: false });
+    }
+  }
+  @Component({ selector: 'route-b', template: `route-B` })
+  class RB {
+    constructor() {
+      registerResource(inject(B_REF), { suspends: false });
+    }
+  }
+  @Component({ selector: 'route-c', template: `route-C` })
+  class RC {
+    constructor() {
+      registerResource(inject(C_REF), { suspends: false });
+    }
+  }
+  @Component({ selector: 'route-n', template: `route-N` })
+  class RN {}
+  @Component({
+    selector: 'attr-host',
+    imports: [TransitionRouterOutlet],
+    template: `<mm-transition-outlet />`,
+  })
+  class AttrHost {}
+
+  const flush = async (fixture: { detectChanges: () => void }) => {
+    for (let i = 0; i < 6; i++) {
+      fixture.detectChanges();
+      await Promise.resolve();
+    }
+    fixture.detectChanges();
+  };
+
+  async function setup(refs: { a: FakeRef; b: FakeRef; c?: FakeRef }) {
+    const rendered = await render(AttrHost, {
+      providers: [
+        provideRouter([
+          { path: 'a', component: RA },
+          { path: 'b', component: RB },
+          { path: 'c', component: RC },
+          { path: 'n', component: RN },
+        ]),
+        provideLocationMocks(),
+        { provide: A_REF, useValue: refs.a },
+        { provide: B_REF, useValue: refs.b },
+        { provide: C_REF, useValue: refs.c ?? makeRef('resolved') },
+      ],
+    });
+    return { ...rendered, router: TestBed.inject(Router) };
+  }
+
+  it('a background poll on the held view does not block the swap', async () => {
+    const a = makeRef('loading');
+    const b = makeRef('loading');
+    const { fixture, container, router } = await setup({ a, b });
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    a.value.set({ ok: true });
+    a.status.set('resolved');
+    await flush(fixture);
+
+    await router.navigateByUrl('/b'); // A held, B loading
+    await flush(fixture);
+    expect(container.querySelector('route-a')).not.toBeNull();
+
+    a.status.set('reloading'); // held A starts a keepPrevious-style poll
+    b.value.set({ ok: true });
+    b.status.set('resolved'); // incoming settles
+    await flush(fixture);
+
+    expect(container.querySelector('route-a')).toBeNull(); // swapped despite A polling
+    expect(container.textContent).toContain('route-B');
+  });
+
+  it('an outgoing ref toggling loading→resolved does not prematurely trip the swap', async () => {
+    const a = makeRef('resolved');
+    const b = makeRef('loading');
+    const { fixture, container, router } = await setup({ a, b });
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    await router.navigateByUrl('/b'); // A held, B loading
+    await flush(fixture);
+    expect(container.querySelector('route-a')).not.toBeNull();
+
+    a.status.set('loading');
+    await flush(fixture);
+    a.status.set('resolved'); // a full outgoing cycle while B is still loading
+    await flush(fixture);
+
+    expect(container.querySelector('route-a')).not.toBeNull(); // still held — outgoing cycle ignored
+    expect(
+      (container.querySelector('route-b') as HTMLElement | null)?.style.display,
+    ).toBe('none');
+
+    b.value.set({ ok: true });
+    b.status.set('resolved');
+    await flush(fixture);
+    expect(container.querySelector('route-a')).toBeNull();
+  });
+
+  it('a no-async incoming route swaps via the fallback even while the outgoing polls', async () => {
+    const a = makeRef('loading');
+    const b = makeRef('loading');
+    const { fixture, container, router } = await setup({ a, b });
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    a.status.set('reloading'); // A keeps polling
+
+    await router.navigateByUrl('/n'); // incoming registers nothing
+    await flush(fixture);
+
+    expect(container.querySelector('route-a')).toBeNull(); // fallback fired despite A polling
+    expect(container.textContent).toContain('route-N');
+  });
+
+  it('interrupt mid-hold: a poll on the held view does not affect the re-targeted swap', async () => {
+    const a = makeRef('resolved');
+    const b = makeRef('loading');
+    const c = makeRef('loading');
+    const { fixture, container, router } = await setup({ a, b, c });
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    await router.navigateByUrl('/b'); // A held, B loading
+    await flush(fixture);
+    a.status.set('reloading'); // held A polls
+
+    await router.navigateByUrl('/c'); // interrupt — B destroyed, A re-held for C
+    await flush(fixture);
+    expect(container.querySelector('route-a')).not.toBeNull();
+    expect(container.querySelector('route-b')).toBeNull();
+    expect(
+      (container.querySelector('route-c') as HTMLElement | null)?.style.display,
+    ).toBe('none');
+
+    c.value.set({ ok: true });
+    c.status.set('resolved'); // C settles while A still reloading
+    await flush(fixture);
+    expect(container.querySelector('route-a')).toBeNull();
+    expect(container.textContent).toContain('route-C');
+  });
+});
+
+describe('TransitionRouterOutlet — per-route scopes (opt-in)', () => {
+  const A_REF = new InjectionToken<FakeRef>('rs-a-ref');
+
+  @Component({ selector: 'route-a', template: `route-A` })
+  class RA {
+    constructor() {
+      registerResource(inject(A_REF), { suspends: false });
+    }
+  }
+  @Component({ selector: 'route-b', template: `route-B` })
+  class RB {
+    constructor() {
+      registerResource(inject(B_REF), { suspends: false });
+    }
+  }
+  @Component({
+    selector: 'rs-host',
+    imports: [TransitionRouterOutlet],
+    template: `<mm-transition-outlet />`,
+  })
+  class RsHost {}
+
+  const flush = async (fixture: { detectChanges: () => void }) => {
+    for (let i = 0; i < 6; i++) {
+      fixture.detectChanges();
+      await Promise.resolve();
+    }
+    fixture.detectChanges();
+  };
+
+  async function setup(a: FakeRef, b: FakeRef) {
+    const rendered = await render(RsHost, {
+      providers: [
+        provideRouter([
+          { path: 'a', component: RA, providers: [provideTransitionScope()] },
+          { path: 'b', component: RB, providers: [provideTransitionScope()] },
+        ]),
+        provideLocationMocks(),
+        { provide: A_REF, useValue: a },
+        { provide: B_REF, useValue: b },
+      ],
+    });
+    return { ...rendered, router: TestBed.inject(Router) };
+  }
+
+  it('holds until the incoming route scope settles (forwarder delegates reads to it)', async () => {
+    const a = makeRef('resolved');
+    const b = makeRef('loading');
+    const { fixture, container, router } = await setup(a, b);
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    await router.navigateByUrl('/b'); // B's own scope is loading
+    await flush(fixture);
+    expect(container.querySelector('route-a')).not.toBeNull(); // held
+
+    b.value.set({ ok: true });
+    b.status.set('resolved');
+    await flush(fixture);
+    expect(container.querySelector('route-a')).toBeNull();
+    expect(container.textContent).toContain('route-B');
+  });
+
+  it('a poll on the held view (its own scope) cannot block the swap — isolation, not attribution', async () => {
+    const a = makeRef('resolved');
+    const b = makeRef('loading');
+    const { fixture, container, router } = await setup(a, b);
+
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+    await router.navigateByUrl('/b'); // A held in scope-A; B loading in scope-B
+    await flush(fixture);
+
+    a.status.set('reloading'); // held A polls in ITS scope — forwarder points at B's
+    b.value.set({ ok: true });
+    b.status.set('resolved');
+    await flush(fixture);
+
+    expect(container.querySelector('route-a')).toBeNull(); // swapped despite A polling
+    expect(container.textContent).toContain('route-B');
+  });
+});
+
 // A controllable fake of the DOM `ViewTransition`: `finished` only settles when WE say
 // so (mirroring reality, where it resolves at animation end — long after activation).
 function deferredTransition() {
@@ -1263,7 +1498,7 @@ describe('view transitions — real router wiring (integration)', () => {
   });
 
   it('a redirect produces a single committed transition and lands on the target', async () => {
-    const { fixture, container, router, created } = await setup();
+    const { fixture, router, created } = await setup();
     await router.navigateByUrl('/b'); // settle onto /b first so /a is a real change
     await flush(fixture);
 

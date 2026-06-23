@@ -18,6 +18,7 @@ npm install @mmstack/router-core
 - **Resolver-driven UI** — declare your document title, breadcrumbs, and one or more nav menus from your `Routes` config; consume them reactively from any component.
 - **Smart preloading** — a `RouterLink` replacement and `PreloadingStrategy` that preload lazy-loaded route modules on hover, visibility, or imperatively.
 - **Transition navigation** — a drop-in `RouterOutlet` that keeps the current route on screen until the incoming route's data settles, then swaps in one frame.
+- **Route-level data** — declare a route's data once; it fires at the resolve phase (before the component, in parallel across the matched chain), stays reactive to param/query changes, coordinates with the transition outlet, and can be warmed on `mmLink` hover.
 
 ## Table of contents
 
@@ -35,6 +36,9 @@ npm install @mmstack/router-core
   - [`injectTriggerPreload`](#injecttriggerpreload)
 - [Transition outlet](#transition-outlet)
   - [`TransitionRouterOutlet` (`mm-transition-outlet`)](#transitionrouteroutlet-mm-transition-outlet)
+- [Route-level data](#route-level-data)
+  - [`provideRouteData` / `createRouteData` / `injectRouteData`](#defining-route-data)
+  - [Prefetch on hover — `withRouteData`](#prefetch-on-hover)
 
 ---
 
@@ -625,6 +629,7 @@ Behaviour:
 - **Settle = the incoming route's registered resources went in flight and then drained.** A route that registers nothing (or errors) swaps via a microtask fallback, so a data-less or failing route never hangs the hold.
 - **Composes with guards and resolvers** — a denied `canActivate` leaves the current route untouched (nothing held or leaked); a pending `resolve` holds at the router level, then the outlet holds through the data load. Works when nested inside a parent route's outlet too.
 - **Interruptions re-target the hold** — navigating again before the incoming route settles destroys the half-loaded view; the stable view stays visible until the new destination settles.
+- **Per-view isolation** — the swap waits on the _incoming_ view's resources only, so long-running background work (e.g. a `keepPrevious` poll) on the outgoing view can't delay it. Routes that opt into [route-level data](#route-level-data) get their own scope automatically (full isolation); others share the outlet's scope, with the swap attributed to the incoming view.
 - **`data: { immediateTransition: true }`** on a route opts it out of the hold — it swaps in immediately, even while loading (handy for routes that should show their own skeleton).
 
 #### View Transitions
@@ -656,3 +661,82 @@ Why the wrapper is needed: Angular fires its transition at route **activation**,
 - **Held routes** — Angular's inert transition is skipped, and the outlet fires the real one at the swap. The same `::view-transition-*` CSS applies to both.
 
 Your own `onViewTransitionCreated` / `skipInitialTransition` options are preserved (pass them to `mmRouterViewTransitions({ ... })`). To opt a specific outlet out even when router view transitions are enabled app-wide, set `[viewTransition]="false"`.
+
+---
+
+## Route-level data
+
+Define a route's data **once, on the route**, and have it fire at the resolve phase — before the component constructs, in the route's injector, with the matched params in hand — instead of waiting for the component to mount and kick off a fetch. It's non-blocking (the request runs while the [transition outlet](#transition-outlet) holds the previous view), stays reactive to param/query changes, and the component just reads it.
+
+It's built entirely on the transition-scope primitive, so `@mmstack/router-core` has **no dependency on a resource library**. Your factory is the only place a resource is named — use [`@mmstack/resource`](https://www.npmjs.com/package/@mmstack/resource)'s `queryResource` (or Angular's `httpResource` + `registerResource()`); anything that produces a `ResourceRef` works.
+
+### Defining route data
+
+Three pieces: a typed `routeDataKey`, `provideRouteData(key)` in the route's `providers` (provides the per-route transition scope + a memoization slot), and `createRouteData(key, factory)` in its `resolve` map (fires the factory). The component reads it with `injectRouteData(key)`.
+
+```typescript
+import {
+  routeDataKey,
+  provideRouteData,
+  createRouteData,
+  injectRouteData,
+} from '@mmstack/router-core';
+import { queryResource, type QueryResourceRef } from '@mmstack/resource';
+
+const USER = routeDataKey<QueryResourceRef<User | undefined>>('user');
+
+export const routes: Routes = [
+  {
+    path: 'users/:id',
+    loadComponent: () => import('./user.page').then((m) => m.UserPage),
+    providers: [provideRouteData(USER)],
+    resolve: {
+      user: createRouteData(USER, (ctx) =>
+        queryResource(() => `/api/users/${ctx.params()['id']}`, {
+          defaultValue: undefined,
+          register: 'suspend', // the outlet holds the previous view until this settles
+          cache: { staleTime: 30_000 }, // optional — enables prefetch-on-hover (below)
+        }),
+      ),
+    },
+  },
+];
+```
+
+```typescript
+@Component({ selector: 'user-page', template: `{{ user.value()?.name }}` })
+export class UserPage {
+  // the resource the route already started — reads the same instance, already in flight
+  readonly user = injectRouteData(USER);
+}
+```
+
+Behaviour:
+
+- **Fires before the component** — the factory runs at the resolve phase, so the request is already in flight when the component mounts (which it does _hidden_, under the transition outlet). Sibling/nested route data fires in the same activation pass, so a matched chain loads in parallel.
+- **Reactive params, define-once** — `ctx.params()` / `ctx.queryParams()` are live signals derived from router state on every navigation. They update on param/query changes **without** relying on the route's `runGuardsAndResolvers` — so you define the factory once and it keeps producing correct data (a query-param change refetches even though the resolver itself doesn't re-run).
+- **Memoized** — the factory runs once per route activation; a re-running resolver reuses the same instance. The data lives as long as the route, and is destroyed with it.
+- **Coordinates with the outlet** — `register: 'suspend'` makes the [`TransitionRouterOutlet`](#transition-outlet) hold the previous view until the data settles; `register: 'indicator'` drives the busy indicator without blocking the swap. Opting in also gives the route its own transition scope (per-view isolation).
+- **No outlet required** — without a transition outlet the data still fires and is readable; you just don't get the held-transition behavior.
+
+### Prefetch on hover
+
+Opt in with `withRouteData()` and the same `mmLink` preload signal that loads a lazy chunk also **warms the route's data**: on hover/visibility, the factory runs with params parsed from the link URL, populating your resource cache so the eventual navigation reads it warm (deduped). It's the `preload="intent"` → `ensureQueryData` pattern, wired to your existing links.
+
+```typescript
+import { provideRouter, withPreloading } from '@angular/router';
+import { PreloadStrategy, withRouteData } from '@mmstack/router-core';
+
+bootstrapApplication(App, {
+  providers: [
+    provideRouter(routes, withPreloading(PreloadStrategy)),
+    withRouteData(), // hovering an mmLink now warms route data, not just code
+  ],
+});
+```
+
+Notes:
+
+- **Needs a cache to be useful.** Prefetch warms whatever shared cache your factory's resource writes to (e.g. `@mmstack/resource`'s `provideQueryCache()` at the app root). Without one, the hover fetch isn't reused by the navigation.
+- **Two-phase for lazily code-split routes.** The route's data factory isn't visible until its chunk has loaded, so the **first** hover warms the code and a **subsequent** hover warms the data; eager (non-lazy) routes warm data on the first hover.
+- On the prefetch path `ctx.isPrefetch` is `true` and params come from the hovered URL (there's no `ActivatedRoute` yet) — a factory can branch on it if needed.

@@ -418,6 +418,8 @@ export class UserProfile {
 
 This is also the pattern for coordinating resources registered _above_ a boundary (e.g. an app-builder page whose connectors register at a higher injector): the outer `provideTransitionScope()` is the shared scope, and any number of `<mm-unscoped-suspense>` boundaries observe it.
 
+**Forwarding scope (advanced).** `provideForwardingTransitionScope()` provides a scope that can be **re-pointed at a different target at runtime** via `setTarget(scope | null)` — reads follow the current target, while `add`/`remove` pin to the target a resource was registered under (so re-pointing never strands a registration). It's the building block for a coordinator that hosts several independent sub-scopes and switches which one it observes — e.g. a router outlet that, per navigation, points at the incoming route's own scope (read it from any injector with `getTransitionScope(injector)`). Most apps reach for `provideTransitionScope()`; this is for that one extra level of control.
+
 ### `injectStartTransition`
 
 The analog of React's `useTransition`. `startTransition(fn)` runs your state mutations (which commit immediately); any resource that reloads as a result **holds its value and reveals together once everything settles** — so a multi-resource update lands as one consistent frame instead of a torn mix of new and stale. The returned handle gives you a unified `pending` signal and a `done` promise for imperative coordination (disable a button, await completion).

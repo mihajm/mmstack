@@ -57,6 +57,21 @@ function treeToSerializedUrl(
 }
 
 /**
+ * Mirrors `RouterLink`'s anchor detection (Angular 20+): `<a>`/`<area>`, or a custom element
+ * whose definition observes the `href` attribute. Must stay byte-for-byte aligned with
+ * RouterLink so {@link Link}'s click gating matches it exactly.
+ */
+function isAnchorLikeHost(el: HTMLElement): boolean {
+  const tagName = el.tagName?.toLowerCase();
+  if (tagName === 'a' || tagName === 'area') return true;
+  if (typeof customElements !== 'object') return false;
+  const ctor = customElements.get(tagName) as
+    | { observedAttributes?: readonly string[] }
+    | undefined;
+  return !!ctor?.observedAttributes?.includes?.('href');
+}
+
+/**
  * Returns an imperative function that triggers preloading for an arbitrary link, using
  * the same path resolution and {@link PreloadStrategy} pipeline as the {@link Link}
  * (`mmLink`) directive.
@@ -251,6 +266,13 @@ export class Link {
   private readonly req = inject(PreloadRequester);
   private readonly router = inject(Router);
   private readonly el: HTMLElement = inject(ElementRef).nativeElement;
+  /**
+   * Whether RouterLink treats this host as an anchor — `<a>`/`<area>` OR a custom element
+   * whose definition observes the `href` attribute. The modifier/target gating below applies
+   * only to anchor-like hosts. Mirrors RouterLink's own `isAnchorElement` (Angular 20+) —
+   * KEEP IN SYNC; see {@link isAnchorLikeHost}.
+   */
+  private readonly isAnchorElement = isAnchorLikeHost(this.el);
 
   readonly target = input<string>();
   readonly queryParams = input<Params>();
@@ -298,8 +320,7 @@ export class Link {
   @HostListener('mousedown', ['$event'])
   onMouseDown(event: MouseEvent) {
     if (!untracked(this.useMouseDown)) return;
-    // modified/middle clicks (and target=_blank etc.) fall through to the browser's
-    // default click handling — RouterLink's own listener applies the same gating
+    // same gating as routerLink
     if (!this.isSpaNavigation(event)) return;
 
     untracked(this.beforeNavigate)?.();
@@ -312,13 +333,9 @@ export class Link {
     );
 
     this.suppressNextClick = true;
-    // safety: if the resulting click lands elsewhere (pointer dragged off the
-    // element before mouseup), clear the flag so the next real click isn't eaten
-    document.addEventListener(
-      'click',
-      () => (this.suppressNextClick = false),
-      { once: true },
-    );
+    document.addEventListener('click', () => (this.suppressNextClick = false), {
+      once: true,
+    });
   }
 
   constructor() {
@@ -329,23 +346,15 @@ export class Link {
       if (intersection.visible()) this.requestPreload();
     });
 
-    // Capture-phase click listener — fires before RouterLink's own (bubble-phase)
-    // host listener, which is what actually performs click navigation. We never
-    // call `routerLink.onClick` from a click ourselves: doing so on top of
-    // RouterLink's own listener used to navigate twice per click.
     const el = this.el;
     const onClickCapture = (event: MouseEvent) => {
       if (this.suppressNextClick) {
         this.suppressNextClick = false;
-        // already navigated on mousedown — stop the anchor's default page load
-        // AND RouterLink's bubble-phase listener (second SPA navigation)
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
 
-      // RouterLink is about to handle this click — fire the hook only for real
-      // SPA navigations (not modified/middle clicks or external targets)
       if (this.isSpaNavigation(event)) untracked(this.beforeNavigate)?.();
     };
     el.addEventListener('click', onClickCapture, { capture: true });
@@ -368,10 +377,7 @@ export class Link {
   private isSpaNavigation(event: MouseEvent): boolean {
     if (!untracked(this.urlTree)) return false;
 
-    const tag = this.el.tagName;
-    // RouterLink only applies the modifier/target gating to anchor-like hosts;
-    // for other elements it navigates on any click
-    if (tag !== 'A' && tag !== 'AREA') return true;
+    if (!this.isAnchorElement) return true;
 
     if (
       event.button !== 0 ||

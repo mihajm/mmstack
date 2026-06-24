@@ -299,7 +299,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     if (!view) return [];
     return ((view as EmbeddedViewRef<unknown>).rootNodes as Node[]).filter(
       (n): n is HTMLElement =>
-        n instanceof HTMLElement ||
+        (typeof HTMLElement !== 'undefined' && n instanceof HTMLElement) ||
         (typeof SVGElement !== 'undefined' && n instanceof SVGElement),
     );
   }

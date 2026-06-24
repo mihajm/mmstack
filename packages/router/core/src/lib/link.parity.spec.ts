@@ -1,5 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { RouterLink } from '@angular/router';
+import { provideLocationMocks } from '@angular/common/testing';
+import { Component, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { provideRouter, RouterLink } from '@angular/router';
 
 /**
  * Parity probe: `mmLink` (the {@link Link} directive) is a drop-in replacement for
@@ -137,5 +140,63 @@ describe('mmLink ↔ RouterLink parity', () => {
   it('RouterLink exposes no outputs to forward (assumption mmLink relies on)', () => {
     const def = (RouterLink as unknown as { ɵdir?: { outputs?: object } }).ɵdir;
     expect(Object.keys(def?.outputs ?? {})).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// behavioral layer — anchor detection (which input-reflection alone can't catch)
+// ---------------------------------------------------------------------------
+
+/**
+ * `mmLink` applies RouterLink's click gating (modifier keys / target) only to anchor-like
+ * hosts, replicating RouterLink's own `isAnchorElement` in `link.ts`'s `isAnchorLikeHost`.
+ * That detection is internal to RouterLink (not an input), so the parity layers above can't
+ * see it — Angular 22 widening it to custom elements that observe `href` slipped through.
+ *
+ * This TRIPWIRE pins RouterLink's *actual* behavior via its `href` reflection (it reflects an
+ * `href` attribute only for anchor-like hosts). If Angular changes anchor detection again,
+ * these flip — reconcile `isAnchorLikeHost` (and mmLink's gating tests) with the new shape.
+ */
+class ParityHrefEl extends HTMLElement {
+  static readonly observedAttributes = ['href'];
+}
+class ParityPlainEl extends HTMLElement {}
+if (!customElements.get('parity-href-el'))
+  customElements.define('parity-href-el', ParityHrefEl);
+if (!customElements.get('parity-plain-el'))
+  customElements.define('parity-plain-el', ParityPlainEl);
+
+@Component({
+  template: `
+    <a routerLink="/x" class="anchor">a</a>
+    <parity-href-el routerLink="/x" class="href-el">h</parity-href-el>
+    <parity-plain-el routerLink="/x" class="plain-el">p</parity-plain-el>
+  `,
+  imports: [RouterLink],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+})
+class RouterLinkHosts {}
+
+describe('RouterLink anchor detection (behavioral tripwire)', () => {
+  function hrefPresent(selector: string): boolean {
+    TestBed.configureTestingModule({
+      providers: [provideRouter([]), provideLocationMocks()],
+    });
+    const fixture = TestBed.createComponent(RouterLinkHosts);
+    fixture.detectChanges();
+    const el = (fixture.nativeElement as HTMLElement).querySelector(selector);
+    return el?.hasAttribute('href') ?? false;
+  }
+
+  it('reflects href on <a> (anchor)', () => {
+    expect(hrefPresent('.anchor')).toBe(true);
+  });
+
+  it('reflects href on a custom element that observes href (Angular 22 widened anchor detection)', () => {
+    expect(hrefPresent('.href-el')).toBe(true);
+  });
+
+  it('does NOT reflect href on a custom element that does not observe href', () => {
+    expect(hrefPresent('.plain-el')).toBe(false);
   });
 });

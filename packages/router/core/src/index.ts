@@ -1,5 +1,6 @@
 export * from './lib/breadcrumb/public_api';
 export * from './lib/link';
+export * from './lib/navigation-hold';
 export * from './lib/nav/public_api';
 export * from './lib/preloading/public_api';
 export * from './lib/query-param';

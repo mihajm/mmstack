@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  PLATFORM_ID,
   type ResourceRef,
   type ResourceStatus,
   signal,
@@ -86,5 +87,17 @@ describe('injectStartTransition', () => {
     void t.done.then(() => (resolved = true));
     await flush();
     expect(resolved).toBe(true); // afterNextRender fallback resolved it
+  });
+
+  it('resolves done on the server without afterNextRender (no-async transition)', async () => {
+    const { fixture } = await render(Host, {
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const host = fixture.componentInstance;
+
+    const t = host.start(() => {
+      /* no reload triggered */
+    });
+    await expect(t.done).resolves.toBeUndefined();
   });
 });

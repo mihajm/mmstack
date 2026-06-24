@@ -1,5 +1,5 @@
 /* eslint-disable @angular-eslint/component-selector   */
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, PLATFORM_ID, signal } from '@angular/core';
 import { render } from '@testing-library/angular';
 import { MmActivity, PAUSED_CONTEXT } from './activity';
 
@@ -94,6 +94,19 @@ describe('MmActivity (keep-alive)', () => {
     fixture.componentInstance.show.set(true);
     await flush(() => fixture.detectChanges());
     expect(child.tmplRuns).toBeGreaterThan(runs0);
+  });
+
+  it('on the server, renders hidden content without crashing or detaching/hiding it', async () => {
+    const { fixture, container } = await render(Host, {
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    fixture.componentInstance.show.set(false);
+    await flush(() => fixture.detectChanges());
+
+    expect(Child.created).toBe(1);
+    expect(container.textContent).toContain('0'); // content rendered, not detached
+    const host = container.querySelector('ab-ka-child') as HTMLElement | null;
+    expect(host?.style.display).toBe(''); // not hidden — SSR renders the full tree
   });
 
   it('provides PAUSED_CONTEXT to the content, tracking the visible input (inverted)', async () => {

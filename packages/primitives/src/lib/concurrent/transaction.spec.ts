@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  PLATFORM_ID,
   type ResourceRef,
   type ResourceStatus,
   signal,
@@ -180,6 +181,18 @@ describe('injectStartTransaction', () => {
     await flush(fixture);
 
     expect(resolved).toBe(true);
+    expect(host.state()).toBe(5);
+    expect(host.display()).toBe(5); // hold released, write kept
+  });
+
+  it('commits a no-async transaction on the server without afterNextRender', async () => {
+    const { fixture } = await render(Host, {
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const host = fixture.componentInstance;
+
+    const t = host.start(() => host.write(5));
+    await expect(t.done).resolves.toBeUndefined();
     expect(host.state()).toBe(5);
     expect(host.display()).toBe(5); // hold released, write kept
   });

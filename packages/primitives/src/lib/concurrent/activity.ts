@@ -50,6 +50,9 @@ export class MmActivity {
   private readonly tpl = inject(TemplateRef);
   private readonly vcr = inject(ViewContainerRef);
   private readonly parent = inject(Injector);
+  private readonly onServer = isPlatformServer(
+    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
+  );
 
   /** When false, keep the content mounted but hidden + CD-detached. */
   readonly visible = input.required<boolean>({ alias: 'mmActivity' });
@@ -81,6 +84,7 @@ export class MmActivity {
         },
       );
     }
+    if (this.onServer) return;
     for (const node of this.view.rootNodes) {
       // covers HTML and SVG roots; text/comment roots can't be styled — their CD is still
       // detached, but prefer an element root for true visual hiding

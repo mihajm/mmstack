@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   ActivatedRoute,
@@ -32,6 +32,35 @@ class TestHostComponent {
   useMouseDown = false;
   beforeNavigate = vi.fn();
   preloading = new Subject<void>();
+}
+
+// Custom elements for the anchor-detection parity tests: one observes `href` (RouterLink
+// treats it as an anchor → modifier-gated), one doesn't (navigates on any click).
+class MmHrefEl extends HTMLElement {
+  static readonly observedAttributes = ['href'];
+}
+class MmPlainEl extends HTMLElement {}
+if (!customElements.get('mm-href-link'))
+  customElements.define('mm-href-link', MmHrefEl);
+if (!customElements.get('mm-plain-link'))
+  customElements.define('mm-plain-link', MmPlainEl);
+
+@Component({
+  template: `<mm-href-link [mmLink]="'/x'" [beforeNavigate]="bn">h</mm-href-link>`,
+  imports: [Link],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+})
+class HrefElHost {
+  bn = vi.fn();
+}
+
+@Component({
+  template: `<mm-plain-link [mmLink]="'/x'" [beforeNavigate]="bn">p</mm-plain-link>`,
+  imports: [Link],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+})
+class PlainElHost {
+  bn = vi.fn();
 }
 
 describe('link primitives & directive', () => {
@@ -254,6 +283,39 @@ describe('link primitives & directive', () => {
       TestBed.tick();
 
       expect(reqMock.startPreload).toHaveBeenCalledWith('/test');
+    });
+  });
+
+  // RouterLink (Angular 22+) treats `<a>`/`<area>` AND custom elements that observe `href`
+  // as anchors — applying modifier/target gating to all of them. mmLink must match.
+  describe('anchor-detection parity (custom-element hosts)', () => {
+    const ctrlClick = (el: Element) =>
+      el.dispatchEvent(new MouseEvent('click', { button: 0, ctrlKey: true }));
+    const plainClick = (el: Element) =>
+      el.dispatchEvent(new MouseEvent('click', { button: 0 }));
+
+    it('gates a modified click on a custom element that observes href (treated as an anchor)', () => {
+      const fixture = TestBed.createComponent(HrefElHost);
+      fixture.detectChanges();
+      const el = fixture.nativeElement.querySelector('mm-href-link');
+
+      ctrlClick(el);
+      // ctrl+click on an anchor-like host is a browser-default nav → hook must NOT fire
+      expect(fixture.componentInstance.bn).not.toHaveBeenCalled();
+
+      plainClick(el);
+      // a bare click IS an SPA nav → hook fires
+      expect(fixture.componentInstance.bn).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT gate a custom element that does not observe href (navigates on any click)', () => {
+      const fixture = TestBed.createComponent(PlainElHost);
+      fixture.detectChanges();
+      const el = fixture.nativeElement.querySelector('mm-plain-link');
+
+      ctrlClick(el);
+      // non-anchor host → RouterLink navigates on any click, so the hook fires even ctrl+click
+      expect(fixture.componentInstance.bn).toHaveBeenCalledTimes(1);
     });
   });
 });

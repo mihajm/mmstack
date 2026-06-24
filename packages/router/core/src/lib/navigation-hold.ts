@@ -25,8 +25,14 @@ type Mode = 'live' | 'frozen' | 'rollback';
 
 // Angular 19 has no `ResourceSnapshot` type and `ResourceStatus` is an enum — local equivalent.
 type ResourceSnapshot<T> =
-  | { readonly status: Exclude<ResourceStatus, ResourceStatus.Error>; readonly value: T }
-  | { readonly status: ResourceStatus.Error; readonly error: Error | undefined };
+  | {
+      readonly status: Exclude<ResourceStatus, ResourceStatus.Error>;
+      readonly value: T;
+    }
+  | {
+      readonly status: ResourceStatus.Error;
+      readonly error: Error | undefined;
+    };
 
 type NavState<T> = {
   readonly mode: Mode;
@@ -42,12 +48,16 @@ export type HeldResource<T> = Resource<T> & { reload(): boolean };
  * operate on this one snapshot. Synthesized from `status()`/`value()`/`error()` because
  * Angular 19 has no `Resource.snapshot`. (On v22+ this is just `resource.snapshot`.)
  */
-function liveSnapshot<T>(resource: ResourceRef<T>): Signal<ResourceSnapshot<T>> {
+function liveSnapshot<T>(
+  resource: ResourceRef<T>,
+): Signal<ResourceSnapshot<T>> {
   return computed(() => {
     const status = resource.status();
-    return status === ResourceStatus.Error
-      ? { status, error: resource.error() }
-      : { status, value: resource.value() };
+    return (
+      status === ResourceStatus.Error
+        ? { status, error: resource.error() }
+        : { status, value: resource.value() }
+    ) as ResourceSnapshot<T>;
   });
 }
 

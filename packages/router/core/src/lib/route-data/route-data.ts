@@ -188,13 +188,16 @@ function liveParams(
   snapshot: ActivatedRouteSnapshot,
 ): Signal<Record<string, string>> {
   const tick = navigationTick(router);
-  return computed(() => {
-    tick();
-    const node =
-      findByConfig(router.routerState.snapshot.root, snapshot.routeConfig) ??
-      snapshot;
-    return toRecord(node.paramMap);
-  });
+  return computed(
+    () => {
+      tick();
+      const node =
+        findByConfig(router.routerState.snapshot.root, snapshot.routeConfig) ??
+        snapshot;
+      return toRecord(node.paramMap);
+    },
+    { equal: recordsEqual },
+  );
 }
 
 function liveQueryParams(
@@ -202,12 +205,16 @@ function liveQueryParams(
   snapshot: ActivatedRouteSnapshot,
 ): Signal<Record<string, string>> {
   const tick = navigationTick(router);
-  return computed(() => {
-    tick();
-    return toRecord(
-      router.routerState.snapshot.root.queryParamMap ?? snapshot.queryParamMap,
-    );
-  });
+  return computed(
+    () => {
+      tick();
+      return toRecord(
+        router.routerState.snapshot.root.queryParamMap ??
+          snapshot.queryParamMap,
+      );
+    },
+    { equal: recordsEqual },
+  );
 }
 
 function navigationTick(router: Router): Signal<unknown> {
@@ -230,6 +237,15 @@ function findByConfig(
     stack.push(...node.children);
   }
   return null;
+}
+
+function recordsEqual(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): boolean {
+  const ak = Object.keys(a);
+  if (ak.length !== Object.keys(b).length) return false;
+  return ak.every((k) => a[k] === b[k]);
 }
 
 function toRecord(pm: ParamMap): Record<string, string> {

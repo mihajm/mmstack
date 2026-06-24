@@ -1,4 +1,13 @@
-import { afterNextRender, effect, inject, Injector, type Signal, untracked } from '@angular/core';
+import { isPlatformServer } from '@angular/common';
+import {
+  afterNextRender,
+  effect,
+  inject,
+  Injector,
+  PLATFORM_ID,
+  type Signal,
+  untracked,
+} from '@angular/core';
 import { injectTransitionScope } from './transition-scope';
 
 /**
@@ -28,6 +37,9 @@ export type TransitionRef = {
 export function injectStartTransition(): (fn: () => void) => TransitionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
+  const onServer = isPlatformServer(
+    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
+  );
 
   return (fn: () => void): TransitionRef => {
     untracked(fn);
@@ -46,6 +58,13 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
         },
         { injector },
       );
+      if (onServer) {
+        if (!untracked(scope.pending)) {
+          watcher.destroy();
+          resolve();
+        }
+        return;
+      }
       // no-async fallback: once the reactive system has processed the writes (afterNextRender),
       // if nothing ever went in flight, the transition is already complete.
       afterNextRender(

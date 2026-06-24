@@ -1,8 +1,10 @@
+import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
   effect,
   inject,
   Injector,
+  PLATFORM_ID,
   type Signal,
   untracked,
   type WritableSignal,
@@ -85,6 +87,9 @@ export type TransactionRef = {
 export function injectStartTransaction(): (fn: () => void) => TransactionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
+  const onServer = isPlatformServer(
+    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
+  );
 
   return (fn: () => void): TransactionRef => {
     const txn = createTransaction();
@@ -129,13 +134,17 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
       },
       { injector },
     );
-    // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
-    afterNextRender(
-      () => {
-        if (!sawPending && !untracked(scope.pending)) finish(false);
-      },
-      { injector },
-    );
+    if (onServer) {
+      if (!untracked(scope.pending)) finish(false);
+    } else {
+      // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
+      afterNextRender(
+        () => {
+          if (!sawPending && !untracked(scope.pending)) finish(false);
+        },
+        { injector },
+      );
+    }
 
     return {
       pending: scope.pending,

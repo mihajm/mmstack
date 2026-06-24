@@ -19,6 +19,7 @@ npm install @mmstack/router-core
 - **Smart preloading** — a `RouterLink` replacement and `PreloadingStrategy` that preload lazy-loaded route modules on hover, visibility, or imperatively.
 - **Transition navigation** — a drop-in `RouterOutlet` that keeps the current route on screen until the incoming route's data settles, then swaps in one frame.
 - **Route-level data** — declare a route's data once; it fires at the resolve phase (before the component, in parallel across the matched chain), stays reactive to param/query changes, coordinates with the transition outlet, and can be warmed on `mmLink` hover.
+- **Navigation hold** — stabilize a persisted/reused resource across navigation so it never flashes to loading mid-transition, and rolls back cleanly on a cancelled navigation.
 
 ## Table of contents
 
@@ -39,6 +40,8 @@ npm install @mmstack/router-core
 - [Route-level data](#route-level-data)
   - [`provideRouteData` / `createRouteData` / `injectRouteData`](#defining-route-data)
   - [Prefetch on hover — `withRouteData`](#prefetch-on-hover)
+- [Navigation hold](#navigation-hold)
+  - [`holdThroughNavigation`](#holdthroughnavigation)
 
 ---
 
@@ -740,3 +743,45 @@ Notes:
 - **Needs a cache to be useful.** Prefetch warms whatever shared cache your factory's resource writes to (e.g. `@mmstack/resource`'s `provideQueryCache()` at the app root). Without one, the hover fetch isn't reused by the navigation.
 - **Two-phase for lazily code-split routes.** The route's data factory isn't visible until its chunk has loaded, so the **first** hover warms the code and a **subsequent** hover warms the data; eager (non-lazy) routes warm data on the first hover.
 - On the prefetch path `ctx.isPrefetch` is `true` and params come from the hovered URL (there's no `ActivatedRoute` yet) — a factory can branch on it if needed.
+
+> **Flash-free param navigation.** A route-data resource on a _reused_ route (e.g. `/users/1 → /users/2`) refetches in place — the outlet can't hold it (same component, no view swap). Wrap it with [`holdThroughNavigation`](#navigation-hold) for a flash-free, rollback-safe transition.
+
+---
+
+## Navigation hold
+
+The [transition outlet](#transition-outlet) holds the previous _view_ when navigating between **different** routes. But a resource that **persists** across a navigation — an app-shell/layout resource, or a route reused on a param change — has no view swap to hold; it just refetches in place and flashes to loading. `holdThroughNavigation` is the signal-level answer to that.
+
+### `holdThroughNavigation`
+
+Wraps any resource (`@mmstack/resource`'s `queryResource`, Angular's `httpResource` or `resource()`) and returns a stabilized `Resource` whose state can't flash through mid-navigation:
+
+```typescript
+import { holdThroughNavigation } from '@mmstack/router-core';
+
+@Component({ selector: 'user-page', template: `{{ user.value()?.name }}` })
+export class UserPage {
+  private readonly id = injectParam('id'); // your param signal
+  // a reused route on param change refetches in place — stabilize it
+  readonly user = holdThroughNavigation(
+    queryResource<User>(() => `/api/users/${this.id()}`),
+  );
+}
+```
+
+Behaviour:
+
+- **During a navigation** the whole snapshot (value / status / error / loading) is frozen at the pre-navigation state — a refetch the navigation triggers shows no torn or loading state.
+- **On success or skip** (`NavigationEnd` / `NavigationSkipped`) it reveals the live state.
+- **On a true rollback** (`NavigationError`, or a `NavigationCancel` that isn't a redirect / superseded-by-a-new-navigation) it holds the pre-navigation snapshot until the resource stops loading — so a cancelled refetch settling back to the route you stayed on reveals cleanly, never the would-be state of the route you didn't reach.
+- **Redirect / superseded cancels** stay frozen — a new navigation is already taking over and drives the next state, with no flicker in between.
+
+The return value is a read-only `Resource` (`value()`, `status()`, `error()`, `isLoading()`, `hasValue()`, `snapshot()`) plus `reload()`, so it's a drop-in for templates and anywhere a `Resource` is read. It composes with route-level data — `holdThroughNavigation(injectRouteData(USER))` gives a route's data flash-free param navigation.
+
+Three tools, three layers — reach for the one that matches:
+
+| Tool | Holds | Trigger |
+| --- | --- | --- |
+| [`TransitionRouterOutlet`](#transition-outlet) | the outgoing **view** | cross-route navigation |
+| `holdThroughNavigation` | a persisted **resource**'s state | navigation lifecycle (with rollback) |
+| [`<mm-suspense>` / transition scope](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) `commit` | a value while **registered resources** load | scope `pending` |

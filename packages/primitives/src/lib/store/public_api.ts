@@ -1,5 +1,6 @@
 export * from './fork-store';
 export {
+  extendStore,
   isLeaf,
   isOpaque,
   isStore,

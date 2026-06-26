@@ -5,6 +5,7 @@ import {
   linkedSignal,
   untracked,
 } from '@angular/core';
+import { type PauseOption, resolvePause } from './concurrent/pausable';
 import { nestedEffect } from './effect';
 
 export type CreateChunkedOptions<T> = {
@@ -26,6 +27,12 @@ export type CreateChunkedOptions<T> = {
    * An optional `Injector` to use for the internal effect. This allows the effect to have access to dependency injection if needed.
    */
   injector?: Injector;
+  /**
+   * Opt-in pause: gate the chunk-scheduling effect on an ambient Activity boundary (`true`), a
+   * custom predicate, or `false` (default — no pausing). While paused, scheduling stops and resumes
+   * from the current chunk on resume. See {@link PauseOption}.
+   */
+  pause?: PauseOption;
 };
 
 /**
@@ -46,7 +53,13 @@ export function chunked<T>(
   source: Signal<T[]> | (() => T[]),
   options?: CreateChunkedOptions<T>,
 ): Signal<T[]> {
-  const { chunkSize = 50, delay = 'frame', equal, injector } = options || {};
+  const {
+    chunkSize = 50,
+    delay = 'frame',
+    equal,
+    injector,
+    pause,
+  } = options || {};
 
   let delayFn: (callback: () => void) => () => void;
 
@@ -88,8 +101,12 @@ export function chunked<T>(
     equal,
   });
 
+  const paused = resolvePause({ injector, pause }, false);
+
   nestedEffect(
     (cleanup) => {
+      if (paused?.()) return;
+
       const fullList = source();
       const current = internal();
 
@@ -104,7 +121,7 @@ export function chunked<T>(
       );
     },
     {
-      injector: injector,
+      injector,
     },
   );
 

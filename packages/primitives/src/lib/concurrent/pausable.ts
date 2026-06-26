@@ -7,10 +7,12 @@ import {
   type EffectCleanupRegisterFn,
   type EffectRef,
   inject,
+  InjectionToken,
   type Injector,
   isDevMode,
   linkedSignal,
   PLATFORM_ID,
+  type Provider,
   runInInjectionContext,
   signal,
   type Signal,
@@ -43,6 +45,31 @@ export type PausableOptions = {
 };
 
 /**
+ * @internal Token carrying an app-wide default {@link PauseOption}, set via
+ * {@link providePausableOptions}. {@link resolvePause} consults it when the call site didn't
+ * specify `pause`, so users can opt every pausable-aware primitive in (or out) from one place.
+ */
+export const PAUSABLE_OPTIONS = new InjectionToken<{ pause?: PauseOption }>(
+  '@mmstack/primitives:pausable-options',
+);
+
+/**
+ * Provides an app-wide default {@link PauseOption} for every pausable-aware primitive (the public
+ * `pausable*` family plus the opt-in integrations like `stored` / `chunked`). A call-site `pause`
+ * always wins; this only fills in when the call didn't specify one.
+ *
+ * @example
+ * // Make everything that can pause honour the ambient Activity boundary by default:
+ * providePausableOptions({ pause: true })
+ */
+export function providePausableOptions(opt: {
+  /** Default pause source for pausable-aware primitives that don't set their own. */
+  pause?: PauseOption;
+}): Provider {
+  return { provide: PAUSABLE_OPTIONS, useValue: opt };
+}
+
+/**
  * Resolve a {@link PauseOption} into a pause predicate, or `null` meaning "do not pause".
  * `null` tells the caller to return the bare primitive — no wrapper is created.
  *
@@ -56,11 +83,10 @@ export type PausableOptions = {
  *
  * Encapsulating this here keeps every pausable primitive's branching identical and in one place.
  */
-export function resolvePause(opt?: PausableOptions): (() => boolean) | null {
-  const explicit = opt?.pause; // distinguish explicit `true` from the omitted default
-  const pause = explicit ?? true; // explicit pausable* calls default to pausing
-  if (pause === false) return null;
-
+export function resolvePause(
+  opt?: PausableOptions,
+  defaultPause: PauseOption = true,
+): (() => boolean) | null {
   const run = <T>(fn: () => T): T =>
     opt?.injector ? runInInjectionContext(opt.injector, fn) : fn();
 
@@ -74,6 +100,16 @@ export function resolvePause(opt?: PausableOptions): (() => boolean) | null {
       return fallback;
     }
   };
+
+  // A `providePausableOptions(...)` default fills in when the call site didn't specify `pause`.
+  const providedPause = tryRun(
+    () => inject(PAUSABLE_OPTIONS, { optional: true })?.pause,
+    undefined,
+  );
+
+  const explicit = opt?.pause ?? providedPause;
+  const pause = explicit ?? defaultPause; // public pausable* default `true`; opt-in integrations `false`
+  if (pause === false) return null;
 
   const onServer = (): boolean =>
     typeof pause === 'function' && !opt?.injector
@@ -95,7 +131,7 @@ export function resolvePause(opt?: PausableOptions): (() => boolean) | null {
     null,
   );
   if (!paused) {
-    if (explicit === true && isDevMode())
+    if (opt?.pause === true && isDevMode())
       console.warn(
         '[pausable] `pause: true` but no PAUSED_CONTEXT in scope — not pausing. Provide one via an ' +
           'Activity boundary (`MmActivity` / `providePaused`), or pass a predicate / `pause: false`.',

@@ -26,6 +26,7 @@ It's designed to be opt-in feature by feature: starting with `queryResource()` a
 - [Pausing a resource](#pausing-a-resource)
 - [Default options (`provideResourceOptions`)](#default-options-provideresourceoptions)
 - [Composition (retry / refresh / keepPrevious)](#composition-retry--refresh--keepprevious)
+- [Testing](#testing)
 - [Recipes](#recipes)
 
 ## Install
@@ -36,7 +37,9 @@ npm install @mmstack/resource
 
 ## Quick start
 
-Two-step setup: provide the cache + interceptors in your app config, then create resources in your services or components.
+A plain `queryResource()` works with nothing but `provideHttpClient()` — an in-memory cache is wired up by default. To turn caching on you add the interceptors (below) and opt resources into it per request. `provideQueryCache()` is **optional**: call it only when you want persistence (IndexedDB), cross-tab sync, or to tune the global TTL/stale defaults — it overrides the in-memory default.
+
+Recommended app config — interceptors plus `provideQueryCache()` for a tuned, persistent cache:
 
 ```typescript
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
@@ -433,7 +436,7 @@ const rows = keyArray(items, (item) => buildRowVm(item), {
 
 ### `provideQueryCache(options?)`
 
-Registers the shared `Cache` in the root injector.
+Overrides the shared `Cache` in the root injector. It's optional — without it `queryResource` falls back to an in-memory cache (no persistence, no cross-tab sync). Call `provideQueryCache()` to add IndexedDB persistence, cross-tab sync, or to tune the global TTL/stale defaults.
 
 ```typescript
 provideQueryCache({
@@ -656,6 +659,96 @@ Practical consequences:
 - **`retry` and `refresh` are independent.** A retry exhaustion doesn't disable refresh; a successful refresh resets the retry counter for the next failure.
 - **`keepPrevious` works alongside both.** While a retry or refresh is in flight, `value()` is the previous successful result, not `undefined`.
 - **Circuit breaker beats retry.** If the breaker opens during a retry sequence, the resource is disabled — no more retries until the breaker probes and closes.
+
+## Testing
+
+Testing code that uses `queryResource`/`mutationResource` comes down to two things: a deterministic cache and a way to feed mock HTTP responses.
+
+### `provideMockQueryCache(options?)`
+
+A real in-memory cache built for tests. Unlike `provideQueryCache()` it never touches IndexedDB or `BroadcastChannel`, and it disables the cleanup sweep interval — so it's safe under `vi.useFakeTimers()` / `jest.useFakeTimers()` and leaves no timers pinned between specs. It's a real cache (not a stub), so cache hits behave exactly as in production and you can assert against them.
+
+```typescript
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { TestBed } from '@angular/core/testing';
+import {
+  createCacheInterceptor,
+  createDedupeRequestsInterceptor,
+  provideMockQueryCache,
+} from '@mmstack/resource';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      provideMockQueryCache(),
+      provideHttpClient(
+        withInterceptors([
+          createCacheInterceptor(),
+          createDedupeRequestsInterceptor(),
+          // your response-mocking interceptor (see below)
+        ]),
+      ),
+    ],
+  });
+});
+```
+
+> A plain `queryResource` no longer requires any cache provider at all (the in-memory default applies), so `provideMockQueryCache()` is only needed when you want the deterministic, timer-free cache for asserting caching behavior.
+
+### `provideMockResourceSensors(options?)`
+
+Resources auto-pause when the network drops or the page is hidden. To drive that behavior in a test — instead of relying on the real `navigator.onLine` / `document.visibilityState` — provide controllable sensors. Pass your own writable signals to toggle state mid-test; omit them for a static online + visible environment.
+
+```typescript
+import { signal } from '@angular/core';
+import { provideMockResourceSensors } from '@mmstack/resource';
+
+const online = signal(true);
+
+TestBed.configureTestingModule({
+  providers: [provideMockResourceSensors({ networkStatus: online })],
+});
+
+// ...later in the test
+online.set(false); // the resource sees the network drop and disables
+```
+
+### Mocking HTTP responses
+
+For most tests — a cold cache or a resource that doesn't cache — Angular's standard `provideHttpClientTesting()` + `HttpTestingController` works out of the box, because a cache miss flows through the interceptor chain to the testing backend like any other request.
+
+```typescript
+import {
+  provideHttpClient,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
+
+const ctrl = TestBed.inject(HttpTestingController);
+ctrl.expectOne('https://example.com/posts').flush([{ id: 1 }]);
+```
+
+When you specifically want to assert that a **cache hit short-circuits before the network**, `HttpTestingController` won't see the second request (that's the point). For those cases set the mock response on the request's `HttpContext` and read it from a tiny interceptor, which lets you count how many requests actually reached the network:
+
+```typescript
+import { HttpContextToken, type HttpInterceptorFn } from '@angular/common/http';
+import { HttpResponse } from '@angular/common/http';
+import { of } from 'rxjs';
+
+const MOCK = new HttpContextToken<() => unknown>(() => () => null);
+
+const mockInterceptor: HttpInterceptorFn = (req) =>
+  of(new HttpResponse({ body: req.context.get(MOCK)(), status: 200 }));
+```
+
+Pass `context` on the request and reuse the same cache key (same URL) to observe the hit:
+
+```typescript
+queryResource(
+  () => ({ url, context: new HttpContext().set(MOCK, () => ({ ok: true })) }),
+  { cache: { staleTime: 10_000 } },
+);
+```
 
 ## Recipes
 

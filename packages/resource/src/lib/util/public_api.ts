@@ -8,3 +8,4 @@ export {
   noDedupe,
 } from './dedupe-interceptor';
 export { hashRequest } from './hash-request';
+export { provideMockResourceSensors } from './sensors';

@@ -24,6 +24,8 @@ import { queryResource } from './query-resource';
 import {
   createCacheInterceptor,
   createDedupeRequestsInterceptor,
+  provideMockQueryCache,
+  provideMockResourceSensors,
   provideQueryCache,
   ResourceSensors,
 } from './util';
@@ -817,5 +819,134 @@ describe('queryResource', () => {
       );
       expect(requests).toBe(1); // fetches normally — no PAUSED_CONTEXT in scope
     });
+  });
+});
+
+describe('queryResource — cache provider ergonomics', () => {
+  it('works with no cache provider at all (in-memory root default)', async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        // intentionally NO provideQueryCache() — the providedIn:'root' default applies
+        {
+          provide: ResourceSensors,
+          useValue: {
+            networkStatus: signal(true),
+            pageVisibility: signal<DocumentVisibilityState>('visible'),
+          },
+        },
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([testInterceptor]),
+        ),
+      ],
+    });
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(() => ({
+        url: 'https://example.com/no-provider',
+        context: createTestContext(() => {
+          // noop
+        }, { data: 'ok' }),
+      })),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(result).toEqual({ data: 'ok' });
+  });
+
+  it('provideMockQueryCache serves consecutive identical queries from cache', async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideMockQueryCache(),
+        {
+          provide: ResourceSensors,
+          useValue: {
+            networkStatus: signal(true),
+            pageVisibility: signal<DocumentVisibilityState>('visible'),
+          },
+        },
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([
+            createCacheInterceptor(),
+            createDedupeRequestsInterceptor(),
+            testInterceptor,
+          ]),
+        ),
+      ],
+    });
+
+    let requests = 0;
+    const url = 'https://example.com/mock-cache';
+    const validate = () => {
+      requests++;
+    };
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({ url, context: createTestContext(validate, { data: 'v' }) }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(requests).toBe(1);
+
+    const res2 = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({ url, context: createTestContext(validate, { data: 'v' }) }),
+        { cache: { staleTime: 10000 } },
+      ),
+    );
+    const result2 = await TestBed.runInInjectionContext(() =>
+      until(res2.value, (v) => v !== undefined),
+    );
+
+    expect(result2).toEqual({ data: 'v' });
+    expect(requests).toBe(1); // second consumer served from the in-memory mock cache
+  });
+
+  it('provideMockResourceSensors drives offline/online behavior', async () => {
+    const online = signal(true);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideMockResourceSensors({ networkStatus: online }),
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([testInterceptor]),
+        ),
+      ],
+    });
+
+    let requests = 0;
+    online.set(false); // start offline
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(() => ({
+        url: 'https://example.com/mock-sensors',
+        context: createTestContext(() => requests++, { data: 'ok' }),
+      })),
+    );
+
+    expect(res.disabled()).toBe(true);
+    expect(requests).toBe(0);
+
+    online.set(true); // back online → resource enables and fetches
+    expect(res.disabled()).toBe(false);
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(result).toEqual({ data: 'ok' });
+    expect(requests).toBe(1);
   });
 });

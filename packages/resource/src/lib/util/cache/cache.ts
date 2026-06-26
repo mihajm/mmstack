@@ -209,7 +209,7 @@ export class Cache<T> {
     if (this.cleanupOpt.maxSize <= 0)
       throw new Error('maxSize must be greater than 0');
 
-    // a non-finite checkInterval disables the sweeper entirely (used by the shared NoopCache)
+    // a non-finite checkInterval disables the sweeper entirely (used by provideMockQueryCache)
     const cleanupInterval = Number.isFinite(this.cleanupOpt.checkInterval)
       ? setInterval(() => {
           this.cleanup();
@@ -694,7 +694,53 @@ type CacheOptions = {
 
 const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
   'INTERNAL_CLIENT_CACHE',
+  {
+    // Memory-only default so a plain queryResource works with zero config. No
+    // IndexedDB / BroadcastChannel — keeps it SSR-safe and request-isolated under
+    // SSR (root injector is per-request). provideQueryCache() overrides this to
+    // layer on persistence / cross-tab sync / global TTL tuning.
+    providedIn: 'root',
+    factory: () => {
+      const cache = new Cache<HttpResponse<unknown>>();
+      inject(DestroyRef, { optional: true })?.onDestroy(() => cache.destroy());
+      return cache;
+    },
+  },
 );
+
+/**
+ * Provides a deterministic, in-memory `QueryCache` for unit tests.
+ *
+ * Unlike {@link provideQueryCache} this never touches IndexedDB or BroadcastChannel
+ * and disables the cleanup sweep interval (`checkInterval: Infinity`), so it plays
+ * nicely with `vi.useFakeTimers()`. It's a real cache (not a stub), so you can
+ * assert cache hits via {@link injectQueryCache} / its `stats` signal.
+ *
+ * @example
+ * TestBed.configureTestingModule({
+ *   providers: [
+ *     provideMockQueryCache(),
+ *     provideHttpClient(withInterceptors([createCacheInterceptor()])),
+ *   ],
+ * });
+ */
+export function provideMockQueryCache(opt?: {
+  ttl?: number;
+  staleTime?: number;
+}): Provider {
+  return {
+    provide: CLIENT_CACHE_TOKEN,
+    useFactory: () => {
+      const cache = new Cache<HttpResponse<unknown>>(opt?.ttl, opt?.staleTime, {
+        type: 'lru',
+        maxSize: 200,
+        checkInterval: Infinity,
+      });
+      inject(DestroyRef, { optional: true })?.onDestroy(() => cache.destroy());
+      return cache;
+    },
+  };
+}
 
 /**
  * Provides the instance of the QueryCache for queryResource. This should probably be called
@@ -762,8 +808,6 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
     }
   };
 
-  // version-suffixed so two deploys with incompatible schemas in adjacent tabs don't
-  // push entries into each other's caches (the `version` option only fences IndexedDB)
   const syncChannelId = `mmstack-query-cache-sync_v${opt?.version ?? 1}`;
 
   return {
@@ -771,8 +815,7 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
     useFactory: () => {
       const onServer = inject(PLATFORM_ID) === 'server';
 
-      // no IndexedDB / BroadcastChannel on the server — each request gets an
-      // isolated, request-lived, memory-only cache
+      // no IndexedDB / BroadcastChannel on the server
       const syncTabsOpt =
         !onServer && opt?.syncTabs
           ? {
@@ -828,27 +871,6 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
   };
 }
 
-class NoopCache<T> extends Cache<T> {
-  constructor() {
-    // Infinity checkInterval → no sweep interval is ever armed, so the shared
-    // instance below never pins a timer
-    super(undefined, undefined, {
-      type: 'lru',
-      maxSize: 200,
-      checkInterval: Infinity,
-    });
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  override store(_: string, __: T, ___ = super.staleTime, ____ = super.ttl) {
-    // noop
-  }
-}
-
-// one shared instance — minting a NoopCache per injectQueryCache() miss would leak
-// an instance (and previously an interval) on every prod call without a provider
-let NOOP_CACHE: NoopCache<unknown> | undefined;
-
 /**
  * Injects the `QueryCache` instance that is used within queryResource.
  * Allows for direct modification of cached data, but is mostly meant for internal use.
@@ -875,20 +897,8 @@ export function injectQueryCache<TRaw = unknown>(
   injector?: Injector,
 ): Cache<HttpResponse<TRaw>> {
   const cache = injector
-    ? injector.get(CLIENT_CACHE_TOKEN, null, {
-        optional: true,
-      })
-    : inject(CLIENT_CACHE_TOKEN, {
-        optional: true,
-      });
-
-  if (!cache) {
-    if (isDevMode())
-      throw new Error(
-        'Cache not provided, please add provideQueryCache() to providers array',
-      );
-    else return (NOOP_CACHE ??= new NoopCache()) as Cache<HttpResponse<TRaw>>;
-  }
+    ? injector.get(CLIENT_CACHE_TOKEN)
+    : inject(CLIENT_CACHE_TOKEN);
 
   return cache as Cache<HttpResponse<TRaw>>;
 }

@@ -19,6 +19,12 @@ import {
  *
  * `type` selects what "not ready" means: `'value'` (default) suspends only until a first value lands
  * then holds through reloads; `'loading'` suspends on every in-flight load (strict suspense).
+ *
+ * SSR: the server serializes whatever the scope reports at stabilization, so a registered resource
+ * must keep the app unstable until it settles or the placeholder is what gets serialized (then
+ * flashes/mismatches on hydration). HttpClient-backed resources, httpResource & all of `@mmstack/resource`
+ * do this automatically via the HTTP layer's `PendingTasks` + transfer cache. A custom loader (raw
+ * `fetch`/promise/timer) must opt in itself: wrap it with `inject(PendingTasks).run(() => promise)`.
  */
 @Directive()
 export abstract class SuspenseBoundaryBase {

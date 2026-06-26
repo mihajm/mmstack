@@ -1,6 +1,7 @@
 export {
   Cache,
   injectQueryCache,
+  provideMockQueryCache,
   provideQueryCache,
   type CacheEntry,
   type CleanupType,

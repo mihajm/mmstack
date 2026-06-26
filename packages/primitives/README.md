@@ -19,7 +19,7 @@ npm install @mmstack/primitives
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
 - [Effects](#effects) — `nestedEffect`
-- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*`, Suspense (`mm-suspense`), `startTransition` / `startTransaction`, `holdUntilReady`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -117,14 +117,16 @@ Each level's shape is resolved from what's known: a value that is currently an o
 
 Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for those.
 
-### `extend` (scoped overlay)
+### `extendStore` (scoped overlay)
 
-`store.extend(seed)` (on any store kind) creates a **scoped overlay** — a child store that **shares** the parent's signals for inherited keys (the same `WritableSignal`: writes go through to the parent and parent changes flow down) while keeping the seed and any new keys in a **local layer** that never propagates upward. No diffing, no syncing — local keys simply aren't wired to the parent.
+`extendStore(store, seed)` (on any store kind) creates a **scoped overlay** — a child store that **shares** the parent's signals for inherited keys (the same `WritableSignal`: writes go through to the parent and parent changes flow down) while keeping the seed and any new keys in a **local layer** that never propagates upward. No diffing, no syncing — local keys simply aren't wired to the parent.
 
 ```typescript
+import { extendStore, store } from '@mmstack/primitives';
+
 const app = store({ user: { name: 'Alice' }, theme: 'dark' });
 
-const scope = app.extend({ draft: '' }); // inherits user + theme, adds a local draft
+const scope = extendStore(app, { draft: '' }); // inherits user + theme, adds a local draft
 
 scope.user === app.user; // true — the same signal (shared, two-way)
 scope.user.name.set('Bob'); // writes through to the parent
@@ -132,19 +134,19 @@ scope.draft.set('hello'); // local only — `app` never gains `draft`
 scope(); // { user: { name: 'Bob' }, theme: 'dark', draft: 'hello' }
 ```
 
-Resolution per key is **local → parent → local**: a seed key (or one set on the scope before it exists on the parent) is local and _shadows_ the parent — and keeps shadowing even if the parent later grows that key; a key that exists only on the parent writes through to it; a brand-new key lands locally. `scope()` is the merged view (local shadowing), and `Object.keys(scope)` / `key in scope` are the union of both layers. `extend` composes — `a.extend(x).extend(y)` chains parents.
+Resolution per key is **local → parent → local**: a seed key (or one set on the scope before it exists on the parent) is local and _shadows_ the parent — and keeps shadowing even if the parent later grows that key; a key that exists only on the parent writes through to it; a brand-new key lands locally. `scope()` is the merged view (local shadowing), and `Object.keys(scope)` / `key in scope` are the union of both layers. It composes — `extendStore(extendStore(app, x), y)` chains parents.
 
 The seed may also be a **signal** of the matching kind, so an existing (externally-owned, reactive) signal becomes the local layer:
 
 ```typescript
 const draft = signal({ title: '' });
-const scope = app.extend(draft); // writes to scope.title flow out to `draft`, and back in
+const scope = extendStore(app, draft); // writes to scope.title flow out to `draft`, and back in
 ```
 
 A few release notes:
 
-- The local layer is a plain store (vivify off). Inherited paths vivify when the _parent_ was created with `vivify`; to autovivify local keys, seed with a vivify-enabled store — `app.extend(store(seed, { vivify: 'auto' }))`.
-- Reserved names — `extend`, `asReadonlyStore`, and the signal methods (`set` / `update` / `mutate` / `inline` / `asReadonly`) — shadow same-named data keys, as on any store.
+- The local layer is a plain store (vivify off). Inherited paths vivify when the _parent_ was created with `vivify`; to autovivify local keys, seed with a vivify-enabled store — `extendStore(app, store(seed, { vivify: 'auto' }))`.
+- Reserved names — `asReadonlyStore` and the signal methods (`set` / `update` / `mutate` / `inline` / `asReadonly`) — shadow same-named data keys, as on any store.
 - `scope.asReadonlyStore()` returns a read-only **snapshot view** of the merge (reactive reads, no writes); it does not share sub-store identity.
 
 ### `forkStore`
@@ -165,7 +167,7 @@ base.user.name(); // 'Bob'
 // draft.discard();    // …or throw the edits away
 ```
 
-The fork is a full store (`draft.store.user.name(...)`, `extend`, deep reads/writes — everything `store` gives you). It's built on `linkedSignal`: it holds local writes until the **base changes underneath it**, then runs a `strategy` to reconcile:
+The fork is a full store (`draft.store.user.name(...)`, `extendStore`, deep reads/writes — everything `store` gives you). It's built on `linkedSignal`: it holds local writes until the **base changes underneath it**, then runs a `strategy` to reconcile:
 
 - **`'fine'`** (default for immutable stores) — per-path 3-way merge: keep the paths the fork edited, take the base's live values for the paths it didn't. Survives concurrent base changes. Relies on copy-on-write reference identity, so it's **unsupported on a mutable base** (in-place mutation defeats it — `fork` warns and falls back to `'coarse'`).
 - **`'coarse'`** — any base change resets the whole fork. Cheapest; correct when the base is held for the fork's lifetime (e.g. a transition). The default for a mutable base.
@@ -364,6 +366,19 @@ pausableEffect(() => poll(url())); // body skipped while paused; deps collapse s
 ```
 
 While paused each one **collapses its dependency set to just the pause predicate**, so an upstream change can't trigger work; on resume it re-tracks and re-runs / recomputes with the latest values. SSR never pauses.
+
+#### `providePausableOptions`
+
+Sets an app-wide default pause source for every pausable-aware primitive — the `pausable*` family above plus the opt-in integrations (`stored`, `chunked`). A call-site `pause` always wins; this only fills in when the call didn't specify one. Use it to make everything honour the ambient `*mmActivity` boundary from one place:
+
+```typescript
+import { providePausableOptions } from '@mmstack/primitives';
+
+// e.g. in app.config.ts
+providers: [providePausableOptions({ pause: true })];
+```
+
+With this provided, `stored(...)` / `chunked(...)` (off by default) start reading the ambient paused context; pass `pause: false` at an individual call site to opt that one back out.
 
 ### Suspense — `<mm-suspense>` and the transition scope
 

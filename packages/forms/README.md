@@ -7,9 +7,8 @@
 
 `@mmstack/forms` is **not** a forms framework. It's a small toolbox layered on top of the stable
 `@angular/forms/signals` API (Angular 22+). Signal Forms already own the model, the field tree, and
-validation; this library fills the ergonomic gaps around them — attaching typed metadata to fields,
-composing reusable "field types," and tracking what changed for dirty-diffs and server reconciliation
-— without a parallel form system. You compose the pieces; you keep full control.
+validation; this library fills the ergonomic gaps around them, like attaching typed metadata to fields,
+composing reusable "field types," and tracking what changed for dirty-diffs and server reconciliation, without a parallel form system. You compose the pieces; you keep full control.
 
 ## Install
 
@@ -36,7 +35,9 @@ the three layers into one typed `[rule, reader]` pair that looks and feels like 
 ```typescript
 import { fieldMetadata } from '@mmstack/forms';
 
-export const [withLabel, injectLabel] = fieldMetadata<string>({ debugName: 'label' });
+export const [withLabel, injectLabel] = fieldMetadata<string>({
+  debugName: 'label',
+});
 ```
 
 Set it in a schema (just like `required` / `min`), read it inside a control (just like `input()`):
@@ -47,7 +48,9 @@ const f = form(model, (p) => {
   withLabel(p.name, 'Full name'); // static value, or a reactive LogicFn
 });
 
-@Component({ /* a control on a [formField] host */ })
+@Component({
+  /* a control on a [formField] host */
+})
 class TextField {
   readonly label = injectLabel('(unlabeled)'); // Signal<string>
 }
@@ -56,8 +59,6 @@ class TextField {
 Resolution precedence at read time: **value set in the schema → component fallback (`injectLabel(x)`) →
 base fallback (`fieldMetadata({ fallback })`) → `undefined`**. The reader's type reflects it —
 `Signal<T>` when a fallback is guaranteed, `Signal<T | undefined>` otherwise.
-
-A built-in `label` is deliberately not shipped — define the attributes your app needs.
 
 > The reader must run in an injection context **on (or under) a `[formField]` host** — it resolves
 > via the `FORM_FIELD` token that the `FormField` directive provides. To read field state from a
@@ -76,7 +77,9 @@ import { compose, type FieldRef } from '@mmstack/forms';
 // projectors read field state lazily — return a value, a getter, or a signal
 const firstError = (f: FieldRef) => () => f.state().errors()[0]?.message ?? '';
 
-@Component({ /* control */ })
+@Component({
+  /* control */
+})
 class TextField {
   readonly field = compose({
     label: withLabel, // a fieldMetadata rule carries its own projector
@@ -117,8 +120,8 @@ bypass signal-normalization (used for methods like `reset` / `reconcile`, below)
 
 ## Change tracking
 
-Native `dirty` tracks whether a field was *interacted with*. Change tracking adds **`changed`** — does
-the field's value differ from a *baseline* — which is what you want for dirty-diffs, "unsaved changes"
+Native `dirty` tracks whether a field was _interacted with_. Change tracking adds **`changed`** — does
+the field's value differ from a _baseline_ — which is what you want for dirty-diffs, "unsaved changes"
 guards, and server reconciliation. It mirrors the delegation of the original `@mmstack/form-core`:
 leaves compare against their own baseline, containers aggregate, with an `Object.is` short-circuit so a
 change only walks its own spine.
@@ -178,7 +181,9 @@ leaves merge as a unit. Customize a path — e.g. a smart array merge — with `
 
 ```typescript
 form(model, (p) => {
-  reconcileWith(p.tags, ({ current, incoming, changed }) => (changed ? current : incoming));
+  reconcileWith(p.tags, ({ current, incoming, changed }) =>
+    changed ? current : incoming,
+  );
   trackChanges(model)(p);
 });
 ```

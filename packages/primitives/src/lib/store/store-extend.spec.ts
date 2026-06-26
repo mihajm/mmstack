@@ -1,9 +1,9 @@
 import { effect, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { mutable } from '../mutable';
-import { mutableStore, store } from './store';
+import { extendStore, mutableStore, store } from './store';
 
-describe('store.extend (scoped overlay)', () => {
+describe('extendStore (scoped overlay)', () => {
   let injector: Injector;
 
   beforeEach(() => {
@@ -15,7 +15,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('inherited keys', () => {
     it('delegates to the parent with shared identity and two-way reactivity', () => {
       const parent = store({ user: { name: 'Alice' }, count: 0 }, { injector });
-      const scope = parent.extend({ local: true });
+      const scope = extendStore(parent, { local: true });
 
       // same sub-store instance → true sharing
       expect(scope.user).toBe(parent.user);
@@ -35,7 +35,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('local keys', () => {
     it('holds new (seed) keys locally and never propagates them upward', () => {
       const parent = store({ count: 0 }, { injector });
-      const scope = parent.extend({ flag: false });
+      const scope = extendStore(parent, { flag: false });
 
       scope.flag.set(true);
       expect(scope.flag()).toBe(true);
@@ -45,7 +45,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('a key set at runtime that exists in neither layer lands locally', () => {
       const parent = store({ a: 1 } as Record<string, number>, { injector });
-      const scope = parent.extend({} as Record<string, number>);
+      const scope = extendStore(parent, {} as Record<string, number>);
 
       scope['b'].set(2);
       expect(scope['b']()).toBe(2);
@@ -56,7 +56,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('shadowing', () => {
     it('a seed key shadows the parent and writes stay local', () => {
       const parent = store({ theme: 'dark' }, { injector });
-      const scope = parent.extend({ theme: 'light' });
+      const scope = extendStore(parent, { theme: 'light' });
 
       expect(scope.theme()).toBe('light'); // local shadow
       expect(parent().theme).toBe('dark'); // parent untouched
@@ -68,7 +68,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('the local shadow keeps winning even if the parent grows the key later', () => {
       const parent = store({} as Record<string, number>, { injector });
-      const scope = parent.extend({ x: 1 } as Record<string, number>);
+      const scope = extendStore(parent, { x: 1 } as Record<string, number>);
 
       parent['x'].set(99);
       expect(parent()['x']).toBe(99);
@@ -79,7 +79,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('whole-object view', () => {
     it('scope() is the merged view (local shadows) and keys are the union', () => {
       const parent = store({ a: 1, b: 2 }, { injector });
-      const scope = parent.extend({ b: 20, c: 3 });
+      const scope = extendStore(parent, { b: 20, c: 3 });
 
       expect(scope()).toEqual({ a: 1, b: 20, c: 3 });
       expect(new Set(Object.keys(scope))).toEqual(new Set(['a', 'b', 'c']));
@@ -90,7 +90,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('scope() reactively reflects both parent and local changes', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
 
       expect(scope()).toEqual({ a: 1, b: 2 });
       parent.a.set(10);
@@ -101,7 +101,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('root set splits keys: inherited → parent, local → local', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
 
       scope.set({ a: 10, b: 20 });
       expect(parent().a).toBe(10);
@@ -114,7 +114,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('composition', () => {
     it('chains through nested extends', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 }).extend({ c: 3 });
+      const scope = extendStore(extendStore(parent, { b: 2 }), { c: 3 });
 
       expect(scope()).toEqual({ a: 1, b: 2, c: 3 });
 
@@ -129,7 +129,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('mutable parent', () => {
     it('keeps the mutable kind: local keys support mutate in place', () => {
       const parent = mutableStore({ shared: { n: 1 } }, { injector });
-      const scope = parent.extend({ localObj: { m: 0 } });
+      const scope = extendStore(parent, { localObj: { m: 0 } });
 
       const ref = scope.localObj();
       scope.localObj.mutate((o) => {
@@ -143,7 +143,7 @@ describe('store.extend (scoped overlay)', () => {
     it('an inherited key still mutates through to the parent source', () => {
       const src = { shared: { n: 1 } };
       const parent = mutableStore(src, { injector });
-      const scope = parent.extend({ localObj: { m: 0 } });
+      const scope = extendStore(parent, { localObj: { m: 0 } });
 
       scope.shared.mutate((s) => {
         s.n = 9;
@@ -156,7 +156,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('readonly parent', () => {
     it('yields a readonly overlay (writes are no-ops)', () => {
       const parent = store({ a: 1 }, { injector }).asReadonlyStore();
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
 
       expect(scope()).toEqual({ a: 1, b: 2 });
       expect(scope.a()).toBe(1);
@@ -171,7 +171,7 @@ describe('store.extend (scoped overlay)', () => {
     it('uses an external writable signal as the local layer (two-way)', () => {
       const parent = store({ a: 1 }, { injector });
       const localSig = signal({ b: 2 });
-      const scope = parent.extend(localSig);
+      const scope = extendStore(parent, localSig);
 
       expect(scope.b()).toBe(2);
 
@@ -188,7 +188,7 @@ describe('store.extend (scoped overlay)', () => {
     it('accepts a mutable signal for a mutable parent', () => {
       const parent = mutableStore({ a: 1 }, { injector });
       const localSig = mutable({ obj: { n: 0 } });
-      const scope = parent.extend(localSig);
+      const scope = extendStore(parent, localSig);
 
       scope.obj.mutate((o) => {
         o.n = 5;
@@ -200,7 +200,7 @@ describe('store.extend (scoped overlay)', () => {
     it('composes by extending with another store', () => {
       const parent = store({ a: 1 }, { injector });
       const other = store({ b: 2 }, { injector });
-      const scope = parent.extend(other);
+      const scope = extendStore(parent, other);
 
       expect(scope()).toEqual({ a: 1, b: 2 });
 
@@ -212,7 +212,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('reactive notifications', () => {
     it('per-key effects are isolated across layers (no over-notification)', () => {
       const parent = store({ a: 1, b: 2 }, { injector });
-      const scope = parent.extend({ c: 3 });
+      const scope = extendStore(parent, { c: 3 });
       let aRuns = 0;
       let cRuns = 0;
       effect(
@@ -251,7 +251,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('an inherited-key effect re-runs when the parent is written directly', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
       let runs = 0;
       effect(
         () => {
@@ -273,7 +273,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('root writers', () => {
     it('scope.update splits inherited vs local', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
       scope.update((cur) => ({ ...cur, a: cur.a + 10, b: cur.b + 20 }));
       expect(parent().a).toBe(11);
       expect(scope.b()).toBe(22);
@@ -282,7 +282,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('root mutate on a mutable scope splits per key', () => {
       const parent = mutableStore({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
       scope.mutate((cur) => {
         cur.a = 10;
         cur.b = 20;
@@ -294,7 +294,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('a readonly scope ignores a root set', () => {
       const parent = store({ a: 1 }, { injector }).asReadonlyStore();
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
       (scope as unknown as { set: (v: object) => void }).set({ a: 9, b: 9 });
       expect(scope()).toEqual({ a: 1, b: 2 });
     });
@@ -303,7 +303,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('asReadonlyStore', () => {
     it('is a read-only, reactive snapshot of the merge', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ b: 2 });
+      const scope = extendStore(parent, { b: 2 });
       const ro = scope.asReadonlyStore();
 
       expect(ro()).toEqual({ a: 1, b: 2 });
@@ -319,7 +319,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('arrays in the overlay', () => {
     it('a local array seed exposes index signals + length', () => {
       const parent = store({ a: 1 }, { injector });
-      const scope = parent.extend({ tags: ['x', 'y'] });
+      const scope = extendStore(parent, { tags: ['x', 'y'] });
       expect(scope.tags[0]()).toBe('x');
       expect(scope.tags.length()).toBe(2);
       scope.tags[0].set('z');
@@ -328,7 +328,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('an inherited array delegates to the parent', () => {
       const parent = store({ items: [{ id: 1 }] }, { injector });
-      const scope = parent.extend({ flag: true });
+      const scope = extendStore(parent, { flag: true });
       expect(scope.items).toBe(parent.items);
       scope.items[0].id.set(9);
       expect(parent().items[0].id).toBe(9);
@@ -338,7 +338,7 @@ describe('store.extend (scoped overlay)', () => {
   describe('edge cases', () => {
     it('an empty seed is a pure pass-through that can still grow local keys', () => {
       const parent = store({ a: 1 } as Record<string, number>, { injector });
-      const scope = parent.extend({} as Record<string, number>);
+      const scope = extendStore(parent, {} as Record<string, number>);
       expect(scope()).toEqual({ a: 1 });
       expect(scope['a']()).toBe(1);
       scope['b'].set(2);
@@ -348,7 +348,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('writes through two levels of chaining to the root parent (shared identity)', () => {
       const root = store({ a: { n: 1 } }, { injector });
-      const scope = root.extend({ b: 2 }).extend({ c: 3 });
+      const scope = extendStore(extendStore(root, { b: 2 }), { c: 3 });
       expect(scope.a).toBe(root.a);
       scope.a.n.set(9);
       expect(root().a.n).toBe(9);
@@ -356,7 +356,7 @@ describe('store.extend (scoped overlay)', () => {
 
     it('a seed object shadows an inherited object (local identity, parent untouched)', () => {
       const parent = store({ cfg: { x: 1 } }, { injector });
-      const scope = parent.extend({ cfg: { x: 99 } });
+      const scope = extendStore(parent, { cfg: { x: 99 } });
       expect(scope.cfg).not.toBe(parent.cfg);
       expect(scope.cfg.x()).toBe(99);
       scope.cfg.x.set(5);
@@ -371,7 +371,7 @@ describe('store.extend (scoped overlay)', () => {
       s['a'].set(5);
       expect(s['a']()).toBe(5);
 
-      const child = s.extend({ b: 2 });
+      const child = extendStore(s, { b: 2 });
       expect(child.b()).toBe(2); // explicitly-typed local key
       expect(child['a']()).toBe(5); // inherited via the `any` index signature
     });
@@ -383,7 +383,7 @@ describe('store.extend (scoped overlay)', () => {
         { a: null as { b: number } | null },
         { injector, vivify: 'auto' },
       );
-      const scope = parent.extend({ local: null as { x: number } | null });
+      const scope = extendStore(parent, { local: null as { x: number } | null });
 
       scope.a.b.set(2); // inherited → vivifies via the parent
       expect(parent().a).toEqual({ b: 2 });
@@ -398,10 +398,55 @@ describe('store.extend (scoped overlay)', () => {
         { b: null as { c: number } | null },
         { injector, vivify: 'auto' },
       );
-      const scope = parent.extend(localStore);
+      const scope = extendStore(parent, localStore);
 
       scope.b.c.set(2);
       expect(localStore().b).toEqual({ c: 2 });
+    });
+  });
+
+  describe('writability inheritance & chaining', () => {
+    it('inherited keys two-way, local keys stay local', () => {
+      const parent = store({ count: 0 }, { injector });
+      const scope = extendStore(parent, { flag: false });
+
+      scope.count.set(5);
+      expect(parent().count).toBe(5);
+
+      scope.flag.set(true);
+      expect(scope.flag()).toBe(true);
+      expect('flag' in parent()).toBe(false);
+    });
+
+    it('inherits mutable writability from the parent store', () => {
+      const parent = mutableStore({ list: [1, 2] }, { injector });
+      const scope = extendStore(parent, { label: 'x' });
+
+      scope.list.mutate((l) => {
+        l.push(3);
+        return l;
+      });
+      expect(parent().list).toEqual([1, 2, 3]);
+    });
+
+    it('inherits readonly writability (STORE_KIND beats set-detection)', () => {
+      const ro = store({ count: 1 }, { injector }).asReadonlyStore();
+      const scope = extendStore(ro, { label: 'x' });
+
+      // a readonly scope must not write through; set is a no-op
+      (scope as any).count.set(99);
+      expect(scope.count()).toBe(1);
+    });
+
+    it('accepts a signal seed and supports chaining', () => {
+      const parent = store({ a: 1 }, { injector });
+      const seed = signal({ b: 2 });
+      const scope = extendStore(parent, seed);
+      const nested = extendStore(scope, { c: 3 });
+
+      expect(nested.a()).toBe(1);
+      expect(nested.b()).toBe(2);
+      expect(nested.c()).toBe(3);
     });
   });
 });

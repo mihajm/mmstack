@@ -1,4 +1,4 @@
-import { effect, Injector, isSignal } from '@angular/core';
+import { computed, effect, Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   isLeaf,
@@ -134,6 +134,58 @@ describe('store', () => {
       expect(isSignal(val)).toBe(true);
       expect(val()).toBe(src.a[i++]);
     }
+  });
+
+  describe('array <-> record union flips (route-forward)', () => {
+    it('a record node flips to an array and routes as an array afterwards', () => {
+      const s = store(
+        { v: { x: 1 } as Record<string, number> | number[] },
+        { injector },
+      );
+      expect((s.v as any).x()).toBe(1);
+
+      s.v.set([10, 20]);
+
+      expect(s.v()).toEqual([10, 20]);
+      expect((s.v as any).length()).toBe(2);
+      expect((s.v as any)[0]()).toBe(10);
+      expect((s.v as any)[1]()).toBe(20);
+
+      const collected: number[] = [];
+      for (const el of s.v as any) collected.push(el());
+      expect(collected).toEqual([10, 20]);
+
+      expect(Object.getPrototypeOf(s.v)).toBe(Array.prototype);
+      expect(Object.keys(s.v)).toEqual(['0', '1', 'length']);
+    });
+
+    it('an array node flips to a record and routes as a record afterwards', () => {
+      const s = store(
+        { v: [1, 2] as number[] | Record<string, number> },
+        { injector },
+      );
+      expect((s.v as any).length()).toBe(2);
+      expect((s.v as any)[0]()).toBe(1);
+
+      s.v.set({ a: 9 });
+
+      expect(s.v()).toEqual({ a: 9 });
+      expect((s.v as any).a()).toBe(9);
+      expect(Object.getPrototypeOf(s.v)).toBe(Object.prototype);
+      expect(Object.keys(s.v)).toEqual(['a']);
+    });
+
+    it('tracks the kind flip reactively inside a computed', () => {
+      const s = store(
+        { v: { x: 1 } as Record<string, number> | number[] },
+        { injector },
+      );
+      const kind = computed(() => (Array.isArray(s.v()) ? 'array' : 'record'));
+
+      expect(kind()).toBe('record');
+      s.v.set([1]);
+      expect(kind()).toBe('array');
+    });
   });
 
   describe('dynamic property creation', () => {

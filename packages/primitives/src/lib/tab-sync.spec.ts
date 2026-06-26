@@ -148,4 +148,10 @@ describe('tabSync', () => {
     // The signal should remain completely unaffected
     expect(sig()).toBe('dark');
   });
+
+  it('accepts an explicit injector (created outside an injection context)', () => {
+    const injector = TestBed.inject(EnvironmentInjector);
+    const sig = tabSync(signal('dark'), { id: 'injector-test', injector });
+    expect(sig()).toBe('dark');
+  });
 });

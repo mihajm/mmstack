@@ -2,8 +2,8 @@ import { isPlatformServer } from '@angular/common';
 import {
   computed,
   DestroyRef,
-  effect,
   inject,
+  Injector,
   isDevMode,
   isSignal,
   PLATFORM_ID,
@@ -13,6 +13,8 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
+import { type PauseOption } from './concurrent/pausable';
+import { pausablePureEffect } from './concurrent/pausable-pure';
 import { toWritable } from './to-writable';
 
 /**
@@ -93,6 +95,18 @@ export type CreateStoredOptions<T> = CreateSignalOptions<T> & {
    * Optional validator, which is called on load of value. Store will be set to fallback if value is false
    */
   validate?: (value: T) => boolean;
+  /**
+   * Opt-in pause: gate the persistence effect on an ambient Activity boundary (`true`), a custom
+   * predicate, or `false` (default — no pausing). While paused the value stays live; persistence is
+   * skipped and flushes the latest value on resume. The inbound `storage` listener stays live.
+   * See {@link PauseOption}.
+   */
+  pause?: PauseOption;
+  /**
+   * Injector used when `stored` is created outside an injection context, and to resolve the ambient
+   * pause boundary when `pause` is `true`.
+   */
+  injector?: Injector;
 };
 
 /**
@@ -178,10 +192,13 @@ export function stored<T>(
     onKeyChange = 'load',
     cleanupOldKey = false,
     validate = () => true,
+    pause,
+    injector: providedInjector,
     ...rest
   }: CreateStoredOptions<T>,
 ): StoredSignal<T> {
-  const isServer = isPlatformServer(inject(PLATFORM_ID));
+  const injector = providedInjector ?? inject(Injector);
+  const isServer = isPlatformServer(injector.get(PLATFORM_ID));
 
   const fallbackStore = isServer ? noopStore : localStorage;
   const store = providedStore ?? fallbackStore;
@@ -193,8 +210,6 @@ export function stored<T>(
         ? key
         : computed(key);
 
-  // "no stored value" marker — distinct from `null`/`undefined`, so a nullable `T` can
-  // round-trip a legitimate `null` through `set` instead of it acting like `clear()`
   const EMPTY = Symbol();
   type Empty = typeof EMPTY;
 
@@ -241,36 +256,39 @@ export function stored<T>(
   let prevKey = initialKey;
 
   if (onKeyChange === 'store') {
-    effect(() => {
-      const k = keySig();
-      storeValue(k, internal());
-      if (prevKey !== k) {
-        if (cleanupOldKey) store.removeItem(prevKey);
-        prevKey = k;
-      }
-    });
+    pausablePureEffect(
+      () => {
+        const k = keySig();
+        storeValue(k, internal());
+        if (prevKey !== k) {
+          if (cleanupOldKey) store.removeItem(prevKey);
+          prevKey = k;
+        }
+      },
+      { injector, pause },
+    );
   } else {
-    effect(() => {
-      const k = keySig();
-      const internalValue = internal();
-      if (k === prevKey) {
-        return storeValue(k, internalValue); // normal operation
-      } else {
-        if (cleanupOldKey) store.removeItem(prevKey);
-        const value = getValue(k);
+    pausablePureEffect(
+      () => {
+        const k = keySig();
+        const internalValue = internal();
+        if (k === prevKey) {
+          return storeValue(k, internalValue); // normal operation
+        } else {
+          if (cleanupOldKey) store.removeItem(prevKey);
+          const value = getValue(k);
 
-        prevKey = k;
-        internal.set(value); // load new value
-      }
-    });
+          prevKey = k;
+          internal.set(value); // load new value
+        }
+      },
+      { injector, pause },
+    );
   }
 
   if (syncTabs && !isServer) {
-    const destroyRef = inject(DestroyRef);
+    const destroyRef = injector.get(DestroyRef);
     const sync = (e: StorageEvent) => {
-      // `storage` events only describe Web Storage — ignore events for a different
-      // storage area (or any event when a custom adapter is configured), otherwise an
-      // unrelated localStorage write with the same key string corrupts our state
       if (e.storageArea !== store) return;
       if (e.key !== untracked(keySig)) return;
 

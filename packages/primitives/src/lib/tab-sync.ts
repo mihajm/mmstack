@@ -4,6 +4,7 @@ import {
   effect,
   inject,
   Injectable,
+  Injector,
   PLATFORM_ID,
   untracked,
   type OnDestroy,
@@ -95,6 +96,14 @@ type LegacySyncSignalOptions = {
 export type SyncSignalOptions = {
   /* The channel id used to synchronize across tabs */
   id: string;
+  /**
+   * Injector used when `tabSync` is called outside an injection context.
+   *
+   * NOTE: `tabSync` is intentionally NOT pausable. Pausing the outbound broadcast would let its
+   * mount-time echo guard swallow a value changed while hidden, so other tabs would silently miss
+   * it — a cross-tab consistency gap not worth the negligible saving. The channel stays live.
+   */
+  injector?: Injector;
 };
 
 /**
@@ -151,16 +160,17 @@ export function tabSync<T extends WritableSignal<any>>(
   sig: T,
   opt?: SyncSignalOptions | LegacySyncSignalOptions | string,
 ): T {
-  if (isPlatformServer(inject(PLATFORM_ID))) return sig;
+  const optObj =
+    typeof opt === 'object' ? (opt as SyncSignalOptions) : undefined;
+  const injector = optObj?.injector ?? inject(Injector);
+
+  if (isPlatformServer(injector.get(PLATFORM_ID))) return sig;
 
   const id =
     typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());
 
-  const bus = inject(MessageBus);
+  const bus = injector.get(MessageBus);
 
-  // The last value applied from a remote tab. The outbound effect skips (exactly) the run
-  // caused by that write — without this, an inbound object (a fresh structured clone, so
-  // never reference-equal) would be re-posted, and two tabs would ping-pong forever.
   const NONE = Symbol();
   let received: unknown = NONE;
 
@@ -168,28 +178,29 @@ export function tabSync<T extends WritableSignal<any>>(
     const before = untracked(sig);
     received = next;
     sig.set(next);
-    // Equality-suppressed write (e.g. an identical primitive): no effect run will follow,
-    // so clear the marker — it must not swallow a later, genuinely local change.
     if (untracked(sig) === before) received = NONE;
   });
 
-  let first = false;
+  let firstDone = false;
 
-  const effectRef = effect(() => {
-    const val = sig();
-    if (!first) {
-      first = true;
-      return;
-    }
-    if (val === received) {
+  const effectRef = effect(
+    () => {
+      const val = sig();
+      if (!firstDone) {
+        firstDone = true;
+        return;
+      }
+      if (val === received) {
+        received = NONE;
+        return;
+      }
       received = NONE;
-      return;
-    }
-    received = NONE;
-    post(val);
-  });
+      post(val);
+    },
+    { injector },
+  );
 
-  inject(DestroyRef).onDestroy(() => {
+  injector.get(DestroyRef).onDestroy(() => {
     effectRef.destroy();
     unsub();
   });

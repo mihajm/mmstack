@@ -29,7 +29,8 @@
       "@mmstack/translate": ["./packages/translate/src/index.ts"],
       "@mmstack/di": ["./packages/di/src/index.ts"],
       "@mmstack/dnd": ["./packages/dnd/src/index.ts"],
-      "@mmstack/forms": ["./packages/forms/src/index.ts"]
+      "@mmstack/forms": ["./packages/forms/src/index.ts"],
+      "@mmstack/translate-tools": ["./packages/translate-tools/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

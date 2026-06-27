@@ -1,0 +1,27 @@
+{
+  "name": "translate-tools",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/translate-tools/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/translate-tools"],
+      "options": {
+        "cwd": "packages/translate-tools",
+        "parallel": false,
+        "commands": [
+          "tsdown",
+          "cp package.json README.md ../../dist/packages/translate-tools/"
+        ]
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "packages/translate-tools"
+      }
+    }
+  }
+}

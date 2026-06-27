@@ -16,3 +16,4 @@ minimumReleaseAgeExclude:
   - '@angular/ssr@22.0.3'
   - '@schematics/angular@22.0.3'
   - '@types/node@26.0.0'
+  - '@formatjs/icu-messageformat-parser@3.5.12'

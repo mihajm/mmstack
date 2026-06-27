@@ -1,0 +1,14 @@
+{
+  "extends": ["./tsconfig.json", "../../tsconfig.lib.json"],
+  "compilerOptions": {
+    "outDir": "../../dist/out-tsc",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "importHelpers": false,
+    "target": "es2022",
+    "lib": ["es2022"],
+    "types": ["node"]
+  },
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+  "include": ["src/**/*.ts"]
+}

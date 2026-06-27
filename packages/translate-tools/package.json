@@ -1,0 +1,38 @@
+{
+  "name": "@mmstack/translate-tools",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "mmtranslate": "./cli.mjs"
+  },
+  "main": "./index.mjs",
+  "module": "./index.mjs",
+  "types": "./index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    }
+  },
+  "files": ["*.mjs", "*.d.mts", "*.map"],
+  "keywords": [
+    "translate",
+    "localize",
+    "export",
+    "import",
+    "angular",
+    "mmstack"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/translate-tools"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/translate-tools",
+  "dependencies": {
+    "@formatjs/icu-messageformat-parser": "^3.5.12",
+    "ts-morph": "^28.0.0"
+  },
+  "sideEffects": false
+}

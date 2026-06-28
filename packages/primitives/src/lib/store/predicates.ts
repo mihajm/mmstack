@@ -1,18 +1,7 @@
-import {
-  isWritableSignal as assertion,
-  isDevMode,
-  type Signal,
-  type WritableSignal,
-} from '@angular/core';
+import { isDevMode, type WritableSignal } from '@angular/core';
 import { type MutableSignal } from '../mutable';
 import { type Vivify, type VivifyFn } from '../util';
 import { isOpaque } from './opaque';
-
-export function isWritableSignal<T>(
-  value: Signal<T>,
-): value is WritableSignal<T> {
-  return assertion(value);
-}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || isOpaque(value))
@@ -89,7 +78,6 @@ export function createFallbackOnChange(
   };
 
   return isMutableSource
-    ? (newValue: any) =>
-        (target as MutableSignal<any>).mutate(write(newValue))
+    ? (newValue: any) => (target as MutableSignal<any>).mutate(write(newValue))
     : (newValue: any) => target.update(write(newValue));
 }

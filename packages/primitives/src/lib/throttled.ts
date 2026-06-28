@@ -49,12 +49,16 @@ export type CreateThrottledOptions<T> = CreateSignalOptions<T> & {
 /**
  * A specialized `WritableSignal` whose publicly readable value updates are throttled.
  *
- * It provides access to the underlying, non-throttled signal via the `original` property.
+ * Provides access to the underlying, non-throttled signal via `original`, and a
+ * `flush()` that emits the current value immediately (clearing any open window) —
+ * useful for terminal transitions that shouldn't wait for the trailing edge.
  *
  * @template T The type of value held by the signal.
- * @see {DebouncedSignal} as the output type has the same structure.
  */
-export type ThrottledSignal<T> = DebouncedSignal<T>;
+export type ThrottledSignal<T> = DebouncedSignal<T> & {
+  /** Emit the latest value now, bypassing the remaining throttle window. */
+  flush: () => void;
+};
 
 /**
  * A convenience function that creates and throttles a new `WritableSignal` in one step.
@@ -79,7 +83,7 @@ export type ThrottledSignal<T> = DebouncedSignal<T>;
 export function throttled<T>(
   initial: T,
   opt?: CreateThrottledOptions<T>,
-): DebouncedSignal<T> {
+): ThrottledSignal<T> {
   return throttle(signal(initial, opt), opt);
 }
 
@@ -162,6 +166,13 @@ export function throttle<T>(
 
   const update = (fn: (prev: T) => T) => set(fn(untracked(source)));
 
+  const flush = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = undefined;
+    pendingTrailing = false;
+    fire();
+  };
+
   const writable = toWritable(
     computed(() => {
       trigger();
@@ -171,6 +182,7 @@ export function throttle<T>(
     update,
   ) as ThrottledSignal<T>;
   writable.original = source.asReadonly();
+  writable.flush = flush;
 
   return writable;
 }

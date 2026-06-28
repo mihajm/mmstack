@@ -30,7 +30,6 @@ import {
   createFallbackOnChange,
   hasOwnKey,
   isRecord,
-  isWritableSignal,
   resolveVivify,
 } from './predicates';
 import {
@@ -51,12 +50,13 @@ export {
   type Opaque,
   type UnwrapOpaque,
 } from './opaque';
-export { isWritableSignal } from './predicates';
 export {
   type MutableSignalStore,
   type SignalStore,
   type WritableSignalStore,
 } from './types';
+
+import { isWritableSignal } from '../mappers/util';
 
 /**
  * @internal Reads (or lazily builds + caches) the child node proxy for `prop` on `target`,

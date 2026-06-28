@@ -33,6 +33,11 @@ import {
   mousePosition,
 } from './mouse-position';
 import { type NetworkStatusSignal, networkStatus } from './network-status';
+import {
+  type PointerDragOptions,
+  type PointerDragSignal,
+  pointerDrag,
+} from './pointer-drag';
 import { type ScreenOrientationState, orientation } from './orientation';
 import { pageVisibility } from './page-visibility';
 import {
@@ -68,6 +73,10 @@ type SensorTypedOptions = {
   mousePosition: {
     opt: MousePositionOptions;
     returnType: MousePositionSignal;
+  };
+  pointerDrag: {
+    opt: PointerDragOptions;
+    returnType: PointerDragSignal;
   };
   networkStatus: {
     opt: SensorRunOptions;
@@ -166,6 +175,19 @@ export function sensor(
   type: 'mousePosition',
   options?: SensorTypedOptions['mousePosition']['opt'],
 ): MousePositionSignal;
+
+/**
+ * Creates a sensor signal tracking a pointer drag gesture (down → move → up).
+ * @param type Must be `'pointerDrag'`.
+ * @param options Optional configuration (target, activationThreshold, throttle, …).
+ * @returns A `PointerDragSignal` with `active`/`start`/`current`/`delta`, plus `unthrottled` and `cancel()`.
+ * @see {pointerDrag} for detailed documentation and examples.
+ * @example const drag = sensor('pointerDrag', { activationThreshold: 4 });
+ */
+export function sensor(
+  type: 'pointerDrag',
+  options?: SensorTypedOptions['pointerDrag']['opt'],
+): PointerDragSignal;
 
 /**
  * Creates a sensor signal that tracks the browser's online/offline status.
@@ -325,6 +347,8 @@ export function sensor<const TType extends keyof SensorTypedOptions>(
   switch (type) {
     case 'mousePosition':
       return mousePosition(opts);
+    case 'pointerDrag':
+      return pointerDrag(opts);
     case 'networkStatus':
       return networkStatus(opts);
     case 'pageVisibility':

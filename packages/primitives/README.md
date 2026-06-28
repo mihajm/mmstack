@@ -646,6 +646,7 @@ const mouse = sensor('mousePosition', {
 | `windowSize`        | `windowSize()`               | `Signal<{ width, height }>` + `.unthrottled`           | Throttled to 100ms by default.                                             |
 | `scrollPosition`    | `scrollPosition()`           | `Signal<{ x, y }>` + `.unthrottled`                    | Window or element scroll, throttled 100ms.                                 |
 | `mousePosition`     | `mousePosition()`            | `Signal<{ x, y }>` + `.unthrottled`                    | Throttled 100ms. `coordinateSpace: 'client' \| 'page'`, optional `touch`.  |
+| `pointerDrag`       | `pointerDrag()`              | `Signal<PointerDragState>` + `.unthrottled` + `.cancel()` | Pointer gesture (down→move→up) with `activationThreshold`, `delta`, modifiers, pointer capture, Escape-cancel. |
 | `elementVisibility` | `elementVisibility(target?)` | `Signal<IntersectionObserverEntry?>` + `.visible`      | IntersectionObserver-based, `.visible` is a boolean shorthand.             |
 | `elementSize`       | `elementSize(target?)`       | `Signal<{ width, height }?>`                           | ResizeObserver-based. Defaults to `border-box`.                            |
 | `geolocation`       | `geolocation(opt?)`          | `Signal<GeolocationPosition?>` + `.error` + `.loading` | One-shot by default; pass `watch: true` for `watchPosition`.               |
@@ -655,7 +656,30 @@ const mouse = sensor('mousePosition', {
 | `idle`              | `idle({ ms })`               | `Signal<boolean>` + `.since`                           | Flips to `true` after `ms` of inactivity. Configurable activity events.    |
 | `focusWithin`       | `focusWithin(target?)`       | `Signal<boolean>`                                      | Mirrors the `:focus-within` CSS pseudo-class.                              |
 
-Element-targeting sensors (`elementSize`, `elementVisibility`, `focusWithin`) default `target` to `inject(ElementRef)` so they're drop-in inside a component.
+Element-targeting sensors (`elementSize`, `elementVisibility`, `focusWithin`, `pointerDrag`) default `target` to `inject(ElementRef)` so they're drop-in inside a component.
+
+### `pointerDrag`
+
+Tracks a pointer **gesture** (pointerdown → capture → move → up) as a signal — the
+foundation for pointer-based move/resize/marquee on a canvas. Unlike native HTML5
+drag, pointer events fire continuously and coordinates stay reliable; `delta` is
+computed on the same update as `current` (never torn). `active` only flips true
+once the pointer travels past `activationThreshold`, so the same element stays
+clickable. Uses `setPointerCapture`, supports a delegated `handleSelector`, and
+cancels on Escape or via `.cancel()`.
+
+```typescript
+import { sensor } from '@mmstack/primitives';
+
+const drag = sensor('pointerDrag', { activationThreshold: 4 });
+
+// derive position from the gesture — no effects
+const position = computed(() => {
+  const d = drag();
+  return d.active ? { x: base.x + d.delta.x, y: base.y + d.delta.y } : base;
+});
+// drag().modifiers.shift → e.g. constrain axis · drag.cancel() → revert
+```
 
 ### `signalFromEvent`
 

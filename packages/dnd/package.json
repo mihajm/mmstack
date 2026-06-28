@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/dnd",
-  "version": "22.0.0-beta.0",
+  "version": "22.0.0",
   "keywords": [
     "angular",
     "dnd",
@@ -18,8 +18,13 @@
   "peerDependencies": {
     "@angular/common": ">=22 <23",
     "@angular/core": ">=22 <23",
-    "@atlaskit/pragmatic-drag-and-drop": "~2.0.1",
-    "@atlaskit/pragmatic-drag-and-drop-hitbox": "~2.0.0"
+    "@atlaskit/pragmatic-drag-and-drop": "~2.0.1"
+  },
+  "optionalDependencies": {
+    "@atlaskit/pragmatic-drag-and-drop-hitbox": "~2.0.0",
+    "@atlaskit/pragmatic-drag-and-drop-auto-scroll": "~3.0.0",
+    "@atlaskit/pragmatic-drag-and-drop-flourish": "~3.0.1",
+    "@atlaskit/pragmatic-drag-and-drop-live-region": "~2.0.0"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/dnd",
   "sideEffects": false

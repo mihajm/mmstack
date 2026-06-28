@@ -1,35 +1,129 @@
 # @mmstack/dnd
 
-An Angular wrapper around [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atlaskit/pragmatic-drag-and-drop) with typed payloads, signal-based state, and a thin function + directive pairing.
+A signals-first Angular binding for [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atlaskit/pragmatic-drag-and-drop) (v2). Make any element draggable or a drop target with a typed payload, and read every piece of drag state as a `Signal`.
 
-[![npm version](https://badge.fury.io/js/%40mmstack%2Fdnd.svg)](https://badge.fury.io/js/%40mmstack%2Fdnd)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/dnd/LICENSE)
+
+Per-element state (`dragging`, `isDragOver`, `closestEdge`) is derived from a single ambient session signal instead of being stored, so there are no recurring effects on the core path. Each primitive is a composable function paired with a thin directive, and pragmatic's optional sub-libraries plug in through `provideDnd` rather than as peer dependencies.
 
 ## Installation
 
 ```bash
-npm install @mmstack/dnd @atlaskit/pragmatic-drag-and-drop @atlaskit/pragmatic-drag-and-drop-hitbox
+npm install @mmstack/dnd @atlaskit/pragmatic-drag-and-drop
 ```
+
+Optional sub-libraries are not peer dependencies. Install only what you use and register it (see [Plugins](#plugins)):
+
+```bash
+npm install @atlaskit/pragmatic-drag-and-drop-hitbox       # edge detection
+npm install @atlaskit/pragmatic-drag-and-drop-auto-scroll  # auto-scroll
+npm install @atlaskit/pragmatic-drag-and-drop-flourish     # post-move flash
+```
+
+## Quick start
+
+Drag cards between two columns. `draggable` carries the typed payload, `dropTarget` narrows it with `accepts` and exposes `isDragOver`, and the drop updates your own signal. No plugins required.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { Draggable, DropTarget } from '@mmstack/dnd';
+
+type Column = 'todo' | 'done';
+type Card = { id: number; title: string };
+
+const isCard = (d: unknown): d is Card =>
+  !!d && typeof d === 'object' && 'id' in d;
+
+@Component({
+  selector: 'app-board',
+  imports: [Draggable, DropTarget],
+  template: `
+    @for (col of columns; track col) {
+      <section
+        mmDropTarget
+        #zone="mmDropTarget"
+        [accepts]="isCard"
+        [class.over]="zone.isDragOver()"
+        (dropped)="move(col, $event.data)"
+      >
+        <h3>{{ col }}</h3>
+        @for (card of board()[col]; track card.id) {
+          <article
+            mmDraggable
+            #d="mmDraggable"
+            [data]="card"
+            [class.dragging]="d.dragging()"
+          >
+            {{ card.title }}
+          </article>
+        }
+      </section>
+    }
+  `,
+  styles: `
+    :host { display: flex; gap: 1rem; font-family: system-ui, sans-serif; }
+    section { flex: 1; min-height: 120px; padding: .75rem; border: 1px solid #e2e8f0; border-radius: 8px; }
+    section.over { border-color: #2563eb; background: #eff6ff; }
+    h3 { margin: 0 0 .5rem; text-transform: capitalize; }
+    article { margin-bottom: .5rem; padding: .5rem .75rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; cursor: grab; user-select: none; }
+    article.dragging { opacity: .4; }
+  `,
+})
+export class BoardComponent {
+  protected readonly isCard = isCard;
+  protected readonly columns: Column[] = ['todo', 'done'];
+
+  protected readonly board = signal<Record<Column, Card[]>>({
+    todo: [
+      { id: 1, title: 'Design' },
+      { id: 2, title: 'Build' },
+    ],
+    done: [{ id: 3, title: 'Kickoff' }],
+  });
+
+  protected move(to: Column, card: Card): void {
+    this.board.update((b) => {
+      const next: Record<Column, Card[]> = {
+        todo: b.todo.filter((c) => c.id !== card.id),
+        done: b.done.filter((c) => c.id !== card.id),
+      };
+      next[to] = [...next[to], card];
+      return next;
+    });
+  }
+}
+```
+
+`$event.data` is typed `Card` because `accepts` narrows it. Add the [hitbox plugin](#plugins) when you want edge-aware drops (insert before or after a target).
 
 ## Primitives
 
-- `draggable<TData, TMeta>(opts)` / `Draggable` — make an element draggable with a typed payload (and optional typed metadata).
-- `dropTarget<TAccept, TSelf, TMeta>(opts)` / `DropTarget` — make an element a drop target with type-narrowing accept, optional edge detection, and a built-in drop indicator opt-in.
-- `monitorElements<TAccept, TMeta>(opts)` — global drag-state observer.
-- `mmDropIndicator` / `<mm-drop-indicator>` — visual insertion-line driven by an `Edge | null` signal.
-- `mmDragHandle` — restrict drag initiation to a specific child element.
-- `reorderable<T>(items, opts)` + `mmReorderable` / `mmReorderableItem` — opinionated sortable list (single or cross-list via `group`).
+- `draggable<TData, TMeta>(opts)` / `Draggable`: make an element draggable with a typed payload and optional metadata.
+- `dropTarget<TAccept, TSelf, TMeta>(opts)` / `DropTarget`: make an element a drop target with a type-narrowing `accepts`, optional edge detection, and derived state.
+- `monitor<TAccept, TMeta>(opts)`: global drag-state observer (derived; callbacks optional).
+- `fileDropTarget(opts)` / `monitorExternal(opts)`: accept files dragged in from the OS (the external adapter).
+- `DragHandle` (`mmDragHandle`): restrict drag initiation to a child element.
+- `autoScroll(opts)` / `mmAutoScroll`: edge auto-scroll (needs the auto-scroll plugin).
+- `provideDnd(config)`: register optional plugins and scope a session.
 - Custom drag previews via the `preview` option on `draggable()`.
 
-Every composable is a function. Every directive is a thin wrapper that forwards inputs into the composable and exposes its signal state. You can compose at either level depending on your taste.
+Every composable is a function. Every directive is a thin wrapper that forwards inputs into the composable and exposes its signal state.
 
----
+## The reactive model
 
-### draggable
+`monitorForElements` already broadcasts the full drag world on every move. A root `DndSession` captures it once into a signal, and everything per-element is a `computed`:
 
-Attaches drag behaviour to the host element with a strongly typed payload.
+```ts
+// inside dropTarget()
+const isDragOver = computed(() => hitIndex() >= 0);
+const closestEdge = computed(() => /* read from the session via the hitbox plugin */);
+```
 
-```typescript
+There are no per-element writable signals, no callbacks writing into signals, and no effects copying one signal into another. Pragmatic's config hooks (`getInitialData`, `canDrop`, `getData`) are read lazily, so registration happens once. A reactive `dragHandle` is the only thing that re-registers, and only when the handle element changes.
+
+## draggable
+
+```ts
 import { Component, signal } from '@angular/core';
 import { draggable } from '@mmstack/dnd';
 
@@ -45,266 +139,203 @@ export class CardComponent {
 
   protected readonly dnd = draggable<Card>({
     data: this.card,
-    onDrop: ({ data, location }) => {
-      console.log('dropped', data, 'onto', location.current);
+    onDrop: ({ data, edge, location }) => {
+      console.log('dropped', data, 'edge', edge, 'onto', location.current);
     },
   });
 }
 ```
 
-Or use the directive:
+Or the directive:
 
 ```html
-<div mmDraggable [data]="card()" #d="mmDraggable" [class.dragging]="d.dragging()" (dropped)="onDrop($event)">
+<div
+  mmDraggable
+  [data]="card()"
+  #d="mmDraggable"
+  [class.dragging]="d.dragging()"
+  (dropped)="onDrop($event)"
+>
   {{ card().title }}
 </div>
 ```
 
-### dropTarget
+## dropTarget
 
-Accepts a typeguard that narrows incoming payloads. All events and signals are typed against `TAccept` — no casting required.
+`accepts` is a typeguard that narrows incoming payloads, so all events and signals are typed against `TAccept` with no casting.
 
-```typescript
-import { Component, signal } from '@angular/core';
+```ts
 import { dropTarget } from '@mmstack/dnd';
 
-type Card = { id: string; title: string };
+type Card = { id: string };
 const isCard = (d: unknown): d is Card =>
-  typeof d === 'object' && d !== null && 'id' in d && 'title' in d;
+  !!d && typeof d === 'object' && 'id' in d;
 
-@Component({
-  selector: 'app-column',
-  template: `
-    @for (c of cards(); track c.id) {
-      <p>{{ c.title }}</p>
-    }
-  `,
-  host: { '[class.over]': 'zone.isDragOver()' },
-})
-export class ColumnComponent {
-  readonly cards = signal<Card[]>([]);
-
-  protected readonly zone = dropTarget<Card>({
-    accepts: isCard,
-    onDrop: ({ data }) => this.cards.update((cs) => [...cs, data]),
-  });
-}
-```
-
-Pass `edges` to enable closest-edge tracking for list-reorder UIs:
-
-```typescript
-const slot = dropTarget<Card, { index: number }>({
+protected readonly zone = dropTarget<Card>({
   accepts: isCard,
-  data: () => ({ index: this.index() }),
-  edges: ['top', 'bottom'],
-  onDrop: ({ data, ...args }) => {
-    // args.location.current[0].data carries the slot's `{ index }`
-  },
+  onDrop: ({ data }) => this.cards.update((cs) => [...cs, data]),
 });
-
-// slot.closestEdge() → 'top' | 'bottom' | null
+// zone.isDragOver(), zone.isInnermost(), zone.dragOverData(), zone.closestEdge()
 ```
 
-The `dropped` event also carries the edge at drop time (`event.edge`) so list-reorder handlers don't have to grab it from the directive's transient signal.
+`closestEdge` and `edges` need the hitbox plugin (see [Plugins](#plugins)); requesting `edges` without it throws. `dropTarget` also supports `sticky` (stay the active target after the pointer leaves) and `dropEffect` (`'move' | 'copy' | 'link'`), both pragmatic element-adapter features.
 
-### DragHandle
+## fileDropTarget (external / files)
 
-Restrict drag-initiation to a specific child element. The `mmDragHandle` directive captures its host `ElementRef` and exposes itself via `exportAs: 'mmDragHandle'` — pass it into a `mmDraggable`'s `dragHandle` input:
+Accept files dragged from outside the browser (pragmatic's external adapter):
 
-```html
-<li mmDraggable [data]="item" [dragHandle]="grip">
-  <span mmDragHandle #grip="mmDragHandle" class="grip">⋮⋮</span>
-  <span>{{ item.label }}</span>
-</li>
-```
+```ts
+import { fileDropTarget } from '@mmstack/dnd';
 
-The composable form (`draggable({ dragHandle: ... })`) accepts the same shapes: an `HTMLElement`, an `ElementRef`, the `DragHandle` directive instance, or a signal/getter of any of these.
-
-### DropIndicator
-
-A self-positioning insertion line driven by an `Edge | null` signal. There are three ways to use it:
-
-**1. Opt in directly on the drop target** (recommended for the common case — `closestEdge` is wired automatically):
-
-```html
-<div mmDropTarget [accepts]="isCard" [edges]="['top', 'bottom']" indicated>
-  {{ item().title }}
-</div>
-```
-
-**2. As a standalone directive** (e.g., to drive from a custom signal):
-
-```html
-<div mmDropIndicator [edge]="someEdgeSignal()">…</div>
-```
-
-**3. As a component** (when you need to overlay the indicator on a positioned wrapper rather than on the drop target itself):
-
-```html
-<div mmDropTarget [accepts]="isCard" [edges]="['top','bottom']" #dt="mmDropTarget" style="position: relative">
-  {{ item().title }}
-  <mm-drop-indicator [edge]="dt.closestEdge()" />
-</div>
-```
-
-Under the hood the directive injects a single shared `<style>` tag into `document.head` on first use and renders the line via `::before`, so it never adds DOM children to your element. Theming via the `--mm-drop-indicator-color` CSS custom property; positioning via `thickness` / `gap` (also exposed on the drop target as `indicatorThickness` / `indicatorGap`).
-
-### monitorElements
-
-Observe drag state globally — useful for cross-cutting UI like dim-others-while-dragging or showing a global drop hint.
-
-```typescript
-import { Component } from '@angular/core';
-import { monitorElements } from '@mmstack/dnd';
-
-@Component({
-  selector: 'app-shell',
-  template: `<div [class.is-dragging]="monitor.isDragging()">...</div>`,
-})
-export class ShellComponent {
-  protected readonly monitor = monitorElements<Card>({
-    accepts: isCard,
-  });
-}
-```
-
-### reorderable
-
-Higher-level abstraction for sortable lists. Pass it a `WritableSignal<T[]>` and it gives you a `ReorderableRef<T>` to bind to two directives. Same-list reorder and (opt-in) cross-list reorder via a shared `group` string. Drop indicators are on by default.
-
-```typescript
-import { Component, signal } from '@angular/core';
-import { Reorderable, ReorderableItem, reorderable } from '@mmstack/dnd';
-
-type Card = { id: number; label: string };
-const isCard = (d: unknown): d is Card =>
-  !!d && typeof d === 'object' && 'id' in d && 'label' in d;
-
-@Component({
-  selector: 'app-list',
-  imports: [Reorderable, ReorderableItem],
-  template: `
-    <ul [mmReorderable]="list">
-      @for (card of list.items(); track list.key(card)) {
-        <li [mmReorderableItem]="card">{{ card.label }}</li>
-      } @empty {
-        <li>drop a card here</li>
-      }
-    </ul>
-  `,
-})
-export class List {
-  readonly cards = signal<Card[]>([…]);
-
-  protected readonly list = reorderable(this.cards, {
-    accepts: isCard,
-    key: (c) => c.id,
-    // group: 'cards',  // optional — enables cross-list with other reorderables sharing this string
-    // edges: ['top', 'bottom'],  // default
-    // indicated: true,            // default — drop indicators
-    // onReorder: (e) => …,
-    // onItemArrived: (e) => …,  // cross-list arrival
-    // onItemLeft: (e) => …,     // cross-list departure
-  });
-}
-```
-
-The `mmReorderable` directive applies a container drop target so items can be dropped onto an empty list or at the end. The container's host element should set its own layout (flexbox/grid/etc.) — `reorderable` doesn't impose styling.
-
-### Custom drag previews
-
-Pass a `preview` option to `draggable()` to render an Angular component, `TemplateRef`, or raw DOM as the native drag image.
-
-```typescript
-@Component({
-  template: `
-    <ng-template #preview let-card>
-      <div class="preview">{{ card.title }}</div>
-    </ng-template>
-
-    <div mmDraggable [data]="card()" [preview]="previewCfg()">{{ card().title }}</div>
-  `,
-})
-export class CardComponent {
-  protected readonly preview = viewChild<TemplateRef<{ $implicit: Card }>>('preview');
-
-  protected readonly previewCfg = computed(() => ({
-    template: this.preview(),
-    context: this.card(),
-    offset: 'pointer-outside' as const,
-  }));
-}
-```
-
-Options: `{ component, inputs?, offset? }` for an Angular component, `{ template, context?, offset? }` for a `TemplateRef`, or `{ render, offset? }` as a raw imperative escape hatch. `offset` is either `'pointer-outside'` (positions the preview just outside the cursor) or `{ x, y }` pixel offsets relative to the preview's top-left.
-
-### Drag metadata (`meta`)
-
-Both `draggable()` and `dropTarget()` carry a typed `meta` payload alongside the user's `data`. The source attaches it, the target reads it from `event.meta` / `canDrop`'s args. Typed via the optional second generic parameter:
-
-```typescript
-const KIND = Symbol('kind');
-type CardMeta = { [KIND]: 'todo' | 'done' };
-
-draggable<Card, CardMeta>({
-  data: this.card,
-  meta: () => ({ [KIND]: 'todo' }),
+protected readonly drop = fileDropTarget({
+  onDrop: ({ files }) => this.upload(files), // files: File[]
+  // canDrop: ({ types }) => ...,  disabled, sticky, dropEffect
 });
-
-dropTarget<Card, void, CardMeta>({
-  accepts: isCard,
-  canDrop: ({ source: { meta } }) => meta[KIND] === 'todo',
-  onDrop: ({ data, meta }) => { /* meta[KIND] is typed */ },
-});
+// drop.isDragOver(), drop.isInnermost()
 ```
 
-`meta` is the seam to build your own higher-level abstractions on top of `@mmstack/dnd`. `reorderable` itself uses it internally for cross-list discrimination.
+`monitorExternal({ onDrop })` observes external drags globally. An element can be both an element target and a file target: apply both composables.
 
-### Autoscroll
+## monitor
 
-`@mmstack/dnd` does **not** bundle `@atlaskit/pragmatic-drag-and-drop-auto-scroll` — install it yourself and call it on your container ref. It composes cleanly with our drop targets:
+```ts
+protected readonly monitor = monitor<Card>({ accepts: isCard });
+// monitor.isDragging(), monitor.source()
+```
 
-```typescript
-import { ElementRef, inject, afterNextRender } from '@angular/core';
+`isDragging` and `source` are pure derivations of the ambient session. Pass `onDragStart` or `onDrop` to also attach a thin subscription for side effects.
+
+## Plugins
+
+Optional `@atlaskit/*` sub-libraries are wired in structurally, so they stay out of `peerDependencies`. Register defaults once with `provideDnd`; per-call options take precedence.
+
+```ts
+import { provideDnd } from '@mmstack/dnd';
+import {
+  attachClosestEdge,
+  extractClosestEdge,
+} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { autoScrollForElements } from '@atlaskit/pragmatic-drag-and-drop-auto-scroll/element';
 
-@Component({…})
-export class ScrollableList {
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-
-  constructor() {
-    afterNextRender(() => autoScrollForElements({ element: this.host.nativeElement }));
-  }
-}
-```
-
-### Accessibility flash
-
-Likewise we don't bundle `@atlaskit/pragmatic-drag-and-drop-flourish`. To draw the eye to a moved element after a programmatic move, install the package yourself and wire it through one of `reorderable`'s event hooks (`onReorder`, `onItemArrived`):
-
-```typescript
-import { triggerPostMoveFlash } from '@atlaskit/pragmatic-drag-and-drop-flourish/trigger-post-move-flash';
-
-reorderable(items, {
-  accepts: isCard,
-  key: (c) => c.id,
-  onReorder: ({ item }) => {
-    afterNextRender(() => {
-      const el = host.querySelector(`[data-id="${item.id}"]`);
-      if (el) triggerPostMoveFlash(el);
-    });
-  },
+bootstrapApplication(App, {
+  providers: [
+    provideDnd({
+      plugins: {
+        hitbox: { attachClosestEdge, extractClosestEdge },
+        autoScroll: autoScrollForElements,
+      },
+    }),
+  ],
 });
 ```
 
-(The DOM-element lookup is layout-specific; use whatever query/ref pattern fits your template.)
+Resolution order is per-call option, then `provideDnd` default, then off. Without a plugin, edge-dependent features are unavailable, and an explicit `edges` request throws an actionable error.
 
----
+### Screen-reader announcements
+
+`injectAnnounce()` returns the active announcer: a registered `announce` plugin if you provided one, otherwise a built-in announcer (a shared polite and assertive ARIA live region, zero dependencies). Swap in Atlassian's `@atlaskit/pragmatic-drag-and-drop-live-region` or your own:
+
+```ts
+provideDnd({ plugins: { announce: liveRegionAnnounce } });
+// in a component: injectAnnounce()('Card moved to position 2 of 5');
+```
+
+## Scoping a session
+
+The drag session is `providedIn: 'root'`, so the library works with zero configuration. To give an independent surface its own session and coordinate space, add `provideDndSession()` to a component's `providers`; the `injectDnd*` helpers then resolve to that scoped session within its subtree:
+
+```ts
+@Component({ providers: [provideDndSession()] /* ... */ })
+export class BoardComponent {}
+```
+
+## Custom drag previews
+
+```ts
+draggable<Card>({
+  data: this.card,
+  preview: () => ({
+    template: this.previewTpl(),
+    context: this.card(),
+    offset: 'pointer-outside',
+  }),
+});
+```
+
+Pass `{ component, bindings?, offset? }` (bindings via `inputBinding` / `outputBinding` / `twoWayBinding` from `@angular/core`), `{ template, context?, offset? }`, or `{ render, offset? }` (a raw escape hatch). `offset` is `'pointer-outside'` or `{ x, y }`.
+
+## Drag metadata (`meta`)
+
+Both `draggable()` and `dropTarget()` carry a typed `meta` payload alongside `data`, keyed by symbols so it never collides with consumer data. It is the seam that higher-level patterns build on.
+
+```ts
+const KIND = Symbol('kind');
+draggable<Card, { [KIND]: 'todo' | 'done' }>({
+  data,
+  meta: () => ({ [KIND]: 'todo' }),
+});
+dropTarget<Card, void, { [KIND]: 'todo' | 'done' }>({
+  accepts: isCard,
+  canDrop: ({ source: { meta } }) => meta[KIND] === 'todo',
+});
+```
+
+## Recipes
+
+Render an Angular component or template as the drag image:
+
+```ts
+draggable<Card>({
+  data: card,
+  preview: () => ({
+    template: tpl(),
+    context: card(),
+    offset: 'pointer-outside',
+  }),
+});
+```
+
+Accept only certain payloads:
+
+```ts
+dropTarget<Card>({
+  accepts: isCard,
+  canDrop: ({ source }) => source.data.status !== 'archived',
+});
+```
+
+Upload files on drop:
+
+```ts
+fileDropTarget({
+  canDrop: ({ types }) => types.includes('Files'),
+  onDrop: ({ files }) => upload(files),
+});
+```
+
+## Testing
+
+Because per-element state is derived from the ambient session, most behaviour is unit-testable by setting the session and asserting the derived signals, with no drag simulation. `injectDndSession()` returns the writable session signal:
+
+```ts
+const session = TestBed.runInInjectionContext(() => injectDndSession());
+session.set({
+  sourceEl,
+  sourceData: boxData(card),
+  targets: [{ element: el, data: {} }],
+  pointer: { x: 0, y: 0 },
+  kind: 'transfer',
+});
+expect(zone.isDragOver()).toBe(true);
+```
 
 ## SSR
 
-All composables short-circuit on the server and return inert signals (`dragging` always false, `isDragOver` always false, etc.), so they're safe to call from components that are server-rendered.
+All composables short-circuit on the server and return inert signals (`dragging` and `isDragOver` stay false); the session attaches no listeners.
+
+## Credits
+
+`@mmstack/dnd` is an unofficial, signals-first Angular wrapper for [pragmatic-drag-and-drop](https://github.com/atlassian/pragmatic-drag-and-drop) by Atlassian (Apache-2.0), which is required as a peer dependency and does the underlying drag-and-drop work. This project is not affiliated with or endorsed by Atlassian. The optional `@atlaskit/*` packages (hitbox, auto-scroll, flourish, live-region) plug in through `provideDnd` and remain the property of their authors.
 
 ## License
 

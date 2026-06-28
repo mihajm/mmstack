@@ -10,6 +10,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { derived } from '../derived';
+import { isWritableSignal } from '../mappers/util';
 import { isMutable, mutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
 import { createVivify, isIndexProp, type Vivify } from '../util';
@@ -30,7 +31,6 @@ import {
   createFallbackOnChange,
   hasOwnKey,
   isRecord,
-  isWritableSignal,
   resolveVivify,
 } from './predicates';
 import {
@@ -51,7 +51,6 @@ export {
   type Opaque,
   type UnwrapOpaque,
 } from './opaque';
-export { isWritableSignal } from './predicates';
 export {
   type MutableSignalStore,
   type SignalStore,

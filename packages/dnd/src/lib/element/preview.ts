@@ -1,7 +1,7 @@
 import {
   createComponent,
-  isSignal,
   type ApplicationRef,
+  type Binding,
   type EnvironmentInjector,
   type TemplateRef,
   type Type,
@@ -9,20 +9,25 @@ import {
 import { pointerOutsideOfPreview } from '@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview';
 import { setCustomNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview';
 
+/** Where to anchor the preview relative to the pointer: a fixed `{x,y}` offset, or `'pointer-outside'` to sit just off the cursor. */
 export type PreviewOffset = 'pointer-outside' | { x: number; y: number };
 
+/** Render a component as the drag preview. */
 type ComponentPreview = {
+  /** The component to instantiate as the preview. */
   component: Type<unknown>;
   /**
-   * Component inputs. Plain values are forwarded as-is; signals (`signal()`,
-   * `computed()`, `input()`) are read at preview-render time so the preview
-   * captures their current value.
+   * Bindings forwarded to the preview component. Use `inputBinding`,
+   * `outputBinding` and `twoWayBinding` from `@angular/core` — inputs stay
+   * reactive (no manual re-render) and outputs / two-way work out of the box.
    */
-  inputs?: Record<string, unknown>;
+  bindings?: Binding[];
   offset?: PreviewOffset;
 };
 
+/** Render a `TemplateRef` as the drag preview. */
 type TemplatePreview<TCtx> = {
+  /** The template to render; a getter defers resolution to preview-render time. */
   template:
     | TemplateRef<{ $implicit: TCtx }>
     | (() => TemplateRef<{ $implicit: TCtx }> | undefined | null);
@@ -34,12 +39,14 @@ type TemplatePreview<TCtx> = {
   offset?: PreviewOffset;
 };
 
+/** Render anything imperatively into the preview container. */
 type RenderPreview = {
   /** Escape hatch — raw access to the container element. Return a cleanup. */
   render: (container: HTMLElement) => (() => void) | void;
   offset?: PreviewOffset;
 };
 
+/** A custom drag preview: a component, a template, or a raw render callback. */
 export type PreviewConfig<TCtx = unknown> =
   | ComponentPreview
   | TemplatePreview<TCtx>
@@ -47,9 +54,9 @@ export type PreviewConfig<TCtx = unknown> =
 
 function resolveOffset(offset: PreviewOffset | undefined) {
   if (!offset) return undefined;
-  if (offset === 'pointer-outside') {
+  if (offset === 'pointer-outside')
     return pointerOutsideOfPreview({ x: '8px', y: '8px' });
-  }
+
   return () => ({ x: offset.x, y: offset.y });
 }
 
@@ -69,19 +76,13 @@ function resolveContext<T>(
   return source;
 }
 
-function resolveInput(value: unknown): unknown {
-  if (isSignal(value)) return (value as () => unknown)();
-  return value;
-}
-
+/** @internal Wires a `PreviewConfig` into pragmatic's custom-preview hook; driven by `draggable`'s `preview` option. */
 export function registerCustomPreview<TCtx>(
   config: PreviewConfig<TCtx>,
   envInjector: EnvironmentInjector,
   appRef: ApplicationRef,
   args: {
-    nativeSetDragImage:
-      | ((image: Element, x: number, y: number) => void)
-      | null;
+    nativeSetDragImage: ((image: Element, x: number, y: number) => void) | null;
   },
 ): void {
   if (!args.nativeSetDragImage) return;
@@ -93,12 +94,8 @@ export function registerCustomPreview<TCtx>(
         const ref = createComponent(config.component, {
           environmentInjector: envInjector,
           hostElement: container,
+          bindings: config.bindings,
         });
-        if (config.inputs) {
-          for (const [k, v] of Object.entries(config.inputs)) {
-            ref.setInput(k, resolveInput(v));
-          }
-        }
         appRef.attachView(ref.hostView);
         return () => {
           appRef.detachView(ref.hostView);

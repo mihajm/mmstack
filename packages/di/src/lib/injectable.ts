@@ -7,6 +7,8 @@ import {
   type Type,
 } from '@angular/core';
 
+import { provideAs } from './provide-as';
+
 type ServiceType<T> =
   T extends Type<infer U>
     ? U
@@ -21,7 +23,11 @@ type MapDeps<T extends readonly any[]> = {
 };
 
 type ProviderFn<T> = {
-  (value: T): Provider;
+  /** Provide a concrete value (`useValue`). A function *value* must be wrapped — see the factory overload. */
+  (value: Exclude<T, (...args: never[]) => unknown>): Provider;
+  /** Provide a zero-dependency factory (`useFactory`); runs lazily in an injection context, so it can call `inject()`. */
+  (factory: () => T): Provider;
+  /** Provide a factory with explicit, typed dependency tokens (`useFactory` + `deps`). */
   <const TDeps extends any[]>(
     fn: (...deps: MapDeps<TDeps>) => T,
     deps: TDeps,
@@ -62,6 +68,11 @@ type InjectableOptions<T> =
  * The third tuple element is the raw `InjectionToken` — useful for interop:
  * `deps: [token]` in other providers, `TestBed.overrideProvider(token, ...)`,
  * or `Injector.create` arrays. Destructure it only when you need it.
+ *
+ * The `provide` helper takes a value (`provide(v)` → `useValue`), a zero-arg
+ * factory (`provide(() => v)` → `useFactory`, no `deps` needed), or a factory
+ * with typed deps (`provide((a) => v, [TokenA])`). A function is always read as
+ * a factory, so to provide a function *value* wrap it: `provide(() => fn)`.
  *
  * @typeParam T The type of the value the token holds.
  * @param token Unique token identifier (used as the token's debug name).
@@ -216,11 +227,6 @@ export function injectable<T>(
     options !== undefined &&
     ('fallback' in options || 'lazyFallback' in options);
 
-  // The fallback lives on the token itself: Angular caches token factories PER ROOT
-  // INJECTOR, so every application (and every SSR request) lazily gets its own
-  // instance. Memoizing in this closure instead would be module-level state — the
-  // first app's fallback (and anything it inject()-ed) would leak into every other
-  // app, test, and server request.
   const injectionToken = hasFallback
     ? new InjectionToken<T>(token, {
         factory: options?.lazyFallback ?? (() => options?.fallback as T),
@@ -233,14 +239,8 @@ export function injectable<T>(
       optional: true,
     });
 
-    // strict null check: an explicitly provided `undefined` is a provided value,
-    // not a missing one (`??` would silently hand it to the fallback)
     if (injected !== null) return injected as T;
-
-    // a constrained lookup (`self`/`skipSelf`) can miss the provider — the bare
-    // lookup reaches the root injector, where the fallback factory lives
     if (hasFallback) return inject(injectionToken) as T;
-
     if (options?.errorMessage) throw new Error(options.errorMessage);
 
     return null as T;
@@ -250,6 +250,7 @@ export function injectable<T>(
     fnOrValue: T | ((...deps: any[]) => T),
     deps?: any[],
   ): Provider => {
+    // explicit deps → factory with those deps
     if (deps !== undefined)
       return {
         provide: injectionToken,
@@ -257,10 +258,9 @@ export function injectable<T>(
         deps,
       };
 
-    return {
-      provide: injectionToken,
-      useValue: fnOrValue,
-    };
+    // no deps → defer to provideAs: a function is a (no-dep) factory, anything
+    // else is a value. Provide a function *value* by wrapping it: `() => fn`.
+    return provideAs(injectionToken, fnOrValue as T | (() => T));
   };
 
   return [injectFn, provideFn, injectionToken];

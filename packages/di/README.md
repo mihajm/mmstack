@@ -122,6 +122,13 @@ const [injectApiConfig, provideApiConfig] = injectable<ApiConfig>('ApiConfig');
 export class AppComponent {}
 ```
 
+A zero-dependency factory needs no `deps` array — pass the factory alone. It runs
+lazily in an injection context, so it can still use `inject()`:
+
+```typescript
+provideApiConfig(() => ({ baseUrl: inject(BASE_URL), timeout: 5000 }));
+```
+
 ### With Fallback Value
 
 When you want to provide a default value instead of returning `null`:
@@ -185,21 +192,24 @@ export class ApiService {
 }
 ```
 
-### Providing Functions as Values
+### Providing functions as values
 
-The `provideFn` correctly handles functions as values (not factories):
+`provide` treats any function as a factory (so `provide(() => x)` is a zero-arg
+factory — no `deps` needed). When your token's type is itself a function, wrap
+the value in a factory that returns it, otherwise it would be called as a factory:
 
 ```typescript
 import { injectable } from '@mmstack/di';
 
 type Validator = (value: string) => boolean;
+const isLongEnough: Validator = (value) => value.length > 5;
 
 const [injectValidator, provideValidator] = injectable<Validator>('Validator');
 
 @Component({
   providers: [
-    // Providing a function as a value (not a factory)
-    provideValidator((value: string) => value.length > 5),
+    provideValidator(() => isLongEnough), // ✅ factory returns the function value
+    // provideValidator(isLongEnough),     // ❌ compile error — would be called as a factory
   ],
 })
 export class FormComponent {

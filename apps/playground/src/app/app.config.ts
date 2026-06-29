@@ -7,6 +7,12 @@ import {
   withEventReplay,
 } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
+import { provideDnd } from '@mmstack/dnd';
+import { edgeAutoScroll } from '@mmstack/dnd/plugins';
+import {
+  attachClosestEdge,
+  extractClosestEdge,
+} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { appRoutes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
@@ -14,5 +20,13 @@ export const appConfig: ApplicationConfig = {
     provideClientHydration(withEventReplay()),
     provideBrowserGlobalErrorListeners(),
     provideRouter(appRoutes),
+    // Optional plugins: pragmatic's hitbox for edge detection, and our zero-dep
+    // `edgeAutoScroll` for reorderable auto-scroll (@mmstack/dnd/plugins).
+    provideDnd({
+      plugins: {
+        hitbox: { attachClosestEdge, extractClosestEdge },
+        autoScroll: edgeAutoScroll,
+      },
+    }),
   ],
 };

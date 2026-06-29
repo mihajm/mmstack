@@ -6,9 +6,12 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
   template: `
     <nav>
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Chess</a>
-      <a routerLink="/list" routerLinkActive="active">List</a>
-      <a routerLink="/kanban" routerLinkActive="active">Kanban</a>
+      <a routerLink="/core" routerLinkActive="active">Core</a>
+      <a routerLink="/sortable" routerLinkActive="active">Sortable</a>
+      <a routerLink="/canvas" routerLinkActive="active">Canvas</a>
+      <a routerLink="/grid" routerLinkActive="active">Grid</a>
+      <a routerLink="/features" routerLinkActive="active">Features</a>
+      <a routerLink="/board" routerLinkActive="active">Board</a>
     </nav>
     <router-outlet />
   `,

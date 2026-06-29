@@ -298,7 +298,6 @@ export type MutationResourceRef<
  * @typeParam TMutation - The type of the mutation value (the request body).
  * @typeParam TICTX - The type of the initial context value passed to `onMutate`.
  * @typeParam TCTX - The type of the context value returned by `onMutate`.
- * @typeParam TMethod - The HTTP method to be used for the mutation (defaults to `HttpResourceRequest['method']`).
  * @returns A `MutationResourceRef` instance, which provides methods for triggering the mutation
  *          and observing its status.
  *
@@ -332,40 +331,9 @@ export type MutationResourceRef<
  * );
  * ```
  */
-// DELETE — the returned request carries no `body`.
-export function mutationResource<
-  TResult,
-  TRaw = TResult,
-  TMutation = TResult,
-  TCTX = void,
-  TICTX = TCTX,
->(
-  request: (params: TMutation) =>
-    | (Omit<HttpResourceRequest, 'body' | 'method'> & {
-        method: 'DELETE' | 'delete';
-      })
-    | undefined
-    | void,
-  options0?: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>,
-): MutationResourceRef<TResult, TMutation, TICTX>;
-
-// Body methods (POST/PUT/PATCH/…) — `body` is required and typed as `TMutation`.
-export function mutationResource<
-  TResult,
-  TRaw = TResult,
-  TMutation = TResult,
-  TCTX = void,
-  TICTX = TCTX,
->(
-  request: (
-    params: TMutation,
-  ) =>
-    | (Omit<HttpResourceRequest, 'body'> & { body: TMutation })
-    | undefined
-    | void,
-  options0?: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX>,
-): MutationResourceRef<TResult, TMutation, TICTX>;
-
+// The request callback maps the mutation value into an HTTP request. `body` is a
+// free-form request field (Angular's `body?: unknown`), independent of `TMutation`
+// and optional — so bodyless POSTs and transforms (e.g. params → `FormData`) are fine.
 export function mutationResource<
   TResult,
   TRaw = TResult,

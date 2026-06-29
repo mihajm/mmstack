@@ -1102,4 +1102,108 @@ describe('mutationResource', () => {
       expect(err.type).toBe('destroyed');
     });
   });
+
+  describe('request contract — body transforms & optional body', () => {
+    type ApplicationDef = { id: string; name: string };
+    type ApplicationSummary = { id: string; version: number; '@type': string };
+
+    it('maps typed params to a transformed (FormData) body and flows onMutate ctx to onError/onSuccess', async () => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      let bodyWasFormData = false;
+
+      const summaries = signal<ApplicationSummary[]>([]);
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          ({
+            app,
+            summary,
+          }: {
+            app: ApplicationDef;
+            summary: ApplicationSummary;
+          }) => {
+            // params are typed `{ app, summary }`, but the wire body is a transform
+            const fd = new FormData();
+            fd.append('app', JSON.stringify(app));
+            fd.append(summary['@type'], JSON.stringify(summary));
+
+            return {
+              url: 'https://example.com/resources/multipart',
+              method: 'POST',
+              body: fd,
+              context: createTestContext((req) => {
+                bodyWasFormData = req.body instanceof FormData;
+              }, { ok: true }),
+            };
+          },
+          {
+            onMutate: ({ summary }) => {
+              const prev = summaries();
+              summaries.set([...prev, summary]);
+              return prev; // → TCTX = ApplicationSummary[]
+            },
+            // `prev` must infer as ApplicationSummary[], never `void`
+            onError: (_err, prev) => summaries.set(prev),
+            onSuccess: (_result, prev) => {
+              const typed: ApplicationSummary[] = prev;
+              expect(Array.isArray(typed)).toBe(true);
+            },
+            onSettled: () => resolve(),
+          },
+        ),
+      );
+
+      res.mutate({
+        app: { id: 'a', name: 'A' },
+        summary: { id: 's', version: 1, '@type': 'Foo' },
+      });
+
+      await promise;
+      expect(bodyWasFormData).toBe(true);
+    });
+
+    it('allows a bodyless POST', async () => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      let fired = false;
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (id: string) => ({
+            url: `https://example.com/posts/${id}/publish`,
+            method: 'POST',
+            context: createTestContext(() => {
+              fired = true;
+            }, { ok: true }),
+          }),
+          { onSettled: () => resolve() },
+        ),
+      );
+
+      res.mutate('123');
+      await promise;
+      expect(fired).toBe(true);
+    });
+
+    it('allows a bodyless DELETE', async () => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      let fired = false;
+
+      const res = TestBed.runInInjectionContext(() =>
+        mutationResource(
+          (id: string) => ({
+            url: `https://example.com/posts/${id}`,
+            method: 'DELETE',
+            context: createTestContext(() => {
+              fired = true;
+            }, { ok: true }),
+          }),
+          { onSettled: () => resolve() },
+        ),
+      );
+
+      res.mutate('123');
+      await promise;
+      expect(fired).toBe(true);
+    });
+  });
 });

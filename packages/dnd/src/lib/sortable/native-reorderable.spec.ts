@@ -1,8 +1,8 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { Reorderable, ReorderableItem, reorderable } from './reorderable';
 import { sortableGroup } from './group';
+import { Reorderable, ReorderableItem, reorderable } from './reorderable';
 
 // Mock the pragmatic element adapter so native draggable/dropTarget registration
 // is observable (and the ambient monitor is inert).
@@ -139,7 +139,7 @@ describe('reorderable — native engine wiring', () => {
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
       .mockImplementation(function (this: HTMLElement) {
         const parent = this.parentElement;
-        const idx = parent ? [...parent.children].indexOf(this) : 0;
+        const idx = parent ? Array.from(parent.children).indexOf(this) : 0;
         return {
           top: idx * 40,
           bottom: idx * 40 + 40,

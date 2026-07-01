@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { forkStore, merge3, type ReconcileFn } from './fork-store';
+import { STORE_SHARED_GLOBALS, STORE_SHARED_OPTIONS } from './internals';
 import { mutableStore, store } from './store';
 
 const set = <T>(node: unknown, value: T) =>
@@ -379,13 +380,28 @@ describe('fork', () => {
       expect(base.a()).toBeNull(); // base untouched
     });
 
-    it('WITHOUT vivify the same write is dropped — the fork does not inherit base store config', () => {
+    it('inherits the base vivify config — the same write vivifies even without forwarding it', () => {
       const base = inInjectionContext(() =>
         store<{ a: { b: number } | null }>({ a: null }, { vivify: 'object' }),
       );
-      const { store: f } = inInjectionContext(() => forkStore(base)); // vivify NOT forwarded
+      const { store: f } = inInjectionContext(() => forkStore(base)); // vivify NOT passed → inherited
       set((f as { a: { b: unknown } }).a.b, 1);
-      expect(f.a()).toBeNull(); // dropped — vivify off on the fork
+      expect(f.a()).toEqual({ b: 1 }); // vivified via the inherited base config
+      expect(base.a()).toBeNull(); // base untouched (local overlay)
+    });
+
+    it('the fork shares the base injector-scoped cache and inherits its vivify (STORE_SHARED_OPTIONS)', () => {
+      const base = inInjectionContext(() =>
+        store<{ a: { b: number } | null }>({ a: null }, { vivify: 'auto' }),
+      );
+      const { store: f } = inInjectionContext(() => forkStore(base));
+      const b = (base as any)[STORE_SHARED_OPTIONS];
+      const ff = (f as any)[STORE_SHARED_OPTIONS];
+      expect(ff[STORE_SHARED_GLOBALS].cache).toBe(b[STORE_SHARED_GLOBALS].cache);
+      expect(ff[STORE_SHARED_GLOBALS].registry).toBe(
+        b[STORE_SHARED_GLOBALS].registry,
+      );
+      expect(ff.vivify).toBe('auto'); // inherited from the base
     });
 
     it('a union node flipping leaf→substore in the base flows through (fork left it alone)', () => {

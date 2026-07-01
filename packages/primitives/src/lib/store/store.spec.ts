@@ -1,14 +1,15 @@
 import { computed, effect, Injector, isSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
-  isLeaf,
-  isOpaque,
   isStore,
-  mutableStore,
-  OPAQUE,
-  opaque,
-  store,
-} from './store';
+  PROXY_CACHE_TOKEN,
+  PROXY_CLEANUP_TOKEN,
+  STORE_SHARED_GLOBALS,
+  STORE_SHARED_OPTIONS,
+} from './internals';
+import { isLeaf } from './leaf';
+import { isOpaque, OPAQUE, opaque } from './opaque';
+import { mutableStore, store } from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -321,6 +322,40 @@ describe('store', () => {
       const s1 = store({ a: 1 }, { injector });
       const s2 = store({ a: 1 }, { injector });
       expect(s1.a).not.toBe(s2.a);
+    });
+  });
+
+  describe('shared options (STORE_SHARED_OPTIONS) + shared globals', () => {
+    it('exposes its resolved options via the symbol, with the injector-scoped cache/registry', () => {
+      const s = store(
+        { a: 1 },
+        { injector, vivify: 'auto', noUnionLeaves: true },
+      );
+      const opts = (s as any)[STORE_SHARED_OPTIONS];
+      expect(opts.injector).toBe(injector);
+      expect(opts.vivify).toBe('auto');
+      expect(opts.noUnionLeaves).toBe(true);
+      // the cache + registry are the injector-scoped singletons (not module globals)
+      expect(opts[STORE_SHARED_GLOBALS].cache).toBe(
+        injector.get(PROXY_CACHE_TOKEN),
+      );
+      expect(opts[STORE_SHARED_GLOBALS].registry).toBe(
+        injector.get(PROXY_CLEANUP_TOKEN),
+      );
+    });
+
+    it('defaults vivify/noUnionLeaves to false when unset', () => {
+      const opts = (store({ a: 1 }, { injector }) as any)[STORE_SHARED_OPTIONS];
+      expect(opts.vivify).toBe(false);
+      expect(opts.noUnionLeaves).toBe(false);
+    });
+
+    it('child nodes inherit the parent shared globals (one cache/registry for the whole tree)', () => {
+      const s = store({ a: { b: 1 } }, { injector });
+      const root = (s as any)[STORE_SHARED_OPTIONS][STORE_SHARED_GLOBALS];
+      const child = (s.a as any)[STORE_SHARED_OPTIONS][STORE_SHARED_GLOBALS];
+      expect(child.cache).toBe(root.cache);
+      expect(child.registry).toBe(root.registry);
     });
   });
 

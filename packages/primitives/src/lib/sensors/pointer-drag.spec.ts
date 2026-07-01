@@ -10,6 +10,7 @@ function pe(
     clientX?: number;
     clientY?: number;
     button?: number;
+    pointerType?: string;
     shiftKey?: boolean;
     altKey?: boolean;
     ctrlKey?: boolean;
@@ -24,6 +25,7 @@ function pe(
   e['pageX'] = opts.clientX ?? 0;
   e['pageY'] = opts.clientY ?? 0;
   e['button'] = opts.button ?? 0;
+  e['pointerType'] = opts.pointerType ?? 'mouse';
   e['shiftKey'] = !!opts.shiftKey;
   e['altKey'] = !!opts.altKey;
   e['ctrlKey'] = !!opts.ctrlKey;
@@ -51,6 +53,33 @@ describe('pointerDrag', () => {
     expect(s.active).toBe(false);
     expect(s.pointerId).toBeNull();
     expect(s.button).toBe(-1);
+  });
+
+  it('stopPropagation: claims the pointerdown when opted in (inner wins over outer)', () => {
+    const { drag, el } = setup({ stopPropagation: true });
+    const e = pe('pointerdown', { pointerId: 1 });
+    let stopped = false;
+    e.stopPropagation = () => (stopped = true);
+    el.dispatchEvent(e);
+    expect(stopped).toBe(true);
+    expect(drag.unthrottled().pointerId).toBe(1); // gesture still started
+  });
+
+  it('does not stop propagation by default', () => {
+    const { el } = setup();
+    const e = pe('pointerdown', { pointerId: 1 });
+    let stopped = false;
+    e.stopPropagation = () => (stopped = true);
+    el.dispatchEvent(e);
+    expect(stopped).toBe(false);
+  });
+
+  it('exposes the pointerType (touch/pen/mouse) for the gesture', () => {
+    const { drag, el } = setup();
+    el.dispatchEvent(pe('pointerdown', { pointerType: 'touch', pointerId: 7 }));
+    expect(drag.unthrottled().pointerType).toBe('touch');
+    el.dispatchEvent(pe('pointerup', { pointerId: 7 }));
+    expect(drag.unthrottled().pointerType).toBe(''); // reset when idle
   });
 
   it('records a pending (inactive) gesture on pointerdown', () => {

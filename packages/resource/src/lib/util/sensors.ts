@@ -1,6 +1,7 @@
 import {
   inject,
   Injectable,
+  type Injector,
   type Provider,
   signal,
   type Signal,
@@ -15,11 +16,13 @@ export class ResourceSensors {
   readonly pageVisibility = sensor('pageVisibility');
 }
 
-export function injectNetworkStatus() {
+export function injectNetworkStatus(injector?: Injector) {
+  if (injector) return injector.get(ResourceSensors).networkStatus;
   return inject(ResourceSensors).networkStatus;
 }
 
-export function injectPageVisibility() {
+export function injectPageVisibility(injector?: Injector) {
+  if (injector) return injector.get(ResourceSensors).pageVisibility;
   return inject(ResourceSensors).pageVisibility;
 }
 

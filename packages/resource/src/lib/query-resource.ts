@@ -33,9 +33,9 @@ import { firstValueFrom } from 'rxjs';
 import {
   applyResourceRegistration,
   type CommonResourceOptions,
-  type ResourceCacheOptions,
   injectResourceOptions,
   provideTypedResourceOptions,
+  type ResourceCacheOptions,
 } from './options';
 import {
   catchValueError,
@@ -326,7 +326,6 @@ export function queryResource<TResult, TRaw = TResult>(
   request: ResourceRequestFn,
   options0?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
-  // Two-layer option injection: per-call > provideQueryResourceOptions > provideResourceOptions.
   const globalOpts = injectResourceOptions(options0?.injector);
   const queryOpts = injectQueryResourceOptions(options0?.injector);
 
@@ -340,7 +339,11 @@ export function queryResource<TResult, TRaw = TResult>(
       queryOpts.circuitBreaker,
       options0?.circuitBreaker,
     ),
-    retry: mergeRetryOptions(globalOpts.retry, queryOpts.retry, options0?.retry),
+    retry: mergeRetryOptions(
+      globalOpts.retry,
+      queryOpts.retry,
+      options0?.retry,
+    ),
     refresh: mergeRefreshOptions(queryOpts.refresh, options0?.refresh),
   } as QueryResourceOptions<TResult, TRaw>;
 
@@ -357,14 +360,12 @@ export function queryResource<TResult, TRaw = TResult>(
     options?.injector,
   );
 
-  const networkAvailable = injectNetworkStatus();
+  const networkAvailable = injectNetworkStatus(options.injector);
 
   const eq = options?.triggerOnSameRequest
     ? undefined
     : (options?.equalRequest ?? createEqualRequest());
 
-  // Opt-in auto-pausing: `true` reads the ambient Activity boundary (no-op outside
-  // one), a predicate is used directly. Composes with the manual `ctx.paused` path.
   const pauseOpt = options?.pause ?? false;
   const externallyPaused: () => boolean =
     pauseOpt === false
@@ -386,11 +387,6 @@ export function queryResource<TResult, TRaw = TResult>(
   const disabledReason = computed<DisabledReason | null>(() => {
     if (!networkAvailable()) return 'offline';
     if (cb.isOpen()) return 'circuit-open';
-    // Both pause sources report 'no-request' here — ctx.paused makes rawRequest
-    // undefined, while the external `pause` option still yields a real request, so it
-    // must be checked explicitly. Either way this also stops polling/refresh triggers
-    // (their inactive() guard reads disabledReason), while stableRequest below HOLDS
-    // the last request so the value is kept (no refetch on resume).
     if (paused() || !rawRequest()) return 'no-request';
     return null;
   });
@@ -519,8 +515,7 @@ export function queryResource<TResult, TRaw = TResult>(
     },
   });
 
-  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll
-  // or react to focus/reconnect.
+  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll or react to focus/reconnect.
   resource = refresh(
     resource,
     destroyRef,
@@ -528,7 +523,7 @@ export function queryResource<TResult, TRaw = TResult>(
     () => disabledReason() !== null,
     {
       injector: options?.injector ?? inject(Injector),
-      visibility: injectPageVisibility(),
+      visibility: injectPageVisibility(options.injector),
       online: networkAvailable,
     },
   );
@@ -546,7 +541,6 @@ export function queryResource<TResult, TRaw = TResult>(
     if (options?.cache && k)
       cache.store(
         k,
-        // statusText omitted — deprecated in Angular (HttpResponse defaults it)
         new HttpResponse({
           body: value,
           status: 200,
@@ -558,8 +552,6 @@ export function queryResource<TResult, TRaw = TResult>(
   };
 
   const update = (updater: (value: TResult) => TResult) => {
-    // baseline on the COMPOSED value (cache-preferring): the cache entry can be newer
-    // than resource.value (cross-tab sync, another instance's set)
     set(updater(untracked(value)));
   };
 

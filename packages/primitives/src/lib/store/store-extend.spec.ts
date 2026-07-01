@@ -1,6 +1,7 @@
 import { effect, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { mutable } from '../mutable';
+import { STORE_SHARED_GLOBALS, STORE_SHARED_OPTIONS } from './internals';
 import { extendStore, mutableStore, store } from './store';
 
 describe('extendStore (scoped overlay)', () => {
@@ -378,18 +379,35 @@ describe('extendStore (scoped overlay)', () => {
   });
 
   describe('vivify interaction', () => {
-    it('inherited paths vivify via the parent; the plain local layer does not', () => {
+    it('inherited AND local paths vivify — extendStore inherits the parent vivify option', () => {
       const parent = store(
         { a: null as { b: number } | null },
         { injector, vivify: 'auto' },
       );
-      const scope = extendStore(parent, { local: null as { x: number } | null });
+      const scope = extendStore(parent, {
+        local: null as { x: number } | null,
+      });
 
       scope.a.b.set(2); // inherited → vivifies via the parent
       expect(parent().a).toEqual({ b: 2 });
 
-      scope.local.x.set(5); // local plain store → dropped (no vivify)
-      expect(scope.local()).toBeNull();
+      // the local layer is built with the parent's options (vivify inherited via
+      // STORE_SHARED_OPTIONS), so local paths vivify too — no inherited-vs-local split.
+      scope.local.x.set(5);
+      expect(scope.local()).toEqual({ x: 5 });
+    });
+
+    it('the scope shares the parent injector-scoped cache and inherits its vivify (STORE_SHARED_OPTIONS)', () => {
+      const parent = store({ a: 1 }, { injector, vivify: 'auto' });
+      const scope = extendStore(parent, { b: 2 });
+      const p = (parent as any)[STORE_SHARED_OPTIONS];
+      const s = (scope as any)[STORE_SHARED_OPTIONS];
+      expect(s[STORE_SHARED_GLOBALS].cache).toBe(p[STORE_SHARED_GLOBALS].cache);
+      expect(s[STORE_SHARED_GLOBALS].registry).toBe(
+        p[STORE_SHARED_GLOBALS].registry,
+      );
+      expect(s.vivify).toBe('auto'); // inherited from the parent
+      expect(s.injector).toBe(p.injector);
     });
 
     it('a vivify-enabled store can back the local layer', () => {

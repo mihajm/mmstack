@@ -1,11 +1,8 @@
-import {
-  isDevMode,
-  linkedSignal,
-  untracked,
-  type Injector,
-} from '@angular/core';
-import { type Vivify } from '../util';
-import { toStore, type UnwrapOpaque, type WritableSignalStore } from './store';
+import { isDevMode, linkedSignal, untracked } from '@angular/core';
+import { STORE_SHARED_OPTIONS } from './internals';
+import type { UnwrapOpaque } from './opaque';
+import { toStore, type toStoreOptions } from './store';
+import type { WritableSignalStore } from './types';
 
 /**
  * A 3-way merge of a forked value against a changed base: given the common `ancestor` (the base
@@ -98,24 +95,16 @@ export function merge3<T>(ancestor: T, mine: T, theirs: T): T {
   return mine; // leaf / array / type-mismatch conflict → local wins
 }
 
+/**
+ * ForkStoreOptions, vivify/noUnionLeaves should remain the same & are automatically inherited, override carefully (advanced usecases)
+ */
+export type ForkStoreOptions<T> = toStoreOptions & {
+  strategy?: ForkStrategy<T>;
+};
+
 export function forkStore<T extends Record<string, any>>(
   base: WritableSignalStore<T>,
-  opt?: {
-    strategy?: ForkStrategy<T>;
-    injector?: Injector;
-    /**
-     * Store config for the FORK's store — NOT inherited from `base` (it's closed over inside
-     * the base's `toStore` and can't be read back). If the base was created with these, pass
-     * the same values or the fork's write semantics will differ:
-     *  - `vivify`: without it, a write through a `null`/`undefined` path is silently dropped on
-     *    the fork even though the base would have created the container. Match the base.
-     *  - `noUnionLeaves`: a perf promise; off just means the slower reactive leaf-probe. NOTE it
-     *    is a whole-store guarantee — a fork that flips a node's type (leaf↔substore) violates it,
-     *    and on `commit` the base receives the flipped value with stale cached leaf-ness.
-     */
-    vivify?: Vivify;
-    noUnionLeaves?: boolean;
-  },
+  opt?: ForkStoreOptions<T>,
 ): Fork<T> {
   // A mutable base mutates in place, so its value reference is stable across changes — which defeats merge3's identity-based change detection
   const mutableBase =
@@ -143,12 +132,13 @@ export function forkStore<T extends Record<string, any>>(
     computation: (theirs, prev) =>
       prev === undefined ? theirs : merge(prev.source, prev.value, theirs),
   });
-  const store = toStore(
-    staged,
-    opt?.injector,
-    opt?.vivify,
-    opt?.noUnionLeaves,
-  ) as unknown as WritableSignalStore<T>;
+  // Inherit the base's shared options (injector, vivify, noUnionLeaves + the
+  // proxy cache/registry), same as extendStore — a fork should vivify like its
+  // base and share its injector-scoped cache. `opt` overrides (advanced use).
+  const store = toStore(staged, {
+    ...(base as any)[STORE_SHARED_OPTIONS],
+    ...opt,
+  }) as unknown as WritableSignalStore<T>;
 
   return {
     store,

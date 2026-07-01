@@ -16,12 +16,15 @@ import { createVivify, isIndexProp, type Vivify } from '../util';
 import {
   IS_STORE,
   isStore,
-  PROXY_CACHE,
-  PROXY_CLEANUP,
+  PROXY_CACHE_TOKEN,
+  PROXY_CLEANUP_TOKEN,
   SCOPE_PARENT,
   SIGNAL_FN_PROP,
-  STORE_INJECTOR,
   STORE_KIND,
+  STORE_SHARED_GLOBALS,
+  STORE_SHARED_OPTIONS,
+  type ProxyCache,
+  type ProxyCleanupRegistry,
   type StoreKind,
 } from './internals';
 import { markAsLeaf } from './leaf';
@@ -42,21 +45,38 @@ import {
   type WritableSignalStore,
 } from './types';
 
-export { isStore, PROXY_CACHE, PROXY_CLEANUP } from './internals';
-export { isLeaf, LEAF } from './leaf';
-export {
-  isOpaque,
-  OPAQUE,
-  opaque,
-  type Opaque,
-  type UnwrapOpaque,
-} from './opaque';
-export { isWritableSignal } from './predicates';
-export {
-  type MutableSignalStore,
-  type SignalStore,
-  type WritableSignalStore,
-} from './types';
+export type toStoreOptions = {
+  injector?: Injector;
+  /**
+   * Opt-in autovivification: when writing through a `null`/`undefined` path, create the
+   * missing intermediate containers instead of dropping the write. Off by default.
+   *
+   * Levels whose current value is a known object/array re-vivify as that same shape — the
+   * knowledge is captured when the path is first accessed and cached, so it holds even after
+   * the value is later nulled. This option governs only genuinely-unknown (currently
+   * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
+   * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+   */
+  vivify?: Vivify;
+  /**
+   * Performance opt-in: promise that no node ever switches between leaf and substore (i.e. no
+   * unions mixing a primitive with an object/array). With this on, each node's leaf-ness is
+   * resolved once on the first {@link isLeaf} probe and cached as a constant, skipping the
+   * reactive `computed`. If a node's shape does change anyway, {@link isLeaf} keeps its first
+   * answer. Off by default.
+   */
+  noUnionLeaves?: boolean;
+  /**
+   * @internal
+   * Shared cleanup singletons, they get injected/passed automatically
+   */
+  [STORE_SHARED_GLOBALS]?: {
+    cache: ProxyCache;
+    registry: ProxyCleanupRegistry;
+  };
+};
+
+export type StoreOptions<T> = CreateSignalOptions<T> & toStoreOptions;
 
 /**
  * @internal Reads (or lazily builds + caches) the child node proxy for `prop` on `target`,
@@ -67,11 +87,13 @@ function getCachedChild(
   target: object,
   prop: PropertyKey,
   build: () => Signal<any>,
+  cache: ProxyCache,
+  cleanupRegistry: ProxyCleanupRegistry,
 ): Signal<any> {
-  let storeCache = PROXY_CACHE.get(target);
+  let storeCache = cache.get(target);
   if (!storeCache) {
     storeCache = new Map();
-    PROXY_CACHE.set(target, storeCache);
+    cache.set(target, storeCache);
   }
 
   const cachedRef = storeCache.get(prop);
@@ -79,13 +101,13 @@ function getCachedChild(
     const cached = cachedRef.deref();
     if (cached) return cached;
     storeCache.delete(prop);
-    PROXY_CLEANUP.unregister(cachedRef);
+    cleanupRegistry.unregister(cachedRef);
   }
 
   const proxy = build();
   const ref = new WeakRef(proxy);
   storeCache.set(prop, ref);
-  PROXY_CLEANUP.register(proxy, { target, prop }, ref);
+  cleanupRegistry.register(proxy, { target, prop }, ref);
   return proxy;
 }
 
@@ -99,15 +121,13 @@ function buildChildNode(
   target: WritableSignal<any> | MutableSignal<any>,
   prop: Key,
   isMutableSource: boolean,
-  injector: Injector,
-  vivify: Vivify,
-  noUnionLeaves: boolean,
+  options: Required<toStoreOptions>,
 ): Signal<any> {
   const value = untracked(target);
   const valueIsRecord = isRecord(value);
   const valueIsArray = Array.isArray(value);
 
-  const nodeVivify = resolveVivify(value, vivify);
+  const nodeVivify = resolveVivify(value, options.vivify);
   const vivifyFn = createVivify(nodeVivify);
 
   const equalFn =
@@ -131,30 +151,24 @@ function buildChildNode(
       });
 
   const childSample = untracked(computation);
-  const childVivify = resolveVivify(childSample, vivify);
-  const proxy = toStore(computation, injector, childVivify, noUnionLeaves);
+  const childVivify = resolveVivify(childSample, options.vivify);
+  const proxy = toStore(computation, options);
 
-  markAsLeaf(proxy, computation, childVivify !== false, noUnionLeaves);
+  markAsLeaf(proxy, computation, childVivify !== false, options.noUnionLeaves);
   return proxy;
 }
 
 export function toStore<T extends AnyRecord>(
   source: MutableSignal<T>,
-  injector?: Injector,
-  vivify?: Vivify,
-  noUnionLeaves?: boolean,
+  options?: toStoreOptions,
 ): MutableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: WritableSignal<T>,
-  injector?: Injector,
-  vivify?: Vivify,
-  noUnionLeaves?: boolean,
+  options?: toStoreOptions,
 ): WritableSignalStore<T>;
 export function toStore<T extends AnyRecord>(
   source: Signal<T>,
-  injector?: Injector,
-  vivify?: Vivify,
-  noUnionLeaves?: boolean,
+  options?: toStoreOptions,
 ): SignalStore<T>;
 
 /**
@@ -174,9 +188,12 @@ export function toStore<T extends AnyRecord>(
  */
 export function toStore<T extends AnyRecord>(
   source: Signal<T> | WritableSignal<T> | MutableSignal<T>,
-  injector?: Injector,
-  vivify: Vivify = false,
-  noUnionLeaves = false,
+  {
+    injector,
+    vivify = false,
+    noUnionLeaves = false,
+    ...rest
+  }: toStoreOptions = {},
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
   if (isStore<T>(source)) return source;
 
@@ -197,6 +214,19 @@ export function toStore<T extends AnyRecord>(
     if (isRecord(v)) return 'record';
     return 'primitive';
   });
+
+  const STORE_OPTIONS: Required<toStoreOptions> = {
+    injector,
+    vivify,
+    noUnionLeaves,
+    [STORE_SHARED_GLOBALS]: {
+      cache:
+        rest[STORE_SHARED_GLOBALS]?.cache ?? injector.get(PROXY_CACHE_TOKEN),
+      registry:
+        rest[STORE_SHARED_GLOBALS]?.registry ??
+        injector.get(PROXY_CLEANUP_TOKEN),
+    },
+  };
 
   // built lazily so non-array nodes never allocate it
   let length: Signal<number> | undefined;
@@ -250,19 +280,22 @@ export function toStore<T extends AnyRecord>(
       return { enumerable: true, configurable: true };
     },
     get(target: any, prop, receiver) {
-      if (prop === IS_STORE) return true;
-      if (prop === STORE_KIND)
-        return isMutableSource
-          ? 'mutable'
-          : isWritableSource
-            ? 'writable'
-            : 'readonly';
-      if (prop === STORE_INJECTOR) return injector;
+      if (typeof prop === 'symbol') {
+        if (prop === IS_STORE) return true;
+        if (prop === STORE_KIND)
+          return isMutableSource
+            ? 'mutable'
+            : isWritableSource
+              ? 'writable'
+              : 'readonly';
+        if (prop === STORE_SHARED_OPTIONS) return STORE_OPTIONS;
+      }
+
       if (prop === 'asReadonlyStore')
         return () => {
           if (!isWritableSource) return s;
           return untracked(() =>
-            toStore(source.asReadonly(), injector, vivify, noUnionLeaves),
+            toStore(source.asReadonly(), { injector, vivify, noUnionLeaves }),
           );
         };
 
@@ -278,7 +311,7 @@ export function toStore<T extends AnyRecord>(
               : isWritableSource
                 ? 'writable'
                 : 'readonly',
-            injector as Injector,
+            STORE_OPTIONS,
           );
 
       if (k === 'array') {
@@ -298,15 +331,18 @@ export function toStore<T extends AnyRecord>(
       if (k === 'array' && !isIndexProp(prop))
         return Reflect.get(target, prop, receiver);
 
-      return getCachedChild(target, prop, () =>
-        buildChildNode(
-          target,
-          k === 'array' ? +(prop as string) : (prop as Key),
-          isMutableSource,
-          injector as Injector,
-          vivify,
-          noUnionLeaves,
-        ),
+      return getCachedChild(
+        target,
+        prop,
+        () =>
+          buildChildNode(
+            target,
+            k === 'array' ? +(prop as string) : (prop as Key),
+            isMutableSource,
+            STORE_OPTIONS,
+          ),
+        STORE_OPTIONS[STORE_SHARED_GLOBALS].cache,
+        STORE_OPTIONS[STORE_SHARED_GLOBALS].registry,
       );
     },
   });
@@ -329,15 +365,15 @@ function scopedStore(
   parent: SignalStore<AnyRecord>,
   seed: AnyRecord | Signal<AnyRecord>,
   kind: ScopeKind,
-  injector: Injector,
+  options: Required<toStoreOptions>,
 ): SignalStore<AnyRecord> {
   const local = isSignal(seed)
-    ? toStore(seed as Signal<AnyRecord>, injector)
+    ? toStore(seed as Signal<AnyRecord>, options)
     : kind === 'mutable'
-      ? mutableStore(seed, { injector })
+      ? mutableStore(seed, options)
       : kind === 'readonly'
-        ? store(seed, { injector }).asReadonlyStore()
-        : store(seed, { injector });
+        ? store(seed, options).asReadonlyStore()
+        : store(seed, options);
 
   const localValue = () => untracked(local) as object;
   const parentValue = () => untracked(parent) as object;
@@ -383,18 +419,20 @@ function scopedStore(
 
   const scope: any = new Proxy(base, {
     get(target, prop) {
-      if (prop === IS_STORE) return true;
-      if (prop === STORE_KIND) return kind;
-      if (prop === STORE_INJECTOR) return injector;
-      if (prop === SCOPE_PARENT) return parent;
+      if (typeof prop === 'symbol') {
+        if (prop === IS_STORE) return true;
+        if (prop === STORE_KIND) return kind;
+        if (prop === SCOPE_PARENT) return parent;
+        if (prop === STORE_SHARED_OPTIONS) return options;
+      }
       if (prop === 'extend')
         return (childSeed: AnyRecord | Signal<AnyRecord>) =>
-          scopedStore(scope, childSeed, kind, injector);
+          scopedStore(scope, childSeed, kind, options);
       if (prop === 'asReadonlyStore')
         return () =>
           toStore(
             computed(() => ({ ...parent(), ...local() })),
-            injector,
+            options,
           );
       if (typeof prop === 'symbol' || SIGNAL_FN_PROP.has(prop))
         return target[prop as keyof typeof target];
@@ -431,20 +469,25 @@ function storeKind(s: any): StoreKind {
   );
 }
 
+export type ExtendStoreOptions = Omit<
+  toStoreOptions,
+  'vivify' | 'noUnionLeaves' | typeof STORE_SHARED_GLOBALS
+>;
+
 export function extendStore<T extends AnyRecord, L extends AnyRecord>(
   store: MutableSignalStore<T>,
   source: MutableSignal<L> | L,
-  injector?: Injector,
+  options?: ExtendStoreOptions,
 ): MutableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
 export function extendStore<T extends AnyRecord, L extends AnyRecord>(
   store: WritableSignalStore<T>,
   source: WritableSignal<L> | L,
-  injector?: Injector,
+  options?: ExtendStoreOptions,
 ): WritableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
 export function extendStore<T extends AnyRecord, L extends AnyRecord>(
   store: SignalStore<T>,
   source: Signal<L> | L,
-  injector?: Injector,
+  options?: ExtendStoreOptions,
 ): SignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
 
 /**
@@ -464,14 +507,14 @@ export function extendStore<T extends AnyRecord, L extends AnyRecord>(
 export function extendStore(
   store: SignalStore<AnyRecord>,
   source: AnyRecord | Signal<AnyRecord>,
-  injector?: Injector,
+  options?: ExtendStoreOptions,
 ): SignalStore<AnyRecord> {
-  return scopedStore(
-    store,
-    source,
-    storeKind(store),
-    injector ?? (store as any)[STORE_INJECTOR] ?? inject(Injector),
-  );
+  const opt: Required<toStoreOptions> = {
+    ...(store as any)[STORE_SHARED_OPTIONS],
+    ...options,
+  };
+
+  return scopedStore(store, source, storeKind(store), opt);
 }
 
 /**
@@ -503,12 +546,11 @@ export function store<T extends AnyRecord>(
     noUnionLeaves?: boolean;
   },
 ): WritableSignalStore<T> {
-  return toStore(
-    signal(value, opt),
-    opt?.injector,
-    opt?.vivify ?? false,
-    opt?.noUnionLeaves ?? false,
-  );
+  return toStore(signal(value, opt), {
+    vivify: false,
+    noUnionLeaves: false,
+    ...opt,
+  });
 }
 
 /**
@@ -540,10 +582,9 @@ export function mutableStore<T extends AnyRecord>(
     noUnionLeaves?: boolean;
   },
 ): MutableSignalStore<T> {
-  return toStore(
-    mutable(value, opt),
-    opt?.injector,
-    opt?.vivify ?? false,
-    opt?.noUnionLeaves ?? false,
-  );
+  return toStore(mutable(value, opt), {
+    vivify: false,
+    noUnionLeaves: false,
+    ...opt,
+  });
 }

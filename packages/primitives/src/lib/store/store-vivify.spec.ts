@@ -1,18 +1,13 @@
 import { Injector, isSignal, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import {
-  PROXY_CACHE,
-  PROXY_CLEANUP,
-  mutableStore,
-  store,
-  toStore,
-} from './store';
+import { PROXY_CACHE_TOKEN, PROXY_CLEANUP_TOKEN } from './internals';
+import { mutableStore, store, toStore } from './store';
 
 /** Simulate the GC reclaiming a cached child proxy: its WeakRef now derefs to undefined. */
 function simulateCollected(target: object, prop: PropertyKey): void {
-  PROXY_CACHE.get(target)?.set(prop, {
-    deref: () => undefined,
-  } as WeakRef<never>);
+  TestBed.inject(PROXY_CACHE_TOKEN)
+    .get(target)
+    ?.set(prop, { deref: () => undefined } as WeakRef<never>);
 }
 
 describe('store vivification (deep / e2e)', () => {
@@ -226,10 +221,10 @@ describe('store vivification (deep / e2e)', () => {
     });
   });
 
-  describe('reconstruction (cache eviction is deterministic via PROXY_CACHE)', () => {
+  describe('reconstruction (cache eviction is deterministic via the proxy cache)', () => {
     it('rebuilds a child proxy after its cached WeakRef is cleared', () => {
       const sig = signal({ a: { b: 1 } });
-      const s = toStore(sig, injector);
+      const s = toStore(sig, { injector });
       const first = s.a;
       expect(first.b()).toBe(1);
 
@@ -243,10 +238,10 @@ describe('store vivification (deep / e2e)', () => {
 
     it('rebuilds after the finalization registry prunes the cache entry', () => {
       const sig = signal({ a: { b: 1 } });
-      const s = toStore(sig, injector);
+      const s = toStore(sig, { injector });
       const first = s.a;
 
-      PROXY_CACHE.get(sig)?.delete('a'); // simulate the finalizer callback
+      TestBed.inject(PROXY_CACHE_TOKEN).get(sig)?.delete('a'); // simulate the finalizer callback
 
       const rebuilt = s.a;
       expect(rebuilt).not.toBe(first);
@@ -255,13 +250,13 @@ describe('store vivification (deep / e2e)', () => {
 
     it('unregisters the stale finalizer when rebuilding over a dead WeakRef', () => {
       const sig = signal({ a: { b: 1 } });
-      const s = toStore(sig, injector);
+      const s = toStore(sig, { injector });
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       s.a; // build + register the finalizer
       const deadRef = { deref: () => undefined } as WeakRef<never>;
-      PROXY_CACHE.get(sig)?.set('a', deadRef);
+      TestBed.inject(PROXY_CACHE_TOKEN).get(sig)?.set('a', deadRef);
 
-      const spy = vi.spyOn(PROXY_CLEANUP, 'unregister');
+      const spy = vi.spyOn(TestBed.inject(PROXY_CLEANUP_TOKEN), 'unregister');
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       s.a; // rebuild path must unregister the stale token
       expect(spy).toHaveBeenCalledWith(deadRef);
@@ -270,7 +265,7 @@ describe('store vivification (deep / e2e)', () => {
 
     it('rebuilds from scratch via auto after the value is nulled and the proxy is cleared', () => {
       const sig = signal({ a: { b: 1 } as { b: number } | null });
-      const s = toStore(sig, injector, 'auto');
+      const s = toStore(sig, { injector, vivify: 'auto' });
       expect(s.a.b()).toBe(1); // build while `a` is a record
       s.a.set(null); // `a` is now null — no live shape knowledge remains
       expect(sig().a).toBeNull();
@@ -284,7 +279,7 @@ describe('store vivification (deep / e2e)', () => {
 
     it('rebuilds a vivified array path from scratch via auto', () => {
       const sig = signal({ a: [1] as number[] | null });
-      const s = toStore(sig, injector, 'auto');
+      const s = toStore(sig, { injector, vivify: 'auto' });
       expect(s.a[0]()).toBe(1);
       s.a.set(null);
 

@@ -37,6 +37,14 @@ export type PointerDragState = {
   modifiers: PointerModifiers;
   /** Mouse button that started the gesture (`-1` when idle). */
   button: number;
+  /** The pointing device: `'mouse' | 'touch' | 'pen'` (`''` when idle). */
+  pointerType: string;
+  /**
+   * The element the gesture started on: the `handleSelector` match when one is
+   * set (so a single delegated listener can tell which child started the drag),
+   * otherwise the listener's element. `null` when idle.
+   */
+  origin: HTMLElement | null;
 };
 
 export type PointerDragOptions = SensorRunOptions & {
@@ -53,12 +61,24 @@ export type PointerDragOptions = SensorRunOptions & {
   coordinateSpace?: 'client' | 'page';
   /** Pixels the pointer must travel before `active` flips true. @default 3 */
   activationThreshold?: number;
-  /** Throttle (ms) for `current`/`delta` updates. @default 16 */
+  /**
+   * Throttle (ms) for `current`/`delta` updates. @default 16
+   *
+   * Note: a final sub-throttle move right before `pointerup` may not surface on
+   * the throttled view (it coalesces into the terminal idle). Logic that must act
+   * on the *exact* release position should read {@link PointerDragSignal.unthrottled}.
+   */
   throttle?: number;
   /** Only start when the pointerdown target matches this selector (delegated handles). */
   handleSelector?: string;
   /** Mouse buttons that may start a gesture. @default [0] (primary) */
   buttons?: number[];
+  /**
+   * Stop the `pointerdown` from propagating once this sensor claims it. Lets an
+   * inner sensor win over an outer one on the same element tree (e.g. a nested
+   * sortable inside another). @default false
+   */
+  stopPropagation?: boolean;
 };
 
 type InternalPointerDragSignal = Signal<PointerDragState> & {
@@ -81,6 +101,8 @@ const IDLE: PointerDragState = {
   pointerId: null,
   modifiers: { shift: false, alt: false, ctrl: false, meta: false },
   button: -1,
+  pointerType: '',
+  origin: null,
 };
 
 function stateEqual(a: PointerDragState, b: PointerDragState): boolean {
@@ -90,6 +112,8 @@ function stateEqual(a: PointerDragState, b: PointerDragState): boolean {
     a.current.x === b.current.x &&
     a.current.y === b.current.y &&
     a.button === b.button &&
+    a.pointerType === b.pointerType &&
+    a.origin === b.origin &&
     a.modifiers.shift === b.modifiers.shift &&
     a.modifiers.alt === b.modifiers.alt &&
     a.modifiers.ctrl === b.modifiers.ctrl &&
@@ -134,6 +158,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     throttle = 16,
     handleSelector,
     buttons = [0],
+    stopPropagation = false,
     debugName = 'pointerDrag',
   } = opt ?? {};
 
@@ -159,9 +184,13 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     debugName,
   });
 
+  const threshold2 = activationThreshold * activationThreshold;
+
   let startPoint: PointerPoint = { x: 0, y: 0 };
   let activePointerId: number | null = null;
   let activeButton = -1;
+  let activePointerType = '';
+  let activeOrigin: HTMLElement | null = null;
   let activated = false;
   let gesture: AbortController | null = null;
 
@@ -182,6 +211,8 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     gesture = null;
     activePointerId = null;
     activeButton = -1;
+    activePointerType = '';
+    activeOrigin = null;
     activated = false;
     state.set(IDLE);
     state.flush(); // terminal transition: reflect IDLE now, not on the trailing edge
@@ -191,8 +222,8 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     if (e.pointerId !== activePointerId) return;
     const current = coord(e);
     const delta = { x: current.x - startPoint.x, y: current.y - startPoint.y };
-    if (!activated && Math.hypot(delta.x, delta.y) >= activationThreshold) {
-      activated = true;
+    if (!activated && delta.x * delta.x + delta.y * delta.y >= threshold2) {
+      activated = true; // squared compare — no sqrt on the pre-activation path
     }
     state.set({
       active: activated,
@@ -202,6 +233,8 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
       pointerId: activePointerId,
       modifiers: mods(e),
       button: activeButton, // pointermove button is -1; keep the down-button
+      pointerType: activePointerType,
+      origin: activeOrigin,
     });
   };
 
@@ -220,11 +253,15 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   const onDown = (el: HTMLElement) => (e: PointerEvent): void => {
     if (activePointerId !== null) return;
     if (!buttons.includes(e.button)) return;
-    if (handleSelector && !(e.target as Element)?.closest?.(handleSelector)) {
-      return;
-    }
+    const matched = handleSelector
+      ? ((e.target as Element)?.closest?.(handleSelector) as HTMLElement | null)
+      : el;
+    if (!matched) return; // handleSelector set but pointerdown landed outside a handle
+    if (stopPropagation) e.stopPropagation(); // claim it: an outer sensor won't also start
     activePointerId = e.pointerId;
     activeButton = e.button;
+    activePointerType = e.pointerType;
+    activeOrigin = matched;
     activated = false;
     startPoint = coord(e);
     try {
@@ -249,6 +286,8 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
       pointerId: e.pointerId,
       modifiers: mods(e),
       button: e.button,
+      pointerType: activePointerType,
+      origin: activeOrigin,
     });
   };
 

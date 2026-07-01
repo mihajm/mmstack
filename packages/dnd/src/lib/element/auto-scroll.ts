@@ -10,11 +10,7 @@ import {
   runInInjectionContext,
 } from '@angular/core';
 
-import {
-  missingPluginError,
-  resolveAutoScroll,
-  type AutoScrollPlugin,
-} from '../provide';
+import { resolveAutoScroll, type AutoScrollPlugin } from '../provide';
 
 export type AutoScrollOptions = {
   /** Defaults to the host element. */
@@ -46,12 +42,9 @@ export function autoScroll(opts: AutoScrollOptions = {}): void {
   runInInjectionContext(injector, () => {
     if (isPlatformServer(inject(PLATFORM_ID))) return;
 
-    const plugin = resolveAutoScroll(opts.autoScroll);
-    if (!plugin)
-      throw missingPluginError(
-        'autoScroll',
-        '@atlaskit/pragmatic-drag-and-drop-auto-scroll',
-      );
+    // Resolve inside the injection context (the getter can be called later, outside one).
+    const plugin = resolveAutoScroll(injector, opts.autoScroll)();
+    if (!plugin) return;
 
     const host = inject<ElementRef<HTMLElement>>(ElementRef);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

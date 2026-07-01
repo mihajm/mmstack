@@ -1,12 +1,16 @@
 import {
   inject,
   InjectionToken,
+  isDevMode,
   makeEnvironmentProviders,
+  runInInjectionContext,
   type EnvironmentProviders,
+  type Injector,
 } from '@angular/core';
 import type { Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 
 import type { Edge } from './internal/types';
+import type { DragEngine } from './session';
 
 /**
  * Optional sub-libraries are wired in *structurally* so core never imports the
@@ -92,32 +96,151 @@ export function injectDndConfig(): DndConfig | null {
   return inject(DND_CONFIG, { optional: true });
 }
 
-/** Resolution order for any plugin/default: per-call override → DI default → `null`. */
-export function resolveHitbox(override?: HitboxPlugin): HitboxPlugin | null {
-  return override ?? injectDndConfig()?.plugins?.hitbox ?? null;
-}
+export type OverrideOption<T extends Required<DndPlugins>[keyof DndPlugins]> =
+  | T
+  | null
+  | undefined;
 
-export function resolveAutoScroll(
-  override?: AutoScrollPlugin,
-): AutoScrollPlugin | null {
-  return override ?? injectDndConfig()?.plugins?.autoScroll ?? null;
-}
+const warnedPlugins = new Set<string>();
 
-export function resolvePostMoveFlash(
-  override?: PostMoveFlash,
-): PostMoveFlash | null {
-  return override ?? injectDndConfig()?.plugins?.postMoveFlash ?? null;
-}
-
-/** Resolves a registered announce plugin (option → DI → `null`). See `injectAnnounce`. */
-export function resolveAnnounce(
-  override?: AnnouncePlugin,
-): AnnouncePlugin | null {
-  return override ?? injectDndConfig()?.plugins?.announce ?? null;
-}
-
-export function missingPluginError(plugin: string, npmPackage: string): Error {
-  return new Error(
-    `[@mmstack/dnd] This feature needs the "${plugin}" plugin. Install \`${npmPackage}\` and register it via \`provideDnd({ plugins: { ${plugin}: ... } })\` (or pass it directly in the composable's options).`,
+/**
+ * Dev-only, warn-once notice that a requested feature has no plugin registered —
+ * the caller then no-ops (graceful degradation, never a throw). Silent in prod.
+ */
+function warnMissingPlugin(plugin: string): void {
+  if (!isDevMode() || warnedPlugins.has(plugin)) return;
+  warnedPlugins.add(plugin);
+  console.warn(
+    `[@mmstack/dnd] The "${plugin}" feature needs a plugin, but none is registered — skipping (no-op). ` +
+      `Install the matching pragmatic plugin or use @mmstack/dnd's built-in, then register it via ` +
+      `\`provideDnd({ plugins: { ${plugin}: … } })\` (or the composable option).`,
   );
 }
+
+/**
+ * Builds a memoized, injector-captured resolver for an optional plugin:
+ * `resolveHitbox(injector, override)` returns a `() => plugin | null` getter
+ * (per-call override → DI default → `null`) that can be called LATER, outside an
+ * injection context (e.g. a during-drag callback) — the injector is captured, the
+ * DI read runs through it once, then caches. On the first miss it warns once
+ * (calling it signals the feature is required); pass `warn: false` for callers that
+ * read a plugin opportunistically (`draggable`'s `.edge`) or have a built-in
+ * fallback (`announce`).
+ */
+function createLazyResolver<
+  TPlugin extends keyof Required<Required<DndPlugins>>,
+>(
+  plugin: TPlugin,
+): (
+  injector: Injector,
+  override?: OverrideOption<Required<DndPlugins>[TPlugin]>,
+  warn?: boolean,
+) => () => Required<DndPlugins>[TPlugin] | null {
+  return (injector, override, warn = true) => {
+    let attempted = false;
+    let resolved: Required<DndPlugins>[TPlugin] | null = null;
+
+    return () => {
+      if (!attempted) {
+        resolved =
+          override ??
+          runInInjectionContext(
+            injector,
+            () =>
+              (injectDndConfig()?.plugins?.[plugin] as
+                | Required<DndPlugins>[TPlugin]
+                | undefined) ?? null,
+          );
+        attempted = true;
+        if (resolved == null && warn) warnMissingPlugin(plugin);
+      }
+      return resolved;
+    };
+  };
+}
+
+/**
+ * Lazy, memoized plugin resolvers: `(injector, override?, warn = true) => () => plugin | null`.
+ * The getter can be called outside an injection context; on the first miss it warns
+ * (dev, once) — pass `warn: false` to stay silent (opportunistic reads / built-in fallback).
+ */
+export const resolveHitbox = createLazyResolver('hitbox');
+export const resolveAutoScroll = createLazyResolver('autoScroll');
+export const resolvePostMoveFlash = createLazyResolver('postMoveFlash');
+export const resolveAnnounce = createLazyResolver('announce');
+
+/* ── Option defaults (DI) ─────────────────────────────────────────────────
+ * Each primitive resolves an option as `per-call ?? DI-default ?? built-in`.
+ * DI defaults layer too: a per-primitive default inherits the common one
+ * (e.g. `engine`) unless it sets that key itself. All defaults are partial. */
+
+/** A provider + a matching reader for one defaults token — see {@link createDefaultsToken}. */
+export type DefaultsToken<T extends object> = {
+  /** Register defaults: a value, or a factory (run in an injection context). */
+  provide: (defaults: T | (() => T)) => EnvironmentProviders;
+  /**
+   * Read the defaults, or `null` if none registered. Accepts an explicit injector
+   * (uses `.get`) so it works outside an injection context; otherwise `inject`s.
+   */
+  inject: (injector?: Injector) => T | null;
+};
+
+/**
+ * Builds a `provideX` / `injectX` pair over a private token (the token itself is
+ * never exported). `inheritFrom` layers a broader defaults reader underneath, so
+ * the resolved value is `{ ...inherited, ...own }` — own keys win, and either side
+ * being absent still yields the other (or `null` when both are).
+ */
+export function createDefaultsToken<T extends object>(
+  name: string,
+  inheritFrom?: (injector?: Injector) => Partial<T> | null,
+): DefaultsToken<T> {
+  const TOKEN = new InjectionToken<T>(name);
+  return {
+    provide: (defaults) =>
+      makeEnvironmentProviders([
+        typeof defaults === 'function'
+          ? { provide: TOKEN, useFactory: defaults }
+          : { provide: TOKEN, useValue: defaults },
+      ]),
+    inject: (injector) => {
+      const own = injector
+        ? injector.get(TOKEN, null, { optional: true })
+        : inject(TOKEN, { optional: true });
+      const inherited = inheritFrom?.(injector) ?? null;
+      return own || inherited ? ({ ...inherited, ...own } as T) : null;
+    },
+  };
+}
+
+/** Fill option keys the caller left `undefined` from `defaults` (per-call always wins). */
+export function withDefaults<T extends object>(
+  opts: T,
+  defaults: Partial<T> | null | undefined,
+): T {
+  if (!defaults) return opts;
+  const out: T = { ...opts };
+  for (const key in defaults) {
+    const value = defaults[key];
+    if (out[key] === undefined && value !== undefined) out[key] = value as T[Extract<keyof T, string>];
+  }
+  return out;
+}
+
+/** Cross-primitive defaults — set once, inherited by draggable / dropTarget / reorderable. */
+export type DndDefaults = {
+  /** Default drag engine for every primitive unless a per-primitive default or per-call option overrides. */
+  engine?: DragEngine;
+};
+
+const dndDefaults = createDefaultsToken<DndDefaults>('@mmstack/dnd:defaults');
+
+/**
+ * Register cross-primitive option defaults (currently `engine`). Inherited by
+ * every primitive; a per-primitive `provideXDefaults` or a per-call option wins.
+ *
+ * @example provideDndDefaults({ engine: 'pointer' }) // every list/draggable goes pointer-mode
+ */
+export const provideDndDefaults = dndDefaults.provide;
+/** Read the cross-primitive defaults (or `null`). @see {@link provideDndDefaults} */
+export const injectDndDefaults = dndDefaults.inject;

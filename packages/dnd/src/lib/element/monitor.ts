@@ -65,7 +65,8 @@ export function monitor<TAccept = unknown, TMeta extends DragMeta = DragMeta>(
       };
 
     const session = inject(DndSession);
-    const hitbox = resolveHitbox(opts.hitbox);
+    // Opportunistic (only reports `event.edge`) → resolve quietly (warn: false).
+    const getHitbox = resolveHitbox(injector, opts.hitbox, false);
 
     const providedAccept = opts.accepts;
 
@@ -73,8 +74,7 @@ export function monitor<TAccept = unknown, TMeta extends DragMeta = DragMeta>(
       data: Record<string | symbol, unknown>,
     ): { data: TAccept; meta: TMeta } | null => {
       const unboxed = unboxData<unknown>(data);
-      // No `accepts` → only report @mmstack drags, so `source()!.data` is never
-      // undefined while `isDragging()` is true (foreign drags aren't "ours").
+      // No `accepts` → only report @mmstack drags, so source() is defined while isDragging() is true.
       if (providedAccept) {
         if (!untracked(() => providedAccept(unboxed))) return null;
       } else if (unboxed === undefined) {
@@ -112,7 +112,7 @@ export function monitor<TAccept = unknown, TMeta extends DragMeta = DragMeta>(
             opts.onDrop?.({
               data: a.data,
               meta: a.meta,
-              edge: extractEdge(location.current.dropTargets, hitbox),
+              edge: extractEdge(location.current.dropTargets, getHitbox()),
               location: {
                 current: mapDropTargets(location.current.dropTargets),
                 previous: mapDropTargets(location.previous.dropTargets),

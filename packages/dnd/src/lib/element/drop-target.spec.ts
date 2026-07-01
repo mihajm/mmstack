@@ -3,6 +3,9 @@ import { TestBed } from '@angular/core/testing';
 import type { dropTargetForElements as PDDropTarget } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
 import { signal } from '@angular/core';
+import type { Edge } from '../internal/types';
+import { trackRuns } from '../testing/reactivity';
+import { makeDragSession } from '../testing/drag-session';
 
 import { boxData, unboxData } from '../internal/payload';
 import { provideDnd, type HitboxPlugin } from '../provide';
@@ -67,13 +70,7 @@ function makeSession(
   targets: DropTargetHit[],
   sourceData: Record<string | symbol, unknown> = boxData<Card>({ id: 'c' }),
 ): DragSession {
-  return {
-    sourceEl: document.createElement('div'),
-    sourceData,
-    targets,
-    pointer: { x: 0, y: 0 },
-    kind: 'transfer',
-  };
+  return makeDragSession({ targets, sourceData });
 }
 
 describe('dropTarget — derived state', () => {
@@ -131,8 +128,10 @@ describe('dropTarget — derived state', () => {
     expect(ref.closestEdge()).toBe('top');
   });
 
-  it('throws a helpful error when edges are requested without a hitbox', () => {
-    expect(() => setup({ edges: ['top'] })).toThrow(/hitbox/);
+  it('warns and no-ops (does not throw) when edges are requested without a hitbox', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(() => setup({ edges: ['top'] })).not.toThrow(); // degrades: no edge, drop still works
+    spy.mockRestore();
   });
 
   it('clears hover / innermost / edge when disabled flips mid-hover (#7)', () => {
@@ -305,16 +304,18 @@ describe('dropTarget — callbacks & reactivity', () => {
     expect(unboxData(data ?? {})).toEqual({ slot: 1 });
   });
 
-  it('surfaces a hitbox diagnostic when dynamic edges become non-empty without a hitbox (#9)', () => {
+  it('degrades (warns, no edge) when dynamic edges become non-empty without a hitbox (#9)', () => {
     const edges = signal<('top' | 'bottom')[] | undefined>(undefined);
     const { config } = build({ edges }); // starts empty → setup does not throw
     edges.set(['top']);
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(() =>
       config.getData?.({
         input: { clientX: 0, clientY: 0 } as never,
         element: document.createElement('div'),
       } as never),
-    ).toThrow(/hitbox/);
+    ).not.toThrow(); // missing hitbox → no edge attached, but the drop still works
+    spy.mockRestore();
   });
 
   it('onDrop fires for accepted sources with mapped (unboxed) location and null edge sans hitbox', () => {
@@ -341,5 +342,76 @@ describe('dropTarget — callbacks & reactivity', () => {
     expect(drops[0].data).toEqual({ id: 'a' });
     expect(drops[0].edge).toBeNull();
     expect(drops[0].location.current[0].data).toEqual({ slot: 2 });
+  });
+});
+
+describe('dropTarget — reactivity (recomputation counts) & gate separation', () => {
+  beforeEach(() => dropTargetMock.mockReset());
+
+  const edgeHitbox: HitboxPlugin = {
+    attachClosestEdge: (data) => data,
+    extractClosestEdge: (data) => (data as { __edge?: Edge }).__edge ?? null,
+  };
+
+  it('isDragOver/isInnermost stay stable across frames; closestEdge refreshes per frame', () => {
+    const { ref, element, session } = setup({
+      edges: ['top'],
+      providers: [provideDnd({ plugins: { hitbox: edgeHitbox } })],
+    });
+    const overRuns = trackRuns(() => ref.isDragOver());
+    const innerRuns = trackRuns(() => ref.isInnermost());
+    const edgeRuns = trackRuns(() => ref.closestEdge());
+    TestBed.tick();
+    session.set(makeSession([{ element, data: { __edge: 'top' } }]));
+    TestBed.tick();
+    const [o, n, e] = [overRuns(), innerRuns(), edgeRuns()];
+
+    // frames: same hovered element (stable identity), fresh edge token each time
+    for (const edge of ['bottom', 'top', 'bottom']) {
+      session.set(makeSession([{ element, data: { __edge: edge } }]));
+      TestBed.tick();
+    }
+    expect(overRuns()).toBe(o); // membership unchanged → no recompute
+    expect(innerRuns()).toBe(n);
+    expect(edgeRuns()).toBe(e + 3); // edge follows the live token
+  });
+
+  it('isDragOver reflects membership, but dragOverData still gates on accepts (foreign source)', () => {
+    const { ref, element, session } = setup();
+    session.set(
+      makeSession([{ element, data: {} }], boxData<unknown>({ notACard: true })),
+    );
+    expect(ref.isDragOver()).toBe(true); // element is in the hovered stack
+    expect(ref.dragOverData()).toBeUndefined(); // ...but the payload isn't accepted
+  });
+});
+
+describe('dropTarget — pointer engine', () => {
+  beforeEach(() => dropTargetMock.mockReset());
+
+  it('engine:"pointer" skips pragmatic; reactive state still flows from the unified session', () => {
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    const { ref, session } = TestBed.runInInjectionContext(() => {
+      const s = TestBed.inject(DndSession).session;
+      const r = dropTarget<Card>({ accepts: isCard, engine: 'pointer' });
+      return { ref: r, session: s };
+    });
+
+    expect(dropTargetMock).not.toHaveBeenCalled(); // not registered with pragmatic
+    // drive the session the way the pointer engine would
+    session.set(
+      makeDragSession({
+        targets: [{ element, data: {} }],
+        sourceData: boxData<Card>({ id: 'c' }),
+        engine: 'pointer',
+      }),
+    );
+    expect(ref.isDragOver()).toBe(true);
+    expect(ref.isInnermost()).toBe(true);
+    expect(ref.dragOverData()).toEqual({ id: 'c' });
   });
 });

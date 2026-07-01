@@ -54,6 +54,25 @@ describe('DndAnnouncer', () => {
     TestBed.inject(DndAnnouncer);
     expect(regions('polite')).toHaveLength(0);
   });
+
+  it('removes both live regions on destroy (no DOM leak)', () => {
+    TestBed.inject(DndAnnouncer);
+    expect(regions('polite')).toHaveLength(1);
+    expect(regions('assertive')).toHaveLength(1);
+    TestBed.resetTestingModule(); // tears down the root injector → onDestroy
+    expect(regions('polite')).toHaveLength(0);
+    expect(regions('assertive')).toHaveLength(0);
+  });
+
+  it('announce is a safe no-op on the server (no region, no throw)', () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const a = TestBed.inject(DndAnnouncer);
+    expect(() => a.announce('nope', 'assertive')).not.toThrow();
+    expect(regions('assertive')).toHaveLength(0);
+  });
 });
 
 describe('injectAnnounce (pluggable)', () => {

@@ -25,15 +25,17 @@ beforeEach(() => {
 });
 
 describe('autoScroll', () => {
-  it('throws a helpful error when no plugin is registered', () => {
+  it('warns and no-ops (does not throw) when no plugin is registered', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
       ],
     });
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(() =>
       TestBed.runInInjectionContext(() => autoScroll()),
-    ).toThrow(/auto-scroll/i);
+    ).not.toThrow(); // missing plugin degrades gracefully now (dev warn + no-op)
+    spy.mockRestore();
   });
 
   it('invokes the registered plugin with the host element after render', async () => {
@@ -77,6 +79,28 @@ describe('autoScroll', () => {
     await fixture.whenStable();
     expect(override).toHaveBeenCalledOnce();
     expect(scrollMock).not.toHaveBeenCalled();
+  });
+
+  it('uses an explicit element option and passes extra config through to the plugin', async () => {
+    TestBed.configureTestingModule({
+      providers: [provideDnd({ plugins: { autoScroll: plugin } })],
+    });
+    const custom = document.createElement('section');
+    @Component({ selector: 'mm-test-el', template: '' })
+    class ElHost {
+      constructor() {
+        autoScroll({ element: custom, maxScrollSpeed: 'fast' });
+      }
+    }
+    const fixture = TestBed.createComponent(ElHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(scrollMock).toHaveBeenCalledOnce();
+    const arg = scrollMock.mock.calls[0][0];
+    expect(arg.element).toBe(custom); // overrides the host
+    expect(arg.maxScrollSpeed).toBe('fast'); // extra config forwarded
+    expect(arg.autoScroll).toBeUndefined(); // ...but not the internal keys
+    expect(arg.injector).toBeUndefined();
   });
 
   it('is a no-op on the server (no throw, no call)', () => {

@@ -1,6 +1,7 @@
 import { ElementRef, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
+import { trackRuns } from '../testing/reactivity';
 import {
   DndExternalSession,
   fileDropTarget,
@@ -80,6 +81,23 @@ describe('fileDropTarget — derived state', () => {
 
     ext.session.set(null);
     expect(ref.isDragOver()).toBe(false);
+  });
+
+  it('isDragOver / isInnermost stay stable across frames (hovered elements unchanged)', () => {
+    const { el, ext, ref } = setup();
+    const over = trackRuns(() => ref.isDragOver());
+    const inner = trackRuns(() => ref.isInnermost());
+    TestBed.tick();
+    ext.session.set(session([el]));
+    TestBed.tick();
+    const [o, n] = [over(), inner()];
+    // frames: fresh target array each time, same element + moving pointer
+    for (let i = 1; i <= 4; i++) {
+      ext.session.set({ ...session([el]), pointer: { x: i, y: i } });
+      TestBed.tick();
+    }
+    expect(over()).toBe(o); // index unchanged → boolean unchanged → no recompute
+    expect(inner()).toBe(n);
   });
 });
 

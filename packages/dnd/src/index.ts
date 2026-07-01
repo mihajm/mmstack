@@ -19,13 +19,16 @@ export {
   injectDndSession,
   injectDndTargets,
   provideDndSession,
+  type DragEngine,
   type DragKind,
   type DragSession,
   type DropTargetHit,
 } from './lib/session';
 
 export {
+  injectDndDefaults,
   provideDnd,
+  provideDndDefaults,
   resolveAnnounce,
   resolveAutoScroll,
   resolveHitbox,
@@ -33,6 +36,7 @@ export {
   type AnnouncePlugin,
   type AutoScrollPlugin,
   type DndConfig,
+  type DndDefaults,
   type DndPlugins,
   type HitboxPlugin,
   type PostMoveFlash,
@@ -41,14 +45,20 @@ export {
 export {
   Draggable,
   draggable,
+  injectDraggableDefaults,
+  provideDraggableDefaults,
   type CreateDraggableOptions,
+  type DraggableDefaults,
   type DraggableRef,
 } from './lib/element/draggable';
 
 export {
   DropTarget,
   dropTarget,
+  injectDropTargetDefaults,
+  provideDropTargetDefaults,
   type CreateDropTargetOptions,
+  type DropTargetDefaults,
   type DropTargetRef,
 } from './lib/element/drop-target';
 
@@ -79,3 +89,7 @@ export {
 } from './lib/element/auto-scroll';
 
 export { injectAnnounce, type Politeness } from './lib/a11y/a11y';
+
+// pointer-based sortable (preview) — built on the pointerDrag sensor, not the
+// pragmatic native core; see ./lib/sortable.
+export * from './lib/sortable';

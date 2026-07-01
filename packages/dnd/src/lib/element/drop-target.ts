@@ -33,17 +33,17 @@ import type {
   Resolvable,
 } from '../internal/types';
 import {
-  missingPluginError,
+  createDefaultsToken,
+  injectDndDefaults,
   resolveHitbox,
+  withDefaults,
   type HitboxPlugin,
 } from '../provide';
-import { DndSession } from '../session';
+import { DndSession, type DragEngine } from '../session';
+import { DndPointerEngine } from './pointer-engine';
 
-export type CreateDropTargetOptions<
-  TAccept,
-  TSelf = void,
-  TMeta extends DragMeta = DragMeta,
-> = {
+/** Options common to both engines. */
+type DropTargetSharedOptions<TAccept, TSelf, TMeta extends DragMeta> = {
   /** Pure type guard on the dragged payload (read untracked — use `canDrop`/`disabled` for reactive gating). */
   accepts: (data: unknown) => data is TAccept;
   /** This target's own data, surfaced on events as `self.data` (value, signal, or getter). */
@@ -52,14 +52,6 @@ export type CreateDropTargetOptions<
   canDrop?: (args: { source: { data: TAccept; meta: TMeta } }) => boolean;
   /** Disable this target (clears hover/edge when flipped mid-hover). */
   disabled?: Resolvable<boolean>;
-  /** Edges to detect for `closestEdge` (needs the hitbox plugin); omit for whole-element drops. */
-  edges?: Resolvable<Edge[] | undefined>;
-  /** Stay the active drop target after the pointer leaves (pragmatic stickiness). */
-  sticky?: Resolvable<boolean>;
-  /** Native drop effect / cursor hint. @default 'move' */
-  dropEffect?: Resolvable<'copy' | 'link' | 'move'>;
-  /** Override the registered hitbox plugin (needed for `edges`/`closestEdge`). */
-  hitbox?: HitboxPlugin | (() => HitboxPlugin | undefined | null);
   /** Injector to run in; defaults to the current injection context. */
   injector?: Injector;
   /** Fires when an accepted source enters this target. */
@@ -69,6 +61,49 @@ export type CreateDropTargetOptions<
   /** Fires when an accepted source is dropped on this target. */
   onDrop?: (event: DropEvent<TAccept, TMeta>) => void;
 };
+
+/**
+ * Native-engine-only drop-target options — HTML5/pragmatic features the pointer
+ * engine has no equivalent for yet. Forbidden (typed `never`) when `engine: 'pointer'`.
+ */
+type DropTargetNativeOptions = {
+  /** Edges to detect for `closestEdge` (needs the hitbox plugin); omit for whole-element drops. */
+  edges?: Resolvable<Edge[] | undefined>;
+  /** Stay the active drop target after the pointer leaves (pragmatic stickiness). */
+  sticky?: Resolvable<boolean>;
+  /** Native drop effect / cursor hint. @default 'move' */
+  dropEffect?: Resolvable<'copy' | 'link' | 'move'>;
+  /**
+   * Override the registered hitbox plugin (needed for `edges`/`closestEdge`). A value,
+   * or a getter (resolved lazily) — hitbox is an object plugin, so a function is
+   * unambiguously a getter (used by the directive to forward its input).
+   */
+  hitbox?: HitboxPlugin | (() => HitboxPlugin | undefined | null);
+};
+
+/**
+ * Drop-target options, discriminated by `engine`. Omit `engine` (or `'native'`) for
+ * native HTML5 DnD + its extras (`edges`/`hitbox`/`sticky`/`dropEffect`); `'pointer'`
+ * accepts pointer-engine drops and *forbids* those native-only options at compile time.
+ */
+export type CreateDropTargetOptions<
+  TAccept,
+  TSelf = void,
+  TMeta extends DragMeta = DragMeta,
+> =
+  | (DropTargetSharedOptions<TAccept, TSelf, TMeta> &
+      DropTargetNativeOptions & { engine?: 'native' })
+  | (DropTargetSharedOptions<TAccept, TSelf, TMeta> & {
+      engine: 'pointer';
+    } & { [K in keyof DropTargetNativeOptions]?: never });
+
+/** @internal Flat view (all fields) for the implementation to read without narrowing. */
+type DropTargetOptionsAll<
+  TAccept,
+  TSelf,
+  TMeta extends DragMeta,
+> = DropTargetSharedOptions<TAccept, TSelf, TMeta> &
+  DropTargetNativeOptions & { engine?: DragEngine };
 
 export type DropTargetRef<TAccept> = {
   /** True while any accepted source is over this target (at any nesting depth). */
@@ -87,6 +122,29 @@ const NOOP: DropTargetRef<never> = {
   dragOverData: computed(() => undefined),
   closestEdge: computed(() => null),
 };
+
+/** DI-settable `dropTarget` defaults; inherits `engine` from {@link provideDndDefaults}. */
+export type DropTargetDefaults = {
+  /** Default drag engine for drop targets. */
+  engine?: DragEngine;
+  /** Default edges to detect for `closestEdge` (needs the hitbox plugin). */
+  edges?: Edge[];
+  /** Default pragmatic stickiness. */
+  sticky?: boolean;
+  /** Default native drop effect / cursor hint. */
+  dropEffect?: 'copy' | 'link' | 'move';
+  /** Default hitbox plugin override. */
+  hitbox?: HitboxPlugin;
+};
+
+const dropTargetDefaults = createDefaultsToken<DropTargetDefaults>(
+  '@mmstack/dnd:drop-target-defaults',
+  injectDndDefaults,
+);
+/** Register `dropTarget` option defaults (a per-call option always wins). */
+export const provideDropTargetDefaults = dropTargetDefaults.provide;
+/** Read the `dropTarget` defaults (or `null`). @see {@link provideDropTargetDefaults} */
+export const injectDropTargetDefaults = dropTargetDefaults.inject;
 
 /**
  * Makes the host element a drop target. `accepts` narrows the payload type;
@@ -112,9 +170,12 @@ export function dropTarget<
   TSelf = void,
   TMeta extends DragMeta = DragMeta,
 >(
-  opts: CreateDropTargetOptions<TAccept, TSelf, TMeta>,
+  options: CreateDropTargetOptions<TAccept, TSelf, TMeta>,
 ): DropTargetRef<TAccept> {
-  const injector = opts.injector ?? inject(Injector);
+  // The discriminated union guards callers; internally read the flat view.
+  const raw = options as DropTargetOptionsAll<TAccept, TSelf, TMeta>;
+  const injector = raw.injector ?? inject(Injector);
+  const opts = withDefaults(raw, injectDropTargetDefaults(injector));
   return runInInjectionContext(injector, () => {
     if (isPlatformServer(inject(PLATFORM_ID))) {
       return NOOP as DropTargetRef<TAccept>;
@@ -122,10 +183,13 @@ export function dropTarget<
 
     const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const session = inject(DndSession);
-    const diHitbox = resolveHitbox();
-    const getHitbox = (): HitboxPlugin | null =>
-      (typeof opts.hitbox === 'function' ? opts.hitbox() : opts.hitbox) ??
-      diHitbox;
+
+    const diHitbox = resolveHitbox(injector);
+    const getHitbox = (): HitboxPlugin | null => {
+      const ov =
+        typeof opts.hitbox === 'function' ? opts.hitbox() : opts.hitbox;
+      return ov ?? diHitbox();
+    };
 
     const selfData = opts.data ? resolveSignal(opts.data) : undefined;
     const disabled = opts.disabled ? resolveSignal(opts.disabled) : undefined;
@@ -138,12 +202,8 @@ export function dropTarget<
     const readEdges = (): Edge[] | undefined =>
       edgesSig ? untracked(edgesSig) : undefined;
 
-    if (readEdges()?.length && !getHitbox()) {
-      throw missingPluginError(
-        'hitbox',
-        '@atlaskit/pragmatic-drag-and-drop-hitbox',
-      );
-    }
+    // Edges requested → resolve now so a missing-plugin warning fires at setup, not first hover.
+    if (readEdges()?.length) getHitbox();
 
     const accept = (
       data: Record<string | symbol, unknown>,
@@ -175,12 +235,59 @@ export function dropTarget<
     });
 
     const closestEdge = computed<Edge | null>(() => {
+      if (!edgesSig?.()?.length) return null;
       const hb = untracked(getHitbox);
       if (!hb) return null;
       const i = hitIndex();
       if (i < 0) return null;
       return hb.extractClosestEdge(session.targets()[i].data);
     });
+
+    if ((opts.engine ?? 'native') === 'pointer') {
+      const eng = inject(DndPointerEngine);
+      const cleanup = eng.registerDropTarget(element, {
+        accepts: (data) => accept(data) !== null,
+        getData: () =>
+          selfData
+            ? boxData(untracked(selfData))
+            : ({} as Record<string | symbol, unknown>),
+        canDrop: (data) => {
+          if (disabled && untracked(disabled)) return false;
+          const a = accept(data);
+          return a ? (opts.canDrop?.({ source: a }) ?? true) : false;
+        },
+        onDragEnter: (src) => {
+          const a = accept(src.data);
+          if (a)
+            opts.onDragEnter?.({
+              source: a,
+              self: selfInfo({ element, data: {} }),
+            });
+        },
+        onDragLeave: (src) => {
+          const a = accept(src.data);
+          if (a)
+            opts.onDragLeave?.({
+              source: a,
+              self: selfInfo({ element, data: {} }),
+            });
+        },
+        onDrop: (src, targets) => {
+          const a = accept(src.data);
+          if (!a) return;
+          opts.onDrop?.({
+            data: a.data,
+            meta: a.meta,
+            edge: null, // pointer mode has no hitbox geometry yet
+            location: { current: mapDropTargets(targets), previous: [] },
+          });
+        },
+      });
+      inject(DestroyRef).onDestroy(cleanup);
+      return { isDragOver, isInnermost, dragOverData, closestEdge };
+    }
+
+    session.ensureNativeMonitor();
 
     const cleanup = dropTargetForElements({
       element,
@@ -193,12 +300,7 @@ export function dropTarget<
         const edges = readEdges();
         if (edges?.length) {
           const hb = getHitbox();
-          if (!hb)
-            throw missingPluginError(
-              'hitbox',
-              '@atlaskit/pragmatic-drag-and-drop-hitbox',
-            );
-
+          if (!hb) return base; // no plugin → drop still works, just no edge
           return hb.attachClosestEdge(base, {
             element: el,
             input,

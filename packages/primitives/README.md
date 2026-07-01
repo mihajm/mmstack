@@ -117,6 +117,8 @@ Each level's shape is resolved from what's known: a value that is currently an o
 
 Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for those.
 
+**Union leaves (perf opt-in).** `noUnionLeaves: true` promises no node ever flips between a leaf and a sub-store, so each node's leaf-ness is resolved once on first access and cached instead of staying reactive. Off by default — leave it off if a value can switch between a primitive and an object/array.
+
 ### `extendStore` (scoped overlay)
 
 `extendStore(store, seed)` (on any store kind) creates a **scoped overlay** — a child store that **shares** the parent's signals for inherited keys (the same `WritableSignal`: writes go through to the parent and parent changes flow down) while keeping the seed and any new keys in a **local layer** that never propagates upward. No diffing, no syncing — local keys simply aren't wired to the parent.
@@ -145,7 +147,7 @@ const scope = extendStore(app, draft); // writes to scope.title flow out to `dra
 
 A few release notes:
 
-- The local layer is a plain store (vivify off). Inherited paths vivify when the _parent_ was created with `vivify`; to autovivify local keys, seed with a vivify-enabled store — `extendStore(app, store(seed, { vivify: 'auto' }))`.
+- The scope inherits the parent's config (`vivify` / `noUnionLeaves`) and its injector-scoped proxy cache, so **both** inherited and local paths vivify when the parent was created with `vivify`. `extendStore` doesn't accept `vivify` / `noUnionLeaves` — they always come from the parent.
 - Reserved names — `asReadonlyStore` and the signal methods (`set` / `update` / `mutate` / `inline` / `asReadonly`) — shadow same-named data keys, as on any store.
 - `scope.asReadonlyStore()` returns a read-only **snapshot view** of the merge (reactive reads, no writes); it does not share sub-store identity.
 
@@ -173,7 +175,7 @@ The fork is a full store (`draft.store.user.name(...)`, `extendStore`, deep read
 - **`'coarse'`** — any base change resets the whole fork. Cheapest; correct when the base is held for the fork's lifetime (e.g. a transition). The default for a mutable base.
 - **a `ReconcileFn<T>`** — `(ancestor, mine, theirs) => merged`, for bring-your-own merge (array-by-id, Immer patches, CRDT-ish).
 
-> Pass the same `vivify` / `noUnionLeaves` the base was created with — fork config isn't inherited (it's closed over inside the base), so mismatched config gives the fork different write semantics.
+> The fork inherits the base's `vivify` / `noUnionLeaves` and its injector-scoped proxy cache automatically, so its write semantics match the base. Pass them explicitly only to override (advanced).
 
 ### `toWritable`
 
@@ -668,6 +670,13 @@ once the pointer travels past `activationThreshold`, so the same element stays
 clickable. Uses `setPointerCapture`, supports a delegated `handleSelector`, and
 cancels on Escape or via `.cancel()`.
 
+A delegated `handleSelector` reports which child actually started the drag via
+`drag().origin` (so one listener on a container can serve many handles), and
+`stopPropagation: true` lets an inner sensor claim the `pointerdown` over an
+outer one on the same tree (e.g. a nested sortable). Reads are throttled
+(`throttle`, default 16ms); `drag.unthrottled()` exposes the un-throttled view
+for logic that needs the exact release position.
+
 ```typescript
 import { sensor } from '@mmstack/primitives';
 
@@ -678,7 +687,7 @@ const position = computed(() => {
   const d = drag();
   return d.active ? { x: base.x + d.delta.x, y: base.y + d.delta.y } : base;
 });
-// drag().modifiers.shift → e.g. constrain axis · drag.cancel() → revert
+// drag().modifiers.shift → e.g. constrain axis · drag().origin → the handle · drag.cancel() → revert
 ```
 
 ### `signalFromEvent`

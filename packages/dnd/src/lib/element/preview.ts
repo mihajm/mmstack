@@ -76,7 +76,46 @@ function resolveContext<T>(
   return source;
 }
 
-/** @internal Wires a `PreviewConfig` into pragmatic's custom-preview hook; driven by `draggable`'s `preview` option. */
+/**
+ * @internal Render a {@link PreviewConfig} into a container (component / template
+ * / raw), returning a cleanup. Engine-agnostic: native mode passes pragmatic's
+ * container, pointer mode passes its own floating one.
+ */
+export function renderPreviewContent<TCtx>(
+  config: PreviewConfig<TCtx>,
+  container: HTMLElement,
+  envInjector: EnvironmentInjector,
+  appRef: ApplicationRef,
+): (() => void) | void {
+  if ('component' in config) {
+    const ref = createComponent(config.component, {
+      environmentInjector: envInjector,
+      hostElement: container,
+      bindings: config.bindings,
+    });
+    appRef.attachView(ref.hostView);
+    return () => {
+      appRef.detachView(ref.hostView);
+      ref.destroy();
+    };
+  }
+  if ('template' in config) {
+    const tpl = resolveTemplate(config.template);
+    if (!tpl) return;
+    const ctx = resolveContext(config.context);
+    const view = tpl.createEmbeddedView({ $implicit: ctx as TCtx });
+    appRef.attachView(view);
+    for (const node of view.rootNodes) container.appendChild(node);
+    return () => {
+      appRef.detachView(view);
+      view.destroy();
+    };
+  }
+  const cleanup = config.render(container);
+  return cleanup ?? undefined;
+}
+
+/** @internal Wires a `PreviewConfig` into pragmatic's custom-preview hook (NATIVE engine). */
 export function registerCustomPreview<TCtx>(
   config: PreviewConfig<TCtx>,
   envInjector: EnvironmentInjector,
@@ -89,33 +128,45 @@ export function registerCustomPreview<TCtx>(
   setCustomNativeDragPreview({
     nativeSetDragImage: args.nativeSetDragImage,
     getOffset: resolveOffset(config.offset),
-    render: ({ container }) => {
-      if ('component' in config) {
-        const ref = createComponent(config.component, {
-          environmentInjector: envInjector,
-          hostElement: container,
-          bindings: config.bindings,
-        });
-        appRef.attachView(ref.hostView);
-        return () => {
-          appRef.detachView(ref.hostView);
-          ref.destroy();
-        };
-      }
-      if ('template' in config) {
-        const tpl = resolveTemplate(config.template);
-        if (!tpl) return;
-        const ctx = resolveContext(config.context);
-        const view = tpl.createEmbeddedView({ $implicit: ctx as TCtx });
-        appRef.attachView(view);
-        for (const node of view.rootNodes) container.appendChild(node);
-        return () => {
-          appRef.detachView(view);
-          view.destroy();
-        };
-      }
-      const cleanup = config.render(container);
-      return cleanup ?? undefined;
-    },
+    render: ({ container }) =>
+      renderPreviewContent(config, container, envInjector, appRef),
   });
+}
+
+/** A live pointer-mode preview element following the pointer. */
+export type PointerPreview = {
+  /** Position the preview at the pointer (+ the config's offset). */
+  move(x: number, y: number): void;
+  /** Tear down the rendered content + remove the container. */
+  destroy(): void;
+};
+
+/**
+ * @internal The POINTER-engine counterpart to {@link registerCustomPreview}:
+ * there is no native drag image, so we own a fixed, pointer-transparent container
+ * that follows the pointer and render the same `PreviewConfig` into it.
+ */
+export function createPointerPreview<TCtx>(
+  config: PreviewConfig<TCtx>,
+  envInjector: EnvironmentInjector,
+  appRef: ApplicationRef,
+): PointerPreview {
+  const container = document.createElement('div');
+  container.style.cssText =
+    'position:fixed;top:0;left:0;pointer-events:none;z-index:10000;will-change:transform;';
+  document.body.appendChild(container);
+  const cleanup = renderPreviewContent(config, container, envInjector, appRef);
+  const off =
+    config.offset === 'pointer-outside'
+      ? { x: 8, y: 8 }
+      : (config.offset ?? { x: 0, y: 0 });
+  return {
+    move: (x, y) => {
+      container.style.transform = `translate(${x + off.x}px, ${y + off.y}px)`;
+    },
+    destroy: () => {
+      cleanup?.();
+      container.remove();
+    },
+  };
 }

@@ -18,6 +18,7 @@ import {
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { nestedEffect, pointerDrag } from '@mmstack/primitives';
 
 import { boxData, extractEdge, mapDropTargets } from '../internal/payload';
 import { resolveElement, resolveSignal } from '../internal/resolve';
@@ -28,11 +29,24 @@ import type {
   DropEvent,
   Resolvable,
 } from '../internal/types';
-import { resolveHitbox, type HitboxPlugin } from '../provide';
-import { DndSession } from '../session';
-import { registerCustomPreview, type PreviewConfig } from './preview';
+import {
+  createDefaultsToken,
+  injectDndDefaults,
+  resolveHitbox,
+  withDefaults,
+  type HitboxPlugin,
+} from '../provide';
+import { DndSession, type DragEngine } from '../session';
+import { DndPointerEngine, type PointerDragSource } from './pointer-engine';
+import {
+  createPointerPreview,
+  registerCustomPreview,
+  type PointerPreview,
+  type PreviewConfig,
+} from './preview';
 
-export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> = {
+/** Options common to both engines. */
+type DraggableSharedOptions<TData, TMeta extends DragMeta> = {
   /** The typed payload carried by the drag (value, signal, or getter). */
   data: Resolvable<TData>;
   /** Extra symbol-keyed metadata travelling with the drag (e.g. source list id). */
@@ -49,8 +63,6 @@ export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> = {
   preview?:
     | PreviewConfig<TData>
     | (() => PreviewConfig<TData> | undefined | null);
-  /** Override the registered hitbox plugin (used only to report `event.edge`). */
-  hitbox?: HitboxPlugin;
   /** Injector to run in; defaults to the current injection context. */
   injector?: Injector;
   /** Fires when this element starts being dragged. */
@@ -59,12 +71,52 @@ export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> = {
   onDrop?: (event: DropEvent<TData, TMeta>) => void;
 };
 
+/** Native-engine-only draggable options — forbidden (typed `never`) when `engine: 'pointer'`. */
+type DraggableNativeOptions = {
+  /** Override the registered hitbox plugin (only reports `event.edge`; the pointer path has no edge). */
+  hitbox?: HitboxPlugin;
+};
+
+/**
+ * Draggable options, discriminated by `engine`. Omit `engine` (or `'native'`) for
+ * native HTML5 DnD (files, cross-window, browser drag image) + `hitbox`; `'pointer'`
+ * drives the pointer engine and *forbids* `hitbox` at compile time.
+ */
+export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> =
+  | (DraggableSharedOptions<TData, TMeta> &
+      DraggableNativeOptions & { engine?: 'native' })
+  | (DraggableSharedOptions<TData, TMeta> & { engine: 'pointer' } & {
+        [K in keyof DraggableNativeOptions]?: never;
+      });
+
+/** @internal Flat view (all fields) for the implementation to read without narrowing. */
+type DraggableOptionsAll<
+  TData,
+  TMeta extends DragMeta,
+> = DraggableSharedOptions<TData, TMeta> &
+  DraggableNativeOptions & { engine?: DragEngine };
+
 export type DraggableRef<TData> = {
   /** True while this element is the active drag source. */
   dragging: Signal<boolean>;
   /** The current payload (the resolved `data` option). */
   data: Signal<TData>;
 };
+
+/** DI-settable `draggable` defaults; inherits `engine` from {@link provideDndDefaults}. */
+export type DraggableDefaults = {
+  /** Default drag engine for draggables. */
+  engine?: DragEngine;
+};
+
+const draggableDefaults = createDefaultsToken<DraggableDefaults>(
+  '@mmstack/dnd:draggable-defaults',
+  injectDndDefaults,
+);
+/** Register `draggable` option defaults (a per-call option always wins). */
+export const provideDraggableDefaults = draggableDefaults.provide;
+/** Read the `draggable` defaults (or `null`). @see {@link provideDraggableDefaults} */
+export const injectDraggableDefaults = draggableDefaults.inject;
 
 /**
  * Makes the host element draggable with a typed payload. `dragging` is *derived*
@@ -90,9 +142,12 @@ export type DraggableRef<TData> = {
  * Or the directive: `<div mmDraggable [data]="card()" (dropped)="onDrop($event)">`.
  */
 export function draggable<TData, TMeta extends DragMeta = DragMeta>(
-  opts: CreateDraggableOptions<TData, TMeta>,
+  options: CreateDraggableOptions<TData, TMeta>,
 ): DraggableRef<TData> {
-  const injector = opts.injector ?? inject(Injector);
+  // The discriminated union guards callers; internally read the flat view.
+  const raw = options as DraggableOptionsAll<TData, TMeta>;
+  const injector = raw.injector ?? inject(Injector);
+  const opts = withDefaults(raw, injectDraggableDefaults(injector));
   return runInInjectionContext(injector, () => {
     const data = resolveSignal(opts.data);
 
@@ -103,9 +158,9 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
 
     const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const session = inject(DndSession);
-    const hitbox = resolveHitbox(opts.hitbox);
+    // Opportunistic (only reports `event.edge`), so warn:false — missing plugin = null edge.
+    const getHitbox = resolveHitbox(injector, opts.hitbox, false);
 
-    // Derived from the `source` slice (recomputes on start/drop, not per frame).
     const dragging = computed(() => session.source()?.el === element);
 
     const readMeta = (): TMeta => (meta ? untracked(meta) : ({} as TMeta));
@@ -120,6 +175,67 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
           : () => opts.preview as PreviewConfig<TData>;
     const envInjector = previewResolver ? inject(EnvironmentInjector) : null;
     const appRef = previewResolver ? inject(ApplicationRef) : null;
+
+    if ((opts.engine ?? 'native') === 'pointer') {
+      const eng = inject(DndPointerEngine);
+      const handleSig =
+        opts.dragHandle != null ? resolveSignal(opts.dragHandle) : null;
+      const target = handleSig
+        ? computed(() => resolveElement(handleSig()) ?? element)
+        : element;
+      const drag = pointerDrag({ target, activationThreshold: 5 });
+
+      let source: PointerDragSource | null = null;
+      let preview: PointerPreview | null = null;
+      nestedEffect(() => {
+        const g = drag.unthrottled();
+        if (g.active && g.pointerId !== null) {
+          if (!source) {
+            if (opts.canDrag && !opts.canDrag()) return; // gate at start only
+            source = {
+              el: element,
+              data: {
+                ...boxData(untracked(data)),
+                ...(readMeta() as Record<symbol, unknown>),
+              },
+              kind: 'transfer',
+            };
+            eng.begin(source, g.current.x, g.current.y);
+            const cfg = previewResolver?.();
+            if (cfg && envInjector && appRef)
+              preview = createPointerPreview(cfg, envInjector, appRef);
+            opts.onDragStart?.({
+              data: untracked(data),
+              meta: readMeta(),
+              element,
+            });
+          } else {
+            eng.move(source, g.current.x, g.current.y);
+          }
+          if (preview) preview.move(g.current.x, g.current.y);
+          else element.style.transform = `translate(${g.delta.x}px, ${g.delta.y}px)`;
+        } else if (source) {
+          const targets = eng.end();
+          if (preview) {
+            preview.destroy();
+            preview = null;
+          } else {
+            element.style.transform = '';
+          }
+          opts.onDrop?.({
+            data: untracked(data),
+            meta: readMeta(),
+            edge: null,
+            location: { current: mapDropTargets(targets), previous: [] },
+          });
+          source = null;
+        }
+      });
+
+      return { dragging, data };
+    }
+
+    session.ensureNativeMonitor();
 
     const canDragFn = opts.canDrag;
     const makeConfig = (dragHandle: HTMLElement | undefined) => ({
@@ -174,7 +290,7 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
         opts.onDrop?.({
           data: untracked(data),
           meta: readMeta(),
-          edge: extractEdge(location.current.dropTargets, hitbox),
+          edge: extractEdge(location.current.dropTargets, getHitbox()),
           location: {
             current: mapDropTargets(location.current.dropTargets),
             previous: mapDropTargets(location.previous.dropTargets),

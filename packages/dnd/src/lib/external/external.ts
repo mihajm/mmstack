@@ -21,11 +21,11 @@ import {
   getFiles,
 } from '@atlaskit/pragmatic-drag-and-drop/external/file';
 
+import { toWritable } from '@mmstack/primitives';
 import { deriveHit } from '../internal/hit';
 import { boxData, mapDropTargets } from '../internal/payload';
 import { resolveSignal } from '../internal/resolve';
 import type { DropTargetInfo, Resolvable } from '../internal/types';
-import { toWritable } from '../internal/writable';
 
 /** Structural shape of pragmatic's external monitor/drop callback args. */
 type ExternalArgs = {
@@ -69,7 +69,6 @@ function toExternalSession({
  */
 @Injectable({ providedIn: 'root' })
 export class DndExternalSession {
-  // Fine-grained slices (mirrors DndSession) so readers recompute per slice.
   private readonly _types = signal<readonly string[] | null>(null);
   private readonly _targets = signal<readonly Element[]>([]);
   private readonly _pointer = signal<{ x: number; y: number }>({ x: 0, y: 0 });

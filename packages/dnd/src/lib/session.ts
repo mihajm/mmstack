@@ -12,7 +12,6 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-import { toWritable } from './internal/writable';
 
 export type DropTargetHit = {
   element: Element;
@@ -22,6 +21,14 @@ export type DropTargetHit = {
 
 export type DragKind = 'transfer' | 'move' | 'resize' | 'marquee';
 
+/**
+ * Which drag mechanism produced this session: the native HTML5 DnD adapter
+ * (`'native'`, the default — files/cross-window/native drag image) or the
+ * pointer engine (`'pointer'` — in-page, continuous position, FLIP). Consumers
+ * branch on this when a behaviour is engine-specific; most don't need to.
+ */
+export type DragEngine = 'native' | 'pointer';
+
 export type DragSession = {
   readonly sourceEl: HTMLElement;
   readonly sourceData: Record<string | symbol, unknown>;
@@ -29,6 +36,8 @@ export type DragSession = {
   readonly targets: readonly DropTargetHit[];
   readonly pointer: { x: number; y: number };
   readonly kind: DragKind;
+  /** The engine driving this drag. @default 'native' */
+  readonly engine: DragEngine;
 };
 
 /** Structural shape of pragmatic's monitor callback args — kept loose for version resilience. */
@@ -62,6 +71,39 @@ const point = (a: MonitorArgs): { x: number; y: number } => ({
   y: a.location.current.input.clientY,
 });
 
+const pointEqual = (
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): boolean => a.x === b.x && a.y === b.y;
+
+// Equal iff same elements+order+data (incl. symbol-keyed edge tokens): skips re-notify on unchanged onDrag frames.
+const targetsEqual = (
+  a: readonly DropTargetHit[],
+  b: readonly DropTargetHit[],
+): boolean => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].element !== b[i].element) return false;
+    const da = a[i].data as Record<PropertyKey, unknown>;
+    const db = b[i].data as Record<PropertyKey, unknown>;
+    const ka = Reflect.ownKeys(da);
+    if (ka.length !== Reflect.ownKeys(db).length) return false;
+    for (const k of ka) if (da[k] !== db[k]) return false;
+  }
+  return true;
+};
+
+const sourceEqual = (a: Source | null, b: Source | null): boolean =>
+  a === b ||
+  (!!a && !!b && a.el === b.el && a.kind === b.kind && a.data === b.data);
+
+const elsEqual = (a: readonly Element[], b: readonly Element[]): boolean =>
+  a.length === b.length && a.every((el, i) => el === b[i]);
+
+const ZERO: { x: number; y: number } = { x: 0, y: 0 };
+const NO_TARGETS: readonly DropTargetHit[] = [];
+
 /**
  * The source of truth for an in-flight drag. One `monitorForElements` subscription
  * pushes pragmatic's drag world into **three fine-grained signals**, so a reader
@@ -69,11 +111,12 @@ const point = (a: MonitorArgs): { x: number; y: number } => ({
  *
  * - `source` — set on drag start / cleared on drop (NOT per frame). `draggable`/
  *   `monitor` derive from this.
- * - `targets` — the innermost-first hovered stack with fresh closest-edge tokens;
- *   re-set on every `onDrag` frame so the edge stays current. To test hover
- *   membership without recomputing per frame, derive from `targetEls` (element
- *   identity, stable across frames via custom equality) instead.
- * - `pointer` — set on every `onDrag` frame; read it only if you need live coords.
+ * - `targets` — the innermost-first hovered stack with fresh closest-edge tokens.
+ *   Fed every `onDrag` frame but equality-gated, so it only re-notifies when the
+ *   stack (elements or data) actually changes. For pure element-membership checks
+ *   prefer `targetEls`.
+ * - `pointer` — the live pointer; fed every frame but equality-gated, so a
+ *   held-still drag (e.g. during auto-scroll) doesn't churn its readers.
  *
  * `providedIn: 'root'` for zero config; re-provide it in a component's `providers`
  * to scope an independent session to a canvas boundary.
@@ -82,97 +125,106 @@ const point = (a: MonitorArgs): { x: number; y: number } => ({
  */
 @Injectable({ providedIn: 'root' })
 export class DndSession {
-  private readonly _source = signal<Source | null>(null);
-  private readonly _targets = signal<readonly DropTargetHit[]>([]);
-  private readonly _pointer = signal<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  /** Drag source — changes on start/drop only. */
-  readonly source: Signal<Source | null> = this._source.asReadonly();
-  /** Innermost-first drop-target stack (with fresh closest-edge tokens, refreshed on drag). */
-  readonly targets: Signal<readonly DropTargetHit[]> =
-    this._targets.asReadonly();
   /**
-   * Innermost-first hovered ELEMENTS only. Stable across frames (custom equality),
-   * so element-identity checks don't recompute on every `onDrag`. Edge tokens live
-   * on `targets`; read those when you need the live closest edge.
+   * The single source of truth — the whole drag snapshot, or `null` when idle.
+   * Writable so a custom (e.g. pointer-based) engine can drive it via `.set()`.
+   * Every fine-grained reader below derives from this; nothing is synchronized
+   * by hand. Fed every `onDrag` frame, so read the narrow signals (not this) when
+   * you only care about one slice.
+   */
+  readonly session: WritableSignal<DragSession | null> =
+    signal<DragSession | null>(null);
+
+  /** Whether a drag is in flight — flips only true↔false (so it's cheap to read). */
+  readonly active = computed(() => this.session() !== null);
+
+  /**
+   * Drag source. Equality-gated on `el`/`data`/`kind`, so although the snapshot
+   * changes every frame this only notifies when the source itself changes
+   * (effectively start/drop).
+   */
+  readonly source: Signal<Source | null> = computed(
+    () => {
+      const s = this.session();
+      return s ? { el: s.sourceEl, data: s.sourceData, kind: s.kind } : null;
+    },
+    { equal: sourceEqual },
+  );
+
+  /** Live pointer; equality-gated so a held-still drag doesn't churn its readers. */
+  readonly pointer: Signal<{ x: number; y: number }> = computed(
+    () => this.session()?.pointer ?? ZERO,
+    { equal: pointEqual },
+  );
+
+  /**
+   * Innermost-first drop-target stack with fresh closest-edge tokens. Equality-
+   * gated, so it only notifies when the stack (elements or data) actually changes.
+   */
+  readonly targets: Signal<readonly DropTargetHit[]> = computed(
+    () => this.session()?.targets ?? NO_TARGETS,
+    { equal: targetsEqual },
+  );
+
+  /**
+   * Innermost-first hovered ELEMENTS only — derived from the gated `targets`, so
+   * element-identity checks stay flat across frames. Edge tokens live on `targets`.
    */
   readonly targetEls: Signal<readonly Element[]> = computed(
-    () => this._targets().map((t) => t.element),
-    { equal: (a, b) => a.length === b.length && a.every((el, i) => el === b[i]) },
-  );
-  /** Latest pointer — changes every `onDrag` frame. */
-  readonly pointer: Signal<{ x: number; y: number }> =
-    this._pointer.asReadonly();
-  readonly active = computed(() => this._source() !== null);
-
-  /** Combined view; recomputes when any slice changes. For tooling/tests/external drive. */
-  readonly session = toWritable(
-    computed<DragSession | null>(() => {
-      const s = this._source();
-      if (!s) return null;
-      return {
-        sourceEl: s.el,
-        sourceData: s.data,
-        targets: this._targets(),
-        pointer: this._pointer(),
-        kind: s.kind,
-      };
-    }),
-    (session) => {
-      if (!session) {
-        this._source.set(null);
-        this._targets.set([]);
-        return;
-      }
-      this._source.set({
-        el: session.sourceEl,
-        data: session.sourceData,
-        kind: session.kind,
-      });
-      this._targets.set(session.targets);
-      this._pointer.set(session.pointer);
-    },
+    () => this.targets().map((t) => t.element),
+    { equal: elsEqual },
   );
 
-  constructor() {
-    if (isPlatformServer(inject(PLATFORM_ID))) return;
+  private readonly server = isPlatformServer(inject(PLATFORM_ID));
+  // Scoped sessions only track drags inside their host subtree; root has no el → tracks everything.
+  private readonly rootEl = inject(ElementRef, { optional: true })?.nativeElement as
+    | HTMLElement
+    | undefined;
+  private readonly destroyRef = inject(DestroyRef);
+  private monitorAttached = false;
 
-    // Scoped sessions inject a host element + only track drags inside their subtree
-    // (root has none → tracks everything), so a drag elsewhere can't bleed in.
-    const rootEl = inject(ElementRef, { optional: true })?.nativeElement as
-      | HTMLElement
-      | undefined;
+  /**
+   * Attach the native (pragmatic) drag monitor that feeds this session — lazily,
+   * so a POINTER-only app never creates it (the pointer engine drives the session
+   * via `.set()`). Called by native `draggable`/`dropTarget`/`reorderable`.
+   * Idempotent + inert on the server.
+   */
+  ensureNativeMonitor(): void {
+    if (this.monitorAttached || this.server) return;
+    this.monitorAttached = true;
+
     const inScope = (el: HTMLElement): boolean =>
-      !rootEl || rootEl.contains(el);
+      !this.rootEl || this.rootEl.contains(el);
 
     const cleanup = monitorForElements({
       onDragStart: (a) => {
         if (!inScope(a.source.element)) return;
-        this._source.set({
-          el: a.source.element,
-          data: a.source.data,
+        this.session.set({
+          sourceEl: a.source.element,
+          sourceData: a.source.data,
+          targets: mapTargets(a),
+          pointer: point(a),
           kind: 'transfer',
+          engine: 'native',
         });
-        this._targets.set(mapTargets(a));
-        this._pointer.set(point(a));
       },
       onDropTargetChange: (a) => {
-        if (!inScope(a.source.element)) return;
-        this._targets.set(mapTargets(a));
-        this._pointer.set(point(a));
+        const s = this.session();
+        // orphan frame (no active drag) → don't fabricate/leak state
+        if (!s || !inScope(a.source.element)) return;
+        this.session.set({ ...s, targets: mapTargets(a), pointer: point(a) });
       },
       onDrag: (a) => {
-        if (!inScope(a.source.element)) return;
-        this._pointer.set(point(a));
-        this._targets.set(mapTargets(a));
+        const s = this.session();
+        if (!s || !inScope(a.source.element)) return;
+        this.session.set({ ...s, pointer: point(a), targets: mapTargets(a) });
       },
       onDrop: (a) => {
         if (!inScope(a.source.element)) return;
-        this._source.set(null);
-        this._targets.set([]);
+        this.session.set(null);
       },
     });
-    inject(DestroyRef).onDestroy(cleanup);
+    this.destroyRef.onDestroy(cleanup);
   }
 }
 

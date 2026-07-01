@@ -1,5 +1,7 @@
 import { EnvironmentInjector, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { trackRuns } from '../testing/reactivity';
+import { makeDragSession } from '../testing/drag-session';
 import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
 import { monitor } from './monitor';
@@ -33,13 +35,7 @@ const KIND = Symbol('kind');
 function makeSession(
   sourceData: Record<string | symbol, unknown>,
 ): DragSession {
-  return {
-    sourceEl: document.createElement('div'),
-    sourceData,
-    targets: [],
-    pointer: { x: 0, y: 0 },
-    kind: 'transfer',
-  };
+  return makeDragSession({ sourceData });
 }
 
 beforeEach(() => {
@@ -235,5 +231,43 @@ describe('monitor — subscription lifecycle', () => {
     });
     expect(ref.isDragging()).toBe(false);
     expect(monitorMock).toHaveBeenCalled();
+  });
+});
+
+describe('monitor — reactivity & non-happy', () => {
+  it('isDragging is frame-stable (boolean equality gate) across the drag', () => {
+    const session = TestBed.inject(DndSession).session;
+    const ref = TestBed.runInInjectionContext(() =>
+      monitor<Card>({ accepts: isCard }),
+    );
+    const runs = trackRuns(() => ref.isDragging());
+    TestBed.tick();
+    session.set(makeSession(boxData<Card>({ id: 'a' })));
+    TestBed.tick();
+    const after = runs();
+    for (let i = 1; i <= 4; i++) {
+      session.set({
+        ...makeSession(boxData<Card>({ id: 'a' })),
+        pointer: { x: i, y: i },
+      });
+      TestBed.tick();
+    }
+    expect(runs()).toBe(after); // stays true → no churn
+    session.set(null);
+    TestBed.tick();
+    expect(runs()).toBe(after + 1); // true → false
+  });
+
+  it('drops accepted→foreign mid-flight: isDragging falls to false (non-happy)', () => {
+    const session = TestBed.inject(DndSession).session;
+    const ref = TestBed.runInInjectionContext(() =>
+      monitor<Card>({ accepts: isCard }),
+    );
+    session.set(makeSession(boxData<Card>({ id: 'a' })));
+    expect(ref.isDragging()).toBe(true);
+    // a foreign source takes over (e.g. external drag) — must not read as ours
+    session.set(makeSession(boxData('not-a-card')));
+    expect(ref.isDragging()).toBe(false);
+    expect(ref.source()).toBeUndefined();
   });
 });

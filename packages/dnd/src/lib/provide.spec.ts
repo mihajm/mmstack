@@ -1,8 +1,8 @@
+import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import {
   injectDndConfig,
-  missingPluginError,
   provideDnd,
   resolveAutoScroll,
   resolveHitbox,
@@ -23,13 +23,14 @@ const hitboxB: HitboxPlugin = {
 const autoScroll: AutoScrollPlugin = () => () => undefined;
 const flash: PostMoveFlash = () => undefined;
 
+/** The workspace injector for the current TestBed module. */
+const inj = () => TestBed.inject(Injector);
+
 beforeEach(() => TestBed.resetTestingModule());
 
 describe('injectDndConfig', () => {
   it('returns null when provideDnd was never called', () => {
-    TestBed.runInInjectionContext(() =>
-      expect(injectDndConfig()).toBeNull(),
-    );
+    TestBed.runInInjectionContext(() => expect(injectDndConfig()).toBeNull());
   });
 
   it('returns the registered config', () => {
@@ -43,12 +44,10 @@ describe('injectDndConfig', () => {
 });
 
 describe('plugin resolution order (option → DI → null)', () => {
-  it('returns null with neither option nor DI', () => {
-    TestBed.runInInjectionContext(() => {
-      expect(resolveHitbox()).toBeNull();
-      expect(resolveAutoScroll()).toBeNull();
-      expect(resolvePostMoveFlash()).toBeNull();
-    });
+  it('returns null with neither option nor DI (warn: false to keep it quiet)', () => {
+    expect(resolveHitbox(inj(), undefined, false)()).toBeNull();
+    expect(resolveAutoScroll(inj(), undefined, false)()).toBeNull();
+    expect(resolvePostMoveFlash(inj(), undefined, false)()).toBeNull();
   });
 
   it('falls back to the DI default', () => {
@@ -59,42 +58,49 @@ describe('plugin resolution order (option → DI → null)', () => {
         }),
       ],
     });
-    TestBed.runInInjectionContext(() => {
-      expect(resolveHitbox()).toBe(hitboxA);
-      expect(resolveAutoScroll()).toBe(autoScroll);
-      expect(resolvePostMoveFlash()).toBe(flash);
-    });
+    expect(resolveHitbox(inj())()).toBe(hitboxA);
+    expect(resolveAutoScroll(inj())()).toBe(autoScroll);
+    expect(resolvePostMoveFlash(inj())()).toBe(flash);
   });
 
   it('lets a per-call option override the DI default', () => {
     TestBed.configureTestingModule({
       providers: [provideDnd({ plugins: { hitbox: hitboxA } })],
     });
-    TestBed.runInInjectionContext(() =>
-      expect(resolveHitbox(hitboxB)).toBe(hitboxB),
-    );
+    expect(resolveHitbox(inj(), hitboxB)()).toBe(hitboxB);
   });
 
   it('uses a per-call option even with no DI config', () => {
-    TestBed.runInInjectionContext(() =>
-      expect(resolveHitbox(hitboxB)).toBe(hitboxB),
-    );
+    expect(resolveHitbox(inj(), hitboxB)()).toBe(hitboxB);
   });
 
-  it('empty provideDnd() resolves plugins to null', () => {
-    TestBed.configureTestingModule({ providers: [provideDnd()] });
-    TestBed.runInInjectionContext(() =>
-      expect(resolveHitbox()).toBeNull(),
-    );
+  it('memoizes: resolves once, then returns the cached value', () => {
+    TestBed.configureTestingModule({
+      providers: [provideDnd({ plugins: { hitbox: hitboxA } })],
+    });
+    const get = resolveHitbox(inj());
+    expect(get()).toBe(hitboxA);
+    expect(get()).toBe(hitboxA); // second read is cached
   });
 });
 
-describe('missingPluginError', () => {
-  it('names the plugin and the npm package', () => {
-    const err = missingPluginError('hitbox', '@atlaskit/x-hitbox');
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('hitbox');
-    expect(err.message).toContain('@atlaskit/x-hitbox');
-    expect(err.message).toContain('provideDnd');
+describe('missing-plugin dev warning (baked into the resolver)', () => {
+  it('warns once when a required plugin resolves to null, then no-ops (memoized)', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const get = resolveHitbox(inj()); // warn defaults to true
+    expect(get()).toBeNull();
+    expect(get()).toBeNull(); // memoized → no second warn
+    expect(spy).toHaveBeenCalledTimes(1);
+    const msg = spy.mock.calls[0]?.[0] as string;
+    expect(msg).toContain('hitbox');
+    expect(msg).toContain('provideDnd');
+    spy.mockRestore();
+  });
+
+  it('stays silent when warn: false (opportunistic read / built-in fallback)', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(resolveAutoScroll(inj(), undefined, false)()).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

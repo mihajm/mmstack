@@ -1,5 +1,11 @@
 import { DOCUMENT, isPlatformServer } from '@angular/common';
-import { DestroyRef, inject, Injectable, PLATFORM_ID } from '@angular/core';
+import {
+  DestroyRef,
+  inject,
+  Injectable,
+  Injector,
+  PLATFORM_ID,
+} from '@angular/core';
 
 import { resolveAnnounce, type AnnouncePlugin } from '../provide';
 
@@ -65,7 +71,8 @@ export class DndAnnouncer {
  * ```
  */
 export function injectAnnounce(override?: AnnouncePlugin): AnnouncePlugin {
-  const plugin = resolveAnnounce(override);
+  // warn:false — null is expected (fall back to the built-in announcer), not a missing requirement.
+  const plugin = resolveAnnounce(inject(Injector), override, false)();
   if (plugin) return plugin;
   const announcer = inject(DndAnnouncer);
   return (message, politeness) => announcer.announce(message, politeness);

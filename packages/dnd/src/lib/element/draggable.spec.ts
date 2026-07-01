@@ -1,5 +1,7 @@
 import { ElementRef, PLATFORM_ID, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { trackRuns } from '../testing/reactivity';
+import { makeDragSession } from '../testing/drag-session';
 import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
 import { draggable } from './draggable';
@@ -53,13 +55,7 @@ function setup<T>(
 }
 
 function sessionFor(sourceEl: HTMLElement): DragSession {
-  return {
-    sourceEl,
-    sourceData: {},
-    targets: [],
-    pointer: { x: 0, y: 0 },
-    kind: 'transfer',
-  };
+  return makeDragSession({ sourceEl });
 }
 
 describe('draggable', () => {
@@ -245,5 +241,240 @@ describe('draggable — options, callbacks & lazy reads', () => {
       },
     });
     expect(dropped[0].edge).toBeNull();
+  });
+
+  it('drops with NO targets → null edge + empty location (non-happy)', () => {
+    const dropped: DropEvent<{ id: number }>[] = [];
+    const { config } = build({ data: { id: 1 }, onDrop: (e) => dropped.push(e) });
+    config.onDrop?.({
+      source: { element: {} as HTMLElement, dragHandle: null, data: {} },
+      location: {
+        initial: {} as never,
+        current: { input: {} as never, dropTargets: [] },
+        previous: { dropTargets: [] },
+      },
+    });
+    expect(dropped[0].edge).toBeNull();
+    expect(dropped[0].location.current).toEqual([]);
+  });
+
+  it('canDrag gate is forwarded live (reflects the latest value)', () => {
+    const allow = signal(true);
+    const { config } = build({ data: { id: 1 }, canDrag: () => allow() });
+    expect(config.canDrag?.({} as never)).toBe(true);
+    allow.set(false);
+    expect(config.canDrag?.({} as never)).toBe(false); // read lazily, not snapshotted
+  });
+});
+
+describe('draggable — reactivity & single registration', () => {
+  beforeEach(() => {
+    draggableMock.mockReset();
+    cleanupMock.mockReset();
+  });
+
+  it('registers exactly once even as data / meta / canDrag signals churn', () => {
+    const data = signal({ id: 1 });
+    const meta = signal({ k: 'a' });
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    TestBed.runInInjectionContext(() => {
+      TestBed.inject(DndSession);
+      draggable({ data, meta: () => meta() });
+    });
+    expect(draggableMock).toHaveBeenCalledTimes(1);
+    data.set({ id: 2 });
+    meta.set({ k: 'b' });
+    TestBed.tick();
+    expect(draggableMock).toHaveBeenCalledTimes(1); // options are read lazily, never re-register
+  });
+
+  it('`dragging` stays stable across frames while this element remains the source', () => {
+    const { ref, element, session } = setup({ id: 1 });
+    const runs = trackRuns(() => ref.dragging());
+    TestBed.tick();
+    expect(runs()).toBe(1);
+
+    session.set(sessionFor(element));
+    TestBed.tick();
+    expect(runs()).toBe(2); // false → true
+
+    // frames: same source element, moving pointer → boolean unchanged
+    for (let i = 1; i <= 4; i++) {
+      session.set({ ...sessionFor(element), pointer: { x: i, y: i } });
+      TestBed.tick();
+    }
+    expect(runs()).toBe(2); // no churn — the equality gate on the boolean holds
+
+    session.set(null);
+    TestBed.tick();
+    expect(runs()).toBe(3); // true → false
+  });
+});
+
+describe('draggable — reactive drag handle (re-registration)', () => {
+  beforeEach(() => {
+    draggableMock.mockReset();
+    cleanupMock.mockReset();
+  });
+
+  it('re-registers only when the handle element actually changes, tearing down the old', () => {
+    const h1 = document.createElement('button');
+    const h2 = document.createElement('button');
+    const handle = signal<HTMLElement | undefined>(h1);
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    TestBed.runInInjectionContext(() => {
+      TestBed.inject(DndSession);
+      draggable({ data: { id: 1 }, dragHandle: handle });
+    });
+    TestBed.tick(); // flush the afterRenderEffect
+    expect(draggableMock).toHaveBeenCalledTimes(1);
+    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBe(h1);
+
+    handle.set(h2);
+    TestBed.tick();
+    expect(cleanupMock).toHaveBeenCalledTimes(1); // old registration torn down
+    expect(draggableMock).toHaveBeenCalledTimes(2);
+    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBe(h2);
+
+    // re-setting the same element must NOT churn a re-register
+    handle.set(h2);
+    TestBed.tick();
+    expect(draggableMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('tolerates the handle becoming undefined (whole element draggable again)', () => {
+    const h1 = document.createElement('button');
+    const handle = signal<HTMLElement | undefined>(h1);
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    TestBed.runInInjectionContext(() => {
+      TestBed.inject(DndSession);
+      draggable({ data: { id: 1 }, dragHandle: handle });
+    });
+    TestBed.tick();
+    handle.set(undefined);
+    TestBed.tick();
+    expect(draggableMock).toHaveBeenCalledTimes(2);
+    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBeUndefined();
+  });
+});
+
+function pe(type: string, x = 0, y = 0, id = 1): Event {
+  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  Object.assign(e, {
+    pointerId: id,
+    clientX: x,
+    clientY: y,
+    pageX: x,
+    pageY: y,
+    button: 0,
+    pointerType: 'mouse',
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+  });
+  return e;
+}
+
+describe('draggable — pointer engine', () => {
+  beforeEach(() => {
+    draggableMock.mockReset();
+    cleanupMock.mockReset();
+  });
+
+  function setupPointer(opts: { onDrop?: (e: DropEvent<{ id: string }>) => void } = {}) {
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    const { ref, session } = TestBed.runInInjectionContext(() => {
+      const session = TestBed.inject(DndSession).session;
+      const r = draggable<{ id: string }>({
+        data: { id: 'x' },
+        engine: 'pointer',
+        onDrop: opts.onDrop,
+      });
+      return { ref: r, session };
+    });
+    return { element, ref, session };
+  }
+
+  it('uses the pointer engine (never registers with pragmatic)', () => {
+    setupPointer();
+    expect(draggableMock).not.toHaveBeenCalled();
+  });
+
+  it('a gesture drives the unified session (engine:"pointer") + follows the pointer, then drops', () => {
+    const drops: DropEvent<{ id: string }>[] = [];
+    const { element, ref, session } = setupPointer({ onDrop: (e) => drops.push(e) });
+
+    expect(ref.dragging()).toBe(false);
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 20, 5)); // past the 5px threshold
+    TestBed.tick();
+
+    expect(session()?.engine).toBe('pointer');
+    expect(session()?.sourceEl).toBe(element);
+    expect(ref.dragging()).toBe(true);
+    expect(element.style.transform).toContain('translate'); // source follows pointer
+
+    element.dispatchEvent(pe('pointerup', 20, 5));
+    TestBed.tick();
+
+    expect(session()).toBeNull();
+    expect(element.style.transform).toBe(''); // preview cleared
+    expect(ref.dragging()).toBe(false);
+    expect(drops).toHaveLength(1);
+    expect(drops[0].data).toEqual({ id: 'x' });
+  });
+
+  it('a custom pointer preview follows the pointer; the source stays put; cleaned up on drop', () => {
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    let container: HTMLElement | undefined;
+    TestBed.runInInjectionContext(() => {
+      TestBed.inject(DndSession);
+      draggable({
+        data: { id: 'x' },
+        engine: 'pointer',
+        preview: {
+          render: (c) => {
+            c.textContent = 'PREVIEW';
+            container = c;
+          },
+        },
+      });
+    });
+
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 30, 10));
+    TestBed.tick();
+
+    expect(container?.textContent).toBe('PREVIEW');
+    expect(container?.style.transform).toContain('translate'); // preview follows
+    expect(element.style.transform).toBe(''); // ...source is NOT transformed
+    expect(document.body.contains(container as HTMLElement)).toBe(true);
+
+    element.dispatchEvent(pe('pointerup', 30, 10));
+    TestBed.tick();
+    expect(document.body.contains(container as HTMLElement)).toBe(false); // removed
   });
 });

@@ -6,6 +6,7 @@ import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop
 import { Draggable } from './draggable';
 import { DropTarget } from './drop-target';
 import { boxData } from '../internal/payload';
+import { makeDragSession } from '../testing/drag-session';
 import { type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession, type DropTargetHit } from '../session';
 
@@ -37,13 +38,7 @@ const stubHitbox: HitboxPlugin = {
 };
 
 function makeSession(targets: DropTargetHit[], data: unknown): DragSession {
-  return {
-    sourceEl: document.createElement('div'),
-    sourceData: boxData(data),
-    targets,
-    pointer: { x: 0, y: 0 },
-    kind: 'transfer',
-  };
+  return makeDragSession({ targets, sourceData: boxData(data) });
 }
 
 beforeEach(() => {

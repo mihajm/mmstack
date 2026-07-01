@@ -64,10 +64,21 @@ export type ResourceCacheOptions =
       ignoreCacheControl?: boolean;
       /**
        * If true, it saves the cached responses to an indexedDb table, making it available across
-       * tabs, sessions and reloads..only valid JSON responses can be persisted (so no Blobs, formData, ArrayBuffers etc.)
+       * tabs, sessions and reloads.
+       *
+       * Note: persisted values are structured-cloned, which preserves `Date`/`Map`/`Set`/`Blob`
+       * etc. but drops class prototypes — so prototype-bearing `parse` output comes back as a
+       * plain object on hydration. Use `setLocal` to keep such a value in memory only.
        * @default false
        */
       persist?: boolean;
+      /**
+       * If true, entries written by this resource are not broadcast to other tabs, even when
+       * `syncTabs` is enabled globally on the cache. Lets you opt into cross-tab sync globally
+       * and opt a specific resource out. Combine with `persist: true` for "persist but don't sync".
+       * @default false
+       */
+      skipTabSync?: boolean;
     };
 
 /**

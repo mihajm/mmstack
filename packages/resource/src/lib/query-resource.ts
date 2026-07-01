@@ -244,6 +244,13 @@ export type QueryResourceRef<TResult> = Omit<
    */
   disabledReason: Signal<DisabledReason | null>;
   /**
+   * Like `set`, but keeps the value in this tab's memory only — never persisted
+   * (IndexedDB) nor broadcast to other tabs. Use for values whose `parse` output
+   * can't survive a serialization round-trip (e.g. class instances), so they aren't
+   * silently downgraded to plain objects elsewhere; a reload / other tab re-fetches.
+   */
+  setLocal(value: TResult): void;
+  /**
    * Prefetches data for the resource, populating the cache if caching is enabled.  This can be
    * used to proactively load data before it's needed.
    *
@@ -454,6 +461,9 @@ export function queryResource<TResult, TRaw = TResult>(
   const persist =
     typeof options?.cache === 'object' && options.cache.persist === true;
 
+  const skipTabSync =
+    typeof options?.cache === 'object' && options.cache.skipTabSync === true;
+
   const cachedRequest = options?.cache
     ? computed(() => {
         const r = stableRequest();
@@ -468,6 +478,8 @@ export function queryResource<TResult, TRaw = TResult>(
             bustBrowserCache,
             ignoreCacheControl,
             persist,
+            skipTabSync,
+            parse: options?.parse as (val: unknown) => unknown,
           }),
         };
       })
@@ -476,13 +488,15 @@ export function queryResource<TResult, TRaw = TResult>(
   let resource = toResourceObject(
     httpResource<TResult>(cachedRequest, {
       ...options,
-      parse: options?.parse as any, // Not my favorite thing to do, but here it is completely safe.
+      // when caching, the interceptor owns `parse` (parse-on-write) so it isn't
+      // applied twice — keep it on httpResource only for the uncached path
+      parse: (options?.cache ? undefined : options?.parse) as any,
     }) as HttpResourceRef<TResult>,
   );
 
   resource = catchValueError(resource, options?.defaultValue as TResult);
 
-  // get full HttpResonse from Cache
+  // cached values are stored already-parsed, so they're returned as-is
   const cachedEvent = cache.getEntryOrKey(cacheKey);
 
   const cacheEntry = linkedSignal<
@@ -539,29 +553,48 @@ export function queryResource<TResult, TRaw = TResult>(
     options?.equal,
   );
 
-  const set = (value: TResult) => {
+  const writeValue = (
+    value: TResult,
+    persistEntry: boolean,
+    broadcastEntry: boolean,
+  ) => {
     resource.value.set(value);
     const k = untracked(cacheKey);
     if (options?.cache && k)
       cache.store(
         k,
-        new HttpResponse({
-          body: value,
-          status: 200,
-        }),
+        new HttpResponse({ body: value, status: 200 }),
         staleTime,
         ttl,
-        persist,
+        persistEntry,
+        broadcastEntry,
       );
   };
+
+  const set = (value: TResult) => writeValue(value, persist, !skipTabSync);
+  // memory-only, this tab only — no persist, no broadcast
+  const setLocal = (value: TResult) => writeValue(value, false, false);
 
   const update = (updater: (value: TResult) => TResult) => {
     set(updater(untracked(value)));
   };
 
+  const valueEq = options.equal;
+
   const value = options?.cache
     ? toWritable(
-        computed((): TResult => cacheEntry()?.value ?? resource.value()),
+        computed(
+          (): TResult => (cacheEntry()?.value ?? resource.value()) as TResult,
+          {
+            equal: valueEq
+              ? (a, b) => {
+                  if (a === undefined && b === undefined) return true;
+                  if (a === undefined || b === undefined) return false;
+                  return valueEq(a, b);
+                }
+              : undefined,
+          },
+        ),
         set,
         update,
       )
@@ -587,6 +620,7 @@ export function queryResource<TResult, TRaw = TResult>(
     ...resource,
     value,
     set,
+    setLocal,
     update,
     statusCode: linkedSignal(resource.statusCode),
     headers: linkedSignal(resource.headers),

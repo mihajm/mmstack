@@ -327,7 +327,7 @@ describe('Cache', () => {
       const cache = new Cache<string>(undefined, undefined, undefined, {
         id: channelId,
         serialize: (v) => v,
-        deserialize: (v) => v,
+        deserialize: (v) => v as string,
       });
 
       cache.store('k', 'local-newer');
@@ -365,7 +365,7 @@ describe('Cache', () => {
       const cache = new Cache<string>(undefined, undefined, undefined, {
         id: channelId,
         serialize: (v) => v,
-        deserialize: (v) => v,
+        deserialize: (v) => v as string,
       });
 
       cache.store('k', 'local-older');

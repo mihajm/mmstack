@@ -280,6 +280,7 @@ describe('createCacheInterceptor', () => {
         60_000, // fresh window from max-age
         undefined, // no swr / no configured ttl → cache default applies
         false, // ...but never persisted
+        true, // broadcast (no skipTabSync)
       );
       storeSpy.mockRestore();
     });

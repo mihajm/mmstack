@@ -1,4 +1,4 @@
-import { HttpHeaders, HttpResponse } from '@angular/common/http';
+import { type HttpResponse } from '@angular/common/http';
 import {
   computed,
   DestroyRef,
@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
 import { extractUrlFromKey } from '../hash-request';
+import { deserialize, serialize } from './encode';
 import { type CacheDB, createNoopDB, createSingleStoreDB } from './persistence';
 
 function generateID() {
@@ -188,13 +189,13 @@ export class Cache<T> {
    *                   Defaults to `undefined`, meaning no synchronization across tabs.
    */
   constructor(
-    protected readonly ttl: number = ONE_DAY,
-    protected readonly staleTime: number = ONE_HOUR,
+    readonly ttl: number = ONE_DAY,
+    readonly staleTime: number = ONE_HOUR,
     cleanupOpt: Partial<CleanupType> = DEFAULT_CLEANUP_OPT,
     syncTabs?: {
       id: string;
-      serialize: (value: T) => string;
-      deserialize: (value: string) => T | null;
+      serialize: (value: T) => unknown;
+      deserialize: (value: unknown) => T | null;
     },
 
     private readonly db: Promise<CacheDB<T>> = Promise.resolve(
@@ -229,7 +230,7 @@ export class Cache<T> {
             entry: { key: msg.entry.key },
             cacheId: this.id,
             type: 'cache-sync-message',
-          } satisfies SyncMessage<string>);
+          } satisfies SyncMessage<unknown>);
 
         return channel.postMessage({
           ...msg,
@@ -239,12 +240,12 @@ export class Cache<T> {
           },
           cacheId: this.id,
           type: 'cache-sync-message',
-        } satisfies SyncMessage<string>);
+        } satisfies SyncMessage<unknown>);
       };
 
       channel.onmessage = (event) => {
         const msg = event.data;
-        if (!isSyncMessage<string>(msg)) return;
+        if (!isSyncMessage<unknown>(msg)) return;
         if (msg.cacheId === this.id) return; // ignore messages from this cache
 
         if (msg.action === 'store') {
@@ -395,6 +396,7 @@ export class Cache<T> {
    * @param staleTime - (Optional) The stale time for this entry, in milliseconds. Overrides the default `staleTime`.
    * @param ttl - (Optional) The TTL for this entry, in milliseconds. Overrides the default `ttl`.
    * @param persist - (Optional) Whether to also write the entry to the persistence layer (IndexedDB). Defaults to `false`.
+   * @param broadcast - (Optional) Whether to notify other tabs of this write. Defaults to `true`; pass `false` to keep the entry in this tab's memory only.
    */
   store(
     key: string,
@@ -402,8 +404,9 @@ export class Cache<T> {
     staleTime = this.staleTime,
     ttl = this.ttl,
     persist = false,
+    broadcast = true,
   ) {
-    this.storeInternal(key, value, staleTime, ttl, false, persist);
+    this.storeInternal(key, value, staleTime, ttl, false, persist, broadcast);
   }
 
   private storeInternal(
@@ -413,6 +416,7 @@ export class Cache<T> {
     ttl = this.ttl,
     fromSync = false,
     persist = false,
+    broadcast = true,
   ) {
     const entry = untracked(this.internal).get(key);
 
@@ -434,6 +438,7 @@ export class Cache<T> {
       },
       fromSync,
       persist,
+      broadcast,
     );
   }
 
@@ -463,6 +468,7 @@ export class Cache<T> {
     next: Omit<CacheEntry<T>, 'timeout'>,
     fromSync: boolean,
     persist: boolean,
+    broadcast = true,
   ) {
     const existing = untracked(this.internal).get(next.key);
     if (existing) clearTimeout(existing.timeout); // stop the previous invalidation
@@ -486,10 +492,11 @@ export class Cache<T> {
     if (!fromSync) {
       if (persist) this.db.then((db) => db.store(next));
 
-      this.broadcast({
-        action: 'store',
-        entry: next,
-      });
+      if (broadcast)
+        this.broadcast({
+          action: 'store',
+          entry: next,
+        });
     }
   }
 
@@ -675,6 +682,9 @@ type CacheOptions = {
   cleanup?: Partial<CleanupType>;
   /**
    * Whether to synchronize cache across tabs. If true, the cache will use a BroadcastChannel to send updates between tabs.
+   *
+   * Enable globally here; opt a specific resource out with its `cache.skipTabSync`
+   * option, or a single write with `setLocal`.
    */
   syncTabs?: boolean;
   /**
@@ -687,18 +697,28 @@ type CacheOptions = {
   /**
    * Version of the caches database, increment this if the interfaces change, this will cause the old data to be deleted.
    * Minimum value is 1, so first increment should be 2.
+   *
+   * Composed with an internal store-format version, so the effective IndexedDB /
+   * sync-channel version may be higher than the number set here — the offset is
+   * cosmetic (store-name suffix) and monotonic, so behavior is unaffected.
    * @default 1
    */
   version?: number;
+  /**
+   * Custom serialization logic to convert the HttpResponse prior to caching (BroadcastChannel and IDB).
+   * Overrides the default Structured Clone compatible POJO serializer.
+   */
+  serialize?: (value: HttpResponse<unknown>) => unknown;
+  /**
+   * Custom deserialization logic to reconstitute the HttpResponse after caching.
+   * Overrides the default POJO deserializer.
+   */
+  deserialize?: (value: unknown) => HttpResponse<unknown> | null;
 };
 
 const CLIENT_CACHE_TOKEN = new InjectionToken<Cache<HttpResponse<unknown>>>(
   'INTERNAL_CLIENT_CACHE',
   {
-    // Memory-only default so a plain queryResource works with zero config. No
-    // IndexedDB / BroadcastChannel — keeps it SSR-safe and request-isolated under
-    // SSR (root injector is per-request). provideQueryCache() overrides this to
-    // layer on persistence / cross-tab sync / global TTL tuning.
     providedIn: 'root',
     factory: () => {
       const cache = new Cache<HttpResponse<unknown>>();
@@ -742,6 +762,10 @@ export function provideMockQueryCache(opt?: {
   };
 }
 
+// Bump on any persisted-format change; composed with the user's `version` so a
+// format change drops stale persisted entries without users bumping `version`.
+const STORE_FORMAT_VERSION = 2;
+
 /**
  * Provides the instance of the QueryCache for queryResource. This should probably be called
  * in your application's root configuration, but can also be overriden with component/module providers.
@@ -765,50 +789,10 @@ export function provideMockQueryCache(opt?: {
  * };
  */
 export function provideQueryCache(opt?: CacheOptions): Provider {
-  const serialize = (value: HttpResponse<unknown>) => {
-    const headersRecord: Record<string, string[]> = {};
-
-    const headerKeys = value.headers.keys();
-    headerKeys.forEach((key) => {
-      const values = value.headers.getAll(key);
-      if (!values) return;
-      headersRecord[key] = values;
-    });
-
-    return JSON.stringify({
-      body: value.body,
-      status: value.status,
-      // statusText intentionally omitted: deprecated in Angular, meaningless under
-      // HTTP/2+ (HttpResponse defaults it to 'OK' on reconstruction)
-      headers: headerKeys.length > 0 ? headersRecord : undefined,
-      url: value.url,
-    });
-  };
-
-  const deserialize = (value: string) => {
-    try {
-      const parsed = JSON.parse(value);
-
-      if (!parsed || typeof parsed !== 'object' || !('body' in parsed))
-        throw new Error('Invalid cache entry format');
-
-      const headers = parsed.headers
-        ? new HttpHeaders(parsed.headers)
-        : undefined;
-
-      return new HttpResponse({
-        body: parsed.body,
-        status: parsed.status,
-        headers: headers,
-        url: parsed.url,
-      });
-    } catch (err) {
-      if (isDevMode()) console.error('Failed to deserialize cache entry:', err);
-      return null;
-    }
-  };
-
-  const syncChannelId = `mmstack-query-cache-sync_v${opt?.version ?? 1}`;
+  const effectiveVersion = (opt?.version ?? 1) + (STORE_FORMAT_VERSION - 1);
+  const syncChannelId = `mmstack-query-cache-sync_v${effectiveVersion}`;
+  const serializeFn = opt?.serialize ?? serialize;
+  const deserializeFn = opt?.deserialize ?? deserialize;
 
   return {
     provide: CLIENT_CACHE_TOKEN,
@@ -820,25 +804,25 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
         !onServer && opt?.syncTabs
           ? {
               id: syncChannelId,
-              serialize,
-              deserialize,
+              serialize: serializeFn,
+              deserialize: deserializeFn,
             }
           : undefined;
 
       const db =
         onServer || opt?.persist === false
           ? undefined
-          : createSingleStoreDB<string>(
+          : createSingleStoreDB<unknown>(
               'mmstack-query-cache-db',
               (version) => `query-store_v${version}`,
-              opt?.version,
+              effectiveVersion,
             ).then((db): CacheDB<HttpResponse<unknown>> => {
               return {
                 getAll: () => {
                   return db.getAll().then((entries) => {
                     return entries
                       .map((entry) => {
-                        const value = deserialize(entry.value);
+                        const value = deserializeFn(entry.value);
                         if (value === null) return null;
                         return {
                           ...entry,
@@ -849,7 +833,10 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
                   });
                 },
                 store: (entry) => {
-                  return db.store({ ...entry, value: serialize(entry.value) });
+                  return db.store({
+                    ...entry,
+                    value: serializeFn(entry.value),
+                  });
                 },
                 remove: db.remove,
               };

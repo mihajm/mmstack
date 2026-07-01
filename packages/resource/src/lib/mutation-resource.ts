@@ -249,7 +249,7 @@ export type MutationResourceRef<
   TICTX = void,
 > = Omit<
   QueryResourceRef<TResult>,
-  'prefetch' | 'value' | 'hasValue' | 'set' | 'update' // we don't allow manually viewing the returned data or updating it manually, prefetching a mutation also doesn't make any sense
+  'prefetch' | 'value' | 'hasValue' | 'set' | 'setLocal' | 'update' // we don't allow manually viewing the returned data or updating it manually, prefetching a mutation also doesn't make any sense
 > & {
   /**
    * Executes the mutation.

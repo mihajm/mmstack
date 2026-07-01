@@ -28,6 +28,7 @@ import {
   provideMockResourceSensors,
   provideQueryCache,
   ResourceSensors,
+  injectQueryCache,
 } from './util';
 
 const TEST_CONTEXT = new HttpContextToken<{
@@ -950,3 +951,222 @@ describe('queryResource — cache provider ergonomics', () => {
     expect(requests).toBe(1);
   });
 });
+
+describe('queryResource — parse option', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideMockQueryCache(),
+        {
+          provide: ResourceSensors,
+          useValue: {
+            networkStatus: signal(true),
+            pageVisibility: signal<DocumentVisibilityState>('visible'),
+          },
+        },
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([
+            createCacheInterceptor(),
+            createDedupeRequestsInterceptor(),
+            testInterceptor,
+          ]),
+        ),
+      ],
+    });
+  });
+
+  it('should parse the response body using the provided parse function', async () => {
+    const url = 'https://example.com/parse';
+    const parse = (val: any) => ({ ...val, parsed: true });
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'raw' }),
+        }),
+        { parse },
+      ),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(result).toEqual({ data: 'raw', parsed: true });
+  });
+
+  it('should parse the response body when retrieving from the cache', async () => {
+    let requests = 0;
+    const url = 'https://example.com/parse-cache';
+    const validate = () => { requests++; };
+    const parse = (val: any) => ({ ...val, parsed: true });
+
+    // First request (network hit)
+    const resA = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(validate, { data: 'raw' }),
+        }),
+        { parse, cache: { staleTime: 10000 } },
+      ),
+    );
+
+    const resultA = await TestBed.runInInjectionContext(() =>
+      until(resA.value, (v) => v !== undefined),
+    );
+    expect(resultA).toEqual({ data: 'raw', parsed: true });
+    expect(requests).toBe(1);
+
+    // Second request (cache hit)
+    const resB = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(validate, { data: 'raw' }),
+        }),
+        { parse, cache: { staleTime: 10000 } },
+      ),
+    );
+
+    const resultB = await TestBed.runInInjectionContext(() =>
+      until(resB.value, (v) => v !== undefined),
+    );
+    
+    // Ensure it was parsed correctly
+    expect(resultB).toEqual({ data: 'raw', parsed: true });
+    // Ensure it was served from cache (no new network request)
+    expect(requests).toBe(1); 
+  });
+
+  it('returns cached entries as-is without re-parsing (parse-on-write)', async () => {
+    const url = 'https://example.com/parse-cached';
+    const customKey = 'parse-cached-key';
+    // parse would add `parsed: true`; a cached (already-parsed) entry must NOT be re-parsed
+    const parse = (val: any) => ({ ...val, parsed: true });
+
+    // seed the cache with an already-parsed value, as hydration/network would store it
+    TestBed.runInInjectionContext(() => {
+      const cache = injectQueryCache();
+      cache.store(
+        customKey,
+        new HttpResponse({ body: { data: 'from-db', parsed: true }, status: 200 }),
+      );
+    });
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            throw new Error('Should not hit network');
+          }, { data: 'should-not-hit' }),
+        }),
+        { parse, cache: { staleTime: 10000, hash: () => customKey } },
+      ),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+
+    expect(result).toEqual({ data: 'from-db', parsed: true });
+  });
+
+  it('does not re-apply parse to values written via set (no double-parse)', async () => {
+    const url = 'https://example.com/parse-set';
+    // non-idempotent: a double-parse would show up as count === 2
+    const parse = (val: any) => ({ ...val, count: (val.count ?? 0) + 1 });
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'raw' }),
+        }),
+        { parse, cache: { staleTime: 10000 } },
+      ),
+    );
+
+    const initial = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    // network body parsed exactly once
+    expect(initial).toEqual({ data: 'raw', count: 1 });
+
+    // write an already-parsed value through the resource's writable setter
+    res.set({ data: 'local', count: 1 });
+
+    // read-back is verbatim — parse must NOT run again (would be count: 2)
+    expect(res.value()).toEqual({ data: 'local', count: 1 });
+    // ...and stays stable across subsequent reads (no creeping re-parse)
+    expect(res.value()).toEqual({ data: 'local', count: 1 });
+  });
+
+  it('setLocal writes to this tab only (no persist, no broadcast), unlike set', async () => {
+    const url = 'https://example.com/set-local';
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'raw' }),
+        }),
+        { cache: { staleTime: 10000, persist: true } },
+      ),
+    );
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+
+    const cache = TestBed.runInInjectionContext(() => injectQueryCache());
+    const storeSpy = vi.spyOn(cache, 'store');
+
+    res.set({ data: 'a' } as any);
+    res.setLocal({ data: 'b' } as any);
+
+    // store(key, value, staleTime, ttl, persist, broadcast)
+    const flags = storeSpy.mock.calls.map((c) => [c[4], c[5]]);
+    expect(flags).toEqual([
+      [true, true], // set → persisted + broadcast
+      [false, false], // setLocal → neither
+    ]);
+    expect(res.value()).toEqual({ data: 'b' });
+  });
+
+  it('cache.skipTabSync opts a resource out of broadcast while still persisting', async () => {
+    const url = 'https://example.com/skip-tab-sync';
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, { data: 'raw' }),
+        }),
+        { cache: { staleTime: 10000, persist: true, skipTabSync: true } },
+      ),
+    );
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+
+    const cache = TestBed.runInInjectionContext(() => injectQueryCache());
+    const storeSpy = vi.spyOn(cache, 'store');
+
+    res.set({ data: 'a' } as any);
+
+    // store(key, value, staleTime, ttl, persist, broadcast) — persist on, broadcast off
+    const [persistFlag, broadcastFlag] = storeSpy.mock.calls[0].slice(4);
+    expect(persistFlag).toBe(true);
+    expect(broadcastFlag).toBe(false);
+  });
+});
+

@@ -7,11 +7,6 @@ export const appRoutes: Route[] = [
       import('./examples/core-example').then((m) => m.CoreExample),
   },
   {
-    path: 'sortable',
-    loadComponent: () =>
-      import('./examples/sortable-example').then((m) => m.SortableExample),
-  },
-  {
     path: 'sortable-pointer',
     loadComponent: () =>
       import('./examples/pointer-sortable-example').then(

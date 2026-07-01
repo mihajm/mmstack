@@ -483,7 +483,7 @@ cache.invalidateUrlPrefix('/api/posts'); // drop every entry under a URL prefix,
 cache.invalidateWhere((key) => key.includes('userId=42')); // arbitrary predicates
 cache.invalidatePrefix('raw-key-prefix'); // match the raw key string from its start
 cache.clear(); // drop EVERYTHING — memory, persisted rows, other tabs
-cache.store(key, value, staleTime, ttl); // imperative write
+cache.store(key, new HttpResponse({ body: value }), staleTime, ttl); // imperative write
 ```
 
 Auto-generated keys have the shape `${method}${SEP}${url}${SEP}${responseType}[${SEP}params][${SEP}body][${SEP}vary]`, where `SEP` is a content-rare control-character delimiter (treat keys as opaque — don't hand-build them). `invalidateUrlPrefix(urlPrefix)` is the common move: it recovers the URL field structurally, so it matches **any** HTTP method and even keys a custom `cache.hash` prepends a namespace to. For a fully-custom key scheme it takes an optional `match` (`(urlPrefix) => (key) => boolean`). Call `clear()` on logout so no prior user's responses survive. For observability there's a read-only `cache.stats()` signal (`{ size, hits, misses }`) — handy for a debug panel; it deliberately exposes no mutation surface.

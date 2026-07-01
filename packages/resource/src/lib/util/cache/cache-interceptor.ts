@@ -7,8 +7,8 @@ import {
   type HttpRequest,
   HttpResponse,
 } from '@angular/common/http';
-import { inject, isDevMode, PLATFORM_ID } from '@angular/core';
-import { map, type Observable, of, tap } from 'rxjs';
+import { inject, PLATFORM_ID } from '@angular/core';
+import { map, type Observable, of } from 'rxjs';
 import { hashRequest } from '../hash-request';
 import { sharePending } from '../share-pending';
 import { injectQueryCache } from './cache';
@@ -22,6 +22,7 @@ type CacheEntryOptions = {
   ignoreCacheControl?: boolean;
   parse?: (val: unknown) => unknown;
   persist?: boolean;
+  skipTabSync?: boolean;
 };
 
 const CACHE_CONTEXT = new HttpContextToken<CacheEntryOptions>(() => ({
@@ -264,38 +265,36 @@ export function createCacheInterceptor(
         });
       }
 
-      // non-JSON bodies (blob/arraybuffer) cannot survive the JSON persistence layer
-      const persistable = req.responseType === 'json';
-      if (opt.persist && !persistable && isDevMode()) {
-        console.warn(
-          `[@mmstack/resource]: persist was requested for a '${req.responseType}' response — such bodies don't survive JSON serialization, persisting skipped.`,
-        );
-      }
+      const broadcast = !opt.skipTabSync;
 
       return next(req).pipe(
-        tap((event) => {
-        if (!(event instanceof HttpResponse)) return;
+        map((event) => {
+          if (!(event instanceof HttpResponse)) return event;
 
-        if (event.ok) {
-          const cacheControl = parseCacheControlHeader(event);
+          // 304 → server confirmed our cached entry is still valid. Re-stamp the
+          // existing entry so subsequent reads within the new freshness window
+          // don't trigger another revalidation round-trip, then serve it.
+          if (event.status === 304 && entry) {
+            // ...unless the key was invalidated while this conditional request was in
+            // flight (e.g. by a mutation) — re-storing would resurrect deleted data
+            if (cache.getUntracked(key)) {
+              const cacheControl = parseCacheControlHeader(event);
+              const { staleTime, ttl } = opt.ignoreCacheControl
+                ? opt
+                : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
+              const persist =
+                (opt.persist ?? false) &&
+                (opt.ignoreCacheControl || !cacheControl.isPrivate);
 
-          if (cacheControl.noStore && !opt.ignoreCacheControl) return;
+              cache.store(key, entry.value, staleTime, ttl, persist, broadcast);
+            }
+            return entry.value;
+          }
 
-          const { staleTime, ttl } = opt.ignoreCacheControl
-            ? opt
-            : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
+          if (!event.ok) return event;
 
-          if (ttl === 0) return; // no point
-
-          // `Cache-Control: private` → fine to keep in memory, never on disk
-          const persist =
-            (opt.persist ?? false) &&
-            persistable &&
-            (opt.ignoreCacheControl || !cacheControl.isPrivate);
-
-          const parsedResponse = opt.parse
-            ? // statusText omitted — deprecated in Angular (HttpResponse defaults it)
-              new HttpResponse({
+          const parsed = opt.parse
+            ? new HttpResponse({
                 body: opt.parse(event.body),
                 headers: event.headers,
                 status: event.status,
@@ -303,39 +302,23 @@ export function createCacheInterceptor(
               })
             : event;
 
-          cache.store(key, parsedResponse, staleTime, ttl, persist);
-          return;
-        }
-
-        // 304 → server confirmed our cached entry is still valid. Re-stamp the
-        // existing entry so subsequent reads within the new freshness window
-        // don't trigger another revalidation round-trip.
-        if (event.status === 304 && entry) {
-          // ...unless the key was invalidated while this conditional request was in
-          // flight (e.g. by a mutation) — re-storing would resurrect deleted data
-          if (!cache.getUntracked(key)) return;
-
           const cacheControl = parseCacheControlHeader(event);
-          const { staleTime, ttl } = opt.ignoreCacheControl
-            ? opt
-            : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
+          if (!cacheControl.noStore || opt.ignoreCacheControl) {
+            const { staleTime, ttl } = opt.ignoreCacheControl
+              ? opt
+              : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
 
-          const persist =
-            (opt.persist ?? false) &&
-            persistable &&
-            (opt.ignoreCacheControl || !cacheControl.isPrivate);
+            if (ttl !== 0) {
+              const persist =
+                (opt.persist ?? false) &&
+                (opt.ignoreCacheControl || !cacheControl.isPrivate);
 
-          cache.store(key, entry.value, staleTime, ttl, persist);
-        }
-      }),
-      map((event) => {
-        // handle 304 responses due to eTag/last-modified
-        if (event instanceof HttpResponse && event.status === 304 && entry) {
-          return entry.value;
-        }
+              cache.store(key, parsed, staleTime, ttl, persist, broadcast);
+            }
+          }
 
-        return event;
-      }),
+          return parsed;
+        }),
       );
     });
   };

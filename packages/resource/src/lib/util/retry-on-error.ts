@@ -1,5 +1,10 @@
 import { type HttpResourceRef } from '@angular/common/http';
-import { effect, ResourceStatus, untracked } from '@angular/core';
+import {
+  effect,
+  ResourceStatus,
+  untracked,
+  type Injector,
+} from '@angular/core';
 
 export type RetryOptions =
   | number
@@ -26,6 +31,7 @@ export function retryOnError<T>(
   res: HttpResourceRef<T>,
   opt?: RetryOptions,
   onError?: RetryErrorCallback,
+  injector?: Injector,
 ): HttpResourceRef<T> {
   const max = opt ? (typeof opt === 'number' ? opt : (opt.max ?? 0)) : 0;
   const backoff = typeof opt === 'object' ? (opt.backoff ?? 1000) : 1000;
@@ -57,14 +63,17 @@ export function retryOnError<T>(
     retries = 0;
   };
 
-  const ref = effect(() => {
-    switch (res.status()) {
-      case ResourceStatus.Error:
-        return handleError();
-      case ResourceStatus.Resolved:
-        return onSuccess();
-    }
-  });
+  const ref = effect(
+    () => {
+      switch (res.status()) {
+        case ResourceStatus.Error:
+          return handleError();
+        case ResourceStatus.Resolved:
+          return onSuccess();
+      }
+    },
+    { injector },
+  );
 
   return {
     ...res,

@@ -527,7 +527,12 @@ export function queryResource<TResult, TRaw = TResult>(
       online: networkAvailable,
     },
   );
-  resource = retryOnError(resource, options?.retry, options?.onError);
+  resource = retryOnError(
+    resource,
+    options?.retry,
+    options?.onError,
+    options.injector,
+  );
 
   resource = persistResourceValues<TResult>(
     resource,
@@ -564,12 +569,15 @@ export function queryResource<TResult, TRaw = TResult>(
     : resource.value;
 
   // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
-  const cbEffectRef = effect(() => {
-    const status = resource.status();
-    if (status === ResourceStatus.Error)
-      cb.fail(untracked(resource.error) as Error | undefined);
-    else if (status === ResourceStatus.Resolved) cb.success();
-  });
+  const cbEffectRef = effect(
+    () => {
+      const status = resource.status();
+      if (status === ResourceStatus.Error)
+        cb.fail(untracked(resource.error) as Error | undefined);
+      else if (status === ResourceStatus.Resolved) cb.success();
+    },
+    { injector: options.injector },
+  );
 
   const client = options?.injector
     ? options.injector.get(HttpClient)

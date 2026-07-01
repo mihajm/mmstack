@@ -16,6 +16,7 @@ type Chip = { kind: string };
  * `/sortable` sections so the two can be compared before the old one retires.
  */
 @Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-sortable-indicator-example',
   imports: [Reorderable, ReorderableItem, Draggable],
   template: `
@@ -23,7 +24,8 @@ type Chip = { kind: string };
       <h1>Sortable — native engine (indicator)</h1>
       <p class="hint">
         HTML5 drag-and-drop; items stay put and a drop-line shows the insert.
-        Same primitives as the pointer engine — this is <code>engine: 'native'</code>
+        Same primitives as the pointer engine — this is
+        <code>engine: 'native'</code>
         (the default). Reorders FLIP-animate to their new spot on commit.
       </p>
 
@@ -50,7 +52,9 @@ type Chip = { kind: string };
       </div>
 
       <h2>Palette → insert</h2>
-      <p class="hint">Drag a chip into the list — a foreign payload mapped to a new item.</p>
+      <p class="hint">
+        Drag a chip into the list — a foreign payload mapped to a new item.
+      </p>
       <div class="palette">
         @for (chip of chips; track chip.kind) {
           <span class="chip" mmDraggable [data]="chip">{{ chip.kind }}</span>
@@ -64,25 +68,61 @@ type Chip = { kind: string };
 
       <h2>Keyboard</h2>
       <p class="hint">
-        Every list above is keyboard-reorderable: focus a row, then ↑/↓ (or ←/→ on
-        an x-axis list); Cmd/Ctrl + arrow jumps to an end.
+        Every list above is keyboard-reorderable: focus a row, then ↑/↓ (or ←/→
+        on an x-axis list); Cmd/Ctrl + arrow jumps to an end.
       </p>
     </main>
   `,
   styles: `
-    main { max-width: 30rem; margin: 2rem auto; font: 14px/1.4 system-ui, sans-serif; }
-    .hint { color: #6b7280; }
-    .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-    .item {
-      padding: 12px 14px; background: #fff; border: 1px solid #e5e7eb;
-      border-radius: 8px; cursor: grab; position: relative;
+    main {
+      max-width: 30rem;
+      margin: 2rem auto;
+      font:
+        14px/1.4 system-ui,
+        sans-serif;
     }
-    .board { display: flex; gap: 16px; align-items: start; }
-    .col { flex: 1; min-height: 100px; padding: 8px; background: #f9fafb; border-radius: 10px; }
-    .palette { display: flex; gap: 8px; margin-bottom: 10px; }
+    .hint {
+      color: #6b7280;
+    }
+    .list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item {
+      padding: 12px 14px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      cursor: grab;
+      position: relative;
+    }
+    .board {
+      display: flex;
+      gap: 16px;
+      align-items: start;
+    }
+    .col {
+      flex: 1;
+      min-height: 100px;
+      padding: 8px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+    .palette {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
     .chip {
-      padding: 8px 14px; background: #eef2ff; border: 1px solid #c7d2fe;
-      border-radius: 999px; cursor: grab;
+      padding: 8px 14px;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 999px;
+      cursor: grab;
     }
   `,
 })

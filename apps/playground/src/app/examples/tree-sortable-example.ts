@@ -1,11 +1,11 @@
 import { Component, Input, signal, type WritableSignal } from '@angular/core';
 import {
   Reorderable,
+  reorderable,
   ReorderableHandle,
   ReorderableItem,
-  type ReorderableController,
-  reorderable,
   sortableGroup,
+  type ReorderableController,
 } from '@mmstack/dnd';
 
 export type TreeNode = {
@@ -29,6 +29,7 @@ function subtreeContains(item: TreeNode, node: TreeNode): boolean {
  * level. Recursion via the standalone component importing itself.
  */
 @Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-tree-node',
   imports: [Reorderable, ReorderableItem, ReorderableHandle, TreeNodeComponent],
   template: `
@@ -48,22 +49,42 @@ function subtreeContains(item: TreeNode, node: TreeNode): boolean {
     </ul>
   `,
   styles: `
-    :host { display: block; }
-    .tn-label {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 6px 10px; border-radius: 6px; cursor: grab;
-      background: #fff; border: 1px solid #e5e7eb; font-weight: 500;
+    :host {
+      display: block;
     }
-    .grip { color: #9ca3af; }
+    .tn-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: grab;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      font-weight: 500;
+    }
+    .grip {
+      color: #9ca3af;
+    }
     .tn-children {
-      list-style: none; margin: 4px 0 4px 18px; padding: 4px 0 4px 12px;
-      border-left: 2px solid #e5e7eb; display: flex; flex-direction: column; gap: 6px;
+      list-style: none;
+      margin: 4px 0 4px 18px;
+      padding: 4px 0 4px 12px;
+      border-left: 2px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
       min-height: 16px;
       /* opt in to the engine's reserved space so the gap opens cleanly */
       padding-bottom: calc(4px + var(--mm-sortable-reserved, 0px));
     }
-    .tn { position: relative; }
-    .tn-label.mm-sortable-dragging { box-shadow: 0 8px 24px rgb(0 0 0 / 18%); border-color: #c7d2fe; }
+    .tn {
+      position: relative;
+    }
+    .tn-label.mm-sortable-dragging {
+      box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+      border-color: #c7d2fe;
+    }
   `,
 })
 export class TreeNodeComponent {
@@ -71,6 +92,7 @@ export class TreeNodeComponent {
 }
 
 @Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-tree-sortable-example',
   imports: [Reorderable, ReorderableItem, TreeNodeComponent],
   template: `
@@ -78,7 +100,8 @@ export class TreeNodeComponent {
       <h1>Nested tree — drag across any level</h1>
       <p class="hint">
         Drag a node by its grip into any list, at any depth — including out to a
-        parent or down into a child. A node can't be dropped into its own subtree.
+        parent or down into a child. A node can't be dropped into its own
+        subtree.
       </p>
       <ul
         class="tn-children tn-root"
@@ -94,11 +117,24 @@ export class TreeNodeComponent {
     </main>
   `,
   styles: `
-    main { max-width: 32rem; margin: 2rem auto; font: 14px/1.4 system-ui, sans-serif; }
-    .hint { color: #6b7280; }
+    main {
+      max-width: 32rem;
+      margin: 2rem auto;
+      font:
+        14px/1.4 system-ui,
+        sans-serif;
+    }
+    .hint {
+      color: #6b7280;
+    }
     .tn-root {
-      list-style: none; margin: 0; padding: 0;
-      display: flex; flex-direction: column; gap: 6px; border-left: none;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-left: none;
     }
   `,
 })
@@ -124,7 +160,10 @@ export class TreeSortableExample {
       this.node(12, 'Cover letter.pdf'),
     ]),
     this.node(2, 'Projects', [
-      this.node(21, 'mmstack', [this.node(211, 'dnd'), this.node(212, 'primitives')]),
+      this.node(21, 'mmstack', [
+        this.node(211, 'dnd'),
+        this.node(212, 'primitives'),
+      ]),
       this.node(22, 'playground'),
     ]),
     this.node(3, 'Photos'),

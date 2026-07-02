@@ -39,9 +39,6 @@ export type ChangedEntry<T = unknown> = {
   readonly commit: (value?: T) => void;
 };
 
-/** Sentinel so `commit(undefined)` (a real `undefined` baseline) differs from `commit()`. */
-const NO_VALUE = Symbol('mmstack/no-value');
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -79,7 +76,7 @@ function childState(
 /**
  * Whether a child changed — delegating to the child's own `changed` signal (which honors the
  * child's overrides and localizes recomputation), falling back to a pure value diff for nodes
- * that aren't tracked (e.g. items of an initially-empty array, before they're committed).
+ * that aren't tracked (e.g. items of an initially-empty array, or dynamically added keys).
  */
 function childChanged(
   state: FieldState<unknown>,
@@ -88,12 +85,17 @@ function childChanged(
   currentChild: unknown,
 ): boolean {
   const entry = childState(state, key)?.metadata(CHANGED);
-  return entry ? entry.changed() : valueDiff(initialChild, currentChild);
+  if (entry) return entry.changed();
+  // Untracked child: no delegate signal covers it, so the diff depends directly on this node's
+  // value — subscribe, or a later edit/revert of that child would never re-evaluate.
+  state.value();
+  return valueDiff(initialChild, currentChild);
 }
 
 function nodeChanged(
   state: FieldState<unknown>,
   initial: Signal<unknown>,
+  keySet: Signal<string>,
 ): boolean {
   const init = initial();
 
@@ -110,6 +112,8 @@ function nodeChanged(
       state.value(); // track until next cycle
       return false;
     }
+
+    keySet(); // child delegates don't cover key churn — re-evaluate when the key set changes
 
     const keys = Object.keys(cur);
     if (keys.length !== Object.keys(init).length) return true;
@@ -166,8 +170,11 @@ type TrackNode = TrackConfig & { readonly state: FieldState<unknown> };
 export const CHANGED = createManagedMetadataKey<ChangedEntry, TrackNode>(
   (data) => {
     const initial: WritableSignal<unknown> = signal(undefined);
-    // This node's FieldState, fed in via the tracking rule (read lazily / post-construction).
-    const stateOf = (): FieldState<unknown> => (data() as TrackNode).state;
+
+    const keySet = computed(() => {
+      const v = state.value();
+      return isRecord(v) ? Object.keys(v).sort().join('\u0001') : '';
+    });
     const cfg = untracked(data);
 
     if (cfg?.root && cfg.autoCommit) {
@@ -179,11 +186,12 @@ export const CHANGED = createManagedMetadataKey<ChangedEntry, TrackNode>(
 
     return {
       initial,
-      changed: computed(() => nodeChanged(stateOf(), initial), {
+      changed: computed(() => nodeChanged(state, initial, keySet), {
         debugName: 'changed',
       }),
-      commit: (value: unknown = NO_VALUE) =>
-        initial.set(value === NO_VALUE ? untracked(stateOf().value) : value),
+      // arity check, not a default: commit(undefined) must set a real `undefined` baseline
+      commit: (...args: [value?: unknown]) =>
+        initial.set(args.length ? args[0] : untracked(state.value)),
     };
   },
 );
@@ -386,6 +394,27 @@ export function reconcileWith<T>(
   metadata(path, RECONCILE_WITH, () => fn as ReconcileFn);
 }
 
+/**
+ * Deeply re-baselines a subtree to (the matching parts of) `value`, so item/leaf-level `changed`
+ * agrees with the container after a kept-edit or custom merge. Children with no counterpart in
+ * `value` (e.g. locally added items) get an `undefined` baseline and thus read as changed.
+ */
+function rebaseline(state: FieldState<unknown>, value: unknown): void {
+  state.metadata(CHANGED)?.commit(value);
+  const cur = untracked(state.value);
+  if (Array.isArray(cur)) {
+    for (let i = 0; i < cur.length; i++) {
+      const child = childState(state, i);
+      if (child) rebaseline(child, Array.isArray(value) ? value[i] : undefined);
+    }
+  } else if (isRecord(cur)) {
+    for (const key of Object.keys(cur)) {
+      const child = childState(state, key);
+      if (child) rebaseline(child, isRecord(value) ? value[key] : undefined);
+    }
+  }
+}
+
 function reconcileNode(state: FieldState<unknown>, incoming: unknown): void {
   const entry = state.metadata(CHANGED);
   const current = untracked(state.value);
@@ -394,7 +423,7 @@ function reconcileNode(state: FieldState<unknown>, incoming: unknown): void {
   const custom = state.metadata(RECONCILE_WITH)?.();
   if (custom) {
     state.value.set(custom({ current, incoming, changed: isChanged }));
-    entry?.commit(incoming);
+    rebaseline(state, incoming);
     return;
   }
 
@@ -410,7 +439,7 @@ function reconcileNode(state: FieldState<unknown>, incoming: unknown): void {
 
   // Leaf/array/type-change as a unit (override an array path for smart merges).
   if (isChanged) {
-    entry?.commit(incoming); // keep the edit; rebaseline to incoming
+    rebaseline(state, incoming); // keep the edit; the subtree's baselines become incoming
   } else {
     state.reset(incoming);
     commitChanges(state.fieldTree);

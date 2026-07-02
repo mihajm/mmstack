@@ -2,6 +2,7 @@ import {
   computed,
   inject,
   Injector,
+  isDevMode,
   signal,
   untracked,
   type Signal,
@@ -62,6 +63,20 @@ export function reorderable<T, K>(
   const axis = options.axis ?? 'y';
   const deadband = options.deadband ?? 4;
   const engine: DragEngine = options.engine ?? 'native';
+  const activationThreshold = options.activationThreshold ?? 5;
+  // The per-call union forbids these, but a DI default can flip the engine under an engine-specific option.
+  if (isDevMode()) {
+    if (engine === 'pointer' && (options.insert || options.onItemInserted)) {
+      console.warn(
+        '[@mmstack/dnd] reorderable: `insert`/`onItemInserted` are native-engine options and are ignored under engine "pointer" (was the engine flipped by a DI default?).',
+      );
+    }
+    if (engine === 'native' && options.activationThreshold !== undefined) {
+      console.warn(
+        '[@mmstack/dnd] reorderable: `activationThreshold` is a pointer-engine option and is ignored under engine "native" (was the engine flipped by a DI default?).',
+      );
+    }
+  }
   const listId = Symbol('@mmstack/dnd:reorderable');
   // null whenever no source set (idle / not hovered) → onDrop's untracked read reflects live state.
   const insertSource = signal<Signal<number | null> | null>(null);
@@ -242,19 +257,17 @@ export function reorderable<T, K>(
         ? untracked(groupApi.activeTarget)
         : null;
 
-    let committed = false;
     if (crossTarget && groupApi) {
+      // Ended over a foreign list: transfer, or no-op if the transfer is invalid —
+      // never fall back to a same-list move computed from a pointer outside this list.
       const from = untracked(session.source);
       const to = untracked(groupApi.activeInsertIndex);
       const item = from >= 0 ? untracked(source)[from] : undefined;
       if (item !== undefined && to >= 0) {
         crossTarget.insertAt(item, to);
         self.takeOut(item, to);
-        committed = true;
       }
-    }
-
-    if (!committed) {
+    } else {
       const to = untracked(session.insertIndex);
       const from = untracked(session.source);
       if (from >= 0 && to >= 0 && from !== to) {
@@ -386,6 +399,7 @@ export function reorderable<T, K>(
     setScrollDelta: (d) => scrollDelta.set(d),
     autoScroll,
     animation,
+    activationThreshold,
     itemState,
     register: (k, el) => {
       byKey.set(k, el);
@@ -403,6 +417,7 @@ export function reorderable<T, K>(
     beginGesture,
     move,
     end,
+    cancel: resetDragState,
     dispose: () => {
       // destroyed mid-drag → tear down so sibling lists aren't left driven by a dead source.
       if (untracked(activeKey) !== null) resetDragState();

@@ -113,6 +113,26 @@ describe('reorderable controller — itemState (pure, no DOM/render)', () => {
     expect(ctrl.announceMove).toBeNull();
   });
 
+  it('cancel() aborts the drag without committing (Escape / pointercancel path)', () => {
+    const data = signal(DATA.slice());
+    let fired = false;
+    const ctrl = reorderable(data, {
+      key: (t) => t.id,
+      onReorder: () => (fired = true),
+    });
+    const item2 = ctrl.itemState(() => data()[2]);
+
+    ctrl.begin(DATA[0].id, geom(0), 10);
+    ctrl.move({ x: 0, y: 55 }); // insert 2 — a commit would reorder
+    ctrl.cancel();
+
+    expect(data().map((t) => t.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(fired).toBe(false);
+    expect(ctrl.activeKey()).toBeNull();
+    expect(ctrl.insertIndex()).toBe(-1);
+    expect(item2.transform()).toBe(0);
+  });
+
   it('a drag that ends at the source index commits nothing', () => {
     const data = signal(DATA.slice());
     let fired = false;
@@ -215,6 +235,61 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
 
     expect(a().map((t) => t.id)).toEqual([2, 3, 1]); // reordered within A
     expect(b().map((t) => t.id)).toEqual([11, 12]); // B untouched
+  });
+
+  it('an invalid cross-list commit is a no-op — never a fallback same-list move', () => {
+    const a = signal(A());
+    const b = signal(B());
+    let reordered = false;
+    const group = sortableGroup<Task>();
+    const ctrlA = reorderable(a, {
+      key: (t) => t.id,
+      group,
+      onReorder: () => (reordered = true),
+    });
+    const ctrlB = reorderable(b, { key: (t) => t.id, group });
+    const gi = getGroupInternals(group);
+
+    // drag within A far enough that a same-list commit WOULD move it...
+    ctrlA.begin(1, { source: 0, centers: [10, 30, 50], footprint: 20, axis: 'y' }, 10);
+    ctrlA.move({ x: 0, y: 55 });
+    // ...but the drag ends over B with an unresolvable insert
+    gi.setActive({
+      source: ctrlA,
+      target: ctrlB,
+      sourceIndex: 0,
+      insertIndex: -1,
+      footprint: 20,
+    });
+    ctrlA.end();
+
+    expect(a().map((t) => t.id)).toEqual([1, 2, 3]); // no sneaky same-list reorder
+    expect(b().map((t) => t.id)).toEqual([11, 12]);
+    expect(reordered).toBe(false);
+  });
+
+  it('cancel() mid-cross-list-drag releases the sibling lists (no transfer)', () => {
+    const a = signal(A());
+    const b = signal(B());
+    const group = sortableGroup<Task>();
+    const ctrlA = reorderable(a, { key: (t) => t.id, group });
+    const ctrlB = reorderable(b, { key: (t) => t.id, group });
+    const gi = getGroupInternals(group);
+
+    ctrlA.begin(1, { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' }, 0);
+    gi.setActive({
+      source: ctrlA,
+      target: ctrlB,
+      sourceIndex: 0,
+      insertIndex: 1,
+      footprint: 30,
+    });
+
+    ctrlA.cancel();
+
+    expect(gi.activeSource()).toBeNull();
+    expect(a().map((t) => t.id)).toEqual([1, 2, 3]);
+    expect(b().map((t) => t.id)).toEqual([11, 12]);
   });
 
   it('dispose() mid-drag tears down the in-flight drag (clears activeKey + the group active slot)', () => {

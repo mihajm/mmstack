@@ -140,22 +140,32 @@ type ReorderableNativeOptions<T> = {
   readonly onItemInserted?: (event: { item: T; index: number }) => void;
 };
 
+/** Pointer-engine-only reorderable options — forbidden when native (the browser owns activation). */
+type ReorderablePointerOptions = {
+  /** Px the pointer must travel before a drag activates (keeps items clickable). @default 5 */
+  readonly activationThreshold?: number;
+};
+
 /**
  * Reorderable options, discriminated by `engine`. Omit `engine` (or `'native'`) for
- * the indicator engine + foreign `insert`; `'pointer'` is the FLIP engine and
- * *forbids* the native-only `insert` / `onItemInserted` at compile time. Shared
- * options work with both.
+ * the indicator engine + foreign `insert`; `'pointer'` is the FLIP engine
+ * (+ `activationThreshold`) — each variant *forbids* the other engine's options at
+ * compile time. Shared options work with both.
  */
 export type ReorderableOptions<T, K> =
   | (ReorderableSharedOptions<T, K> &
-      ReorderableNativeOptions<T> & { readonly engine?: 'native' })
-  | (ReorderableSharedOptions<T, K> & { readonly engine: 'pointer' } & {
+      ReorderableNativeOptions<T> & { readonly engine?: 'native' } & {
+        readonly [Key in keyof ReorderablePointerOptions]?: never;
+      })
+  | (ReorderableSharedOptions<T, K> &
+      ReorderablePointerOptions & { readonly engine: 'pointer' } & {
         readonly [Key in keyof ReorderableNativeOptions<T>]?: never;
       });
 
 /** @internal Flat view (all fields) for the factory to read without narrowing. */
 export type ReorderableOptionsAll<T, K> = ReorderableSharedOptions<T, K> &
-  ReorderableNativeOptions<T> & { readonly engine?: DragEngine };
+  ReorderableNativeOptions<T> &
+  ReorderablePointerOptions & { readonly engine?: DragEngine };
 
 export type ReorderableItemState<K = unknown> = {
   readonly itemKey: Signal<K>;
@@ -246,6 +256,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   } | null;
   /** Resolved animation config, or `null` when disabled (native FLIP-on-commit / pointer glide). */
   readonly animation: { duration: number; easing: string } | null;
+  /** Resolved pointer-engine activation distance in px. */
+  readonly activationThreshold: number;
   itemState(item: () => T): ReorderableItemState<K>;
   /** @internal item DOM registration (both directions). */
   register(key: K, el: HTMLElement): void;
@@ -262,6 +274,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   move(point: { x: number; y: number }): void;
   /** @internal end the drag, committing reorder or cross-list transfer. */
   end(): void;
+  /** Abort the in-flight drag without committing anything (Escape / pointercancel / programmatic). */
+  cancel(): void;
   /** @internal leave the group. */
   dispose(): void;
 };

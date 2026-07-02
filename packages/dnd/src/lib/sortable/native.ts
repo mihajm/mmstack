@@ -100,13 +100,21 @@ export function connectNativeContainer<T, K = unknown>(
   const pointer = injectDndPointer();
   const targets = injectDndTargets();
 
-  // Centers cached once per drag — stable, so an indicator move can't feed back into hit-testing.
+  // Centers cached per drag — stable, so an indicator move can't feed back into hit-testing.
+  // Re-measured post-layout on ANY source change (a same-length reorder mid-drag — e.g. a
+  // concurrent keyboard move — shifts the rects just like an insert/removal does).
   const centers = signal<readonly number[]>([]);
-  effect(() => {
-    if (!active()) return;
-    const c = controller();
-    void c.items().length; // track → re-measure on count change
-    untracked(() => centers.set(c.measure().centers));
+  afterRenderEffect({
+    earlyRead: () => {
+      if (!active()) return null;
+      const c = controller();
+      void c.items();
+      return c.measure().centers;
+    },
+    write: (measured) => {
+      const m = measured();
+      if (m) centers.set(m);
+    },
   });
 
   // While scrolling, frozen drag-start centers drift by `scrollDelta`, so the collision shifts the pointer to match.

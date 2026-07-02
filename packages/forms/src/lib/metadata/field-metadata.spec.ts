@@ -11,6 +11,11 @@ const [, injectBaseLabel] = fieldMetadata<string>({
   fallback: 'BASE',
 });
 
+const [withNullable, injectNullable] = fieldMetadata<string | null>({
+  debugName: 'nullable',
+  fallback: 'FALLBACK',
+});
+
 // A custom same-type reducer that keeps the longest contributed string.
 const longest: MetadataReducer<string | undefined, string> = {
   getInitial: () => undefined,
@@ -31,6 +36,7 @@ class Probe {
   readonly baseLabel = injectBaseLabel();
   readonly baseLabelOrComponent = injectBaseLabel('OVERRIDE');
   readonly longest = injectLongest();
+  readonly nullable = injectNullable();
 }
 
 function setup<C>(type: new () => C): { instance: C; probe: Probe } {
@@ -48,7 +54,10 @@ function setup<C>(type: new () => C): { instance: C; probe: Probe } {
 })
 class SchemaHost {
   readonly model = signal({ name: 'x' });
-  readonly f = form(this.model, (p) => withLabel(p.name, 'SCHEMA'));
+  readonly f = form(this.model, (p) => {
+    withLabel(p.name, 'SCHEMA');
+    withNullable(p.name, null);
+  });
 }
 
 @Component({
@@ -106,6 +115,12 @@ describe('fieldMetadata', () => {
       const { probe } = setup(BareHost);
       expect(probe.baseLabel()).toBe('BASE');
       expect(probe.baseLabelOrComponent()).toBe('OVERRIDE');
+    });
+
+    it('treats a schema-set null as a real value — only undefined is unset', () => {
+      const { probe } = setup(SchemaHost);
+      expect(probe.nullable()).toBeNull(); // not 'FALLBACK'
+      expect(setup(BareHost).probe.nullable()).toBe('FALLBACK');
     });
   });
 

@@ -111,12 +111,16 @@ export function fieldMetadata<T>(
   const base = opts?.fallback;
   const name = opts?.debugName ?? 'metadata';
 
-  // Defer the field-state read until the [formField] host has bound
+  // Defer the field-state read until the [formField] host has bound.
+  // Only `undefined` counts as unset — a schema-provided `null` is a real value.
   const project =
     (componentFallback?: T): FieldProjector<T | undefined> =>
     (field) =>
-    () =>
-      field.state().metadata(KEY)?.() ?? componentFallback ?? base;
+    () => {
+      const value = field.state().metadata(KEY)?.();
+      if (value !== undefined) return value;
+      return componentFallback !== undefined ? componentFallback : base;
+    };
 
   const ruleFn = <TPathKind extends PathKind = PathKind.Root>(
     path: SchemaPath<T, SchemaPathRules.Supported, TPathKind>,

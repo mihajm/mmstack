@@ -3,6 +3,7 @@ export * from './lib/commands';
 export * from './lib/discover';
 export * from './lib/icu';
 export * from './lib/lift';
+export * from './lib/lint';
 export * from './lib/loader';
 export * from './lib/nested';
 export * from './lib/registry';

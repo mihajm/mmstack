@@ -92,6 +92,30 @@ Writes a config listing the discovered namespaces, their registry files, and loc
 npx mmtranslate generate-manifest --src "src/**/*.ts" --out mmtranslate.config.ts
 ```
 
+### `dupes` / `unused` / `lint`
+
+Hygiene rules over the discovered namespaces. `dupes` reports the same normalized source-locale value under different keys (trim + collapsed whitespace; `--ignore-case` to fold case), within and across namespaces — grouped by value with every key path and file location. `unused` reports keys no scanned app source references: the typed `t.x.y.z` access pattern (and the dotted string `'x.y.z'`) counts as usage, and anything reached dynamically — a computed access like `t.detail[key]`, or a subtree passed around whole — is conservatively skipped as **unknown, not unused**, so the rule only reports what it can prove. `lint` runs every rule in one discovery pass with a merged report and a single non-zero exit code for CI.
+
+```bash
+npx mmtranslate dupes  --src "src/**/*.ts" --ignore-case
+npx mmtranslate unused --src "libs/i18n/**/*.ts" --app-src "src/**/*.ts"
+npx mmtranslate lint   --src "src/**/*.ts" --report json
+```
+
+Suppress findings with comments in the translation module, same principle as eslint (rule names `duplicate` and `unused`; no names = all rules):
+
+```ts
+/* mmtranslate-disable duplicate */        // before the first statement — whole file
+
+export const common = createNamespace('common', {
+  save: 'Save',
+  // mmtranslate-disable-next-line duplicate
+  confirm: 'Save',                         // just this key
+});
+```
+
+Comments are located with the TypeScript scanner, so a marker inside a translation *string* never suppresses anything. Suppressed keys leave their duplicate group before the ≥2 check — suppressing all but one member silences the group.
+
 ### Options
 
 | Flag                       | Applies to                 | Default                                     | Meaning                                                                |
@@ -101,6 +125,9 @@ npx mmtranslate generate-manifest --src "src/**/*.ts" --out mmtranslate.config.t
 | `--in <dir>`               | import                     | `translations`                              | Directory of translated JSON.                                          |
 | `--source-locale <locale>` | all                        | `en` (import: the value recorded at export) | Label for the default/source translation (your app's `defaultLocale`). |
 | `--force`                  | import                     | off                                         | Overwrite an existing file when adding a new locale.                   |
+| `--ignore-case`            | dupes / lint               | off                                         | Compare values case-insensitively.                                     |
+| `--app-src <glob>`         | unused / lint (repeatable) | the `--src` globs                           | App sources for the usage scan (definition/registry files never count). |
+| `--report json`            | dupes / unused / lint      | human output                                | Machine-readable report.                                               |
 
 ## How discovery works
 

@@ -223,7 +223,8 @@ function readMetaSourceLocale(inDir: string): string | undefined {
   }
 }
 
-function buildProject(opts: ProjectOptions): Project {
+/** @internal Shared by the command runners and `lint.ts`. */
+export function buildProject(opts: ProjectOptions): Project {
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
     compilerOptions: { allowJs: false },

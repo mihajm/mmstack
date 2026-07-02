@@ -6,6 +6,11 @@ import {
   runGenerateManifest,
   runImport,
 } from './lib/commands';
+import {
+  formatLintReport,
+  runLint,
+  type LintRuleName,
+} from './lib/lint';
 
 const USAGE = `Usage: mmtranslate <command> [options]
 
@@ -14,6 +19,11 @@ Commands:
   import              Read translated JSON back into TypeScript createTranslation files,
                       registering any new locales.
   generate-manifest   Write a config listing the discovered namespaces/registries.
+  dupes               Report duplicate translations (same normalized source value under
+                      different keys, within and across namespaces).
+  unused              Report keys no scanned app source references (dynamic access is
+                      conservatively skipped as "unknown, not unused").
+  lint                Run all rules in one discovery pass; non-zero exit on findings.
 
 Options:
   --src <glob>        Source glob to scan (repeatable). Default: src/**/*.ts
@@ -22,6 +32,14 @@ Options:
   --source-locale <l> Locale label for the default/source translation. Default: en
                       (import falls back to the value recorded at export time).
   --force             import: overwrite an existing file when adding a new locale.
+  --ignore-case       dupes/lint: compare values case-insensitively.
+  --app-src <glob>    unused/lint: app-source glob for the usage scan (repeatable).
+                      Default: the --src globs.
+  --report json       dupes/unused/lint: machine-readable output.
+
+Suppressing lint findings (rules: duplicate, unused; no names = all):
+  /* mmtranslate-disable duplicate */            before the first statement: whole file
+  // mmtranslate-disable-next-line duplicate     the line below the comment
 `;
 
 function main(): void {
@@ -57,6 +75,30 @@ function main(): void {
     const outFile = path.resolve(cwd, flag(rest, 'out') ?? 'mmtranslate.config.ts');
     runGenerateManifest({ cwd, srcGlobs, outFile, sourceLocale });
     console.log(`Wrote manifest to ${outFile}`);
+    return;
+  }
+
+  const LINT_COMMANDS: Record<string, LintRuleName[]> = {
+    dupes: ['duplicate'],
+    unused: ['unused'],
+    lint: ['duplicate', 'unused'],
+  };
+  const rules = LINT_COMMANDS[command ?? ''];
+  if (rules) {
+    const appSrc = multiFlag(rest, 'app-src');
+    const report = runLint({
+      cwd,
+      srcGlobs,
+      rules,
+      sourceLocale,
+      ignoreCase: rest.includes('--ignore-case'),
+      appGlobs: appSrc.length ? appSrc : undefined,
+      onWarn: (message) => console.warn(`⚠ ${message}`),
+    });
+    if (flag(rest, 'report') === 'json')
+      console.log(JSON.stringify(report, null, 2));
+    else console.log(formatLintReport(report));
+    if (report.findings.length) process.exitCode = 1;
     return;
   }
 

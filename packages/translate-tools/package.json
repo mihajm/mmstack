@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/translate-tools",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "bin": {
     "mmtranslate": "./cli.mjs"
@@ -14,7 +14,11 @@
       "default": "./index.mjs"
     }
   },
-  "files": ["*.mjs", "*.d.mts", "*.map"],
+  "files": [
+    "*.mjs",
+    "*.d.mts",
+    "*.map"
+  ],
   "keywords": [
     "translate",
     "localize",

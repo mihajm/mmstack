@@ -4,4 +4,5 @@ export * from './pausable';
 export * from './start-transition';
 export * from './suspense-boundary';
 export * from './transaction';
+export * from './transition';
 export * from './transition-scope';

@@ -33,7 +33,7 @@ export function parseLoader(
   // `() => import('path')` shorthand — no `.then`, no accessor.
   if (body.getExpression().getKind() === SyntaxKind.ImportKeyword) {
     const pathArg = body.getArguments()[0];
-    if (!pathArg || !Node.isStringLiteral(pathArg)) return null;
+    if (!isPathLiteral(pathArg)) return null;
     return { importPath: pathArg.getLiteralText(), accessor: [] };
   }
 
@@ -49,7 +49,7 @@ export function parseLoader(
     return null;
 
   const pathArg = importCall.getArguments()[0];
-  if (!pathArg || !Node.isStringLiteral(pathArg)) return null;
+  if (!isPathLiteral(pathArg)) return null;
 
   const cb = body.getArguments()[0];
   if (!cb || !Node.isArrowFunction(cb)) return null;
@@ -57,6 +57,16 @@ export function parseLoader(
   if (!accessor) return null;
 
   return { importPath: pathArg.getLiteralText(), accessor };
+}
+
+// runtime `import()` accepts a template-literal specifier too — treat `` import(`./x`) `` like import('./x')
+function isPathLiteral(
+  node: Node | undefined,
+): node is Node & { getLiteralText(): string } {
+  return (
+    !!node &&
+    (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node))
+  );
 }
 
 function accessorChain(node: Node): string[] | null {

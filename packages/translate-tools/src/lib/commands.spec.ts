@@ -107,13 +107,14 @@ describe('validateImport', () => {
     ]);
   });
 
-  it('does not flag parity for an extra key absent from the source (when all source keys present)', () => {
-    expect(
-      validateImport(
-        { greeting: 'Hallo {name}', detail: { authorLabel: 'Autor' }, extra: 'Hi {x}' },
-        source,
-      ),
-    ).toEqual([]); // extra key carries valid ICU and no source counterpart → no issue
+  it('flags a key absent from the source (createTranslation is typed to the source shape)', () => {
+    const issues = validateImport(
+      { greeting: 'Hallo {name}', detail: { authorLabel: 'Autor' }, extra: 'Hi {x}' },
+      source,
+    );
+    expect(issues).toEqual([
+      { key: 'extra', message: expect.stringContaining('unknown key') },
+    ]);
   });
 
   it('reports a source key missing from the translation', () => {
@@ -193,5 +194,30 @@ describe('applyImport', () => {
     expect(() =>
       applyImport(p, ns, 'de', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
     ).toThrow(/Could not locate the registerNamespace call/);
+  });
+
+  it('a registry-lookup failure leaves no orphan module in the project', () => {
+    const p = project();
+    const before = p.getSourceFiles().length;
+    const ns = { ...quoteNs(p), registryCallIndex: 99 };
+    expect(() =>
+      applyImport(p, ns, 'de', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
+    ).toThrow();
+    expect(p.getSourceFiles().length).toBe(before);
+  });
+
+  it('throws instead of silently succeeding when an existing locale module no longer matches', () => {
+    const p = project();
+    const ns = quoteNs(p); // discovered while sl-SI was still intact
+    // hand-edit the module: the export is no longer a createTranslation(...) call
+    p.getSourceFileOrThrow('/namespaces.ts')
+      .getVariableDeclarationOrThrow('quoteSl')
+      .setInitializer(`'hand-edited'`);
+    expect(() =>
+      applyImport(p, ns, 'sl-SI', {
+        greeting: 'x {name}',
+        detail: { authorLabel: 'A' },
+      }),
+    ).toThrow(/Could not update locale "sl-SI"/);
   });
 });

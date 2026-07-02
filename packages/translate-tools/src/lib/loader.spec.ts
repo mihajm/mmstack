@@ -32,6 +32,17 @@ describe('parseLoader', () => {
     });
   });
 
+  it('accepts a template-literal module specifier (both forms)', () => {
+    expect(parseLoader(arrow('() => import(`./x`)'))).toEqual({
+      importPath: './x',
+      accessor: [],
+    });
+    expect(parseLoader(arrow('() => import(`./x`).then((m) => m.a)'))).toEqual({
+      importPath: './x',
+      accessor: ['a'],
+    });
+  });
+
   it('parses `.then((m) => m.default)` to a default accessor', () => {
     expect(parseLoader(arrow(`() => import('./x').then((m) => m.default)`))).toEqual({
       importPath: './x',

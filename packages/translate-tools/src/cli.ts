@@ -42,6 +42,8 @@ function main(): void {
     const inDir = path.resolve(cwd, flag(rest, 'in') ?? 'translations');
     const force = rest.includes('--force');
     const report = runImport({ cwd, srcGlobs, inDir, sourceLocale, force });
+    for (const { file, reason } of report.skipped)
+      console.warn(`⚠ skipped ${file}: ${reason}`);
     for (const { file, issues } of report.rejected) {
       console.error(`✗ ${file}`);
       for (const issue of issues) console.error(`   ${issue.key}: ${issue.message}`);

@@ -63,12 +63,17 @@ It also writes a small hidden `.mmtranslate-meta.json` recording the source loca
 For each `<namespace>.<locale>.json` that isn't the source locale, it:
 
 - **validates** every leaf is valid ICU, uses the **same placeholders** as the source (a dropped or
-  renamed `{name}` is reported), and **covers every source key** (a missing key is reported). A file
-  with any issue is skipped so nothing "malformed" is written;
+  renamed `{name}` is reported), **covers every source key** (a missing key is reported), and
+  **contains no unknown keys** (an extra key would generate TypeScript that doesn't compile —
+  `createTranslation` is typed to the source shape). A file with any issue is rejected so nothing
+  "malformed" is written — always **per file**, so one bad file never blocks the rest of the run;
 - for a **new** locale, generates `<namespace>.<locale>.ts` (a `createTranslation` call) next to the
   source namespace and inserts its loader into the matching `registerNamespace(...)` call. If a file
-  already exists at that path it **throws** unless you pass `--force`;
+  already exists at that path the locale is **rejected** unless you pass `--force`;
 - for an **existing** locale, updates that module's translation in place.
+
+`.json` files the run doesn't recognize — a typo'd namespace, a stray-dot name — are reported as
+**skipped** with a reason, so a mis-named file can't silently vanish from a run.
 
 `import` reads the source locale from the sidecar `export` wrote, so `--source-locale` only needs to
 be repeated if you're importing files that weren't produced by this tool.

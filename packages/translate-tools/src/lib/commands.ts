@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Project } from 'ts-morph';
+import { Node, Project } from 'ts-morph';
 import { codegenTranslationFile } from './codegen';
 import { type DiscoveredNamespace, discoverFromProject } from './discover';
 import { placeholderParity, validateMessage } from './icu';
@@ -53,7 +53,12 @@ export function validateImport(
       continue;
     }
     const sourceMessage = src.get(key);
-    if (sourceMessage === undefined) continue;
+    if (sourceMessage === undefined) {
+      // `createTranslation` is typed to the source shape, so an unknown key would
+      // generate TypeScript that doesn't compile — reject it here with a clear message.
+      issues.push({ key, message: 'unknown key (not in the source) — remove it' });
+      continue;
+    }
     // The source comes from the developer's own TS; a broken source ICU would make
     // placeholderParity throw, so reject it cleanly per-key instead of aborting the run.
     const sourceValid = validateMessage(sourceMessage);
@@ -92,7 +97,19 @@ export function applyImport(
 ): ApplyResult {
   const existing = ns.locales.find((l) => l.locale === locale);
   if (existing) {
-    replaceTranslationLiteral(project, existing.moduleFilePath, existing.exportName, translation);
+    const replaced = replaceTranslationLiteral(
+      project,
+      existing.moduleFilePath,
+      existing.exportName,
+      translation,
+    );
+    // A silent false would count as applied while writing nothing (e.g. the module was
+    // hand-edited and the export no longer is a createTranslation call).
+    if (!replaced)
+      throw new Error(
+        `Could not update locale "${locale}": expected an export "${existing.exportName}" ` +
+          `initialized by a createTranslation(...) call in ${existing.moduleFilePath}.`,
+      );
     return { created: false, filePath: existing.moduleFilePath };
   }
 
@@ -125,6 +142,16 @@ export function applyImport(
         `Remove it or pass --force to overwrite.`,
     );
 
+  // Resolve + validate the registry call BEFORE creating the module, so a failure
+  // can't leave an orphan file in the project (the caller saves everything on success).
+  const registrySf = project.getSourceFileOrThrow(ns.registryFilePath);
+  const registryCall = registryCallFor(registrySf, ns);
+  const otherArg = registryCall.getArguments()[1];
+  if (otherArg && !Node.isObjectLiteralExpression(otherArg))
+    throw new Error(
+      "registerNamespace's second argument must be an object literal of locale loaders.",
+    );
+
   project.createSourceFile(
     newFilePath,
     codegenTranslationFile({
@@ -138,9 +165,8 @@ export function applyImport(
     { overwrite: true },
   );
 
-  const registrySf = project.getSourceFileOrThrow(ns.registryFilePath);
   addLocaleLoader(
-    registryCallFor(registrySf, ns),
+    registryCall,
     locale,
     relativeImport(ns.registryFilePath, newFilePath),
     exportName,
@@ -218,6 +244,19 @@ export function runExport(
     onWarn: warnToStderr,
   });
   assertUniqueNamespaces(namespaces);
+  // Import parses file names as <namespace>.<locale>.json — a dot in either segment
+  // exports a file the import will skip, so surface it now rather than at import time.
+  for (const ns of namespaces) {
+    for (const [what, value] of [
+      ['Namespace', ns.namespace] as const,
+      ...ns.locales.map((l) => ['Locale', l.locale] as const),
+    ])
+      if (value.includes('.'))
+        warnToStderr(
+          `${what} "${value}" contains a "." — its exported JSON cannot be re-imported ` +
+            `(import expects <namespace>.<locale>.json with no dots in either segment).`,
+        );
+  }
   const files = planExport(namespaces);
   fs.mkdirSync(opts.outDir, { recursive: true });
   for (const file of files)
@@ -232,6 +271,8 @@ export function runExport(
 export type ImportReport = {
   applied: number;
   rejected: { file: string; issues: ImportIssue[] }[];
+  /** `.json` files the run did not act on (a stray-dot name, an unknown namespace) — likely typos. */
+  skipped: { file: string; reason: string }[];
 };
 
 export function runImport(
@@ -249,13 +290,29 @@ export function runImport(
   const byName = new Map(namespaces.map((n) => [n.namespace, n]));
 
   const rejected: ImportReport['rejected'] = [];
+  const skipped: ImportReport['skipped'] = [];
   let applied = 0;
 
   for (const fileName of fs.readdirSync(opts.inDir)) {
+    if (fileName === META_FILE) continue;
     const parsed = parseImportFileName(fileName);
-    if (!parsed) continue;
+    if (!parsed) {
+      if (fileName.endsWith('.json'))
+        skipped.push({
+          file: fileName,
+          reason: 'not a <namespace>.<locale>.json name (neither segment may contain a dot)',
+        });
+      continue;
+    }
     const ns = byName.get(parsed.namespace);
-    if (!ns || parsed.locale === ns.source.locale) continue; // unknown ns, or the source itself
+    if (!ns) {
+      skipped.push({
+        file: fileName,
+        reason: `no namespace "${parsed.namespace}" found in the scanned sources`,
+      });
+      continue;
+    }
+    if (parsed.locale === ns.source.locale) continue; // the source dump itself
 
     let translation: NestedTranslation;
     try {
@@ -274,12 +331,21 @@ export function runImport(
       rejected.push({ file: fileName, issues });
       continue;
     }
-    applyImport(project, ns, parsed.locale, translation, opts.force);
-    applied++;
+    // Per-file: one unappliable locale (e.g. an unregistered file already at the target
+    // path without --force) must not abort the other files' import.
+    try {
+      applyImport(project, ns, parsed.locale, translation, opts.force);
+      applied++;
+    } catch (e) {
+      rejected.push({
+        file: fileName,
+        issues: [{ key: '(apply)', message: e instanceof Error ? e.message : String(e) }],
+      });
+    }
   }
 
   project.saveSync();
-  return { applied, rejected };
+  return { applied, rejected, skipped };
 }
 
 export function runGenerateManifest(

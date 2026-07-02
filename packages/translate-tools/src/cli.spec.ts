@@ -327,7 +327,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     ).toThrow(/Duplicate namespace/);
   });
 
-  it('errors before clobbering an existing file, unless --force is passed', () => {
+  it('rejects (per-file) before clobbering an existing file, unless --force is passed', () => {
     const out = path.join(dir, 'i18n');
     runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
     fs.writeFileSync(
@@ -338,27 +338,99 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         status: '{state, select, other {x}}',
       }),
     );
-    // a stale, unregistered module already sits at the target path
+    // this one has no obstacle and must still land despite quote's rejection
+    fs.writeFileSync(
+      path.join(out, 'settings.de.json'),
+      JSON.stringify({ theme: { label: 'Thema', dark: 'Dunkel', light: 'Hell' } }),
+    );
+    // a stale, unregistered module already sits at quote's target path
     fs.writeFileSync(
       path.join(dir, 'src/quote.de.ts'),
       `export const hand = 'do not lose me';`,
     );
 
-    expect(() =>
-      runImport({ cwd: dir, srcGlobs: globs, inDir: out, sourceLocale: 'en' }),
-    ).toThrow(/already exists/);
+    const first = runImport({
+      cwd: dir,
+      srcGlobs: globs,
+      inDir: out,
+      sourceLocale: 'en',
+    });
+    expect(first.applied).toBe(1); // settings landed
+    expect(first.rejected).toEqual([
+      {
+        file: 'quote.de.json',
+        issues: [
+          { key: '(apply)', message: expect.stringContaining('already exists') },
+        ],
+      },
+    ]);
+    // the hand file is untouched
+    expect(fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8')).toContain(
+      'do not lose me',
+    );
 
-    const report = runImport({
+    const forced = runImport({
       cwd: dir,
       srcGlobs: globs,
       inDir: out,
       sourceLocale: 'en',
       force: true,
     });
-    expect(report.applied).toBe(1);
+    expect(forced.rejected).toEqual([]);
     expect(fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8')).toContain(
       'createTranslation',
     );
+  });
+
+  it('reports unknown-namespace and stray-dot json files as skipped (typo guard)', () => {
+    const out = path.join(dir, 'i18n');
+    runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
+    fs.writeFileSync(path.join(out, 'qoute.de.json'), JSON.stringify({ title: 'x' })); // typo'd namespace
+    fs.writeFileSync(path.join(out, 'quote.sl.si.json'), JSON.stringify({ title: 'x' })); // stray dot
+
+    const report = runImport({
+      cwd: dir,
+      srcGlobs: globs,
+      inDir: out,
+      sourceLocale: 'en',
+    });
+    expect(report.applied).toBe(0);
+    expect(report.skipped).toEqual(
+      expect.arrayContaining([
+        { file: 'qoute.de.json', reason: expect.stringContaining('no namespace "qoute"') },
+        { file: 'quote.sl.si.json', reason: expect.stringContaining('<namespace>.<locale>.json') },
+      ]),
+    );
+    // the sidecar meta file is expected, not noise
+    expect(report.skipped.some((s) => s.file.includes('mmtranslate-meta'))).toBe(false);
+  });
+
+  it('rejects a translation with a key the source does not have (would not compile)', () => {
+    const out = path.join(dir, 'i18n');
+    runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
+    fs.writeFileSync(
+      path.join(out, 'quote.de.json'),
+      JSON.stringify({
+        title: 'Zitate',
+        by: 'von {author}',
+        status: '{state, select, draft {Entwurf} published {Ok} other {x}}',
+        subtitle: 'Untertitel', // not in the source
+      }),
+    );
+
+    const report = runImport({
+      cwd: dir,
+      srcGlobs: globs,
+      inDir: out,
+      sourceLocale: 'en',
+    });
+    expect(report.applied).toBe(0);
+    expect(
+      report.rejected[0]?.issues.some(
+        (i) => i.key === 'subtitle' && i.message.includes('unknown key'),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'src/quote.de.ts'))).toBe(false);
   });
 
   it('round-trips a non-en source locale via the sidecar (no bogus source-as-target import)', () => {

@@ -36,7 +36,7 @@ import {
   withDefaults,
   type HitboxPlugin,
 } from '../provide';
-import { DndSession, type DragEngine } from '../session';
+import { DndSession, type DragEngine, type DropTargetHit } from '../session';
 import { DndPointerEngine, type PointerDragSource } from './pointer-engine';
 import {
   createPointerPreview,
@@ -77,15 +77,25 @@ type DraggableNativeOptions = {
   hitbox?: HitboxPlugin;
 };
 
+/** Pointer-engine-only draggable options — forbidden when native (the browser owns activation). */
+type DraggablePointerOptions = {
+  /** Px the pointer must travel before the drag activates (keeps the element clickable). @default 5 */
+  activationThreshold?: number;
+};
+
 /**
  * Draggable options, discriminated by `engine`. Omit `engine` (or `'native'`) for
  * native HTML5 DnD (files, cross-window, browser drag image) + `hitbox`; `'pointer'`
- * drives the pointer engine and *forbids* `hitbox` at compile time.
+ * drives the pointer engine (+ `activationThreshold`) — each variant *forbids* the
+ * other engine's options at compile time.
  */
 export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> =
   | (DraggableSharedOptions<TData, TMeta> &
-      DraggableNativeOptions & { engine?: 'native' })
-  | (DraggableSharedOptions<TData, TMeta> & { engine: 'pointer' } & {
+      DraggableNativeOptions & { engine?: 'native' } & {
+        [K in keyof DraggablePointerOptions]?: never;
+      })
+  | (DraggableSharedOptions<TData, TMeta> &
+      DraggablePointerOptions & { engine: 'pointer' } & {
         [K in keyof DraggableNativeOptions]?: never;
       });
 
@@ -94,7 +104,8 @@ type DraggableOptionsAll<
   TData,
   TMeta extends DragMeta,
 > = DraggableSharedOptions<TData, TMeta> &
-  DraggableNativeOptions & { engine?: DragEngine };
+  DraggableNativeOptions &
+  DraggablePointerOptions & { engine?: DragEngine };
 
 export type DraggableRef<TData> = {
   /** True while this element is the active drag source. */
@@ -107,6 +118,8 @@ export type DraggableRef<TData> = {
 export type DraggableDefaults = {
   /** Default drag engine for draggables. */
   engine?: DragEngine;
+  /** Default activation distance in px (pointer engine only). */
+  activationThreshold?: number;
 };
 
 const draggableDefaults = createDefaultsToken<DraggableDefaults>(
@@ -183,15 +196,25 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
       const target = handleSig
         ? computed(() => resolveElement(handleSig()) ?? element)
         : element;
-      const drag = pointerDrag({ target, activationThreshold: 5 });
+      const drag = pointerDrag({
+        target,
+        activationThreshold: opts.activationThreshold ?? 5,
+      });
 
+      const canDragFn = opts.canDrag;
       let source: PointerDragSource | null = null;
       let preview: PointerPreview | null = null;
+      let denied = false;
       nestedEffect(() => {
         const g = drag.unthrottled();
         if (g.active && g.pointerId !== null) {
+          if (denied) return;
           if (!source) {
-            if (opts.canDrag && !opts.canDrag()) return; // gate at start only
+            // gate once per gesture, untracked — like native's per-attempt canDrag
+            if (canDragFn && !untracked(canDragFn)) {
+              denied = true;
+              return;
+            }
             source = {
               el: element,
               data: {
@@ -213,9 +236,16 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
             eng.move(source, g.current.x, g.current.y);
           }
           if (preview) preview.move(g.current.x, g.current.y);
-          else element.style.transform = `translate(${g.delta.x}px, ${g.delta.y}px)`;
-        } else if (source) {
-          const targets = eng.end();
+          else
+            element.style.transform = `translate(${g.delta.x}px, ${g.delta.y}px)`;
+        } else {
+          denied = false;
+          if (!source) return;
+          // abort → targets get leave (not drop); the source's onDrop still fires
+          // with an empty stack, matching pragmatic's native Escape semantics
+          let targets: readonly DropTargetHit[] = [];
+          if (g.cancelled) eng.cancel();
+          else targets = eng.end();
           if (preview) {
             preview.destroy();
             preview = null;

@@ -76,6 +76,35 @@ class CustomKeysHost {
 }
 
 @Component({
+  selector: 'mm-double-move-host',
+  imports: [Reorderable, ReorderableItem],
+  template: `
+    <ul [mmReorderable]="list">
+      @for (r of list.items(); track r.id) {
+        <li [mmReorderableItem]="r">{{ r.label }}</li>
+      }
+    </ul>
+  `,
+})
+class DoubleMoveHost {
+  readonly data = signal<Row[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ]);
+  // one keydown commits two successive moves of the focused item
+  readonly list = reorderable(this.data, {
+    key: (r) => r.id,
+    onKeyboardKeydown: (e, { index, move }) => {
+      if (e.key !== 'd') return;
+      e.preventDefault();
+      move(index + 1);
+      move(index + 2);
+    },
+  });
+}
+
+@Component({
   selector: 'mm-silent-host',
   imports: [Reorderable, ReorderableItem],
   template: `
@@ -315,6 +344,25 @@ describe('reorderable — native engine wiring', () => {
     );
     fixture.detectChanges();
     expect(labels()).toEqual(['B', 'A', 'C']);
+  });
+
+  it('keyboard: api.move targets the focused item across successive calls (live index)', () => {
+    const fixture = TestBed.createComponent(DoubleMoveHost);
+    fixture.detectChanges();
+    TestBed.tick();
+    fixture.detectChanges();
+
+    const first = fixture.nativeElement.querySelector('li') as HTMLElement; // 'A'
+    first.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'd', bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    // A moves 0→1, then the SAME item moves 1→2 (not whatever slid into slot 0)
+    const labels = [...fixture.nativeElement.querySelectorAll('li')].map((e) =>
+      (e.textContent ?? '').trim(),
+    );
+    expect(labels).toEqual(['B', 'C', 'A']);
   });
 
   it('keyboard: announceMove:false reorders but creates no live region (a11y opt-out)', () => {

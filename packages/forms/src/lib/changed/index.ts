@@ -14,4 +14,5 @@ export {
   type ChangedEqual,
   type ChangedFn,
   type ReconcileFn,
+  type TrackChangesOptions,
 } from './changed';

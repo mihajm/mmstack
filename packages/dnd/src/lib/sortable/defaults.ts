@@ -15,6 +15,8 @@ export type ReorderableDefaults = {
   axis?: Axis;
   /** Default px a center must be cleared by before the insert index flips. */
   deadband?: number;
+  /** Default activation distance in px (pointer engine only). */
+  activationThreshold?: number;
   /** Default during-drag reflow glide (or `false` for instant). */
   animation?: ReorderableAnimation | false;
   /** Default edge auto-scroll config (or `false` to keep it off). */

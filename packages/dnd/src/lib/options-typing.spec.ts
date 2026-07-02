@@ -78,6 +78,22 @@ describe('engine-discriminated options (compile-time safety)', () => {
     void bad;
   });
 
+  it('draggable: activationThreshold is pointer-only', () => {
+    const pointerD: CreateDraggableOptions<Card> = {
+      data: card,
+      engine: 'pointer',
+      activationThreshold: 8,
+    };
+    expect(pointerD.activationThreshold).toBe(8);
+
+    // @ts-expect-error `activationThreshold` is pointer-only
+    const bad: CreateDraggableOptions<Card> = {
+      data: card,
+      activationThreshold: 8,
+    };
+    void bad;
+  });
+
   it('reorderable: insert / onItemInserted forbidden with engine:"pointer"', () => {
     const nativeR: ReorderableOptions<Card, string> = {
       key: (c) => c.id,
@@ -106,5 +122,21 @@ describe('engine-discriminated options (compile-time safety)', () => {
     };
     void badInsert;
     void badCb;
+  });
+
+  it('reorderable: activationThreshold is pointer-only', () => {
+    const pointerR: ReorderableOptions<Card, string> = {
+      key: (c) => c.id,
+      engine: 'pointer',
+      activationThreshold: 10,
+    };
+    expect(pointerR.activationThreshold).toBe(10);
+
+    // @ts-expect-error `activationThreshold` is pointer-only
+    const bad: ReorderableOptions<Card, string> = {
+      key: (c) => c.id,
+      activationThreshold: 10,
+    };
+    void bad;
   });
 });

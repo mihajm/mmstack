@@ -139,6 +139,24 @@ describe('option defaults — reorderable consumption', () => {
     expect(ctrl.engine).toBe('native');
   });
 
+  it('activationThreshold: built-in 5, DI-defaultable, per-call wins', () => {
+    const builtin = inCtx([], () => injectReorderable(list(), { key }));
+    expect(builtin.activationThreshold).toBe(5);
+
+    const viaDi = inCtx(
+      [provideReorderableDefaults({ engine: 'pointer', activationThreshold: 12 })],
+      () => injectReorderable(list(), { key }),
+    );
+    expect(viaDi.activationThreshold).toBe(12);
+
+    const perCall = inCtx(
+      [provideReorderableDefaults({ engine: 'pointer', activationThreshold: 12 })],
+      () =>
+        injectReorderable(list(), { key, engine: 'pointer', activationThreshold: 3 }),
+    );
+    expect(perCall.activationThreshold).toBe(3);
+  });
+
   it('the pure reorderable() ignores DI defaults — no injector, no magic', () => {
     const ctrl = inCtx([provideDndDefaults({ engine: 'pointer' })], () =>
       reorderable(list(), { key }),

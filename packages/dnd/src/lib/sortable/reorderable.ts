@@ -3,10 +3,12 @@ import {
   computed,
   DestroyRef,
   Directive,
+  effect,
   ElementRef,
   inject,
   Injector,
   input,
+  isDevMode,
   runInInjectionContext,
   signal,
 } from '@angular/core';
@@ -36,11 +38,23 @@ export function connectReorderableContainer<T, K = unknown>(
   // Defer: the engine comes from a required input not available at construction.
   afterNextRender(
     () =>
-      runInInjectionContext(injector, () =>
-        controller().engine === 'native'
-          ? connectNativeContainer(controller, element)
-          : connectPointerContainer(controller, element),
-      ),
+      runInInjectionContext(injector, () => {
+        const connected = controller();
+        if (connected.engine === 'native')
+          connectNativeContainer(controller, element);
+        else connectPointerContainer(controller, element);
+        if (isDevMode()) {
+          let warned = false;
+          effect(() => {
+            if (controller() !== connected && !warned) {
+              warned = true;
+              console.warn(
+                '[@mmstack/dnd] reorderable: the controller instance changed after the container was wired — gestures/drop targets stay bound to the original. Recreate the container (e.g. @if) to swap controllers.',
+              );
+            }
+          });
+        }
+      }),
     { injector },
   );
   return { reservedSpace: computed(() => controller().reservedSpace()) };

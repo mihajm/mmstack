@@ -222,7 +222,7 @@ protected readonly zone = dropTarget<Card>({
 
 `closestEdge` and `edges` need the hitbox plugin (see [Plugins](#plugins)); without it, drops still work — you just get no edge (`closestEdge()` stays `null`), plus a one-time dev warning. `dropTarget` also supports `sticky` (stay the active target after the pointer leaves) and `dropEffect` (`'move' | 'copy' | 'link'`), both pragmatic element-adapter features.
 
-Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. `edges` / `sticky` / `dropEffect` are native-only and are compile-time-forbidden when `engine: 'pointer'`.
+Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. `edges` / `sticky` / `dropEffect` are native-only and are compile-time-forbidden when `engine: 'pointer'`; conversely `activationThreshold` (px before the drag activates, default 5) is pointer-only.
 
 ## fileDropTarget (external / files)
 
@@ -320,6 +320,8 @@ reorderable(this.tasks, { key: (t) => t.id, engine: 'pointer' }); // FLIP glide
 
 The item is `position: relative` in both engines so the native indicator can overlay; opt into the reserved gap space (pointer engine, cross-list) with `padding-bottom: calc(<your> + var(--mm-sortable-reserved, 0px))` on the container.
 
+**Escape cancels in both engines.** Pressing Escape (or a `pointercancel`, e.g. a touch scroll takeover) aborts the drag without committing — items glide back and nothing is spliced. Only a real release commits. The controller also exposes `cancel()` for a programmatic abort.
+
 ### Cross-list
 
 Give two (or more) lists the **same** `sortableGroup<T>()` object and items drag between them:
@@ -351,7 +353,7 @@ reorderable(this.items, {
 
 ### Options
 
-`key` (required identity), `engine`, `axis` (`'y'` \| `'x'`), `deadband` (px a center must be cleared before the insert flips), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
+`key` (required identity), `engine`, `axis` (`'y'` \| `'x'`), `deadband` (px a center must be cleared before the insert flips), `activationThreshold` (px before a drag activates — pointer engine), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
 
 ## Plugins
 
@@ -416,6 +418,8 @@ provideDraggableDefaults({ engine: 'native' }); // e.g. keep draggables native w
 Every field is optional — provide just the one you care about. Resolution order, most-specific first:
 
 **per-call option → per-primitive default → common (`provideDndDefaults`) → built-in.**
+
+> One sharp edge: the engine-specific options are compile-time-guarded **per call**, but a DI default can flip the engine underneath a call site that omitted it. A native-only option (e.g. `insert`) is then silently ignored — `reorderable` warns about this in dev mode. Pin `engine` at the call site (or per-primitive default) where you rely on engine-specific options.
 
 Each provider accepts a value **or a factory** (`T | (() => T)`), matching `provideDnd`. Each token also has a matching reader — `injectDndDefaults`, `injectDraggableDefaults`, `injectDropTargetDefaults`, `injectReorderableDefaults` — returning the resolved defaults (or `null`); pass an `Injector` to read them outside an injection context.
 

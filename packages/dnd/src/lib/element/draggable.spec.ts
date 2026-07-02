@@ -394,7 +394,12 @@ describe('draggable — pointer engine', () => {
     cleanupMock.mockReset();
   });
 
-  function setupPointer(opts: { onDrop?: (e: DropEvent<{ id: string }>) => void } = {}) {
+  function setupPointer(
+    opts: {
+      onDrop?: (e: DropEvent<{ id: string }>) => void;
+      canDrag?: () => boolean;
+    } = {},
+  ) {
     const element = document.createElement('div');
     document.body.appendChild(element);
     TestBed.resetTestingModule();
@@ -406,6 +411,7 @@ describe('draggable — pointer engine', () => {
       const r = draggable<{ id: string }>({
         data: { id: 'x' },
         engine: 'pointer',
+        canDrag: opts.canDrag,
         onDrop: opts.onDrop,
       });
       return { ref: r, session };
@@ -440,6 +446,51 @@ describe('draggable — pointer engine', () => {
     expect(ref.dragging()).toBe(false);
     expect(drops).toHaveLength(1);
     expect(drops[0].data).toEqual({ id: 'x' });
+  });
+
+  it('Escape aborts: session cleared, transform reset, onDrop fires with an EMPTY stack (native parity)', () => {
+    const drops: DropEvent<{ id: string }>[] = [];
+    const { element, ref, session } = setupPointer({ onDrop: (e) => drops.push(e) });
+
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 20, 5));
+    TestBed.tick();
+    expect(ref.dragging()).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    TestBed.tick();
+
+    expect(session()).toBeNull();
+    expect(ref.dragging()).toBe(false);
+    expect(element.style.transform).toBe('');
+    expect(drops).toHaveLength(1);
+    expect(drops[0].location.current).toEqual([]); // aborted → no targets
+  });
+
+  it('canDrag=false vetoes the whole gesture — flipping true mid-gesture cannot start a drag', () => {
+    const allowed = signal(false);
+    const { element, session } = setupPointer({ canDrag: () => allowed() });
+
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 20, 5));
+    TestBed.tick();
+    expect(session()).toBeNull(); // denied at activation
+
+    allowed.set(true); // permission arrives mid-gesture
+    element.dispatchEvent(pe('pointermove', 30, 5));
+    TestBed.tick();
+    expect(session()).toBeNull(); // still denied — latched for this gesture
+
+    element.dispatchEvent(pe('pointerup', 30, 5));
+    TestBed.tick();
+
+    // a fresh gesture re-evaluates the gate
+    element.dispatchEvent(pe('pointerdown', 0, 0, 2));
+    element.dispatchEvent(pe('pointermove', 20, 5, 2));
+    TestBed.tick();
+    expect(session()?.sourceEl).toBe(element);
+    element.dispatchEvent(pe('pointerup', 20, 5, 2));
+    TestBed.tick();
   });
 
   it('a custom pointer preview follows the pointer; the source stays put; cleaned up on drop', () => {

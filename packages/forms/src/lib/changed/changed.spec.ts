@@ -65,7 +65,7 @@ function setup(schema?: SchemaFn<Model>) {
 
 // No explicit commitChanges — exercises the automatic baseline / option behavior.
 // Ticks so the root tracking effect runs its first (seeding) pass.
-function setupAuto(opts?: { manualCommit?: boolean; commitOnSubmit?: boolean }) {
+function setupAuto(opts?: { manualCommit?: boolean }) {
   const r = TestBed.runInInjectionContext(() => {
     const model = signal<Model>(initial());
     const f = form(model, trackChanges(model, opts));
@@ -222,10 +222,10 @@ describe('change tracking', () => {
     });
   });
 
-  // Records whose key SET changes have their child field nodes rebuilt by signal forms, which resets
-  // per-child baselines — so a key add/remove marks the container changed until you re-commit. The
-  // container always re-evaluates correctly (no stale/dead-leaf subscription) and recovers on commit.
-  // Fixed-shape objects (the common case) are unaffected — see "value identity, not reference".
+  // Keys in the initial shape get their own tracking; keys added later are value-diffed by the
+  // container (which subscribes to its value for them, so their edits/reverts stay live). Key
+  // additions/removals are caught via the container's key-set dependency — including reverting
+  // to the baseline shape, which reads unchanged again on its own.
   describe('dynamic object keys', () => {
     function setupDict(init: Record<string, number>) {
       return TestBed.runInInjectionContext(() => {
@@ -252,6 +252,39 @@ describe('change tracking', () => {
       expect(changedOf(f.dict)).toBe(true);
     });
 
+    it('detects a key addition from the delegating loop path (fresh ref, same shape first)', () => {
+      const { f, model } = setupDict({ a: 1, b: 2 });
+      model.update((m) => ({ dict: { ...m.dict } })); // same shape → false via child delegation
+      expect(changedOf(f.dict)).toBe(false);
+      model.update((m) => ({ dict: { ...m.dict, c: 3 } }));
+      expect(changedOf(f.dict)).toBe(true);
+    });
+
+    it('reads unchanged again after add + remove back to the baseline shape', () => {
+      const { f, model } = setupDict({ a: 1, b: 2 });
+      model.update((m) => ({ dict: { ...m.dict, c: 3 } }));
+      expect(changedOf(f.dict)).toBe(true);
+      model.update(() => ({ dict: { a: 1, b: 2 } })); // exact baseline shape + values again
+      expect(changedOf(f.dict)).toBe(false);
+
+      f.dict['a']().value.set(9); // tracking is still live after the churn
+      expect(changedOf(f.dict)).toBe(true);
+      f.dict['a']().value.set(1);
+      expect(changedOf(f.dict)).toBe(false);
+    });
+
+    it('tracks edit AND revert of a dynamically added (untracked) key after commit', () => {
+      const { f, model } = setupDict({ a: 1, b: 2 });
+      model.update((m) => ({ dict: { ...m.dict, c: 3 } }));
+      commitChanges(f); // baseline now includes c, which has no CHANGED entry of its own
+
+      expect(changedOf(f.dict)).toBe(false);
+      model.update((m) => ({ dict: { ...m.dict, c: 4 } }));
+      expect(changedOf(f.dict)).toBe(true);
+      model.update((m) => ({ dict: { ...m.dict, c: 3 } })); // revert the untracked key
+      expect(changedOf(f.dict)).toBe(false);
+    });
+
     it('re-evaluates after a changed key is removed, then recovers + keeps tracking on commit', () => {
       const { f, model } = setupDict({ a: 1, b: 2 });
       model.update((m) => ({ dict: { ...m.dict, b: 99 } })); // change b (delegated)
@@ -264,6 +297,50 @@ describe('change tracking', () => {
 
       model.update((m) => ({ dict: { ...m.dict, a: 9 } })); // tracking survives churn
       expect(changedOf(f.dict)).toBe(true);
+    });
+  });
+
+  // Items pushed into an initially-empty array have no tracking of their own (the schema had no
+  // item shape to descend into) — the container falls back to a value diff and must stay reactive.
+  describe('untracked children (initially-empty arrays)', () => {
+    function setupItems() {
+      return TestBed.runInInjectionContext(() => {
+        const model = signal<{ items: { a: string; b: number }[] }>({
+          items: [],
+        });
+        const fld = form(model, trackChanges(model));
+        commitChanges(fld);
+        return { model, f: fld };
+      });
+    }
+
+    it('reads a pushed item as changed until committed', () => {
+      const { f, model } = setupItems();
+      model.update(() => ({ items: [{ a: 'x', b: 1 }] }));
+      expect(changedOf(f.items[0])).toBe(true); // no baseline yet
+      expect(changedOf(f.items)).toBe(true);
+
+      commitChanges(f.items);
+      expect(changedOf(f.items[0])).toBe(false);
+      expect(changedOf(f.items)).toBe(false);
+    });
+
+    it('tracks edit and revert of item leaves after commit — item and array agree', () => {
+      const { f, model } = setupItems();
+      model.update(() => ({ items: [{ a: 'x', b: 1 }] }));
+      commitChanges(f);
+
+      f.items[0].a().value.set('y');
+      expect(changedOf(f.items[0])).toBe(true);
+      expect(changedOf(f.items)).toBe(true);
+
+      f.items[0].b().value.set(2); // second leaf while already changed
+      f.items[0].a().value.set('x'); // revert the first
+      expect(changedOf(f.items[0])).toBe(true); // b still differs
+
+      f.items[0].b().value.set(1); // revert the second
+      expect(changedOf(f.items[0])).toBe(false);
+      expect(changedOf(f.items)).toBe(false);
     });
   });
 
@@ -423,6 +500,50 @@ describe('change tracking', () => {
       f.name().value.set('samesame');
       reconcile(f, { ...initial(), name: 'samesame' });
       expect(changedOf(f.name)).toBe(false); // baseline := incoming === current edit
+    });
+
+    it('rebaselines items along with the array on a kept-edit reconcile', () => {
+      const { f, model } = setup();
+      f.tags[0]().value.set('z'); // array now changed → kept as a unit
+      reconcile(f, { ...initial(), tags: ['A', 'B'] });
+
+      expect(model().tags).toEqual(['z', 'b']); // edit kept
+      expect(changedOf(f.tags)).toBe(true);
+      expect(changedOf(f.tags[0])).toBe(true); // 'z' vs new baseline 'A'
+      expect(changedOf(f.tags[1])).toBe(true); // 'b' vs new baseline 'B' — agrees with the array
+
+      f.tags[1]().value.set('B');
+      expect(changedOf(f.tags[1])).toBe(false);
+      f.tags[0]().value.set('A'); // catch up to the server
+      expect(changedOf(f.tags)).toBe(false);
+    });
+
+    it('gives a locally added item past the incoming length an undefined baseline', () => {
+      const { f, model } = setup();
+      model.update((m) => ({
+        ...m,
+        contacts: [...m.contacts, { email: 'new@x.com', primary: false }],
+      }));
+      reconcile(f, initial()); // server still has 2 contacts
+
+      expect(model().contacts).toHaveLength(3); // kept as a unit
+      expect(changedOf(f.contacts)).toBe(true);
+      expect(changedOf(f.contacts[0])).toBe(false); // rebaselined to incoming[0]
+      expect(changedOf(f.contacts[1])).toBe(false);
+      expect(changedOf(f.contacts[2])).toBe(true); // no server counterpart
+    });
+
+    it('rebaselines the subtree under a reconcileWith override', () => {
+      const { f, model } = setup((p) =>
+        reconcileWith(p.tags, ({ current }) => current),
+      );
+      reconcile(f, { ...initial(), tags: ['A', 'B'] });
+
+      expect(model().tags).toEqual(['a', 'b']); // override kept local values
+      expect(changedOf(f.tags)).toBe(true); // vs the new baseline
+      expect(changedOf(f.tags[0])).toBe(true);
+      f.tags[0]().value.set('A');
+      expect(changedOf(f.tags[0])).toBe(false);
     });
 
     it('honors a reconcileWith override at a path', () => {

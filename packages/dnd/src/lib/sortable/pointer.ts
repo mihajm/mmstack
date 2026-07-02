@@ -24,7 +24,7 @@ export function connectPointerContainer<T, K = unknown>(
   const drag = pointerDrag({
     target: element,
     handleSelector: HANDLE_SELECTOR,
-    activationThreshold: 5,
+    activationThreshold: untracked(controller).activationThreshold,
     // nested list claims the pointerdown so the outer one doesn't also start a drag (innermost wins).
     stopPropagation: true,
   });
@@ -80,7 +80,9 @@ export function connectPointerContainer<T, K = unknown>(
       }
       if (dragging) c.move(g.current);
     } else if (dragging) {
-      c.end();
+      // Escape / pointercancel / teardown abort the drag; only a real release commits.
+      if (g.cancelled) c.cancel();
+      else c.end();
       dragging = false;
       stopAutoScroll();
     }

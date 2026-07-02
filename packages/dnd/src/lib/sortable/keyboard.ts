@@ -26,7 +26,10 @@ export function keyboardReorder<T, K>(
   index: () => number,
   element: HTMLElement,
   injector: Injector,
-): { onKeydown: (event: KeyboardEvent) => void; tabIndex: Signal<number | null> } {
+): {
+  onKeydown: (event: KeyboardEvent) => void;
+  tabIndex: Signal<number | null>;
+} {
   // Needs the stored injector: injectAnnounce() uses inject(), but this runs from keydown (no injection context).
   let announce: ((message: string) => void) | null | undefined;
   const getAnnounce = (): ((message: string) => void) | null => {
@@ -71,7 +74,7 @@ export function keyboardReorder<T, K>(
         total,
         axis: c.axis,
         jump: c.jumpModifier(event),
-        move: (to) => applyMove(from, to),
+        move: (to) => applyMove(index(), to),
       });
       return;
     }
@@ -82,11 +85,7 @@ export function keyboardReorder<T, K>(
     if (event.key !== back && event.key !== fwd) return;
 
     const dir = event.key === fwd ? 1 : -1;
-    const to = c.jumpModifier(event)
-      ? dir > 0
-        ? total - 1
-        : 0
-      : from + dir;
+    const to = c.jumpModifier(event) ? (dir > 0 ? total - 1 : 0) : from + dir;
     if (Math.min(Math.max(to, 0), total - 1) === from) return; // already at the edge
 
     event.preventDefault();

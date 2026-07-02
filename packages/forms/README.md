@@ -57,7 +57,8 @@ class TextField {
 ```
 
 Resolution precedence at read time: **value set in the schema → component fallback (`injectLabel(x)`) →
-base fallback (`fieldMetadata({ fallback })`) → `undefined`**. The reader's type reflects it —
+base fallback (`fieldMetadata({ fallback })`) → `undefined`**. Only `undefined` counts as unset — a
+schema-set `null` is a real value and does not fall through. The reader's type reflects it —
 `Signal<T>` when a fallback is guaranteed, `Signal<T | undefined>` otherwise.
 
 > The reader must run in an injection context **on (or under) a `[formField]` host** — it resolves
@@ -140,8 +141,9 @@ readonly changed = injectChanged(); // Signal<boolean> for this field
 ```
 
 > **The baseline is established automatically.** By default `trackChanges` adopts the model's initial
-> value as the baseline (captured just after construction), so `changed` is meaningful with no extra
-> wiring. Two options tune this:
+> value as the baseline (captured on the first effect flush after construction — programmatic edits
+> made before then are absorbed into it), so `changed` is meaningful with no extra wiring. Two
+> options tune this:
 >
 > `trackChanges(model, { manualCommit: true })` skips the automatic baseline and lets you call
 > [`commitChanges`](#reset--reconcile) yourself — the right choice when the initial data arrives
@@ -161,6 +163,11 @@ form(model, (p) => {
 });
 ```
 
+> **Arrays diff their items by value, index-wise** (so reorders of identity-tracked items are still
+> caught). One consequence: an override placed on an _item_ path affects that item's own `changed`
+> signal, but not the array's (or any ancestor's) — put the override on the **array path itself** to
+> change how the container diffs.
+
 ## Reset & reconcile
 
 Both build on the native `FieldState.reset` (which clears touched/dirty and optionally sets the value),
@@ -177,7 +184,9 @@ reconcile(this.f, serverUser); // merge server data without clobbering in-flight
 `reconcile` is the headline: every field's baseline becomes the incoming value; **unchanged** fields
 adopt it, **changed** fields keep the user's edit (now measured against the new baseline — so if the
 server caught up to an edit, it goes back to unchanged on its own). Objects merge per-leaf; arrays and
-leaves merge as a unit. Customize a path — e.g. a smart array merge — with `reconcileWith`:
+leaves merge as a unit (item baselines still follow the incoming values, so item-level `changed` stays
+consistent — a locally added item with no incoming counterpart simply reads as changed). Customize a
+path — e.g. a smart array merge — with `reconcileWith`:
 
 ```typescript
 form(model, (p) => {

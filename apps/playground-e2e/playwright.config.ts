@@ -1,11 +1,15 @@
 import { workspaceRoot } from '@nx/devkit';
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env['BASE_URL'] || 'http://localhost:4200';
+// Own port by default: 4200 is routinely occupied by other dev servers (e.g. studio),
+// and Playwright's reuseExistingServer can't tell a foreign app from the playground.
+const baseURL = process.env['BASE_URL'] || 'http://localhost:4300';
+const port = new URL(baseURL).port || '80';
 
 /**
- * E2E coverage for `@mmstack/dnd` via the playground app — real-browser drags
- * (pointer + native HTML5) that jsdom unit tests can't simulate.
+ * E2E coverage for the playground app — real-browser behavior that jsdom unit
+ * tests can't simulate: `@mmstack/dnd` drags (pointer + native HTML5) and
+ * `@mmstack/resource` mutation persistence (real IndexedDB + offline emulation).
  */
 export default defineConfig({
   testDir: './src',
@@ -16,7 +20,7 @@ export default defineConfig({
   reporter: 'list',
   use: { baseURL, trace: 'on-first-retry' },
   webServer: {
-    command: 'npx nx run playground:serve',
+    command: `npx nx run playground:serve --port=${port}`,
     url: baseURL,
     reuseExistingServer: !process.env['CI'],
     cwd: workspaceRoot,

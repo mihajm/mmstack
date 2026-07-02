@@ -1,3 +1,4 @@
+import { provideHttpClient, withFetch } from '@angular/common/http';
 import {
   type ApplicationConfig,
   provideBrowserGlobalErrorListeners,
@@ -19,6 +20,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideClientHydration(withEventReplay()),
     provideBrowserGlobalErrorListeners(),
+    provideHttpClient(withFetch()),
     provideRouter(appRoutes),
     // Optional plugins: pragmatic's hitbox for edge detection, and our zero-dep
     // `edgeAutoScroll` for reorderable auto-scroll (@mmstack/dnd/plugins).

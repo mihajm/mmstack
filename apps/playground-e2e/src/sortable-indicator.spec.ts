@@ -1,10 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 // Native (indicator) sortable engine, exercised with real HTML5 DnD. Items are
 // drop targets, so moving between them fires `onDropTargetChange` → the session
 // pointer advances even under Playwright's synthetic `dragTo` (same-list too).
 
-const listOrder = (page: import('@playwright/test').Page, name: string) => () =>
+const listOrder = (page: Page, name: string) => () =>
   page
     .locator(`ul[data-list="${name}"] li`)
     .evaluateAll((els) => els.map((e) => (e.textContent ?? '').trim()));

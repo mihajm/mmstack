@@ -7,6 +7,13 @@ export const appRoutes: Route[] = [
       import('./examples/core-example').then((m) => m.CoreExample),
   },
   {
+    path: 'persistence',
+    loadComponent: () =>
+      import('./examples/persistence-example').then(
+        (m) => m.PersistenceExample,
+      ),
+  },
+  {
     path: 'sortable-pointer',
     loadComponent: () =>
       import('./examples/pointer-sortable-example').then(

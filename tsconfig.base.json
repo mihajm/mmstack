@@ -31,7 +31,8 @@
       "@mmstack/dnd": ["./packages/dnd/src/index.ts"],
       "@mmstack/dnd/plugins": ["./packages/dnd/plugins/src/index.ts"],
       "@mmstack/forms": ["./packages/forms/src/index.ts"],
-      "@mmstack/translate-tools": ["./packages/translate-tools/src/index.ts"]
+      "@mmstack/translate-tools": ["./packages/translate-tools/src/index.ts"],
+      "@mmstack/demos": ["./libs/demos/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

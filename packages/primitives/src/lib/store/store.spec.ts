@@ -187,6 +187,51 @@ describe('store', () => {
       s.v.set([1]);
       expect(kind()).toBe('array');
     });
+
+    it('a write through a child cached BEFORE a record→array flip keeps the array an array', () => {
+      const s = store(
+        { v: { 0: 'a' } as Record<string, string> | string[] },
+        { injector },
+      );
+      const el = (s.v as any)[0]; // cached while v is a RECORD
+      expect(el()).toBe('a');
+
+      s.v.set(['a', 'b']); // flip
+      expect(el()).toBe('a'); // the cached child reads the new shape
+
+      el.set('z'); // ...and writes it shape-correctly
+      expect(Array.isArray(s().v)).toBe(true);
+      expect(s().v).toEqual(['z', 'b']);
+    });
+
+    it('object|null union: a child cached while present reads undefined after nulling (no throw)', () => {
+      const s = store({ u: { n: 1 } as { n: number } | null }, { injector });
+      const n = (s.u as any).n; // cached while u is a record
+      expect(n()).toBe(1);
+
+      s.u.set(null);
+      expect(n()).toBeUndefined();
+
+      s.u.set({ n: 7 }); // and comes back to life when the record returns
+      expect(n()).toBe(7);
+    });
+
+    it('mutable union leaf: a child that becomes an object after build still propagates in-place parent mutations', () => {
+      const m = mutableStore(
+        { a: { b: 1 as number | { c: number } } },
+        { injector },
+      );
+      const b = (m.a as any).b; // cached while b is a PRIMITIVE
+      b.set({ c: 1 });
+
+      const seen = computed(() => (b() as { c: number }).c);
+      expect(seen()).toBe(1);
+
+      m.inline((v) => {
+        (v.a.b as { c: number }).c = 5; // in-place parent-level mutation
+      });
+      expect(seen()).toBe(5); // the child re-notified despite the stable reference
+    });
   });
 
   describe('dynamic property creation', () => {

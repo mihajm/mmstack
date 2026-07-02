@@ -125,4 +125,69 @@ describe('holdThroughNavigation', () => {
     snapshot.set(resolved('c'));
     expect(held.value()).toBe('c');
   });
+
+  // The navigation's refetch usually starts AFTER NavigationEnd (live params tick on it) —
+  // the reveal must hold through that first load cycle, not flash it.
+  describe('settle-aware reveal (post-NavigationEnd refetch)', () => {
+    it('holds through a refetch that starts after NavigationEnd', () => {
+      const { events, snapshot, held } = setup(resolved('a'));
+
+      events.next(new NavigationStart(1, '/users/2'));
+      events.next(new NavigationEnd(1, '/users/2', '/users/2'));
+      expect(held.value()).toBe('a'); // revealed — same value, nothing loaded yet
+
+      snapshot.set(loading(undefined as unknown as string)); // params ticked → refetch
+      expect(held.value()).toBe('a'); // held — no flash
+      expect(held.isLoading()).toBe(false);
+
+      snapshot.set(resolved('b'));
+      expect(held.value()).toBe('b'); // revealed on settle
+    });
+
+    it('after the cycle completes, a later load passes through live (reload indicator visible)', () => {
+      const { events, snapshot, held } = setup(resolved('a'));
+
+      events.next(new NavigationStart(1, '/x'));
+      events.next(new NavigationEnd(1, '/x', '/x'));
+      snapshot.set(loading('a'));
+      // cycle tracking is observation-based (lazy computation) — a mounted template
+      // reads every frame; the test stands in for it
+      expect(held.value()).toBe('a');
+      snapshot.set(resolved('b')); // navigation's cycle done
+      expect(held.value()).toBe('b');
+
+      snapshot.set(loading('b')); // an unrelated later load — passes through
+      expect(held.isLoading()).toBe(true);
+    });
+
+    it('holds at the LAST SETTLED snapshot, not the pre-navigation one', () => {
+      const { events, snapshot, held } = setup(resolved('a'));
+
+      events.next(new NavigationStart(1, '/x'));
+      snapshot.set(resolved('b')); // settled mid-navigation (e.g. a warm prefetch)
+      events.next(new NavigationEnd(1, '/x', '/x'));
+      expect(held.value()).toBe('b');
+
+      snapshot.set(loading(undefined as unknown as string)); // post-nav refetch
+      expect(held.value()).toBe('b'); // held at b — never back to a
+
+      snapshot.set(resolved('c'));
+      expect(held.value()).toBe('c');
+    });
+
+    it('a navigation starting mid-hold freezes at the held value', () => {
+      const { events, snapshot, held } = setup(resolved('a'));
+
+      events.next(new NavigationStart(1, '/x'));
+      events.next(new NavigationEnd(1, '/x', '/x'));
+      snapshot.set(loading(undefined as unknown as string)); // still settling…
+      expect(held.value()).toBe('a');
+
+      events.next(new NavigationStart(2, '/y')); // …when the next navigation begins
+      expect(held.value()).toBe('a'); // frozen at what was displayed
+      events.next(new NavigationEnd(2, '/y', '/y'));
+      snapshot.set(resolved('d'));
+      expect(held.value()).toBe('d');
+    });
+  });
 });

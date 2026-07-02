@@ -1,5 +1,5 @@
 import { provideLocationMocks } from '@angular/common/testing';
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { PreloadRequester } from '../preloading/preload-requester';
@@ -117,5 +117,138 @@ describe('withRouteData (mmLink data prefetch)', () => {
     await tick();
 
     expect(calls.map((c) => c.params['id'])).toEqual(['1', '2']);
+  });
+});
+
+// ——— failure paths: a throwing/erroring warm must never wedge the pipeline ———
+
+function failureSetup(
+  factory: (ctx: { isPrefetch: boolean }) => unknown,
+  other?: () => void,
+) {
+  const KEY = routeDataKey<unknown>('fragile');
+  const OTHER = routeDataKey<{ ok: true }>('other');
+  TestBed.configureTestingModule({
+    providers: [
+      provideRouter([
+        {
+          path: 'fragile/:id',
+          component: Blank,
+          providers: [provideRouteData(KEY)],
+          resolve: { fragile: createRouteData(KEY, factory) },
+        },
+        {
+          path: 'other',
+          component: Blank,
+          providers: [provideRouteData(OTHER)],
+          resolve: {
+            other: createRouteData(OTHER, () => {
+              other?.();
+              return { ok: true } as const;
+            }),
+          },
+        },
+      ]),
+      provideLocationMocks(),
+      withRouteData(),
+    ],
+  });
+  TestBed.inject(RouteDataPrefetcher).connect();
+  return TestBed.inject(PreloadRequester);
+}
+
+describe('withRouteData — failure paths', () => {
+  it('a throwing factory does not kill the pipeline, and the same link can retry', async () => {
+    let attempts = 0;
+    let otherRuns = 0;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const req = failureSetup(
+      () => {
+        attempts++;
+        throw new Error('boom');
+      },
+      () => otherRuns++,
+    );
+
+    req.startPreload('/fragile/1');
+    await tick();
+    expect(attempts).toBe(1);
+
+    req.startPreload('/other'); // the subscription must still be alive
+    await tick();
+    expect(otherRuns).toBe(1);
+
+    req.startPreload('/fragile/1'); // a failed warm is retryable
+    await tick();
+    expect(attempts).toBe(2);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('an error-settled warm clears the dedupe so the next hover retries', async () => {
+    let attempts = 0;
+    const status = signal('loading');
+    const req = failureSetup(() => {
+      attempts++;
+      return { status };
+    });
+
+    req.startPreload('/fragile/2');
+    await tick();
+    expect(attempts).toBe(1);
+
+    status.set('error');
+    await tick();
+    TestBed.tick(); // flush the settle effect
+
+    req.startPreload('/fragile/2');
+    await tick();
+    expect(attempts).toBe(2);
+  });
+
+  it('a resolved warm stays deduped', async () => {
+    let attempts = 0;
+    const status = signal('loading');
+    const req = failureSetup(() => {
+      attempts++;
+      return { status };
+    });
+
+    req.startPreload('/fragile/3');
+    await tick();
+    status.set('resolved');
+    await tick();
+    TestBed.tick();
+
+    req.startPreload('/fragile/3');
+    await tick();
+    expect(attempts).toBe(1);
+  });
+
+  it('watches every resource of a composite return (an erroring member re-arms the hover)', async () => {
+    let attempts = 0;
+    const a = signal('loading');
+    const b = signal('loading');
+    const req = failureSetup(() => {
+      attempts++;
+      return { a: { status: a }, b: { status: b } };
+    });
+
+    req.startPreload('/fragile/4');
+    await tick();
+
+    a.set('resolved');
+    await tick();
+    TestBed.tick();
+    req.startPreload('/fragile/4'); // still in flight (b loading) → deduped
+    await tick();
+    expect(attempts).toBe(1);
+
+    b.set('error');
+    await tick();
+    TestBed.tick();
+    req.startPreload('/fragile/4'); // the composite settled with an error → retry
+    await tick();
+    expect(attempts).toBe(2);
   });
 });

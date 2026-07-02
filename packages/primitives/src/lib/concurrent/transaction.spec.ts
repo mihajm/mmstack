@@ -115,6 +115,28 @@ class Host {
   }
 }
 
+// eslint-disable-next-line @angular-eslint/component-selector
+@Component({ selector: 'tx-child', template: `` })
+class Child {
+  readonly start = injectStartTransaction();
+  readonly ref = makeRef('resolved');
+  constructor() {
+    injectTransitionScope().add(this.ref, { suspends: false });
+  }
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'tx-wrap',
+  imports: [Child],
+  template: `@if (show()) {<tx-child />}`,
+  providers: [provideTransitionScope()],
+})
+class Wrap {
+  readonly show = signal(true);
+  readonly scope = injectTransitionScope();
+}
+
 describe('injectStartTransaction', () => {
   const flush = async (fixture: { detectChanges(): void }) => {
     for (let i = 0; i < 4; i++) {
@@ -214,6 +236,70 @@ describe('injectStartTransaction', () => {
     await flush(fixture);
 
     expect(resolved).toBe(true); // `await t.done` must not hang after abort
+  });
+
+  it('a pre-existing in-flight load is not attributed: it cannot commit the transaction early', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    const bg = makeRef('loading'); // in flight BEFORE the transaction starts
+    host.scope.add(bg, { suspends: false });
+    expect(host.display()).toBe(1);
+
+    const t = host.start(() => {
+      host.write(2);
+      host.ref.status.set('loading');
+    });
+    await flush(fixture);
+    expect(t.pending()).toBe(true);
+
+    bg.status.set('resolved'); // the background load settles — NOT the transaction's work
+    await flush(fixture);
+    expect(host.display()).toBe(1); // still held
+    expect(t.pending()).toBe(true);
+
+    host.ref.status.set('resolved'); // the transaction's own work settles
+    await flush(fixture);
+    expect(host.display()).toBe(2); // committed now
+  });
+
+  it('a never-settling background load does not block the transaction', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    const bg = makeRef('loading');
+    host.scope.add(bg, { suspends: false });
+    expect(host.display()).toBe(1);
+
+    const t = host.start(() => {
+      host.write(2);
+      host.ref.status.set('loading');
+    });
+    await flush(fixture);
+    host.ref.status.set('resolved');
+    await flush(fixture);
+
+    expect(host.display()).toBe(2); // committed despite bg still loading
+    expect(t.pending()).toBe(false);
+  });
+
+  it('destroying the calling context mid-transaction releases the hold on a surviving scope', async () => {
+    const { fixture } = await render(Wrap);
+    const wrap = fixture.componentInstance;
+    const child = fixture.debugElement.query(
+      (n) => n.componentInstance instanceof Child,
+    ).componentInstance as Child;
+
+    const t = child.start(() => child.ref.status.set('loading'));
+    await flush(fixture);
+    expect(wrap.scope.holding()).toBe(true);
+
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+
+    wrap.show.set(false); // the transacting component is destroyed mid-flight
+    await flush(fixture);
+
+    expect(wrap.scope.holding()).toBe(false); // hold released — not leaked forever
+    expect(resolved).toBe(true); // done settles so awaiters never hang
   });
 
   it('a throwing transaction body rolls back and releases the hold', async () => {

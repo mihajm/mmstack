@@ -265,6 +265,65 @@ describe('route-data integration — nested resolvers', () => {
     expect(container.querySelector('route-home')).toBeNull();
   });
 
+  it('a CHILD factory sees the PARENT route param (activation matches the prefetch extraction)', async () => {
+    const AUDIT = routeDataKey<HttpResourceRef<{ ok: boolean } | undefined>>('audit');
+
+    @Component({ selector: 'route-audit', template: `audit:{{ data.value()?.ok }}` })
+    class AuditCmp {
+      readonly data = injectRouteData(AUDIT);
+    }
+
+    const rendered = await render(Host, {
+      providers: [
+        provideRouter([
+          {
+            path: 'org/:orgId',
+            loadComponent: () => Promise.resolve(OrgLayout),
+            providers: [provideRouteData(ORG)],
+            resolve: {
+              org: createRouteData(ORG, (ctx) => {
+                const res = httpResource<Org>(() => `/api/orgs/${ctx.params()['orgId']}`);
+                registerResource(res, { suspends: true });
+                return res;
+              }),
+            },
+            children: [
+              {
+                path: 'audit',
+                component: AuditCmp,
+                providers: [provideRouteData(AUDIT)],
+                resolve: {
+                  audit: createRouteData(AUDIT, (ctx) => {
+                    // reads the PARENT's :orgId — the prefetch path extracts it from the
+                    // full config path, so activation must see it too
+                    const res = httpResource<{ ok: boolean }>(
+                      () => `/api/orgs/${ctx.params()['orgId']}/audit`,
+                    );
+                    registerResource(res, { suspends: true });
+                    return res;
+                  }),
+                },
+              },
+            ],
+          },
+        ]),
+        provideLocationMocks(),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    });
+    const router = TestBed.inject(Router);
+    const http = TestBed.inject(HttpTestingController);
+
+    await router.navigateByUrl('/org/7/audit');
+    await flush(rendered.fixture);
+
+    http.expectOne('/api/orgs/7').flush({ name: 'Acme' });
+    http.expectOne('/api/orgs/7/audit').flush({ ok: true }); // parent param visible in the child
+    await flush(rendered.fixture);
+    expect(rendered.container.textContent).toContain('audit:true');
+  });
+
   it('retains the parent loader across sibling navigation; the child outlet holds the swap', async () => {
     const { fixture, container, router, http } = await nestedSetup();
 

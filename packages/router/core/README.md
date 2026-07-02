@@ -743,6 +743,7 @@ Notes:
 - **Needs a cache to be useful.** Prefetch warms whatever shared cache your factory's resource writes to (e.g. `@mmstack/resource`'s `provideQueryCache()` at the app root). Without one, the hover fetch isn't reused by the navigation.
 - **Two-phase for lazily code-split routes.** The route's data factory isn't visible until its chunk has loaded, so the **first** hover warms the code and a **subsequent** hover warms the data; eager (non-lazy) routes warm data on the first hover.
 - On the prefetch path `ctx.isPrefetch` is `true` and params come from the hovered URL (there's no `ActivatedRoute` yet) — a factory can branch on it if needed.
+- **Hovers are deduped per link — but failures re-arm.** A warm that resolves stays deduped; one that errors, times out (`timeout`, default 30s), or throws is forgotten so the next hover retries. A factory may also return an object of resources (`{ user, posts }`) — every member is watched and the warm scope stays alive until all of them settle.
 
 > **Flash-free param navigation.** A route-data resource on a _reused_ route (e.g. `/users/1 → /users/2`) refetches in place — the outlet can't hold it (same component, no view swap). Wrap it with [`holdThroughNavigation`](#navigation-hold) for a flash-free, rollback-safe transition.
 
@@ -772,7 +773,7 @@ export class UserPage {
 Behaviour:
 
 - **During a navigation** the whole snapshot (value / status / error / loading) is frozen at the pre-navigation state — a refetch the navigation triggers shows no torn or loading state.
-- **On success or skip** (`NavigationEnd` / `NavigationSkipped`) it reveals the live state.
+- **On success or skip** (`NavigationEnd` / `NavigationSkipped`) it reveals — **settle-aware**: a navigation's refetch typically starts just _after_ `NavigationEnd` (live params tick on it), so the last settled snapshot is held through that first load cycle and revealed when it lands. Once the cycle completes, loads pass through live again (a later `reload()`'s indicator shows normally) until the next navigation.
 - **On a true rollback** (`NavigationError`, or a `NavigationCancel` that isn't a redirect / superseded-by-a-new-navigation) it holds the pre-navigation snapshot until the resource stops loading — so a cancelled refetch settling back to the route you stayed on reveals cleanly, never the would-be state of the route you didn't reach.
 - **Redirect / superseded cancels** stay frozen — a new navigation is already taking over and drives the next state, with no flicker in between.
 

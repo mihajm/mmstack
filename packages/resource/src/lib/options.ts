@@ -144,23 +144,38 @@ export function provideTypedResourceOptions<T>(
 
 /**
  * Applies a resolved `register` option to a freshly-created resource — adds it to the nearest
- * transition scope and removes it on destroy. Runs in the resource's injection context (or the
- * provided `injector`), since registration needs `TRANSITION_SCOPE` + `DestroyRef`.
+ * transition scope and removes it when the context is destroyed OR the resource's own
+ * `.destroy()` is called (a manually-destroyed resource must not linger in the scope). Runs in
+ * the resource's injection context (or the provided `injector`), since registration needs
+ * `TRANSITION_SCOPE` + `DestroyRef`. Returns the remover, for callers that manage a facade.
  */
 export function applyResourceRegistration(
   ref: ResourceRef<unknown>,
   register: TransitionRegistration | undefined,
   injector?: Injector,
-): void {
-  if (!register) return;
+): () => void {
+  if (!register) return () => undefined;
   const opt: RegisterOptions = { suspends: register === 'suspend' };
-  const run = injector
-    ? (fn: () => void) => runInInjectionContext(injector, fn)
-    : (fn: () => void) => fn();
-  run(() => {
+  const run = <T>(fn: () => T): T =>
+    injector ? runInInjectionContext(injector, fn) : fn();
+  return run(() => {
     const scope = injectTransitionScope();
     const destroyRef = inject(DestroyRef);
     scope.add(ref, opt);
-    destroyRef.onDestroy(() => scope.remove(ref));
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      scope.remove(ref);
+    };
+    destroyRef.onDestroy(remove);
+    const originalDestroy = ref.destroy;
+    if (typeof originalDestroy === 'function') {
+      ref.destroy = () => {
+        remove();
+        originalDestroy.call(ref);
+      };
+    }
+    return remove;
   });
 }

@@ -44,5 +44,6 @@ Thumbs.db
 .angular
 
 __screenshots__/
+test-results
 
 /articles

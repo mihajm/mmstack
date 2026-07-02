@@ -8,6 +8,7 @@ import {
   inject,
   Injectable,
   InjectionToken,
+  isDevMode,
   makeEnvironmentProviders,
   PLATFORM_ID,
   provideEnvironmentInitializer,
@@ -37,6 +38,19 @@ type StatusBearing = { status: () => string };
 
 function isStatusBearing(value: unknown): value is StatusBearing {
   return !!value && typeof (value as StatusBearing).status === 'function';
+}
+
+/** The resource(s) a factory returned: the value itself, or the first-level members of a
+ * composite (`{ user, posts }`) — each must settle before the warm scope is torn down. */
+function statusBearers(value: unknown): StatusBearing[] {
+  if (isStatusBearing(value)) return [value];
+  if (value && typeof value === 'object')
+    return Object.values(value).filter(isStatusBearing);
+  return [];
+}
+
+function isSettled(status: string): boolean {
+  return status === 'resolved' || status === 'error' || status === 'local';
 }
 
 /**
@@ -80,7 +94,7 @@ export class RouteDataPrefetcher {
       if (this.warmed.has(dedupeKey)) continue;
       this.warmed.add(dedupeKey);
 
-      this.run(tag, extracted);
+      this.run(tag, extracted, dedupeKey);
     }
   }
 
@@ -90,6 +104,7 @@ export class RouteDataPrefetcher {
       params: Record<string, string>;
       query: Record<string, string>;
     },
+    dedupeKey: string,
   ): void {
     // throwaway scope so registration is harmless; parented at root so the resource resolves
     // the shared (root) cache and writes the warm entry there.
@@ -98,34 +113,53 @@ export class RouteDataPrefetcher {
       this.rootInjector,
     );
 
-    runInInjectionContext(ephemeral, () => {
-      const ctx: RouteDataContext = {
-        params: signal(extracted.params),
-        queryParams: signal(extracted.query),
-        isPrefetch: true,
-        injector: ephemeral,
-      };
-      const value = tag.factory(ctx);
+    try {
+      runInInjectionContext(ephemeral, () => {
+        const ctx: RouteDataContext = {
+          params: signal(extracted.params),
+          queryParams: signal(extracted.query),
+          isPrefetch: true,
+          injector: ephemeral,
+        };
+        // the value itself, or each first-level member of a composite return
+        const watched = statusBearers(tag.factory(ctx));
 
-      if (isStatusBearing(value)) {
+        if (!watched.length) {
+          queueMicrotask(() => ephemeral.destroy());
+          return;
+        }
+
         let settled = false;
-        // safety net: never leak the injector if the request never settles
+        // a failed warm should retry on the next hover: forget the dedupe entry
+        const finish = (failed: boolean) => {
+          settled = true;
+          clearTimeout(timer);
+          if (failed) this.warmed.delete(dedupeKey);
+          queueMicrotask(() => ephemeral.destroy());
+        };
+        // safety net: never leak the injector if a request never settles
         const timer = setTimeout(() => {
-          if (!settled) ephemeral.destroy();
+          if (settled) return;
+          this.warmed.delete(dedupeKey);
+          ephemeral.destroy();
         }, this.prefetchTimeout);
         const ref = effect(() => {
-          const s = value.status();
-          if (s === 'resolved' || s === 'error' || s === 'local') {
-            settled = true;
-            clearTimeout(timer);
-            ref.destroy();
-            queueMicrotask(() => ephemeral.destroy());
-          }
+          const statuses = watched.map((w) => w.status());
+          if (!statuses.every(isSettled)) return;
+          finish(statuses.includes('error'));
+          ref.destroy();
         });
-      } else {
-        queueMicrotask(() => ephemeral.destroy());
-      }
-    });
+      });
+    } catch (e) {
+      // user code — a throwing factory must not kill the preload subscription or block retries
+      this.warmed.delete(dedupeKey);
+      ephemeral.destroy();
+      if (isDevMode())
+        console.warn(
+          `[mmstack/router-core] route-data prefetch factory for "${tag.description}" threw:`,
+          e,
+        );
+    }
   }
 
   private collectTagged(): { configPath: string; tag: RouteDataTag }[] {

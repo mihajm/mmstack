@@ -238,6 +238,40 @@ export function getTransitionScope(injector: Injector): TransitionScope | null {
 }
 
 /**
+ * @internal Transaction-attributed pending for `startTransition`/`startTransaction`: like
+ * `scope.pending`, but loads already in flight when the tracker is created are NOT attributed —
+ * a pre-existing background load can neither settle the transaction early nor block its settle
+ * forever. A pre-existing flight is excluded only until it first settles; a later re-trigger of
+ * the same resource (e.g. the transaction's write changed its request) counts as the
+ * transaction's own work.
+ */
+export function createAttributedPending(
+  scope: TransitionScope,
+): Signal<boolean> {
+  const isInFlight = (ref: ResourceRef<any>): boolean => {
+    const s = untracked(ref.status);
+    return s === 'loading' || s === 'reloading';
+  };
+  const preexisting = new Set(untracked(scope.resources).filter(isInFlight));
+
+  return computed(() => {
+    let pending = false;
+    for (const ref of scope.resources()) {
+      const s = ref.status();
+      const loading = s === 'loading' || s === 'reloading';
+      if (preexisting.has(ref)) {
+        // deletes are monotonic, so this stays sound under re-computation
+        if (loading) continue;
+        preexisting.delete(ref);
+        continue;
+      }
+      if (loading) pending = true;
+    }
+    return pending;
+  });
+}
+
+/**
  * Returns a register function bound to the nearest transition scope: it adds a resource
  * to the scope and removes it when the caller's injection context is destroyed. Pass any
  * `ResourceRef` (a query, mutation, or plain Angular resource) through it.

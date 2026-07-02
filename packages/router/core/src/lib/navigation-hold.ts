@@ -3,6 +3,13 @@
  * success/skip, roll back on a genuine cancel/error (not redirect/superseded) — is modeled on
  * Angular's transactional router resource (angular/angular#69490). The implementation is an
  * independent, signals-only take: a scan over router events + linkedSignal, no effects.
+ *
+ * The reveal is SETTLE-AWARE: a navigation's refetch often starts strictly AFTER
+ * `NavigationEnd` (route-data live params tick on NavigationEnd; the resource's loader runs on
+ * the next effect flush), so revealing at the event would flash that load through. Instead the
+ * post-navigation phase holds the last settled snapshot through the first load cycle and
+ * reveals when it settles; once that cycle completes, loads pass through live again (so a
+ * later `reload()`'s indicator stays visible) until the next navigation.
  */
 
 import {
@@ -22,12 +29,14 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { EventType, NavigationCancellationCode, Router } from '@angular/router';
 import { scan } from 'rxjs';
 
-type Mode = 'live' | 'frozen' | 'rollback';
+type Mode = 'live' | 'frozen' | 'settling';
 
 type NavState<T> = {
   readonly mode: Mode;
-  /** The pre-navigation snapshot, captured at the instant we enter `frozen`. */
-  readonly frozen: ResourceSnapshot<T>;
+  /** Seed for a first read that happens mid-navigation (before any stable output exists). */
+  readonly seed: ResourceSnapshot<T>;
+  /** Monotonic navigation id — a new navigation resets the settle-cycle tracking. */
+  readonly nav: number;
 };
 
 /** The stabilized result: the read surface of a `Resource`, plus `reload()` delegated to the source. */
@@ -53,11 +62,15 @@ const isLoadingStatus = (s: ResourceStatus): boolean =>
  *
  * - **During a navigation** the whole snapshot (value/status/error/loading) is frozen at the
  *   pre-navigation state, so a refetch the navigation triggers shows no torn/loading state.
- * - **On success or skip** (`NavigationEnd`/`NavigationSkipped`) it reveals the live state.
+ * - **On success or skip** (`NavigationEnd`/`NavigationSkipped`) it reveals — settle-aware:
+ *   the navigation's refetch usually starts just AFTER `NavigationEnd` (live params tick on it),
+ *   so the last settled snapshot is held through that first load cycle and revealed when it
+ *   lands. Once the cycle completes, loads pass through live again (a later `reload()`'s
+ *   indicator shows normally) until the next navigation.
  * - **On a true rollback** (`NavigationError`, or a `NavigationCancel` that isn't a redirect /
- *   superseded-by-a-new-navigation) it holds the frozen snapshot until the resource stops
- *   loading, so a cancelled refetch settling back to the route we stayed on reveals cleanly —
- *   never the would-be state of the route we didn't reach.
+ *   superseded-by-a-new-navigation) the same settle logic holds the pre-navigation snapshot
+ *   until the cancelled load settles back — never revealing the would-be state of the route we
+ *   didn't reach.
  * - **Redirect / superseded cancels** are left frozen: a new navigation is already taking over
  *   and will drive the next state (no spurious unfreeze between the two).
  *
@@ -84,53 +97,68 @@ export function holdThroughNavigation<T>(
     const router = inject(Router);
     const live = liveSnapshot(resource);
 
+    const initial: NavState<T> = { mode: 'live', seed: untracked(live), nav: 0 };
     const navState = toSignal(
       router.events.pipe(
-        scan<unknown, NavState<T>>(
-          (state, e) => {
-            switch ((e as { type: EventType }).type) {
-              case EventType.NavigationStart:
-                return state.mode === 'frozen'
-                  ? state // already frozen (superseded) — keep the original snapshot
-                  : { mode: 'frozen', frozen: untracked(live) };
-              case EventType.NavigationEnd:
-              case EventType.NavigationSkipped:
-                return { mode: 'live', frozen: state.frozen };
-              case EventType.NavigationError:
-                return { mode: 'rollback', frozen: state.frozen };
-              case EventType.NavigationCancel: {
-                const code = (e as { code: NavigationCancellationCode }).code;
-                return code ===
-                  NavigationCancellationCode.SupersededByNewNavigation ||
-                  code === NavigationCancellationCode.Redirect
-                  ? state // a new navigation is taking over — stay as-is
-                  : { mode: 'rollback', frozen: state.frozen };
-              }
-              default:
-                return state;
+        scan<unknown, NavState<T>>((state, e) => {
+          switch ((e as { type: EventType }).type) {
+            case EventType.NavigationStart:
+              return state.mode === 'frozen'
+                ? state // already frozen (superseded) — same navigation intent, keep the hold
+                : { mode: 'frozen', seed: untracked(live), nav: state.nav + 1 };
+            case EventType.NavigationEnd:
+            case EventType.NavigationSkipped:
+            case EventType.NavigationError:
+              // success reveals; error rolls back — both by settling: hold the last settled
+              // snapshot through any in-flight (or about-to-start) load, reveal when it lands
+              return { mode: 'settling', seed: state.seed, nav: state.nav };
+            case EventType.NavigationCancel: {
+              const code = (e as { code: NavigationCancellationCode }).code;
+              return code ===
+                NavigationCancellationCode.SupersededByNewNavigation ||
+                code === NavigationCancellationCode.Redirect
+                ? state // a new navigation is taking over — stay as-is
+                : { mode: 'settling', seed: state.seed, nav: state.nav };
             }
-          },
-          { mode: 'live', frozen: untracked(live) },
-        ),
+            default:
+              return state;
+          }
+        }, initial),
       ),
-      { initialValue: { mode: 'live', frozen: untracked(live) } },
+      { initialValue: initial },
     );
 
+    // `done` = this navigation's load cycle completed → later loads pass through live
+    // (a manual reload's indicator stays visible between navigations).
     const stable = linkedSignal<
       { ns: NavState<T>; live: ResourceSnapshot<T> },
-      ResourceSnapshot<T>
+      { snap: ResourceSnapshot<T>; done: boolean }
     >({
       source: () => ({ ns: navState(), live: live() }),
-      computation: ({ ns, live: liveSnap }) => {
-        if (ns.mode === 'frozen') return ns.frozen;
-        // rollback: hold the pre-nav snapshot until the cancelled load settles, then reveal
-        if (ns.mode === 'rollback')
-          return isLoadingStatus(liveSnap.status) ? ns.frozen : liveSnap;
-        return liveSnap;
+      computation: ({ ns, live: liveSnap }, prev) => {
+        // the previously displayed snapshot — what a hold keeps showing
+        const heldSnap = prev?.value.snap ?? ns.seed;
+        if (ns.mode === 'frozen') return { snap: heldSnap, done: false };
+        if (ns.mode === 'live') return { snap: liveSnap, done: false };
+
+        const sameSettle =
+          prev !== undefined &&
+          prev.source.ns.mode === 'settling' &&
+          prev.source.ns.nav === ns.nav;
+        if (sameSettle && prev.value.done) return { snap: liveSnap, done: true };
+        if (isLoadingStatus(liveSnap.status))
+          return { snap: heldSnap, done: false };
+        // settled — the cycle is complete if the previous settling frame was loading
+        const completed =
+          sameSettle && isLoadingStatus(prev.source.live.status);
+        return { snap: liveSnap, done: completed };
       },
     });
 
-    return buildHeldResource(stable, resource);
+    return buildHeldResource(
+      computed(() => stable().snap),
+      resource,
+    );
   });
 }
 

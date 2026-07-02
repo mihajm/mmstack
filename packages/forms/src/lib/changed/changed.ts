@@ -58,9 +58,9 @@ function valueDiff(initial: unknown, current: unknown): boolean {
   return true;
 }
 
-/** Per-path override metadata keys. */
-const CHANGED_EQUAL = createMetadataKey<ChangedEqual>();
-const CHANGED_WITH = createMetadataKey<ChangedFn>();
+/** Per-path override metadata keys. @internal exported for the changed-values walker only. */
+export const CHANGED_EQUAL = createMetadataKey<ChangedEqual>();
+export const CHANGED_WITH = createMetadataKey<ChangedFn>();
 
 function childState(
   state: FieldState<unknown>,
@@ -126,13 +126,37 @@ function nodeChanged(
   const current = state.value();
   if (Object.is(init, current)) return false;
   if (Array.isArray(current) && Array.isArray(init)) {
-    // Index-wise: items are identity-tracked, so per-node delegation would miss a reorder.
+    // Index-wise: items are identity-tracked, so delegating to a child's `changed()` (whose
+    // baseline follows the ITEM) would miss a reorder — but item-level RULES still apply,
+    // positionally (see itemChanged).
     if (current.length !== init.length) return true;
     for (let i = 0; i < current.length; i++)
-      if (valueDiff(init[i], current[i])) return true;
+      if (itemChanged(state, i, init[i], current[i])) return true;
     return false;
   }
   return true;
+}
+
+/**
+ * Array-item comparison at equal lengths: positional (`init[i]` vs `current[i]`, so reorders
+ * stay visible) but honoring an item-level `changedWith`/`changedEqual` rule when the item
+ * field carries one. Rules attach per-path (every item gets the same rule via the schema), so
+ * applying the field-at-`i`'s rule to the positional pair is sound even though item NODES are
+ * identity-tracked. Rules deeper INSIDE an item are not consulted — the item stays one
+ * comparison unit (documented limitation).
+ */
+function itemChanged(
+  state: FieldState<unknown>,
+  index: number,
+  initialItem: unknown,
+  currentItem: unknown,
+): boolean {
+  const child = childState(state, index);
+  const custom = child?.metadata(CHANGED_WITH)?.();
+  if (custom) return custom(initialItem, currentItem);
+  const eq = child?.metadata(CHANGED_EQUAL)?.();
+  if (eq) return !eq(initialItem, currentItem);
+  return valueDiff(initialItem, currentItem);
 }
 
 /**
@@ -401,8 +425,9 @@ export function reconcileWith<T>(
  * Deeply re-baselines a subtree to (the matching parts of) `value`, so item/leaf-level `changed`
  * agrees with the container after a kept-edit or custom merge. Children with no counterpart in
  * `value` (e.g. locally added items) get an `undefined` baseline and thus read as changed.
+ * @internal exported for submit-changes (re-baseline submitted units to their submitted values).
  */
-function rebaseline(state: FieldState<unknown>, value: unknown): void {
+export function rebaseline(state: FieldState<unknown>, value: unknown): void {
   state.metadata(CHANGED)?.commit(value);
   const cur = untracked(state.value);
   if (Array.isArray(cur)) {

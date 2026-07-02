@@ -16,3 +16,14 @@ export {
   type ReconcileFn,
   type TrackChangesOptions,
 } from './changed';
+export {
+  changedCount,
+  changedPaths,
+  changedValues,
+  type DeepPartial,
+} from './changed-values';
+export {
+  submitChanges,
+  type SubmitChangesOptions,
+  type SubmitTarget,
+} from './submit-changes';

@@ -3,6 +3,7 @@ import {
   createMetadataKey,
   type LogicFn,
   metadata,
+  type MetadataKey,
   type MetadataReducer,
   type PathKind,
   type SchemaPath,
@@ -32,9 +33,25 @@ export type FieldMetadataOptions<T> = {
 };
 
 /**
+ * The underlying `MetadataKey` a {@link fieldMetadata} attribute stores under — the third tuple
+ * element, exposed for interop with the native layer (`metadata(path, KEY, value)` in a schema,
+ * `state().metadata(KEY)` in a control, TestBed assertions, custom tooling). Note the read is the
+ * RAW accumulator: `Signal<T | undefined>` with **no fallbacks applied** — fallbacks (component
+ * and base) are reader/projector sugar, so `injectX()` and `state().metadata(KEY)?.()` can differ.
+ */
+export type FieldMetadataKey<T> = MetadataKey<
+  Signal<T | undefined>,
+  T,
+  T | undefined
+>;
+
+/**
  * Schema rule that binds a metadata value to a field path. Mirrors the shape & path-kind
  * genericity of the native rules (e.g. `required(path)` / `min(path, value)`), so it works on
- * root, child and array-item paths alike.
+ * root, child and array-item paths alike — and, like the native `metadata()` rule, the path's
+ * VALUE type is independent of the metadata type: a `string` attribute (a label) attaches to a
+ * boolean or number field just fine, and a reactive {@link LogicFn} value gets its ctx typed by
+ * the field it's on (`withLabel(p.count, ({ value }) => value() + ' items')`).
  *
  * The rule also carries a default {@link FieldProjector} under the {@link PROJECTOR} symbol, so
  * it can be dropped straight into `compose({ x: withX })`, and exposes {@link project} to build
@@ -44,9 +61,9 @@ export type FieldMetadataOptions<T> = {
  * @typeParam TDefault `T` when a base fallback is configured, otherwise `T | undefined`.
  */
 export type FieldMetadataRule<T, TDefault> = {
-  <TPathKind extends PathKind = PathKind.Root>(
-    path: SchemaPath<T, SchemaPathRules.Supported, TPathKind>,
-    value: T | LogicFn<T, T, TPathKind>,
+  <TValue = unknown, TPathKind extends PathKind = PathKind.Root>(
+    path: SchemaPath<TValue, SchemaPathRules.Supported, TPathKind>,
+    value: T | LogicFn<TValue, T, TPathKind>,
   ): void;
   /** Default projector (no component fallback) — makes the rule usable directly in `compose`. */
   readonly [PROJECTOR]: FieldProjector<TDefault>;
@@ -71,39 +88,48 @@ export type FieldMetadataReader<T, TDefault> = {
  *
  * Bundles the layers Angular exposes separately — a metadata key ({@link createMetadataKey}), the
  * schema rule that sets it ({@link metadata}), and the `FieldState.metadata()` read — into a
- * `[rule, reader]` tuple:
+ * `[rule, reader, key]` tuple:
  *
  * - the **rule** (`withX`) is used in a schema like the native `required`/`min` rules, and also
  *   carries a {@link FieldProjector} so it composes via `compose({ x: withX })`;
  * - the **reader** (`injectX`) is used inside a control like `input()`, resolving the value via
- *   the `FORM_FIELD` token that the `[formField]` directive provides.
+ *   the `FORM_FIELD` token that the `[formField]` directive provides;
+ * - the **key** ({@link FieldMetadataKey}) is the escape hatch to the native layer — set it with
+ *   `metadata(path, KEY, value)`, read it raw with `state().metadata(KEY)`, or drop it straight
+ *   into `compose({ x: KEY })`. Destructure it only when you need it, like `injectable`'s token.
  *
- * Resolution precedence at read time: value set in the schema → component fallback (reader
- * argument / `project(fallback)`) → base fallback ({@link FieldMetadataOptions.fallback}) →
- * `undefined`.
+ * Resolution precedence at read time (reader/projector only — the raw key read applies none of
+ * it): value set in the schema → component fallback (reader argument / `project(fallback)`) →
+ * base fallback ({@link FieldMetadataOptions.fallback}) → `undefined`.
  *
  * @example
  * ```ts
- * export const [withLabel, injectLabel] = fieldMetadata<string>({ debugName: 'label' });
+ * export const [withLabel, injectLabel, LABEL] = fieldMetadata<string>({ debugName: 'label' });
  *
  * form(model, (p) => { withLabel(p.name, 'Full name'); });   // schema
  * readonly label = injectLabel('(unlabeled)');               // standalone read
  * readonly field = compose({ label: withLabel });            // composed read (injects once)
+ * metadata(path, LABEL, () => 'Raw');                        // native escape hatch
  * ```
  *
  * @typeParam T The value type stored on the field for this attribute.
  */
 export function fieldMetadata<T>(
   opts: FieldMetadataOptions<T> & { fallback: T },
-): [FieldMetadataRule<T, T>, FieldMetadataReader<T, T>];
-export function fieldMetadata<T>(
-  opts?: FieldMetadataOptions<T>,
-): [FieldMetadataRule<T, T | undefined>, FieldMetadataReader<T, T | undefined>];
+): [FieldMetadataRule<T, T>, FieldMetadataReader<T, T>, FieldMetadataKey<T>];
 export function fieldMetadata<T>(
   opts?: FieldMetadataOptions<T>,
 ): [
   FieldMetadataRule<T, T | undefined>,
   FieldMetadataReader<T, T | undefined>,
+  FieldMetadataKey<T>,
+];
+export function fieldMetadata<T>(
+  opts?: FieldMetadataOptions<T>,
+): [
+  FieldMetadataRule<T, T | undefined>,
+  FieldMetadataReader<T, T | undefined>,
+  FieldMetadataKey<T>,
 ] {
   const KEY = opts?.reducer
     ? createMetadataKey<T, T | undefined>(opts.reducer)
@@ -122,16 +148,18 @@ export function fieldMetadata<T>(
       return componentFallback !== undefined ? componentFallback : base;
     };
 
-  const ruleFn = <TPathKind extends PathKind = PathKind.Root>(
-    path: SchemaPath<T, SchemaPathRules.Supported, TPathKind>,
-    value: T | LogicFn<T, T, TPathKind>,
+  const ruleFn = <TValue = unknown, TPathKind extends PathKind = PathKind.Root>(
+    path: SchemaPath<TValue, SchemaPathRules.Supported, TPathKind>,
+    value: T | LogicFn<TValue, T, TPathKind>,
   ): void => {
     metadata(
       path,
       KEY,
-      typeof value === 'function'
-        ? (value as LogicFn<T, T, PathKind>)
-        : () => value,
+      (typeof value === 'function' ? value : () => value) as LogicFn<
+        TValue,
+        T,
+        TPathKind
+      >,
     );
   };
 
@@ -143,5 +171,5 @@ export function fieldMetadata<T>(
   const read = (componentFallback?: T): Signal<T | undefined> =>
     injectField(project(componentFallback), name) as Signal<T | undefined>;
 
-  return [rule, read as FieldMetadataReader<T, T | undefined>];
+  return [rule, read as FieldMetadataReader<T, T | undefined>, KEY];
 }

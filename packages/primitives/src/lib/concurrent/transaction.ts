@@ -1,6 +1,7 @@
 import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
+  DestroyRef,
   effect,
   inject,
   Injector,
@@ -9,7 +10,10 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { injectTransitionScope } from './transition-scope';
+import {
+  createAttributedPending,
+  injectTransitionScope,
+} from './transition-scope';
 
 /**
  * An undo log for a transactional transition. Stateful writes made while the transaction is the
@@ -60,7 +64,8 @@ function runInTransaction(txn: Transaction, fn: () => void): void {
   }
 }
 
-/** Handle for an in-progress transaction (Tier 3): the transition `pending`/`done`, plus `abort`. */
+/** Handle for an in-progress transaction (Tier 3): the transaction's own `pending`/`done`
+ * (loads already in flight at start are not attributed to it), plus `abort`. */
 export type TransactionRef = {
   readonly pending: Signal<boolean>;
   readonly done: Promise<void>;
@@ -87,12 +92,16 @@ export type TransactionRef = {
 export function injectStartTransaction(): (fn: () => void) => TransactionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
+  const destroyRef = inject(DestroyRef);
   const onServer = isPlatformServer(
     inject(PLATFORM_ID, { optional: true }) ?? 'browser',
   );
 
   return (fn: () => void): TransactionRef => {
     const txn = createTransaction();
+    // attributed: loads already in flight when the transaction starts are not ours —
+    // they can neither commit this transaction early nor block its settle forever
+    const pending = createAttributedPending(scope);
 
     // Hold BEFORE the writes, so the display freezes at pre-transaction values.
     scope.beginHold();
@@ -111,12 +120,18 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
     const finish = (restore: boolean) => {
       if (finished) return;
       finished = true;
+      releaseDestroy();
       watcher?.destroy();
       if (restore) txn.restore();
       else txn.clear();
       scope.endHold();
       resolveDone();
     };
+
+    // The scope may outlive the calling context (a component transacting on an ancestor
+    // boundary): a destroy mid-flight kills the settle watcher, so without this the hold
+    // would leak and freeze the surviving scope forever. Keep the writes — they landed live.
+    const releaseDestroy = destroyRef.onDestroy(() => finish(false));
 
     try {
       runInTransaction(txn, fn);
@@ -128,26 +143,26 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
     let sawPending = false;
     watcher = effect(
       () => {
-        const p = scope.pending();
+        const p = pending();
         if (p) sawPending = true;
         if (sawPending && !p) finish(false);
       },
       { injector },
     );
     if (onServer) {
-      if (!untracked(scope.pending)) finish(false);
+      if (!untracked(pending)) finish(false);
     } else {
       // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
       afterNextRender(
         () => {
-          if (!sawPending && !untracked(scope.pending)) finish(false);
+          if (!sawPending && !untracked(pending)) finish(false);
         },
         { injector },
       );
     }
 
     return {
-      pending: scope.pending,
+      pending,
       done,
       abort: () => finish(true),
     };

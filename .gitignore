@@ -42,3 +42,8 @@ Thumbs.db
 .nx/workspace-data
 
 .angular
+
+__screenshots__/
+test-results
+
+/articles

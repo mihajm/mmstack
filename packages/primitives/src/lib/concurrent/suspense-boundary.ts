@@ -77,8 +77,7 @@ export class SuspenseBoundary extends SuspenseBoundaryBase {}
 
 /**
  * Unscoped suspense boundary — **reads the ambient scope** instead of providing one. For cases where
- * the resources to coordinate are registered *above* the boundary (e.g. an app-builder page whose
- * manifests/connectors register at a higher injector), so the boundary observes that outer scope
+ * the resources to coordinate are registered *above* the boundary so the boundary observes that outer scope
  * rather than opening a fresh one. Pair with a `provideTransitionScope()` (or another boundary) in an
  * ancestor.
  */

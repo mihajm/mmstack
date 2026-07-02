@@ -3,12 +3,12 @@ import {
   DestroyRef,
   inject,
   InjectionToken,
-  type Injector,
   isDevMode,
   linkedSignal,
   ResourceStatus,
   signal,
   untracked,
+  type Injector,
   type Provider,
   type ResourceRef,
   type Signal,
@@ -236,6 +236,41 @@ export function provideForwardingTransitionScope(): Provider {
 /** Read the transition scope reachable from `injector`, or null if none is provided there. */
 export function getTransitionScope(injector: Injector): TransitionScope | null {
   return injector.get(TRANSITION_SCOPE, null);
+}
+
+/**
+ * @internal Transaction-attributed pending for `startTransition`/`startTransaction`: like
+ * `scope.pending`, but loads already in flight when the tracker is created are NOT attributed —
+ * a pre-existing background load can neither settle the transaction early nor block its settle
+ * forever. A pre-existing flight is excluded only until it first settles; a later re-trigger of
+ * the same resource (e.g. the transaction's write changed its request) counts as the
+ * transaction's own work.
+ */
+export function createAttributedPending(
+  scope: TransitionScope,
+): Signal<boolean> {
+  const isInFlight = (ref: ResourceRef<any>): boolean => {
+    const s = untracked(ref.status);
+    return s === ResourceStatus.Loading || s === ResourceStatus.Reloading;
+  };
+  const preexisting = new Set(untracked(scope.resources).filter(isInFlight));
+
+  return computed(() => {
+    let pending = false;
+    for (const ref of scope.resources()) {
+      const s = ref.status();
+      const loading =
+        s === ResourceStatus.Loading || s === ResourceStatus.Reloading;
+      if (preexisting.has(ref)) {
+        // deletes are monotonic, so this stays sound under re-computation
+        if (loading) continue;
+        preexisting.delete(ref);
+        continue;
+      }
+      if (loading) pending = true;
+    }
+    return pending;
+  });
 }
 
 /**

@@ -8,9 +8,11 @@ import {
   inject,
   Injectable,
   InjectionToken,
+  isDevMode,
   makeEnvironmentProviders,
   PLATFORM_ID,
   provideEnvironmentInitializer,
+  ResourceStatus,
   runInInjectionContext,
   signal,
 } from '@angular/core';
@@ -32,13 +34,30 @@ const PREFETCH_TIMEOUT = new InjectionToken<number>(
   '@mmstack/router-core:route-data-prefetch-timeout',
 );
 
-/** Looks like a resource: has an `isLoading()` signal we can watch to know when to tear down.
- * (We key on `isLoading` rather than `status` because it's a `Signal<boolean>` across every
- * Angular version, whereas `status()` is an enum on v19/v20 and a string union on v22+.) */
-type LoadingBearing = { isLoading: () => boolean };
+/** Looks like a resource: has a `status()` signal we can watch to know when to tear down.
+ * v19 note: `status()` returns the `ResourceStatus` *enum* (a string union only on v22+), so the
+ * settle/error checks below compare against `ResourceStatus.*`, not string literals. */
+type StatusBearing = { status: () => ResourceStatus };
 
-function isLoadingBearing(value: unknown): value is LoadingBearing {
-  return !!value && typeof (value as LoadingBearing).isLoading === 'function';
+function isStatusBearing(value: unknown): value is StatusBearing {
+  return !!value && typeof (value as StatusBearing).status === 'function';
+}
+
+/** The resource(s) a factory returned: the value itself, or the first-level members of a
+ * composite (`{ user, posts }`) — each must settle before the warm scope is torn down. */
+function statusBearers(value: unknown): StatusBearing[] {
+  if (isStatusBearing(value)) return [value];
+  if (value && typeof value === 'object')
+    return Object.values(value).filter(isStatusBearing);
+  return [];
+}
+
+function isSettled(status: ResourceStatus): boolean {
+  return (
+    status === ResourceStatus.Resolved ||
+    status === ResourceStatus.Error ||
+    status === ResourceStatus.Local
+  );
 }
 
 /**
@@ -82,7 +101,7 @@ export class RouteDataPrefetcher {
       if (this.warmed.has(dedupeKey)) continue;
       this.warmed.add(dedupeKey);
 
-      this.run(tag, extracted);
+      this.run(tag, extracted, dedupeKey);
     }
   }
 
@@ -92,6 +111,7 @@ export class RouteDataPrefetcher {
       params: Record<string, string>;
       query: Record<string, string>;
     },
+    dedupeKey: string,
   ): void {
     // throwaway scope so registration is harmless; parented at root so the resource resolves
     // the shared (root) cache and writes the warm entry there.
@@ -100,37 +120,53 @@ export class RouteDataPrefetcher {
       this.rootInjector,
     );
 
-    runInInjectionContext(ephemeral, () => {
-      const ctx: RouteDataContext = {
-        params: signal(extracted.params),
-        queryParams: signal(extracted.query),
-        isPrefetch: true,
-        injector: ephemeral,
-      };
-      const value = tag.factory(ctx);
+    try {
+      runInInjectionContext(ephemeral, () => {
+        const ctx: RouteDataContext = {
+          params: signal(extracted.params),
+          queryParams: signal(extracted.query),
+          isPrefetch: true,
+          injector: ephemeral,
+        };
+        // the value itself, or each first-level member of a composite return
+        const watched = statusBearers(tag.factory(ctx));
 
-      if (isLoadingBearing(value)) {
-        let started = false;
+        if (!watched.length) {
+          queueMicrotask(() => ephemeral.destroy());
+          return;
+        }
+
         let settled = false;
-        // safety net: never leak the injector if the request never settles
+        // a failed warm should retry on the next hover: forget the dedupe entry
+        const finish = (failed: boolean) => {
+          settled = true;
+          clearTimeout(timer);
+          if (failed) this.warmed.delete(dedupeKey);
+          queueMicrotask(() => ephemeral.destroy());
+        };
+        // safety net: never leak the injector if a request never settles
         const timer = setTimeout(() => {
-          if (!settled) ephemeral.destroy();
+          if (settled) return;
+          this.warmed.delete(dedupeKey);
+          ephemeral.destroy();
         }, this.prefetchTimeout);
         const ref = effect(() => {
-          const loading = value.isLoading();
-          if (loading) started = true;
-          // tear down once the request has gone in flight and then drained
-          if (started && !loading) {
-            settled = true;
-            clearTimeout(timer);
-            ref.destroy();
-            queueMicrotask(() => ephemeral.destroy());
-          }
+          const statuses = watched.map((w) => w.status());
+          if (!statuses.every(isSettled)) return;
+          finish(statuses.includes(ResourceStatus.Error));
+          ref.destroy();
         });
-      } else {
-        queueMicrotask(() => ephemeral.destroy());
-      }
-    });
+      });
+    } catch (e) {
+      // user code — a throwing factory must not kill the preload subscription or block retries
+      this.warmed.delete(dedupeKey);
+      ephemeral.destroy();
+      if (isDevMode())
+        console.warn(
+          `[mmstack/router-core] route-data prefetch factory for "${tag.description}" threw:`,
+          e,
+        );
+    }
   }
 
   private collectTagged(): { configPath: string; tag: RouteDataTag }[] {

@@ -42,3 +42,11 @@ Thumbs.db
 .nx/workspace-data
 
 .angular
+<<<<<<< HEAD
+=======
+
+__screenshots__/
+test-results
+
+/articles
+>>>>>>> 918eea70 (fix: primitives, router-core & resource bugs & improvements)

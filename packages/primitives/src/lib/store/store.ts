@@ -112,10 +112,21 @@ function getCachedChild(
 }
 
 /**
+ * @internal Whether a mutable parent's child value must always re-notify: in-place mutation
+ * keeps an object child's reference stable, so `Object.is` would swallow the change. Decided
+ * per-VALUE (not snapshotted at build) so a union child that becomes an object later still
+ * propagates parent-level mutations.
+ */
+function mutableChildEqual(a: unknown, b: unknown): boolean {
+  if (typeof a === 'object' && a !== null) return false;
+  return Object.is(a, b);
+}
+
+/**
  * @internal Builds the derived child signal for `prop` and wraps it as an array/object substore.
- * A record parent reads the key directly; any other container goes through the fallback `from`/
- * `onChange` path. Shared verbatim by the array and object proxies — the only place a child node
- * is constructed.
+ * Both the read (`v?.[prop]`) and the write (`createFallbackOnChange` copies by the container's
+ * LIVE shape) are shape-adaptive, so a child cached before an array↔record↔null union flip stays
+ * correct after it. The only place a child node is constructed — shared by every container kind.
  */
 function buildChildNode(
   target: WritableSignal<any> | MutableSignal<any>,
@@ -124,31 +135,20 @@ function buildChildNode(
   options: Required<toStoreOptions>,
 ): Signal<any> {
   const value = untracked(target);
-  const valueIsRecord = isRecord(value);
-  const valueIsArray = Array.isArray(value);
 
   const nodeVivify = resolveVivify(value, options.vivify);
   const vivifyFn = createVivify(nodeVivify);
 
   const equalFn =
-    (valueIsRecord || valueIsArray) &&
-    isMutableSource &&
-    typeof (value as Record<string, any>)[prop] === 'object'
-      ? () => false
+    isMutableSource && (isRecord(value) || Array.isArray(value))
+      ? mutableChildEqual
       : undefined;
 
-  const computation = valueIsRecord
-    ? derived(target, prop as any, { equal: equalFn, vivify: nodeVivify })
-    : derived(target, {
-        from: (v: any) => v?.[prop],
-        onChange: createFallbackOnChange(
-          target,
-          prop,
-          vivifyFn,
-          isMutableSource,
-        ),
-        equal: equalFn,
-      });
+  const computation = derived(target, {
+    from: (v: any) => v?.[prop],
+    onChange: createFallbackOnChange(target, prop, vivifyFn, isMutableSource),
+    equal: equalFn,
+  });
 
   const childSample = untracked(computation);
   const childVivify = resolveVivify(childSample, options.vivify);

@@ -27,6 +27,7 @@ import {
 import {
   injectPaused,
   type PauseOption,
+  resolvePause,
   toWritable,
 } from '@mmstack/primitives';
 import { firstValueFrom } from 'rxjs';
@@ -130,6 +131,10 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
      * the resource HOLDS its current value and last request (no refetch on resume if
      * the request is unchanged) and stops background work (polling, focus/reconnect
      * triggers). The two compose — either source can pause the resource.
+     *
+     * When unset, an app-wide `providePausableOptions({ pause })` default (from
+     * `@mmstack/primitives`) applies — the same opt-in mechanism the pausable-aware
+     * primitives use. An explicit `false` opts a single query back out.
      */
     pause?: PauseOption;
     /**
@@ -373,15 +378,15 @@ export function queryResource<TResult, TRaw = TResult>(
     ? undefined
     : (options?.equalRequest ?? createEqualRequest());
 
-  const pauseOpt = options?.pause ?? false;
   const externallyPaused: () => boolean =
-    pauseOpt === false
-      ? () => false
-      : typeof pauseOpt === 'function'
-        ? pauseOpt
-        : options?.injector
-          ? runInInjectionContext(options.injector, injectPaused)
-          : injectPaused();
+    options?.pause === true
+      ? options?.injector
+        ? runInInjectionContext(options.injector, injectPaused)
+        : injectPaused()
+      : (resolvePause(
+          { pause: options?.pause, injector: options?.injector },
+          false,
+        ) ?? (() => false));
 
   const requestCtx: RequestContext = { paused: PAUSED };
   const rawResult = computed(() => request(requestCtx));

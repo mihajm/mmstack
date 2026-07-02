@@ -1,6 +1,7 @@
 import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
+  DestroyRef,
   effect,
   inject,
   Injector,
@@ -8,11 +9,15 @@ import {
   type Signal,
   untracked,
 } from '@angular/core';
-import { injectTransitionScope } from './transition-scope';
+import {
+  createAttributedPending,
+  injectTransitionScope,
+} from './transition-scope';
 
 /**
- * Handle for an in-progress transition: a `pending` signal (true while the transition's
- * resources are in flight) and a `done` promise that resolves once they all settle.
+ * Handle for an in-progress transition: a `pending` signal (true while the transition's OWN
+ * resources are in flight — loads already in flight when it started are not attributed) and a
+ * `done` promise that resolves once they all settle.
  */
 export type TransitionRef = {
   readonly pending: Signal<boolean>;
@@ -37,47 +42,49 @@ export type TransitionRef = {
 export function injectStartTransition(): (fn: () => void) => TransitionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
+  const destroyRef = inject(DestroyRef);
   const onServer = isPlatformServer(
     inject(PLATFORM_ID, { optional: true }) ?? 'browser',
   );
 
   return (fn: () => void): TransitionRef => {
+    // attributed: loads already in flight when the transition starts are not ours —
+    // they can neither settle this transition early nor block it forever
+    const pending = createAttributedPending(scope);
     untracked(fn);
 
     let sawPending = false;
     const done = new Promise<void>((resolve) => {
+      const settle = () => {
+        releaseDestroy();
+        watcher.destroy();
+        resolve();
+      };
       const watcher = effect(
         () => {
-          const p = scope.pending();
+          const p = pending();
           if (p) sawPending = true;
           // settle: requests went in flight and then drained
-          if (sawPending && !p) {
-            watcher.destroy();
-            resolve();
-          }
+          if (sawPending && !p) settle();
         },
         { injector },
       );
+      // a destroy mid-flight kills the watcher — resolve so awaiters never hang
+      const releaseDestroy = destroyRef.onDestroy(settle);
       if (onServer) {
-        if (!untracked(scope.pending)) {
-          watcher.destroy();
-          resolve();
-        }
+        if (!untracked(pending)) settle();
         return;
       }
       // no-async fallback: once the reactive system has processed the writes (afterNextRender),
       // if nothing ever went in flight, the transition is already complete.
       afterNextRender(
         () => {
-          if (!sawPending && !untracked(scope.pending)) {
-            watcher.destroy();
-            resolve();
-          }
+          if (!sawPending && !untracked(pending)) settle();
         },
         { injector },
       );
     });
 
-    return { pending: scope.pending, done };
+    return { pending, done };
   };
 }

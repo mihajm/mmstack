@@ -45,6 +45,13 @@ export type PointerDragState = {
    * otherwise the listener's element. `null` when idle.
    */
   origin: HTMLElement | null;
+  /**
+   * Whether the LAST gesture ended by being aborted (`pointercancel` /
+   * `lostpointercapture` / Escape / `cancel()`) rather than a normal `pointerup`.
+   * Only meaningful on the idle transition — consumers ending a drag branch on it
+   * to distinguish "drop here" from "abort". Sticky until the next `pointerdown`.
+   */
+  cancelled: boolean;
 };
 
 export type PointerDragOptions = SensorRunOptions & {
@@ -103,11 +110,16 @@ const IDLE: PointerDragState = {
   button: -1,
   pointerType: '',
   origin: null,
+  cancelled: false,
 };
+
+/** Terminal state of an aborted gesture — same idle shape, `cancelled: true`. */
+const CANCELLED: PointerDragState = { ...IDLE, cancelled: true };
 
 function stateEqual(a: PointerDragState, b: PointerDragState): boolean {
   return (
     a.active === b.active &&
+    a.cancelled === b.cancelled &&
     a.pointerId === b.pointerId &&
     a.current.x === b.current.x &&
     a.current.y === b.current.y &&
@@ -206,7 +218,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     meta: e.metaKey,
   });
 
-  const end = (): void => {
+  const end = (cancelled = false): void => {
     gesture?.abort();
     gesture = null;
     activePointerId = null;
@@ -214,8 +226,8 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     activePointerType = '';
     activeOrigin = null;
     activated = false;
-    state.set(IDLE);
-    state.flush(); // terminal transition: reflect IDLE now, not on the trailing edge
+    state.set(cancelled ? CANCELLED : IDLE);
+    state.flush(); // terminal transition: reflect idle now, not on the trailing edge
   };
 
   const onMove = (e: PointerEvent): void => {
@@ -235,6 +247,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
       button: activeButton, // pointermove button is -1; keep the down-button
       pointerType: activePointerType,
       origin: activeOrigin,
+      cancelled: false,
     });
   };
 
@@ -243,11 +256,11 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   };
 
   const onCancel = (e: PointerEvent): void => {
-    if (e.pointerId === activePointerId) end();
+    if (e.pointerId === activePointerId) end(true);
   };
 
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && activePointerId !== null) end();
+    if (e.key === 'Escape' && activePointerId !== null) end(true);
   };
 
   const onDown = (el: HTMLElement) => (e: PointerEvent): void => {
@@ -288,6 +301,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
       button: e.button,
       pointerType: activePointerType,
       origin: activeOrigin,
+      cancelled: false,
     });
   };
 
@@ -298,7 +312,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     });
     return () => {
       controller.abort();
-      end();
+      end(true); // teardown mid-gesture is an abort, not a drop
     };
   };
 
@@ -315,6 +329,6 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
 
   const base = state.asReadonly() as InternalPointerDragSignal;
   base.unthrottled = state.original;
-  base.cancel = end;
+  base.cancel = () => end(true);
   return base;
 }

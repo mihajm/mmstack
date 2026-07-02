@@ -205,6 +205,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   }
 
   override ngOnDestroy(): void {
+    this.swapEpoch++; // a deferred view-transition callback must not touch destroyed state
     this.dropHeld();
     super.ngOnDestroy();
   }
@@ -230,8 +231,14 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private resetArm(): void {
     this.armed = false;
     this.sawPending = false;
+    this.swapEpoch++; // invalidate any swap already scheduled into a view transition
     this.outgoingRefs.clear();
   }
+
+  /** Bumped whenever the hold is re-targeted/reset, so a DEFERRED `startViewTransition`
+   * callback (the browser snapshots the old frame first) from a superseded swap can't fire
+   * against re-targeted state — destroying the stable view and revealing a half-loaded one. */
+  private swapEpoch = 0;
 
   private commitSwap(): void {
     if (!this.held) return;
@@ -244,14 +251,16 @@ export class TransitionRouterOutlet extends RouterOutlet {
       typeof document !== 'undefined' &&
       document.startViewTransition
     ) {
-      document.startViewTransition(() => this.finishSwap());
+      const epoch = this.swapEpoch;
+      document.startViewTransition(() => this.finishSwap(epoch));
     } else {
-      this.finishSwap();
+      this.finishSwap(this.swapEpoch);
     }
   }
 
   /** The actual swap: destroy the held view, reveal the incoming one. Always instant. */
-  private finishSwap(): void {
+  private finishSwap(epoch: number): void {
+    if (epoch !== this.swapEpoch) return; // superseded while deferred — not ours to commit
     this.dropHeld(); // drop the route we're leaving
     if (this.hiddenIncoming) {
       this.setHidden(this.hiddenIncoming, false);

@@ -266,6 +266,19 @@ export type QueryResourceRef<TResult> = Omit<
    *              to prefetch data with different parameters than the main resource request.
    */
   prefetch: (req?: Partial<HttpResourceRequest> | string) => Promise<void>;
+  /**
+   * Cancel the in-flight load, if any — the CANCELLATION CONTRACT's manual lever:
+   * - The HTTP request is genuinely torn down (deduped requests abort when the last
+   *   consumer lets go — the dedupe layer is refCounted), and an aborted response can
+   *   never settle into the query cache (cache writes happen on the subscriber side).
+   * - The current value is KEPT (`status` becomes `'local'`); with `keepPrevious` that's
+   *   the previous settled value, otherwise whatever `value()` currently reports.
+   * - No-op when nothing is in flight. A later request change or `reload()` loads
+   *   normally — abort never wedges the resource.
+   *
+   * This is what `TransitionScope.abortPending()` calls on registered queries.
+   */
+  abort(): void;
 };
 
 /**
@@ -634,6 +647,14 @@ export function queryResource<TResult, TRaw = TResult>(
     reload: () => {
       cb.halfOpen(); // open the circuit for manual reload
       return resource.reload();
+    },
+    abort: () => {
+      const s = untracked(resource.status);
+      if (s !== 'loading' && s !== 'reloading') return;
+      // a self-set reaches ResourceImpl.set through the wrapper chain → Angular aborts
+      // the in-flight load; deliberately NOT writeValue: an abort must not touch the
+      // cache (no store, no staleness bump, no tab broadcast)
+      resource.value.set(untracked(resource.value));
     },
     destroy: () => {
       cbEffectRef.destroy();

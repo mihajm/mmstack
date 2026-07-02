@@ -8,6 +8,7 @@ import {
   LOCALE_ID,
   type Provider,
   resource,
+  type ResourceStatus,
   type Signal,
   signal,
   untracked,
@@ -711,6 +712,33 @@ export function injectIntl() {
  * }
  * ```
  */
+/**
+ * The dynamic locale loader's READ surface — locale switches load translation chunks
+ * through an internal resource; this exposes its status without the mutating ref.
+ * Structurally a `ResourceLike`, so it plugs straight into `@mmstack/primitives`'
+ * coordination: register it into a transition scope and a locale switch drives
+ * suspense/transition pending like any resource —
+ *
+ * ```ts
+ * // once, in a component under your scope/suspense boundary:
+ * registerResource(injectLocaleLoadState(), { suspends: false });
+ * // switching inside a transition then reveals the new locale in ONE frame:
+ * const t = startTransition(() => locale.set('de'));
+ * ```
+ */
+export function injectLocaleLoadState(): {
+  readonly status: Signal<ResourceStatus>;
+  readonly isLoading: Signal<boolean>;
+  hasValue(): boolean;
+} {
+  const loader = inject(TranslationStore).dynamicLocaleLoader;
+  return {
+    status: loader.status,
+    isLoading: loader.isLoading,
+    hasValue: () => loader.hasValue(),
+  };
+}
+
 export function injectDynamicLocale(): WritableSignal<string> & {
   isLoading: Signal<boolean>;
 } {

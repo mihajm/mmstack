@@ -14,6 +14,7 @@ export {
   injectAddTranslations,
   injectDefaultLocale,
   injectDynamicLocale,
+  injectLocaleLoadState,
   injectIntl,
   injectSupportedLocales,
   provideIntlConfig,

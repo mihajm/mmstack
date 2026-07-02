@@ -540,12 +540,13 @@ export const appConfig: ApplicationConfig = {
 
 The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds preloading. All standard `routerLink` inputs (`queryParams`, `fragment`, `state`, `relativeTo`, etc.) are proxied through unchanged.
 
-- **`preloadOn`** — `input<'hover' | 'visible' | null>()` (default: `'hover'`). `null` disables preloading.
+- **`preloadOn`** — `input<'hover' | 'visible' | null>()` (default: `'hover'`). `null` disables preloading. This is the WHEN.
+- **`preload`** — `input<'all' | 'code'>()` (default: `'all'`). The WHAT: `'all'` warms the lazy chunk AND the route's data ([`withRouteData`](#prefetch-on-hover)); `'code'` warms only the chunk — for links to routes whose data is expensive or shouldn't fire speculatively. (Per-KEY opt-out belongs in the factory via `ctx.isPrefetch`.)
 - **`preloading`** — `output<void>()` fires when the route is queued for preload (before the JS actually loads).
 - **`useMouseDown`** — navigate on mousedown instead of click (shaves ~50–100ms off perceived latency). The press's own click event is swallowed, so the navigation runs exactly once; keyboard activation still works.
 - **`beforeNavigate`** — `input<() => void>()` hook invoked just before an SPA navigation triggered by this link. Modified/middle clicks and `target="_blank"` links are left to the browser and skip the hook.
 
-App-wide defaults for `preloadOn` / `useMouseDown` can be set once via `provideMMLinkDefaultConfig({ ... })`.
+App-wide defaults for `preloadOn` / `preload` / `useMouseDown` can be set once via `provideMMLinkDefaultConfig({ ... })`.
 
 Replace existing `routerLink`s with `mmLink` to opt them in:
 
@@ -717,10 +718,38 @@ export class UserPage {
 Behaviour:
 
 - **Fires before the component** — the factory runs at the resolve phase, so the request is already in flight when the component mounts (which it does _hidden_, under the transition outlet). Sibling/nested route data fires in the same activation pass, so a matched chain loads in parallel.
-- **Reactive params, define-once** — `ctx.params()` / `ctx.queryParams()` are live signals derived from router state on every navigation. They update on param/query changes **without** relying on the route's `runGuardsAndResolvers` — so you define the factory once and it keeps producing correct data (a query-param change refetches even though the resolver itself doesn't re-run).
+- **Reactive params, define-once** — `ctx.params()` / `ctx.queryParams()` are live signals derived from router state on every navigation. They update on param/query changes **without** relying on the route's `runGuardsAndResolvers` — so you define the factory once and it keeps producing correct data (a query-param change refetches even though the resolver itself doesn't re-run). `ctx.param('id')` is the single-param sugar: a memoized signal with a dev-mode error when the name doesn't exist on the matched route (typo guard) — prefer it over `ctx.params()['id']`.
 - **Memoized** — the factory runs once per route activation; a re-running resolver reuses the same instance. The data lives as long as the route, and is destroyed with it.
 - **Coordinates with the outlet** — `register: 'suspend'` makes the [`TransitionRouterOutlet`](#transition-outlet) hold the previous view until the data settles; `register: 'indicator'` drives the busy indicator without blocking the swap. Opting in also gives the route its own transition scope (per-view isolation).
 - **No outlet required** — without a transition outlet the data still fires and is readable; you just don't get the held-transition behavior.
+- **Cross-data access** — a child route's factory can read an ancestor's slot directly: `injectRouteData(PARENT_KEY)` works inside the factory (resolve order is parent-first and the factory's injector sees ancestor route providers; integration-tested). Params inherit the same way via `ctx.params()`.
+- **Refresh from a component** — the slot IS the resource ref: `injectRouteData(USER).reload()` is the "pull to refresh this page" story; no extra API.
+
+**When the data errors** — two composable levers:
+
+```typescript
+createRouteData(USER, factory, {
+  // the "what does the app do next" hook: redirect, toast-and-stay, log.
+  // Fires per TRANSITION into error (first load, reloads, param re-fetches);
+  // never fires for speculative prefetch errors.
+  onError: (err, ctx) => ctx.injector.get(Router).navigateByUrl('/not-found'),
+});
+```
+
+Without `onError` the default stands: the outlet swaps on settle-by-error and the component renders the slot's `error()` — the in-view error-boundary pattern (`@if (user.error(); as e) { ... }`). Use the boundary for recoverable in-place errors, `onError` for route-level policy.
+
+**Guards reading warm data** — share the cache key, not the slot: a functional guard runs *before* resolvers (so the slot for the navigation being guarded isn't populated yet — which is why there's deliberately no `guardFromRouteData` helper), but guards run in an injection context, so a guard that fetches through the same cached query the factory uses leaves the cache warm and the factory's resource resolves from it without a second request:
+
+```typescript
+const canSeeUser: CanActivateFn = async (snapshot) => {
+  const user = queryResource<User>(
+    () => `/api/users/${snapshot.params['id']}`,
+    { cache: { staleTime: 30_000 } }, // SAME url ⇒ same cache key as the factory's query
+  );
+  const value = await until(user.value, (v) => v !== undefined);
+  return value.active || createUrlTreeFromSnapshot(snapshot, ['/inactive']);
+};
+```
 
 ### Prefetch on hover
 
@@ -748,6 +777,9 @@ Notes:
 > **Flash-free param navigation.** A route-data resource on a _reused_ route (e.g. `/users/1 → /users/2`) refetches in place — the outlet can't hold it (same component, no view swap). Wrap it with [`holdThroughNavigation`](#navigation-hold) for a flash-free, rollback-safe transition.
 
 ---
+
+**Any resolver can join the pipeline.** `createRouteData` resolvers are tagged automatically; `withPrefetch(resolver, { description, prefetch })` tags arbitrary ones — navigation runs the wrapped resolver unchanged, hover runs your `prefetch(ctx)` speculatively (params extracted from the link URL, `ctx.isPrefetch: true`, deduped per link + description). The canonical consumer is `@mmstack/translate`: warming a route's locale chunk on hover (see its README's ecosystem recipes).
+
 
 ## Navigation hold
 

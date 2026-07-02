@@ -102,9 +102,10 @@ export class PreloadStrategy implements PreloadingStrategy {
   private readonly req = inject(PreloadRequester);
 
   constructor() {
+    // code loads for every scope — 'code' vs 'all' only gates DATA warming
     this.req.preloadRequested$
       .pipe(takeUntilDestroyed())
-      .subscribe((path) => this.trigger(path));
+      .subscribe(({ path }) => this.trigger(path));
   }
 
   preload(route: Route, load: () => Observable<any>): Observable<any> {

@@ -1,11 +1,14 @@
 import {
   computed,
+  effect,
   type EnvironmentProviders,
   inject,
   InjectionToken,
   Injector,
+  isDevMode,
   makeEnvironmentProviders,
   type Signal,
+  untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -28,14 +31,88 @@ import { filter } from 'rxjs';
 export type RouteDataContext = {
   readonly params: Signal<Record<string, string>>;
   readonly queryParams: Signal<Record<string, string>>;
+  /**
+   * Single-param accessor: `param('id')` ≡ a memoized `computed(() => params()['id'] ?? '')`,
+   * with a dev-mode error the first time the param is ABSENT from the matched route — so a
+   * `:id` vs `param('userId')` typo screams at first navigation instead of silently
+   * producing `undefined` URLs. Runtime check only (no type-level path parsing).
+   */
+  param(name: string): Signal<string>;
   /** `true` only on the prefetch path (no real activation) — lets a factory tune behavior. */
   readonly isPrefetch: boolean;
   /** The injector the factory runs in (route env injector on activation). */
   readonly injector: Injector;
 };
 
+/**
+ * @internal Builds {@link RouteDataContext.param} over a params signal (shared by the live
+ * resolver ctx and the prefetch ctx). Memoized per name; warns once per name.
+ */
+export function paramAccessor(
+  params: Signal<Record<string, string>>,
+): (name: string) => Signal<string> {
+  const cache = new Map<string, Signal<string>>();
+  return (name) => {
+    let sig = cache.get(name);
+    if (!sig) {
+      let warned = false;
+      sig = computed(() => {
+        const value = params()[name];
+        if (value === undefined) {
+          if (isDevMode() && !warned) {
+            warned = true;
+            console.error(
+              `[mmstack/router-core] ctx.param('${name}'): no such param on the matched route — check the route's path definition for a typo.`,
+            );
+          }
+          return '';
+        }
+        return value;
+      });
+      cache.set(name, sig);
+    }
+    return sig;
+  };
+}
+
 /** Builds the route's data from the context. User code — the only place a resource lib is referenced. */
 export type RouteDataFactory<T> = (ctx: RouteDataContext) => T;
+
+/** @internal Looks like a resource: a `status()` we can watch. Shared with the prefetcher. */
+export type StatusBearing = { status: () => string };
+
+/** @internal */
+export function isStatusBearing(value: unknown): value is StatusBearing {
+  return !!value && typeof (value as StatusBearing).status === 'function';
+}
+
+/** @internal The resource(s) a factory returned: the value itself, or the first-level
+ * members of a composite (`{ user, posts }`). Shared with the prefetcher. */
+export function statusBearers(value: unknown): StatusBearing[] {
+  if (isStatusBearing(value)) return [value];
+  if (value && typeof value === 'object')
+    return Object.values(value).filter(isStatusBearing);
+  return [];
+}
+
+export type CreateRouteDataOptions = {
+  /**
+   * Error hook for the route's data: fires when any status-bearing resource the factory
+   * returned (or any first-level member of a composite return) TRANSITIONS into
+   * `status() === 'error'` — first load, reloads, and param re-fetches alike. Runs on the
+   * LIVE path only: prefetch errors are speculative and never fire this.
+   *
+   * This is the "what does the app do next" lever — redirect, toast-and-stay, log:
+   * ```ts
+   * createRouteData(USER, factory, {
+   *   onError: (err, ctx) => ctx.injector.get(Router).navigateByUrl('/not-found'),
+   * });
+   * ```
+   * WITHOUT it the default stands: the outlet swaps on settle-by-error and the component
+   * renders the slot's `error()` — the in-view error-boundary pattern.
+   */
+  onError?: (error: unknown, ctx: RouteDataContext) => void;
+};
 
 /** A typed handle linking a route's `providers` ({@link provideRouteData}), its `resolve` slot
  * ({@link createRouteData}) and its readers ({@link injectRouteData}). */
@@ -118,6 +195,7 @@ export function provideRouteData<T>(
 export function createRouteData<T>(
   key: RouteDataKey<T>,
   factory: RouteDataFactory<T>,
+  options?: CreateRouteDataOptions,
 ): ResolveFn<T> {
   const resolver: ResolveFn<T> = (snapshot) => {
     const slot = inject(key.token, { optional: true });
@@ -129,13 +207,18 @@ export function createRouteData<T>(
     return slot.ensure(() => {
       const injector = inject(Injector);
       const router = inject(Router);
+      const params = liveParams(router, snapshot);
       const ctx: RouteDataContext = {
-        params: liveParams(router, snapshot),
+        params,
+        param: paramAccessor(params),
         queryParams: liveQueryParams(router, snapshot),
         isPrefetch: false,
         injector,
       };
-      return factory(ctx);
+      const value = factory(ctx);
+      const onError = options?.onError;
+      if (onError) watchForErrors(value, onError, ctx);
+      return value;
     });
   };
 
@@ -147,6 +230,33 @@ export function createRouteData<T>(
   };
 
   return resolver;
+}
+
+/**
+ * @internal Fire `onError` on every TRANSITION into `'error'` of any returned status-bearer.
+ * The effect lives in the route's injection context (created inside `slot.ensure`), so it
+ * dies with the route — and it exists only on the live path (the prefetch tag carries the
+ * factory alone, never options, so speculative warms can't redirect the app).
+ */
+function watchForErrors(
+  value: unknown,
+  onError: (error: unknown, ctx: RouteDataContext) => void,
+  ctx: RouteDataContext,
+): void {
+  const bearers = statusBearers(value);
+  if (!bearers.length) return;
+  const prev = bearers.map(() => '');
+  effect(() => {
+    bearers.forEach((bearer, i) => {
+      const status = bearer.status();
+      const was = prev[i];
+      prev[i] = status;
+      if (status !== 'error' || was === 'error') return;
+      const error =
+        (bearer as { error?: () => unknown }).error?.() ?? undefined;
+      untracked(() => onError(error, ctx));
+    });
+  });
 }
 
 /** @internal */
@@ -165,6 +275,41 @@ export function readRouteDataTag(fn: unknown): RouteDataTag | null {
   return typeof fn === 'function'
     ? ((fn as RouteDataTagged)[ROUTE_DATA_TAG] ?? null)
     : null;
+}
+
+/**
+ * Tag ANY resolver as prefetchable: `withRouteData()`'s hover/visible pipeline runs
+ * `prefetch(ctx)` speculatively — same ephemeral root-parented injector as route-data
+ * factories, `ctx.isPrefetch: true`, params extracted from the link URL — while navigation
+ * runs the wrapped resolver unchanged. For resolvers whose speculative work is idempotent
+ * and cache-shaped: warming translations, priming a dataset, anything a hover may safely
+ * start. (`createRouteData` resolvers are already tagged — don't double-tag those.)
+ *
+ * ```ts
+ * resolve: {
+ *   i18n: withPrefetch(quoteNs.resolveNamespaceTranslation, {
+ *     description: 'quote-i18n',
+ *     prefetch: (ctx) => quoteNs.warmNamespaceTranslation(ctx.params()['locale']),
+ *   }),
+ * }
+ * ```
+ *
+ * Prefetch runs are deduped per link URL + `description`; a returned status-bearing
+ * resource is awaited for teardown like any route-data factory, a plain promise just runs.
+ */
+export function withPrefetch<T>(
+  resolver: ResolveFn<T>,
+  options: {
+    description: string;
+    prefetch: (ctx: RouteDataContext) => unknown;
+  },
+): ResolveFn<T> {
+  const tagged: ResolveFn<T> = (route, state) => resolver(route, state);
+  (tagged as RouteDataTagged)[ROUTE_DATA_TAG] = {
+    description: options.description,
+    factory: options.prefetch as RouteDataFactory<unknown>,
+  };
+  return tagged;
 }
 
 /** Read the route data produced by {@link createRouteData} for `key`. */

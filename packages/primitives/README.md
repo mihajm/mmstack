@@ -19,8 +19,8 @@ npm install @mmstack/primitives
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
 - [Effects](#effects) — `nestedEffect`
-- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), `startTransition` / `startTransaction`, `holdUntilReady`
-- [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
+- [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`, `opLog`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
 - [Pipelines](#pipelines) — `piped` / `pipeable`, operators (`select`, `map`, `filter`, `filterWith`, `distinct`, `combineWith`, `tap`, `startWith`, `pairwise`, `scan`)
@@ -441,6 +441,10 @@ This is also the pattern for coordinating resources registered _above_ a boundar
 
 **Forwarding scope (advanced).** `provideForwardingTransitionScope()` provides a scope that can be **re-pointed at a different target at runtime** via `setTarget(scope | null)` — reads follow the current target, while `add`/`remove` pin to the target a resource was registered under (so re-pointing never strands a registration). It's the building block for a coordinator that hosts several independent sub-scopes and switches which one it observes — e.g. a router outlet that, per navigation, points at the incoming route's own scope (read it from any injector with `getTransitionScope(injector)`). Most apps reach for `provideTransitionScope()`; this is for that one extra level of control.
 
+**Cancellation — `scope.abortPending()`.** View-scoped work already dies with its view (a superseded transition destroys the hidden incoming view, which aborts its in-flight loads — and an aborted response can never settle into `@mmstack/resource`'s cache). For resources registered in a scope that _outlives_ the transition, `scope.abortPending()` is the manual lever: it calls `abort()` on every in-flight registered resource that exposes it (queries do; mutations deliberately don't — a POST can't be unsent) and returns how many it aborted. A shared resource aborts for _all_ its readers, so reach for this on interactions that invalidate the pending work, not as a reflex. Honest limit: only I/O is cancellable — no framework can preempt a running synchronous computation.
+
+**SSR.** Scopes bridge into Angular's `PendingTasks` on the server automatically: while a scope has in-flight loads, serialization waits — so even custom (non-HTTP) loaders render settled. This is wired by the `provide*TransitionScope()` factories; call `bridgeScopeToPendingTasks(scope, injector)` yourself only for scopes you construct directly. Browser builds are untouched (client stability is deliberately not tied to loads).
+
 ### Hold-and-swap — `*mmTransition`
 
 The transition itself, for any branch change — tabs, wizard steps, master-detail. Suspense decides placeholder-vs-content _within_ a branch, but it can't stop an `@switch` from unmounting the old branch the instant the value flips. `*mmTransition` holds it: when the bound value changes, the **old view stays mounted and visible** (keeping its old value) while the **new view mounts hidden with its own transition scope**; resources created in the incoming subtree register there just by existing, and once they've gone in flight and settled the views swap in one frame.
@@ -459,6 +463,52 @@ The transition itself, for any branch change — tabs, wizard steps, master-deta
 ```
 
 The first render is immediate (nothing to hold). An interrupting change mid-hold destroys the half-ready hidden view and re-targets — the stable view stays visible until the newest branch settles. A branch that loads nothing swaps right after its first render, and per-view scopes mean the outgoing branch's background work can never delay the swap. `immediate: true` skips holding; `viewTransition: true` wraps the swap in `document.startViewTransition` (feature detected). This is `@mmstack/router-core`'s `<mm-transition-outlet>` without the router — same semantics, any signal as the trigger.
+
+### Per-element morphs — `mmViewTransitionName`
+
+When a swap is wrapped in the View Transitions API (`viewTransition: true` above, or the outlet's equivalent), the browser cross-fades the whole boundary by default. Name an element on both sides and it **morphs** instead — the hero image glides from the list card into the detail header:
+
+```html
+<!-- outgoing (list) and incoming (detail) views both name it: -->
+<img [mmViewTransitionName]="'hero-' + item().id" [src]="item().img" />
+```
+
+The directive binds `view-transition-name` reactively and normalizes the value to a valid CSS ident; `''`/`'none'` clears it (the conditional opt-out). It works with holds precisely because the incoming view is `display: none` while held — unboxed elements aren't captured, so the same name on both sides is legal at each capture point. One rule stays yours: a name must be unique among elements **visible** at capture time, so derive names from ids for anything that can repeat.
+
+### Async derivations — `latest()` / `use()`
+
+A `computed` over resources: `use(res)` reads a resource's value inside a `latest(fn)` computation and reports it to the derivation, so pending-ness propagates **by read** — no wiring, no per-site `isLoading` checks:
+
+```typescript
+import { latest, use } from '@mmstack/primitives';
+
+const fullName = latest(() => {
+  const u = use(user); // typed value — NO undefined checks in here
+  const org = use(orgFor(u)); // dependent (waterfall) resources compose too
+  return `${u.name} @ ${org.name}`;
+});
+
+fullName(); // holds its previous value while anything it read is in flight
+fullName.pending(); // the aggregate flight indicator
+```
+
+Semantics worth knowing: a member with no value yet short-circuits the computation (that's why the body needs no `undefined` handling) — the result reports `hasValue: false` until every read member has produced one. `status` aggregates with `error` winning; the held value stays readable through an error (unlike a raw `ResourceRef`, `latest`'s value never throws). Results are themselves status-bearing, so they **nest** (a `latest` inside a `latest` propagates) and register into transition scopes via the same `register: 'indicator' | 'suspend'` vocabulary as resources. `use()` accepts anything structurally resource-shaped — Angular `resource()`/`httpResource`, `@mmstack/resource` queries, or another `latest` result.
+
+Honest limit: the collector is a synchronous stack, so it covers derivations you own — not arbitrary template reads. Boundaries keep creation-time registration.
+
+### `deferredValue`
+
+`useDeferredValue` for signals: holds its previous value when the source changes and catches up at lower priority — after the next paint by default — so an expensive subtree keyed off the deferred value never blocks the urgent update that caused the change:
+
+```typescript
+const query = signal('');
+const deferredQuery = deferredValue(query);
+const results = computed(() => expensiveFilter(items(), deferredQuery()));
+// typing echoes instantly; the big list re-renders one beat later
+// deferredQuery.pending() → true while behind (dim the stale list)
+```
+
+Rapid changes coalesce latest-wins (the expensive subtree never sees intermediate values), `pending` compares by **value** — a change reverted before catch-up isn't pending — and an equal catch-up never notifies consumers. `strategy: 'idle'` defers to `requestIdleCallback` instead; a function strategy is the custom-scheduler/test seam. On the server it's a synchronous pass-through (SSR renders once — deferral would just mean stale content). This is a scheduling tool, not an async one: for async work compose `latest()`; for coordinated reveals use a transition scope.
 
 ### `injectStartTransition`
 
@@ -614,6 +664,29 @@ import { tabSync } from '@mmstack/primitives';
 
 const cart = tabSync(signal([]), { id: 'shopping-cart' });
 ```
+
+### `opLog`
+
+A minimal **operation log** over any object-shaped `WritableSignal` that honors the copy-on-write contract (stores qualify, and so do plain immutably-updated model signals): each tick's changes are recovered as one batch of path-level `set`/`delete` ops by a reference-identity-pruned diff — O(changed paths), from *outside* the signal, zero cost when no log exists:
+
+```typescript
+import { opLog, store } from '@mmstack/primitives';
+
+const state = store({ user: { name: 'Ann' }, items: [1, 2] });
+const log = opLog(state);
+
+log.subscribe((batch) => send(batch)); // lossless, ordered — sync/persistence feed
+log.latest(); // Signal<OpBatch | null> — lossy sampling (devtools-style)
+
+state.user.name.set('Bea');
+// → { origin, version, ops: [{ kind: 'set', path: ['user','name'], next: 'Bea', prev: 'Ann' }] }
+
+log.apply(remoteBatch); // applies ops in ONE commit AND advances the diff baseline —
+// so applying a remote batch emits no echo batch (sync loops terminate by construction)
+invertBatch(batch); // prev-based inverse — undo is a data transform
+```
+
+Batching is per tick (two writes to one leaf in a tick emit one composed op), `prev` is always carried in-memory (structural sharing makes it free — wire serializers decide whether to keep it), arrays diff per-index at equal lengths and as whole-array ops on length change, and a `forkStore`'s `commit()` lands as a single batch — fork *is* the transaction primitive. Mutable stores are unsupported (in-place mutation defeats ref-identity diffing; dev warn). This is the substrate for worker mirrors, tab/mesh sync, persistence journals, and undo — one protocol, many consumers.
 
 ## Performance helpers
 

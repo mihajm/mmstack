@@ -22,7 +22,9 @@ import { PreloadRequester } from '../preloading/preload-requester';
 import { extractRouteParams } from '../util/extract-params';
 import { findPath } from '../util/find-path';
 import {
+  paramAccessor,
   readRouteDataTag,
+  statusBearers,
   type RouteDataContext,
   type RouteDataTag,
 } from './route-data';
@@ -32,22 +34,6 @@ const DEFAULT_PREFETCH_TIMEOUT = 30_000;
 const PREFETCH_TIMEOUT = new InjectionToken<number>(
   '@mmstack/router-core:route-data-prefetch-timeout',
 );
-
-/** Looks like a resource: has a `status()` signal we can watch to know when to tear down. */
-type StatusBearing = { status: () => string };
-
-function isStatusBearing(value: unknown): value is StatusBearing {
-  return !!value && typeof (value as StatusBearing).status === 'function';
-}
-
-/** The resource(s) a factory returned: the value itself, or the first-level members of a
- * composite (`{ user, posts }`) — each must settle before the warm scope is torn down. */
-function statusBearers(value: unknown): StatusBearing[] {
-  if (isStatusBearing(value)) return [value];
-  if (value && typeof value === 'object')
-    return Object.values(value).filter(isStatusBearing);
-  return [];
-}
 
 function isSettled(status: string): boolean {
   return status === 'resolved' || status === 'error' || status === 'local';
@@ -82,7 +68,10 @@ export class RouteDataPrefetcher {
     this.connected = true;
     this.req.preloadRequested$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((linkPath) => this.warm(linkPath));
+      // scope 'code' = warm the chunk only — the link opted its DATA out (mmLink `preload`)
+      .subscribe(({ path, scope }) => {
+        if (scope === 'all') this.warm(path);
+      });
   }
 
   private warm(linkPath: string): void {
@@ -115,8 +104,10 @@ export class RouteDataPrefetcher {
 
     try {
       runInInjectionContext(ephemeral, () => {
+        const params = signal(extracted.params);
         const ctx: RouteDataContext = {
-          params: signal(extracted.params),
+          params,
+          param: paramAccessor(params),
           queryParams: signal(extracted.query),
           isPrefetch: true,
           injector: ephemeral,

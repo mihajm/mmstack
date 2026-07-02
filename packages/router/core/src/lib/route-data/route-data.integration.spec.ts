@@ -350,4 +350,83 @@ describe('route-data integration — nested resolvers', () => {
     expect(container.textContent).not.toContain('user:Cara'); // child swapped
     expect(container.textContent).toContain('org:Acme'); // parent untouched, still shown
   });
+
+  it("a CHILD factory reads the PARENT's SLOT via injectRouteData(PARENT_KEY) (cross-data access)", async () => {
+    // resolve order is parent-first and the child factory's injector sees ancestor route
+    // providers — so the parent's slot is populated and injectable by the time the child runs
+    const PARENT = routeDataKey<HttpResourceRef<User | undefined>>('p-user');
+    const CHILD = routeDataKey<{
+      parentRef: unknown;
+      posts: HttpResourceRef<string[] | undefined>;
+    }>('p-posts');
+    let parentInstance: unknown = null;
+
+    @Component({ selector: 'cd-child', template: `posts:{{ data.posts.value()?.length ?? 0 }}` })
+    class ChildCmp {
+      readonly data = injectRouteData(CHILD);
+    }
+    @Component({
+      selector: 'cd-parent',
+      imports: [TransitionRouterOutlet],
+      template: `parent|<mm-transition-outlet />`,
+    })
+    class ParentCmp {}
+
+    const { fixture, router, http } = await (async () => {
+      const rendered = await render(Host, {
+        providers: [
+          provideRouter([
+            {
+              path: 'p/:id',
+              component: ParentCmp,
+              providers: [provideRouteData(PARENT)],
+              resolve: {
+                user: createRouteData(PARENT, (ctx) => {
+                  const res = httpResource<User>(
+                    () => `/api/p-users/${ctx.params()['id']}`,
+                  );
+                  parentInstance = res;
+                  return res;
+                }),
+              },
+              children: [
+                {
+                  path: 'posts',
+                  component: ChildCmp,
+                  providers: [provideRouteData(CHILD)],
+                  resolve: {
+                    posts: createRouteData(CHILD, () => ({
+                      // the cross-data access under test:
+                      parentRef: injectRouteData(PARENT),
+                      posts: httpResource<string[]>(() => '/api/p-posts'),
+                    })),
+                  },
+                },
+              ],
+            },
+          ]),
+          provideLocationMocks(),
+          provideHttpClient(),
+          provideHttpClientTesting(),
+        ],
+      });
+      return {
+        ...rendered,
+        router: TestBed.inject(Router),
+        http: TestBed.inject(HttpTestingController),
+      };
+    })();
+
+    await router.navigateByUrl('/p/3/posts');
+    await flush(fixture);
+    http.expectOne('/api/p-users/3').flush({ name: 'Ann' });
+    http.expectOne('/api/p-posts').flush(['a', 'b']);
+    await flush(fixture);
+
+    const child = fixture.debugElement.query(
+      (n) => n.componentInstance instanceof ChildCmp,
+    )?.componentInstance as ChildCmp;
+    expect(child.data.parentRef).toBe(parentInstance); // the SAME parent slot instance
+    expect(fixture.nativeElement.textContent).toContain('posts:2');
+  });
 });

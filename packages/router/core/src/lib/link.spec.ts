@@ -119,7 +119,7 @@ describe('link primitives & directive', () => {
           queryParamsHandling: undefined,
         });
 
-        expect(reqMock.startPreload).toHaveBeenCalledWith('/my-path');
+        expect(reqMock.startPreload).toHaveBeenCalledWith('/my-path', 'all');
       });
     });
 
@@ -140,6 +140,7 @@ describe('link primitives & directive', () => {
       const provider = provideMMLinkDefaultConfig({ useMouseDown: true });
       expect((provider as any).useValue).toEqual({
         preloadOn: 'hover',
+        preload: 'all',
         useMouseDown: true,
       });
     });
@@ -177,7 +178,7 @@ describe('link primitives & directive', () => {
       // Trigger hover
       linkElement.dispatchEvent(new MouseEvent('mouseenter'));
 
-      expect(reqMock.startPreload).toHaveBeenCalledWith('/test');
+      expect(reqMock.startPreload).toHaveBeenCalledWith('/test', 'all');
       expect(emitted).toBe(true);
     });
 
@@ -282,7 +283,7 @@ describe('link primitives & directive', () => {
       fixture.detectChanges();
       TestBed.tick();
 
-      expect(reqMock.startPreload).toHaveBeenCalledWith('/test');
+      expect(reqMock.startPreload).toHaveBeenCalledWith('/test', 'all');
     });
   });
 

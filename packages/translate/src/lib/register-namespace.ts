@@ -340,40 +340,37 @@ export function registerNamespace<
     return addSignalFn(createT(store, keyMap), store, keyMap);
   };
 
-  // Tracks whether the default locale's translation has been loaded by any prior
-  // resolver call. Captured in closure across navigations on purpose — concurrent
-  // resolves may each see `false` and both queue a default preload; that's harmless
-  // because `store.register` is idempotent (same payload overwrites with the same
-  // value). Do not add locking here.
   let defaultTranslationLoaded = false;
-  // Locales whose translations this namespace already registered — a repeat navigation
-  // must not re-run the loader (and re-register) every time.
   const loadedLocales = new Set<string>();
-  const resolver: ResolveFn<void> = async (snapshot) => {
-    const store = inject(TranslationStore);
 
-    const locale = injectResolveParamLocale(snapshot);
-
-    const defaultLocale = injectDefaultLocale();
-    const shouldPreloadDefault =
-      injectIntlConfig()?.preloadDefaultLocale ?? false;
-
+  /**
+   * Load + register translations for `locale` WITHOUT touching the active locale — the
+   * shared core of the resolver and {@link warm}. Idempotent via the closure guards.
+   * `'ready'` = the locale's data is usable (the resolver may switch to it);
+   * `'default-cached'` preserves the resolver's historical no-switch behavior for the
+   * repeat default-fallback path.
+   */
+  const loadForLocale = async (
+    store: TranslationStore,
+    locale: string,
+    defaultLocale: string,
+    shouldPreloadDefault: boolean,
+  ): Promise<'ready' | 'default-cached' | 'failed'> => {
     const tPromise = unwrappedOther[locale] as LocaleLoader | undefined;
 
     const promise = tPromise ?? unwrappedDefault;
-    if (!promise && isDevMode()) {
-      return console.warn(`No translation found for locale: ${locale}`);
+    if (!promise) {
+      if (isDevMode())
+        console.warn(`No translation found for locale: ${locale}`);
+      return 'failed';
     }
 
-    if (promise === unwrappedDefault && defaultTranslationLoaded) return;
+    if (promise === unwrappedDefault && defaultTranslationLoaded)
+      return 'default-cached';
 
-    // already loaded on a previous navigation — just sync the locale, skip the reload
-    if (tPromise && loadedLocales.has(locale)) {
-      if (locale !== untracked(store.locale)) store.locale.set(locale);
-      return;
-    }
+    // already loaded on a previous run — nothing to fetch or register
+    if (tPromise && loadedLocales.has(locale)) return 'ready';
 
-    let loaded = false;
     try {
       const promises = [promise()];
 
@@ -415,24 +412,70 @@ export function registerNamespace<
       if (t) loadedLocales.add(locale);
       if (promise === unwrappedDefault || defaultT)
         defaultTranslationLoaded = true;
-      loaded = true;
+      return 'ready';
     } catch {
       if (isDevMode()) {
         console.warn(
           `Failed to load translation for locale: ${locale} — locale switch skipped.`,
         );
       }
-    } finally {
-      // only switch on success — switching to a locale whose load failed would render
-      // wholesale fallbacks (or '') with no signal to the router that anything failed
-      if (loaded && locale !== untracked(store.locale))
-        store.locale.set(locale);
+      return 'failed';
     }
   };
 
-  return Object.assign([injectT, resolver] as const, {
+  const resolver: ResolveFn<void> = async (snapshot) => {
+    const store = inject(TranslationStore);
+
+    const locale = injectResolveParamLocale(snapshot);
+    const defaultLocale = injectDefaultLocale();
+    const shouldPreloadDefault =
+      injectIntlConfig()?.preloadDefaultLocale ?? false;
+
+    const result = await loadForLocale(
+      store,
+      locale,
+      defaultLocale,
+      shouldPreloadDefault,
+    );
+
+    // only switch on success — switching to a locale whose load failed would render
+    // wholesale fallbacks (or '') with no signal to the router that anything failed
+    if (result === 'ready' && locale !== untracked(store.locale))
+      store.locale.set(locale);
+  };
+
+  /**
+   * Speculatively load + register this namespace's translations for `locale` (the
+   * ACTIVE locale when omitted) WITHOUT switching — the warm half of hover-prefetch.
+   * Pair with `@mmstack/router-core`'s `withPrefetch` so hovering a link loads the
+   * locale chunk before navigation (idempotent; the later resolver run is then instant):
+   *
+   * ```ts
+   * resolve: {
+   *   i18n: withPrefetch(ns.resolveNamespaceTranslation, {
+   *     description: 'quote-i18n',
+   *     prefetch: (ctx) => ns.warmNamespaceTranslation(ctx.params()['locale']),
+   *   }),
+   * }
+   * ```
+   */
+  const warm = async (locale?: string): Promise<void> => {
+    const store = inject(TranslationStore);
+    const defaultLocale = injectDefaultLocale();
+    const shouldPreloadDefault =
+      injectIntlConfig()?.preloadDefaultLocale ?? false;
+    await loadForLocale(
+      store,
+      locale || untracked(store.locale),
+      defaultLocale,
+      shouldPreloadDefault,
+    );
+  };
+
+  return Object.assign([injectT, resolver, warm] as const, {
     injectNamespaceT: injectT,
     resolveNamespaceTranslation: resolver,
+    warmNamespaceTranslation: warm,
   });
 }
 
@@ -482,10 +525,7 @@ export function registerRemoteNamespace<TNS extends string>(
 ) {
   const keyMap = new Map<string, string>();
 
-  // TransferState plumbing: remote translations fetched during SSR are serialized into
-  // the page so hydration doesn't refetch them. Captured lazily from the resolver's
-  // injection context (registration happens at module scope, outside DI); the on-demand
-  // loaders run async without a context, so they use these captured references.
+  // TransferState plumbing: remote translations fetched during SSR
   let transferState: TransferState | null = null;
   let onServer = false;
 
@@ -507,10 +547,6 @@ export function registerRemoteNamespace<TNS extends string>(
     });
   };
 
-  // The dynamic-locale loader in TranslationStore reads `.namespace` and `.flat`
-  // off the loader result, so on-demand loaders must return CompiledTranslation.
-  // Wrap the raw remote fetchers once here at registration time rather than every
-  // resolver call.
   const compileLoader =
     <TLocale extends string>(
       loader: () => Promise<Record<string, string>>,

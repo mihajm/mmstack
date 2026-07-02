@@ -1,6 +1,20 @@
-import { computed, type ResourceRef, signal, type ResourceStatus } from '@angular/core';
+import {
+  computed,
+  Injector,
+  PendingTasks,
+  PLATFORM_ID,
+  signal,
+  type ResourceRef,
+  type ResourceStatus,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createForwardingScope, createTransitionScope } from './transition-scope';
+import {
+  bridgeScopeToPendingTasks,
+  createForwardingScope,
+  createTransitionScope,
+  injectTransitionScope,
+  provideTransitionScope,
+} from './transition-scope';
 
 // Minimal fake matching the bits the scope reads: status(), isLoading(), hasValue().
 function fakeResource(status: ResourceStatus, value: unknown): ResourceRef<unknown> {
@@ -140,6 +154,39 @@ describe('createTransitionScope', () => {
       expect(cb()).toBe('b1');
     });
   });
+
+  it('abortPending aborts exactly the in-flight resources that expose abort()', () => {
+    TestBed.runInInjectionContext(() => {
+      const scope = createTransitionScope();
+      const aborted: string[] = [];
+      const abortable = (name: string, status: ResourceStatus) => {
+        const r = fakeResource(status, undefined);
+        (r as any).abort = () => {
+          aborted.push(name);
+          (r as any).status.set('local');
+        };
+        return r;
+      };
+
+      const inFlight = abortable('in-flight', 'loading');
+      const reloading = abortable('reloading', 'reloading');
+      const settled = abortable('settled', 'resolved'); // not in flight → untouched
+      const abortless = fakeResource('loading', undefined); // no abort() → left to settle
+      scope.add(inFlight);
+      scope.add(reloading);
+      scope.add(settled);
+      scope.add(abortless);
+      expect(scope.pending()).toBe(true);
+
+      expect(scope.abortPending()).toBe(2);
+      expect(aborted.toSorted()).toEqual(['in-flight', 'reloading']);
+      expect(scope.pending()).toBe(true); // the abortless one is honestly still in flight
+
+      (abortless as any).status.set('resolved');
+      expect(scope.pending()).toBe(false);
+      expect(scope.abortPending()).toBe(0); // nothing left in flight — safe no-op
+    });
+  });
 });
 
 describe('createForwardingScope', () => {
@@ -196,5 +243,111 @@ describe('createForwardingScope', () => {
       expect(a.resources().length).toBe(0);
       expect(b.resources().length).toBe(0);
     });
+  });
+
+  it('abortPending delegates to the current target (own scope when untargeted)', () => {
+    TestBed.runInInjectionContext(() => {
+      const fwd = createForwardingScope();
+      const target = createTransitionScope();
+      const aborted: string[] = [];
+      const abortable = (name: string, into: { add(r: any): void }) => {
+        const r = fakeResource('loading', undefined);
+        (r as any).abort = () => {
+          aborted.push(name);
+          (r as any).status.set('local');
+        };
+        into.add(r);
+      };
+      abortable('own', fwd); // registered while untargeted → lives in the own scope
+      fwd.setTarget(target);
+      abortable('targeted', fwd); // pinned to the target
+
+      expect(fwd.abortPending()).toBe(1); // acts on the CURRENT target only
+      expect(aborted).toEqual(['targeted']);
+
+      fwd.setTarget(null);
+      expect(fwd.abortPending()).toBe(1); // now the own scope's turn
+      expect(aborted).toEqual(['targeted', 'own']);
+    });
+  });
+});
+
+describe('bridgeScopeToPendingTasks (SSR stability bridge)', () => {
+  /** Counts live tasks the way PendingTasks would; `add()` returns the releaser. */
+  function fakeTasks() {
+    const state = {
+      active: 0,
+      add: () => {
+        state.active++;
+        let done = false;
+        return () => {
+          if (done) return;
+          done = true;
+          state.active--;
+        };
+      },
+    };
+    return state;
+  }
+
+  it('on the server, a pending scope holds a task until its loads settle', () => {
+    const tasks = fakeTasks();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'server' },
+        { provide: PendingTasks, useValue: tasks },
+        provideTransitionScope(),
+      ],
+    });
+    const scope = TestBed.runInInjectionContext(() => injectTransitionScope());
+    TestBed.tick();
+    expect(tasks.active).toBe(0); // quiet scope → serialization not blocked
+
+    const r = fakeResource('loading', undefined);
+    scope.add(r);
+    TestBed.tick();
+    expect(tasks.active).toBe(1); // SSR now waits for the custom loader
+
+    (r as any).status.set('resolved');
+    TestBed.tick();
+    expect(tasks.active).toBe(0); // settle releases it
+
+    (r as any).status.set('reloading'); // a new flight re-acquires
+    TestBed.tick();
+    expect(tasks.active).toBe(1);
+    (r as any).status.set('resolved');
+    TestBed.tick();
+    expect(tasks.active).toBe(0);
+  });
+
+  it('is inert in the browser (stability must not be tied to every load)', () => {
+    const tasks = fakeTasks();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        { provide: PendingTasks, useValue: tasks },
+        provideTransitionScope(),
+      ],
+    });
+    const scope = TestBed.runInInjectionContext(() => injectTransitionScope());
+    scope.add(fakeResource('loading', undefined));
+    TestBed.tick();
+    expect(tasks.active).toBe(0);
+  });
+
+  it('bridges hand-made scopes via the explicit injector form', () => {
+    const tasks = fakeTasks();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'server' },
+        { provide: PendingTasks, useValue: tasks },
+      ],
+    });
+    const scope = createTransitionScope();
+    bridgeScopeToPendingTasks(scope, TestBed.inject(Injector));
+
+    scope.add(fakeResource('loading', undefined));
+    TestBed.tick();
+    expect(tasks.active).toBe(1);
   });
 });

@@ -1,4 +1,4 @@
-import { computed, signal } from '@angular/core';
+import { computed, signal, untracked } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { compileTranslation } from './compile';
 import { createNamespace } from './create-namespace';
@@ -317,9 +317,10 @@ describe('registerNamespace return shape', () => {
       {},
     );
 
-    // tuple form
+    // tuple form (third element = warmNamespaceTranslation, added 2026-07)
     expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(3);
+    expect(result[2]).toBe(result.warmNamespaceTranslation);
 
     // tuple and object access return the same function references
     expect(result[0]).toBe(result.injectNamespaceT);
@@ -336,6 +337,78 @@ describe('registerNamespace return shape', () => {
     const { injectNamespaceT, resolveNamespaceTranslation } = result;
     expect(injectNamespaceT).toBe(result[0]);
     expect(resolveNamespaceTranslation).toBe(result[1]);
+  });
+});
+
+describe('warmNamespaceTranslation', () => {
+  it('loads + registers a locale WITHOUT switching, idempotently', async () => {
+    TestBed.configureTestingModule({});
+    TestBed.runInInjectionContext(() => {
+      injectLocaleInternal().set('en-US');
+    });
+    const store = TestBed.inject(TranslationStore);
+
+    const demo = createNamespace('warmdemo', { hello: 'Hi' });
+    const sl = demo.createTranslation('sl-SI', { hello: 'Zivjo' });
+    let defaultLoads = 0;
+    let slLoads = 0;
+    const ns = registerNamespace(
+      () => {
+        defaultLoads++;
+        return Promise.resolve(demo.translation);
+      },
+      {
+        'sl-SI': () => {
+          slLoads++;
+          return Promise.resolve(sl);
+        },
+      },
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      ns.warmNamespaceTranslation('sl-SI'),
+    );
+
+    expect(slLoads).toBe(1); // the locale chunk was fetched…
+    expect(defaultLoads).toBe(0); // …only that one (no preloadDefaultLocale configured)
+    expect(untracked(store.locale)).toBe('en-US'); // warm NEVER switches the locale
+
+    // the data is registered: switching later reads it synchronously (no load)
+    const t = TestBed.runInInjectionContext(() => ns.injectNamespaceT());
+    store.locale.set('sl-SI');
+    expect(t('warmdemo.hello')).toBe('Zivjo');
+
+    // idempotent — a repeat warm (e.g. a second hover) never re-runs the loader
+    await TestBed.runInInjectionContext(() =>
+      ns.warmNamespaceTranslation('sl-SI'),
+    );
+    expect(slLoads).toBe(1);
+  });
+
+  it('warm() without a locale warms the ACTIVE locale', async () => {
+    TestBed.configureTestingModule({});
+    TestBed.runInInjectionContext(() => {
+      injectLocaleInternal().set('en-US');
+    });
+    const store = TestBed.inject(TranslationStore);
+    store.locale.set('sl-SI'); // after construction — the store seeds the global on init
+
+    const demo = createNamespace('warmdemo2', { hello: 'Hi' });
+    const sl = demo.createTranslation('sl-SI', { hello: 'Zivjo' });
+    let slLoads = 0;
+    const ns = registerNamespace(() => Promise.resolve(demo.translation), {
+      'sl-SI': () => {
+        slLoads++;
+        return Promise.resolve(sl);
+      },
+    });
+
+    await TestBed.runInInjectionContext(() => ns.warmNamespaceTranslation());
+    expect(slLoads).toBe(1);
+    expect(untracked(store.locale)).toBe('sl-SI'); // unchanged
+
+    const t = TestBed.runInInjectionContext(() => ns.injectNamespaceT());
+    expect(t('warmdemo2.hello')).toBe('Zivjo'); // already readable — no switch needed
   });
 });
 

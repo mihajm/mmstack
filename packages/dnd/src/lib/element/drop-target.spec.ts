@@ -8,7 +8,7 @@ import { trackRuns } from '../testing/reactivity';
 import { makeDragSession } from '../testing/drag-session';
 
 import { boxData, unboxData } from '../internal/payload';
-import { provideDnd, type HitboxPlugin } from '../provide';
+import { provideDnd, ɵclearWarnedPlugins, type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession, type DropTargetHit } from '../session';
 import { dropTarget } from './drop-target';
 import type { DropEvent, DropTargetEvent } from '../internal/types';
@@ -74,7 +74,10 @@ function makeSession(
 }
 
 describe('dropTarget — derived state', () => {
-  beforeEach(() => dropTargetMock.mockReset());
+  beforeEach(() => {
+    dropTargetMock.mockReset();
+    ɵclearWarnedPlugins();
+  });
 
   it('derives isDragOver / isInnermost from the innermost-first stack', () => {
     const { ref, element, session } = setup();
@@ -221,7 +224,10 @@ describe('dropTarget — registration hooks (read lazily)', () => {
 });
 
 describe('dropTarget — callbacks & reactivity', () => {
-  beforeEach(() => dropTargetMock.mockReset());
+  beforeEach(() => {
+    dropTargetMock.mockReset();
+    ɵclearWarnedPlugins();
+  });
 
   function build(opts: Record<string, unknown> = {}, providers: unknown[] = []) {
     const element = document.createElement('div');

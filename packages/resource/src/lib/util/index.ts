@@ -7,6 +7,7 @@ export * from './has-slow-connection';
 export * from './hash-request';
 export * from './merge-options';
 export * from './persist';
+export * from './persist-mutations';
 export * from './refresh';
 export * from './retry-on-error';
 export * from './sensors';

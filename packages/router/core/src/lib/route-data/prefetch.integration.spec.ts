@@ -22,6 +22,8 @@ import {
   injectRouteData,
   provideRouteData,
   routeDataKey,
+  withPrefetch,
+  type RouteDataContext,
 } from './route-data';
 import { withRouteData } from './with-route-data';
 import { TransitionRouterOutlet } from '../transition-router-outlet';
@@ -174,5 +176,60 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
     await flush(fixture);
     http.expectOne('/api/items/5').flush('Five');
     await flush(fixture);
+  });
+
+  it('withPrefetch tags an ARBITRARY resolver: hover runs prefetch(ctx), navigation runs the resolver', async () => {
+    const prefetched: (Record<string, string> | boolean)[] = [];
+    let resolved = 0;
+
+    @Component({ selector: 'wp-cmp', template: `wp` })
+    class WpCmp {}
+
+    const rendered = await render(Host, {
+      providers: [
+        provideRouter([
+          { path: 'home', component: HomeCmp },
+          {
+            path: 'docs/:locale/guide',
+            component: WpCmp,
+            resolve: {
+              i18n: withPrefetch(
+                () => {
+                  resolved++;
+                },
+                {
+                  description: 'guide-i18n',
+                  prefetch: (ctx: RouteDataContext) => {
+                    prefetched.push(ctx.params(), ctx.isPrefetch);
+                  },
+                },
+              ),
+            },
+          },
+        ]),
+        provideLocationMocks(),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        withRouteData(),
+      ],
+    });
+    const router = TestBed.inject(Router);
+    const preload = TestBed.inject(PreloadRequester);
+    await router.navigateByUrl('/home');
+    await flush(rendered.fixture);
+
+    preload.startPreload('/docs/de/guide');
+    await flush(rendered.fixture);
+    expect(prefetched).toEqual([{ locale: 'de' }, true]); // params from the LINK URL
+    expect(resolved).toBe(0); // the wrapped resolver never ran speculatively
+
+    preload.startPreload('/docs/de/guide'); // deduped per link+description
+    await flush(rendered.fixture);
+    expect(prefetched.length).toBe(2);
+
+    await router.navigateByUrl('/docs/de/guide');
+    await flush(rendered.fixture);
+    expect(resolved).toBe(1); // navigation runs the real resolver
+    expect(prefetched.length).toBe(2); // …and does not re-run prefetch
   });
 });

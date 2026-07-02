@@ -104,6 +104,122 @@ describe('route-data', () => {
     expect((factoryRef as { id: Signal<string> }).id()).toBe('42');
   });
 
+  it("ctx.param('id') reads the live param; a typo'd name dev-errors once and yields ''", async () => {
+    const KEY = routeDataKey<{ id: Signal<string>; typo: Signal<string> }>(
+      'param-access',
+    );
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    @Component({ selector: 'p-cmp', template: `p` })
+    class PCmp {
+      readonly data = injectRouteData(KEY);
+    }
+    @Component({
+      selector: 'p-host',
+      imports: [TransitionRouterOutlet],
+      template: `<mm-transition-outlet />`,
+    })
+    class Host {}
+
+    const { fixture } = await render(Host, {
+      providers: [
+        provideRouter([
+          {
+            path: 'users/:id',
+            component: PCmp,
+            providers: [provideRouteData(KEY)],
+            resolve: {
+              d: createRouteData(KEY, (ctx) => ({
+                id: ctx.param('id'),
+                typo: ctx.param('userId'), // not a param on this route
+              })),
+            },
+          },
+        ]),
+        provideLocationMocks(),
+      ],
+    });
+
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/users/42');
+    await flush(fixture);
+
+    const slotData = (fixture.debugElement.query(
+      // the rendered component instance carries the injected data
+      (n) => n.componentInstance instanceof PCmp,
+    )?.componentInstance as PCmp | undefined)?.data;
+
+    expect(slotData?.id()).toBe('42');
+    expect(slotData?.typo()).toBe(''); // safe empty, not undefined
+    expect(err).toHaveBeenCalledWith(
+      expect.stringContaining("ctx.param('userId')"),
+    );
+
+    err.mockClear();
+    await router.navigateByUrl('/users/7');
+    await flush(fixture);
+    expect(slotData?.id()).toBe('7'); // live across param navigation
+    expect(err).not.toHaveBeenCalled(); // warned once, not per read
+    err.mockRestore();
+  });
+
+  it('onError fires per TRANSITION into error, with the error, on the live path', async () => {
+    const KEY = routeDataKey<FakeRef>('erroring');
+    const seen: unknown[] = [];
+    let ref!: FakeRef;
+
+    @Component({ selector: 'e-cmp', template: `e` })
+    class ECmp {
+      readonly data = injectRouteData(KEY);
+    }
+    @Component({
+      selector: 'e-host',
+      imports: [TransitionRouterOutlet],
+      template: `<mm-transition-outlet />`,
+    })
+    class Host {}
+
+    const { fixture } = await render(Host, {
+      providers: [
+        provideRouter([
+          {
+            path: 'e',
+            component: ECmp,
+            providers: [provideRouteData(KEY)],
+            resolve: {
+              d: createRouteData(
+                KEY,
+                () => (ref = makeRef('loading')),
+                { onError: (error) => seen.push(error) },
+              ),
+            },
+          },
+        ]),
+        provideLocationMocks(),
+      ],
+    });
+
+    await TestBed.inject(Router).navigateByUrl('/e');
+    await flush(fixture);
+    expect(seen).toEqual([]); // loading — nothing yet
+
+    (ref.error as WritableSignal<unknown>).set(new Error('boom'));
+    ref.status.set('error');
+    await flush(fixture);
+    expect(seen.length).toBe(1);
+    expect((seen[0] as Error).message).toBe('boom');
+
+    ref.status.set('reloading'); // retry…
+    await flush(fixture);
+    ref.status.set('error'); // …fails again: a NEW transition fires again
+    await flush(fixture);
+    expect(seen.length).toBe(2);
+
+    ref.status.set('resolved'); // recovery does not fire
+    await flush(fixture);
+    expect(seen.length).toBe(2);
+  });
+
   it('memoizes: a resolver re-run on param change reuses the same instance, and live params update', async () => {
     const KEY = routeDataKey<FakeRef & { id: Signal<string> }>('user');
     const created: unknown[] = [];

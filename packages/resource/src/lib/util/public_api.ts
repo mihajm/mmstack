@@ -8,4 +8,11 @@ export {
   noDedupe,
 } from './dedupe-interceptor';
 export { hashRequest } from './hash-request';
+export {
+  injectPendingMutations,
+  provideMockMutationPersistence,
+  type MutationErrorMeta,
+  type PendingMutation,
+  type PersistMutationsOptions,
+} from './persist-mutations';
 export { provideMockResourceSensors } from './sensors';

@@ -20,6 +20,7 @@ It's designed to be opt-in feature by feature: starting with `queryResource()` a
 - [`mutationResource`](#mutationresource)
 - [`manualQueryResource`](#manualqueryresource)
 - [`infiniteQueryResource`](#infinitequeryresource)
+- [`streamResource` (SSE / WebSocket)](#streamresource-sse--websocket)
 - [Caching](#caching)
 - [Circuit breakers](#circuit-breakers)
 - [Transitions & Suspense](#transitions--suspense)
@@ -236,6 +237,7 @@ queryResource<TResult, TRaw = TResult>(
 | `disabled`       | `Signal<boolean>`                                       | `true` when network is offline, circuit breaker is open, or `request()` returned `undefined`. |
 | `disabledReason` | `Signal<'offline' \| 'circuit-open' \| 'no-request' \| null>` | Why the resource is disabled. `null` when enabled. Branch your UI on this rather than parsing combined state. |
 | `reload`     | `() => void`                               | Force a refetch (ignores `staleTime` for the next request).                                   |
+| `abort`      | `() => void`                               | Cancel the in-flight load, keeping the current value (`status` → `'local'`). The request is genuinely torn down and an aborted response never reaches the cache; a later `reload()`/request change loads normally. No-op when idle. `scope.abortPending()` calls this. |
 | `prefetch`   | `(req?) => Promise<void>`                  | Warm the cache without subscribing. Silently skips on slow connections (`saveData` / 2g).     |
 | `destroy`    | `() => void`                               | –                                                                                             |
 
@@ -307,6 +309,29 @@ mutationResource(request, { queue: true });
 ```
 
 Queued mutations sit in a signal-backed queue and execute one at a time. The queue **persists across resource-disabled states** — if the circuit breaker opens or the network drops, queued mutations stay pending and run when the resource recovers. This is intentional for resilience (think "POST goes out when we're back online"), but it does mean a queued mutation can fire long after the user triggered it. Don't enable `queue` if that's surprising in your UX.
+
+### Offline persistence (`persist`)
+
+Take the queue one step further: with `persist`, accepted-but-unsettled mutations survive an **app close** (IndexedDB) and replay when a `mutationResource` with the same `persist.key` is next instantiated while online — or on network regain:
+
+```typescript
+mutationResource((n: Note) => ({ url: '/api/notes', method: 'POST', body: n }), {
+  queue: true,
+  persist: {
+    key: 'save-note', // stable identity of this mutation KIND across sessions
+    // serialize / deserialize for non-structured-cloneable payloads; ttl (default 7 days);
+    // keepOnError: boolean | (err, { replayed }) => boolean — retry transient failures
+  },
+});
+```
+
+Replay runs through the normal lifecycle — `onMutate`/`onSuccess`/`onError` fire with their lexical closures intact (which is why activation is at resource instantiation), and `onError` receives `{ replayed: true }` so reconciliation policy stays yours. Ordering is per-key FIFO for queued resources; a non-queue resource replays only the newest stash (its usual latest-wins). `invalidates` fires for replayed successes too, so server truth wins after a replay.
+
+For "3 changes waiting to sync" UX there's `injectPendingMutations()` — a live signal of every stashed mutation across the app, plus a `flush()` for a manual "sync now" button.
+
+**Multi-tab apps are handled**: a per-key Web Lock elects ONE tab as the replayer (no double-sends), a dying tab hands over automatically (Web Locks release on close/crash, and the successor re-syncs from disk first — settled rows never re-send, leftovers replay), and pending badges stay live across tabs via `BroadcastChannel`. A row stashed by a *living* sibling tab is visible everywhere but only ever sent by its owner.
+
+**The honest limit is delivery, not tabs**: semantics are AT-LEAST-ONCE — a close between sending a replay and its response re-sends next time. Make replayed requests idempotent (e.g. an idempotency-key header derived from the stash) and you're safe everywhere.
 
 ### Declarative invalidation (`invalidates`)
 
@@ -431,6 +456,33 @@ const rows = keyArray(items, (item) => buildRowVm(item), {
   key: (item) => item.id,
 });
 ```
+
+## `streamResource` (SSE / WebSocket)
+
+A live-connection resource with the standard status surface — so a stream participates in transition scopes, suspense boundaries, and `latest()` like any other resource:
+
+```typescript
+import { streamResource, sse, websocket } from '@mmstack/resource';
+
+const prices = streamResource<PriceTick>(() => `/api/prices/${symbol()}/stream`, {
+  transport: sse(), // or websocket(), or your own StreamTransport
+  register: 'indicator',
+});
+
+prices.value(); // the latest message
+prices.connected(); // live-connection indicator (the dot in the corner)
+```
+
+Semantics, in the order you'll meet them:
+
+- **`status` is `'loading'` until the first message** — a connection with no data yet is honestly not ready — then `'resolved'` with `value` tracking every message. `connected` is a separate signal: connection state for UX, independent of data readiness.
+- **Drops reconnect, the value holds.** Connection failures retry with exponential backoff (1s base, 30s cap, **persistent by default** — a live connection's job is to be alive; pass `reconnect: 0` for single-shot or `{ max, backoff }` to tune). The last value stays readable through the outage; only *exhausted* retries surface as `status: 'error'`, and `reload()` starts a fresh attempt budget.
+- **Offline-aware**: while offline nothing burns attempts; regain reconnects immediately with a fresh ladder.
+- **Reactive source**: a URL change tears the old connection down and connects anew; returning `undefined` disconnects (`status: 'idle'`) — the disable lever.
+- **`abort()`** disconnects and *stays* disconnected, keeping the current value (`status: 'local'`) — so `scope.abortPending()` reaches streams; `reload()` or a source change resumes.
+- **SSR-safe by never connecting on the server** (a stream never settles, so connecting would wedge serialization). Streams are client-only by design.
+
+Messages default to `JSON.parse`; both built-ins take a `deserialize` (and `sse()` an `event` name, `websocket()` `protocols`). The `transport` seam is the extension point — a custom `StreamTransport` maps any connection-shaped thing (a shared STOMP client's topic subscription, a worker port) onto `emit`/`open`/`fail`, and the reconnect/status machinery comes free. Event-shaped consumers (streams of commands rather than state) bridge with `toObservable(res.value)`.
 
 ## Caching
 

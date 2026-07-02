@@ -113,6 +113,7 @@ export function injectTriggerPreload() {
     queryParams?: Params,
     fragment?: string,
     queryParamsHandling?: 'merge' | 'preserve' | '',
+    scope: 'all' | 'code' = 'all',
   ) => {
     const urlTree = inputToUrlTree(
       router,
@@ -125,7 +126,7 @@ export function injectTriggerPreload() {
     const fullPath = treeToSerializedUrl(router, urlTree);
     if (!fullPath) return;
 
-    req.startPreload(fullPath);
+    req.startPreload(fullPath, scope);
   };
 }
 
@@ -141,6 +142,15 @@ export type MMLinkConfig = {
    * @default 'hover'
    */
   preloadOn: 'hover' | 'visible' | null;
+  /**
+   * WHAT a preload warms (`preloadOn` is the WHEN): `'all'` warms the lazy code chunk AND
+   * the route's data (`createRouteData` factories, when `withRouteData()` is wired);
+   * `'code'` warms only the chunk — for links to routes whose data is expensive or
+   * shouldn't fire speculatively. Per-KEY opt-out belongs in the factory itself via
+   * `ctx.isPrefetch`. String literal so future scopes can slot in.
+   * @default 'all'
+   */
+  preload: 'all' | 'code';
   /**
    * Whether to use mouse down events for preloading.
    * @default false
@@ -174,6 +184,7 @@ export function provideMMLinkDefaultConfig(
 ): Provider {
   const cfg: MMLinkConfig = {
     preloadOn: 'hover',
+    preload: 'all',
     useMouseDown: false,
     ...config,
   };
@@ -188,6 +199,7 @@ function injectConfig() {
   const cfg = inject(configToken, { optional: true });
   return {
     preloadOn: 'hover' as const,
+    preload: 'all' as const,
     useMouseDown: false,
     ...cfg,
   };
@@ -285,6 +297,8 @@ export class Link {
   readonly preloadOn = input<'hover' | 'visible' | null>(
     injectConfig().preloadOn,
   );
+  /** What to warm (`preloadOn` is when): `'all'` = code + route data, `'code'` = chunk only. */
+  readonly preload = input<'all' | 'code'>(injectConfig().preload);
   readonly useMouseDown = input(injectConfig().useMouseDown, {
     transform: booleanAttribute,
   });
@@ -365,7 +379,7 @@ export class Link {
   private requestPreload() {
     const fp = untracked(this.fullPath);
     if (!this.routerLink || !fp) return;
-    this.req.startPreload(fp);
+    this.req.startPreload(fp, untracked(this.preload));
     this.preloading.emit();
   }
 

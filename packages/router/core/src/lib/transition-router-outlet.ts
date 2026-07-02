@@ -11,7 +11,6 @@ import {
   inject,
   Injector,
   input,
-  type ResourceRef,
   untracked,
   ViewContainerRef,
 } from '@angular/core';
@@ -21,6 +20,7 @@ import {
   getTransitionScope,
   injectTransitionScope,
   provideForwardingTransitionScope,
+  type ResourceLike,
 } from '@mmstack/primitives';
 import { RouterViewTransitions } from './view-transition';
 
@@ -103,7 +103,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private armed = false;
 
   /** Resources held by the OUTGOING view, snapshotted at activation so the swap ignores them. */
-  private outgoingRefs = new Set<ResourceRef<any>>();
+  private outgoingRefs = new Set<ResourceLike>();
 
   /** In-flight state of the INCOMING view only — what the swap waits on, so outgoing background work can't block it. */
   private readonly incomingPending = computed(() => {

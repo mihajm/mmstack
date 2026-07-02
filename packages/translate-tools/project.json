@@ -12,7 +12,7 @@
         "parallel": false,
         "commands": [
           "tsdown",
-          "cp package.json README.md ../../dist/packages/translate-tools/"
+          "cp package.json README.md LICENSE ../../dist/packages/translate-tools/"
         ]
       }
     },

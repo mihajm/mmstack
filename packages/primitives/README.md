@@ -119,6 +119,10 @@ Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for 
 
 **Union leaves (perf opt-in).** `noUnionLeaves: true` promises no node ever flips between a leaf and a sub-store, so each node's leaf-ness is resolved once on first access and cached instead of staying reactive. Off by default — leave it off if a value can switch between a primitive and an object/array.
 
+**Unions are fully supported by default.** A node may flip between array ↔ record ↔ primitive ↔ `null` freely: routing (`keys`/iteration/prototype) follows the live kind, and a child signal you grabbed **before** a flip stays correct after it — reads resolve against the new shape (`undefined` through a `null` parent, no throw) and writes copy by the container's live shape, so writing through a pre-flip child never turns an array into a plain object.
+
+> Reserved keys: `set`, `update`, `mutate`, `inline`, `asReadonly` (and `extend`, until its removal next minor) resolve to the signal's own methods, so record keys with those names aren't reachable as child stores — read them off the value (`s().set`) instead.
+
 ### `extendStore` (scoped overlay)
 
 `extendStore(store, seed)` (on any store kind) creates a **scoped overlay** — a child store that **shares** the parent's signals for inherited keys (the same `WritableSignal`: writes go through to the parent and parent changes flow down) while keeping the seed and any new keys in a **local layer** that never propagates upward. No diffing, no syncing — local keys simply aren't wired to the parent.
@@ -461,6 +465,15 @@ const t = startTransaction(() => applyBulkEdit()); // live state updates; the di
 await t.done; // committed, display revealed in one frame
 ```
 
+Every exit settles: a throwing body rolls back, and if the calling context is **destroyed
+mid-flight** the hold is released (writes kept) and `done` resolves — a transaction can never
+leave a surviving ancestor scope frozen.
+
+Attribution is **per transaction**: a load already in flight when it starts is not adopted —
+it can neither commit the transaction early nor block its settle. (The same applies to
+`startTransition`.) A pre-existing flight re-triggered by the transaction's own writes counts
+once it restarts.
+
 ### `holdUntilReady`
 
 The **structural** counterpart to `keepPrevious`: where that holds a _value_ through a reload, this holds a _structure_ through a swap. Given a `target` signal and a `ready` predicate, it keeps yielding the previous value until `ready()` is true, then swaps to the current target. Mount the incoming structure off to the side so its resources can settle and flip `ready`, keep showing the held one meanwhile, and let the old one go once `ready` releases the swap. (`@mmstack/router-core`'s `<mm-transition-outlet>` is this pattern applied to routes.)
@@ -676,6 +689,11 @@ A delegated `handleSelector` reports which child actually started the drag via
 outer one on the same tree (e.g. a nested sortable). Reads are throttled
 (`throttle`, default 16ms); `drag.unthrottled()` exposes the un-throttled view
 for logic that needs the exact release position.
+
+The idle state carries the **end reason**: `cancelled` is `true` when the gesture
+was aborted (Escape, `pointercancel`, `.cancel()`) rather than released, and stays
+set until the next `pointerdown` — so a drag consumer can tell "drop here" from
+"abort" (`@mmstack/dnd` uses this to cancel instead of committing).
 
 ```typescript
 import { sensor } from '@mmstack/primitives';

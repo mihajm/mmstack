@@ -6,8 +6,10 @@ import {
   Injector,
   signal,
   untracked,
+  type ResourceRef,
   type Signal,
 } from '@angular/core';
+import { applyResourceRegistration } from './options';
 import {
   queryResource,
   type PAUSED,
@@ -117,15 +119,13 @@ export function infiniteQueryResource<
   const injector = options.injector ?? inject(Injector);
 
   const pageParam = signal<TPageParam>(initialPageParam);
-  // pages keyed by the param that produced them, so a reload of an already-loaded
-  // page REPLACES its slot instead of appending a duplicate
   const loaded = signal<{ param: TPageParam; page: TPage }[]>([]);
 
   const resource = queryResource<TPage, TRaw>(
-    // forward queryResource's own context so the fn can return ctx.paused —
-    // pausing holds the loaded pages and stops page fetches until unpaused
+    // forward queryResource's own context so the fn can return ctx.paused
     (qctx) => request({ ...qctx, pageParam: pageParam() }),
-    { ...rest, injector } as QueryResourceOptions<TPage, TRaw>,
+    // register: false — the inner query's value RESETS on every page fetch
+    { ...rest, injector, register: false } as QueryResourceOptions<TPage, TRaw>,
   );
 
   const appendRef = effect(
@@ -176,6 +176,17 @@ export function infiniteQueryResource<
     }
   };
 
+  // Register the AGGREGATE with the transition scope
+  const unregister = applyResourceRegistration(
+    {
+      status: resource.status,
+      isLoading: resource.isLoading,
+      hasValue: () => pages().length > 0 || resource.hasValue(),
+    } as unknown as ResourceRef<unknown>,
+    options.register,
+    injector,
+  );
+
   return {
     pages,
     hasNextPage,
@@ -190,6 +201,7 @@ export function infiniteQueryResource<
     reset,
     destroy: () => {
       appendRef.destroy();
+      unregister();
       resource.destroy();
     },
   };

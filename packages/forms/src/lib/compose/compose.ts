@@ -3,6 +3,7 @@ import {
   type FieldState,
   FORM_FIELD,
   type FormField,
+  MetadataKey,
 } from '@angular/forms/signals';
 
 /**
@@ -33,6 +34,42 @@ export type FieldProjection<T> = T | (() => T);
 export type FieldProjector<T> = (field: FieldRef) => FieldProjection<T>;
 
 /**
+ * Projector over a field's METADATA — surfaces rule metadata (Angular's native
+ * `REQUIRED` / `MIN` / `MAX` / …, or your own keys) into a composition without the
+ * hand-rolled `(f) => () => f.state().metadata(KEY)?.() ?? fallback` getter:
+ *
+ * ```ts
+ * import { MIN, REQUIRED } from '@angular/forms/signals';
+ *
+ * const [numberField, injectNumberField] = composition({
+ *   required: fromMetadata(REQUIRED, false), // Signal<boolean>
+ *   min: MIN, // a bare key composes directly ≡ fromMetadata(MIN) — Signal<number | undefined>
+ * });
+ * ```
+ *
+ * A bare {@link MetadataKey} in a composition is sugar for the no-fallback form; reach for
+ * `fromMetadata` explicitly when you want a fallback. Only `undefined` counts as unset (a
+ * schema-set `null` is a real value — the same rule `fieldMetadata` follows); with a `fallback`
+ * the projected signal never yields `undefined`.
+ */
+export function fromMetadata<T>(
+  key: MetadataKey<Signal<T>, any, any>,
+  fallback: T,
+): FieldProjector<T>;
+export function fromMetadata<T>(
+  key: MetadataKey<Signal<T>, any, any>,
+): FieldProjector<T | undefined>;
+export function fromMetadata<T>(
+  key: MetadataKey<Signal<T>, any, any>,
+  ...fallback: [T?]
+): FieldProjector<T | undefined> {
+  return (field) => () => {
+    const value = field.state().metadata(key)?.();
+    return value === undefined && fallback.length ? fallback[0] : value;
+  };
+}
+
+/**
  * Marks a value (e.g. a schema rule from `fieldMetadata`) as carrying a default
  * {@link FieldProjector}, so it can be dropped straight into {@link compose}.
  */
@@ -41,12 +78,16 @@ export const PROJECTOR: unique symbol = Symbol(
 );
 
 /**
- * Anything usable as a {@link compose} value: a raw {@link FieldProjector} or a carrier that
- * exposes one under the {@link PROJECTOR} symbol.
+ * Anything usable as a {@link compose} value: a raw {@link FieldProjector}, a carrier that
+ * exposes one under the {@link PROJECTOR} symbol (e.g. a `fieldMetadata` rule), or a
+ * {@link MetadataKey} directly — native (`REQUIRED`, `MIN`, …) or a `fieldMetadata` key — which
+ * materializes as {@link fromMetadata} without a fallback (`Signal<T | undefined>`; reach for
+ * `fromMetadata(key, fallback)` when you need one).
  */
 export type Projectable<T = unknown> =
   | FieldProjector<T>
-  | { readonly [PROJECTOR]: FieldProjector<T> };
+  | { readonly [PROJECTOR]: FieldProjector<T> }
+  | MetadataKey<Signal<T>, any, any>;
 
 /**
  * Marks a projected value to bypass signal-normalization. Use it for non-signal members of a
@@ -75,11 +116,14 @@ type ProjectionValue<R> =
 
 /** The materialized value a {@link Projectable} produces in {@link compose} (a `Signal`, or a raw value). */
 export type Projected<P> =
-  ProjectorReturn<P> extends RawProjection<infer R>
-    ? R
-    : Signal<ProjectionValue<ProjectorReturn<P>>>;
+  P extends MetadataKey<Signal<infer U>, any, any>
+    ? Signal<U | undefined>
+    : ProjectorReturn<P> extends RawProjection<infer R>
+      ? R
+      : Signal<ProjectionValue<ProjectorReturn<P>>>;
 
 function resolveProjector(p: Projectable): FieldProjector<unknown> {
+  if (p instanceof MetadataKey) return fromMetadata(p);
   return (PROJECTOR in p ? p[PROJECTOR] : p) as FieldProjector<unknown>;
 }
 
@@ -141,11 +185,12 @@ export function injectField<P extends Projectable>(
  * function textField() {
  *   return compose({
  *     ...labeled,
+ *     required: REQUIRED,                                         // a MetadataKey, directly
  *     error: (f) => () => f.state().errors()[0]?.message ?? '',   // getter — lazy
  *     invalid: (f) => () => f.state().invalid(),
  *   });
  * }
- * // in a control: readonly field = textField();  → field.label(), field.error(), ...
+ * // in a control: readonly field = textField();  → field.label(), field.required(), ...
  * ```
  */
 export function compose<M extends Record<string, Projectable>>(

@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
+  applyEach,
   form,
   FormField,
   type FieldTree,
@@ -376,6 +377,59 @@ describe('change tracking', () => {
       f.name().value.set('bob');
       expect(changedOf(f.name)).toBe(false);
       expect(changedOf(f)).toBe(false);
+    });
+
+    it('honors an item-level changedEqual on array items at equal lengths', () => {
+      const { f, model } = setup((p) =>
+        // a contact only "changes" when its email does — primary flips are ignored
+        applyEach(p.contacts, (c) =>
+          changedEqual(c, (a, b) => a.email === b.email),
+        ),
+      );
+
+      model.update((m) => ({
+        ...m,
+        contacts: [{ ...m.contacts[0], primary: false }, m.contacts[1]],
+      }));
+      expect(changedOf(f.contacts)).toBe(false); // rule says equal
+      expect(changedOf(f)).toBe(false);
+
+      model.update((m) => ({
+        ...m,
+        contacts: [{ ...m.contacts[0], email: 'new@x.com' }, m.contacts[1]],
+      }));
+      expect(changedOf(f.contacts)).toBe(true);
+      expect(changedOf(f)).toBe(true);
+    });
+
+    it('item rules apply POSITIONALLY — a reorder stays visible through them', () => {
+      const { f, model } = setup((p) =>
+        applyEach(p.contacts, (c) =>
+          changedEqual(c, (a, b) => a.email === b.email),
+        ),
+      );
+
+      // swap the two contacts: each ITEM is unchanged, but position 0's email differs
+      model.update((m) => ({
+        ...m,
+        contacts: [m.contacts[1], m.contacts[0]],
+      }));
+      expect(changedOf(f.contacts)).toBe(true);
+
+      model.update((m) => ({
+        ...m,
+        contacts: [m.contacts[1], m.contacts[0]], // swap back
+      }));
+      expect(changedOf(f.contacts)).toBe(false);
+    });
+
+    it('length changes trump item rules (a rule cannot hide an add/remove)', () => {
+      const { f, model } = setup((p) =>
+        applyEach(p.contacts, (c) => changedWith(c, () => false)),
+      );
+
+      model.update((m) => ({ ...m, contacts: m.contacts.slice(0, 1) }));
+      expect(changedOf(f.contacts)).toBe(true); // shorter — changed regardless of rules
     });
   });
 

@@ -1,6 +1,7 @@
 export {
   compose,
   composition,
+  fromMetadata,
   injectField,
   injectFieldRef,
   raw,

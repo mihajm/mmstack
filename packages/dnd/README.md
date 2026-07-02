@@ -524,6 +524,21 @@ expect(zone.isDragOver()).toBe(true);
 
 Reorderable logic is testable without a DOM: `reorderable(signal, opts)` is a pure controller — drive `begin` / `move` / `end` and read the per-item state signals directly.
 
+### Vitest consumers: inline `@mmstack/dnd` + `@atlaskit/*`
+
+`@atlaskit/pragmatic-drag-and-drop 2.0.1` ships **without an `exports` map** — its subpaths (`element/adapter`, `element/set-custom-native-drag-preview`, …) are the legacy folder-with-`package.json` kind. Vitest externalizes `node_modules` by default and loads externalized packages with **Node's ESM resolver**, which refuses directory imports — so the first spec that touches this package fails with `ERR_UNSUPPORTED_DIR_IMPORT` (surfacing as `EISDIR` in some setups). Tell Vitest to inline both families, so Vite's resolver — which understands the legacy layout — processes them instead:
+
+```ts
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    server: { deps: { inline: [/@mmstack\/dnd/, /@atlaskit\//] } },
+  },
+});
+```
+
+Both entries matter: once a package is externalized, Node resolves its inner imports itself — Vitest can't intercept them. Inlining `@mmstack/dnd` routes its `@atlaskit/*` imports through Vite; inlining `@atlaskit/*` makes those subpaths resolvable there. The same class of issue applies to anything else that externalizes dependencies to Node's resolver (e.g. a Vite dev SSR server) — the equivalent lever there is `ssr: { noExternal: [/@mmstack\/dnd/, /@atlaskit\//] }`.
+
 ## SSR
 
 All composables short-circuit on the server and return inert signals (`dragging` and `isDragOver` stay false); the session attaches no listeners.

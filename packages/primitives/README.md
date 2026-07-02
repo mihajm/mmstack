@@ -19,7 +19,7 @@ npm install @mmstack/primitives
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
 - [Effects](#effects) — `nestedEffect`
-- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), `startTransition` / `startTransaction`, `holdUntilReady`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -440,6 +440,25 @@ export class UserProfile {
 This is also the pattern for coordinating resources registered _above_ a boundary (e.g. an app-builder page whose connectors register at a higher injector): the outer `provideTransitionScope()` is the shared scope, and any number of `<mm-unscoped-suspense>` boundaries observe it.
 
 **Forwarding scope (advanced).** `provideForwardingTransitionScope()` provides a scope that can be **re-pointed at a different target at runtime** via `setTarget(scope | null)` — reads follow the current target, while `add`/`remove` pin to the target a resource was registered under (so re-pointing never strands a registration). It's the building block for a coordinator that hosts several independent sub-scopes and switches which one it observes — e.g. a router outlet that, per navigation, points at the incoming route's own scope (read it from any injector with `getTransitionScope(injector)`). Most apps reach for `provideTransitionScope()`; this is for that one extra level of control.
+
+### Hold-and-swap — `*mmTransition`
+
+The transition itself, for any branch change — tabs, wizard steps, master-detail. Suspense decides placeholder-vs-content _within_ a branch, but it can't stop an `@switch` from unmounting the old branch the instant the value flips. `*mmTransition` holds it: when the bound value changes, the **old view stays mounted and visible** (keeping its old value) while the **new view mounts hidden with its own transition scope**; resources created in the incoming subtree register there just by existing, and once they've gone in flight and settled the views swap in one frame.
+
+```html
+<div *mmTransition="selectedTab(); let tab">
+  @switch (tab) {
+    @case ('overview') {
+      <overview-pane />
+    }
+    @case ('activity') {
+      <activity-pane />
+    }
+  }
+</div>
+```
+
+The first render is immediate (nothing to hold). An interrupting change mid-hold destroys the half-ready hidden view and re-targets — the stable view stays visible until the newest branch settles. A branch that loads nothing swaps right after its first render, and per-view scopes mean the outgoing branch's background work can never delay the swap. `immediate: true` skips holding; `viewTransition: true` wraps the swap in `document.startViewTransition` (feature detected). This is `@mmstack/router-core`'s `<mm-transition-outlet>` without the router — same semantics, any signal as the trigger.
 
 ### `injectStartTransition`
 

@@ -5,7 +5,7 @@ import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { registerResource } from '@mmstack/primitives';
@@ -91,5 +91,58 @@ describe('holdThroughNavigation integration — reused route-data resource (the 
     req.flush({ name: 'Bob' });
     await flush(fixture);
     expect(container.textContent).toContain('user:Bob');
+  });
+});
+
+describe('holdThroughNavigation — eager settledness (unread consumers)', () => {
+  // The settle machine is pull-based; these tests drive a navigation + refetch cycle
+  // WITHOUT ever reading the held resource (the unmounted-consumer case), then check
+  // whether a later manual reload's indicator passes through live.
+  const snap = (status: string, value: unknown) =>
+    ({ status, value, error: undefined }) as never;
+
+  async function driveUnreadCycle(eager: boolean) {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([{ path: 'a', children: [] }]),
+        provideLocationMocks(),
+      ],
+    });
+    const snapshot = signal(snap('resolved', { name: 'Alice' }));
+    const fake = {
+      snapshot,
+      reload: () => true,
+    } as unknown as Parameters<typeof holdThroughNavigation>[0];
+
+    const held = TestBed.runInInjectionContext(() =>
+      holdThroughNavigation<User | undefined>(
+        fake as never,
+        eager ? { eager: true } : undefined,
+      ),
+    );
+
+    // navigation succeeds; the refetch runs just after NavigationEnd — all UNREAD
+    await TestBed.inject(Router).navigateByUrl('/a');
+    TestBed.tick();
+    snapshot.set(snap('loading', undefined));
+    TestBed.tick(); // eager watcher (when present) observes the in-flight frame
+    snapshot.set(snap('resolved', { name: 'Bob' }));
+    TestBed.tick();
+
+    // ...now a manual reload, long after the navigation settled
+    snapshot.set(snap('reloading', { name: 'Bob' }));
+    TestBed.tick();
+    return held;
+  }
+
+  it('without eager, an unread consumer misses the cycle and the reload is held (the caveat)', async () => {
+    const held = await driveUnreadCycle(false);
+    expect(held.isLoading()).toBe(false); // indicator wrongly hidden — documented caveat
+  });
+
+  it('eager: true keeps settledness tracked with zero readers — the reload passes live', async () => {
+    const held = await driveUnreadCycle(true);
+    expect(held.isLoading()).toBe(true); // cycle was observed → live pass-through
+    expect(held.value()).toEqual({ name: 'Bob' });
   });
 });

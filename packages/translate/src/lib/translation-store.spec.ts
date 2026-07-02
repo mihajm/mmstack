@@ -11,6 +11,7 @@ import {
   injectIntlConfig,
   injectLocaleInternal,
   injectSupportedLocales,
+  injectLocaleLoadState,
   provideIntlConfig,
 } from './translation-store';
 
@@ -831,5 +832,23 @@ describe('translation-store', () => {
       expect(store.formatMessage('ns1::MMT_DELIM::key')).toBe('val1');
       expect(store.formatMessage('ns2::MMT_DELIM::key')).toBe('val2');
     });
+  });
+});
+
+describe('injectLocaleLoadState', () => {
+  it('exposes the ResourceLike read surface of the locale loader — and nothing mutating', () => {
+    TestBed.configureTestingModule({});
+    const state = TestBed.runInInjectionContext(() => injectLocaleLoadState());
+
+    // the shape @mmstack/primitives' registerResource/scopes accept structurally
+    // (values not asserted — the store queues its initial locale at construction)
+    expect(typeof state.status()).toBe('string');
+    expect(typeof state.isLoading()).toBe('boolean');
+    expect(typeof state.hasValue()).toBe('boolean');
+
+    // deliberately NOT the raw ResourceRef: no way to reload/destroy the store's loader
+    expect('reload' in state).toBe(false);
+    expect('destroy' in state).toBe(false);
+    expect('set' in state).toBe(false);
   });
 });

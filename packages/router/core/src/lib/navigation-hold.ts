@@ -14,6 +14,7 @@
 
 import {
   computed,
+  effect,
   inject,
   type Injector,
   linkedSignal,
@@ -78,6 +79,14 @@ const isLoadingStatus = (s: ResourceStatus): boolean =>
  * it for a resource that *persists* across a navigation (a layout/shell resource, or a reused
  * route on a param change), where the outlet's view-hold doesn't apply.
  *
+ * OBSERVATION CAVEAT (and the `eager` opt-out): the settle machine is pull-based — it
+ * advances only when the held resource is READ. A consumer that goes unread through a
+ * navigation (an unmounted view, a backgrounded pane) misses the load-cycle frames, so
+ * the machine can't tell the cycle completed; a later manual `reload()` then gets held
+ * (its indicator invisible) instead of passing through live. Pass `eager: true` to add
+ * a tiny always-on watcher that keeps settledness tracked with zero readers — right for
+ * shell/layout resources that are read intermittently.
+ *
  * @example
  * ```ts
  * readonly user = holdThroughNavigation(
@@ -88,7 +97,7 @@ const isLoadingStatus = (s: ResourceStatus): boolean =>
  */
 export function holdThroughNavigation<T>(
   resource: ResourceRef<T>,
-  options?: { injector?: Injector },
+  options?: { injector?: Injector; eager?: boolean },
 ): HeldResource<T> {
   const run = <R>(fn: () => R): R =>
     options?.injector ? runInInjectionContext(options.injector, fn) : fn();
@@ -154,6 +163,9 @@ export function holdThroughNavigation<T>(
         return { snap: liveSnap, done: completed };
       },
     });
+
+    // eager settledness: observe every frame so the machine advances with no readers
+    if (options?.eager) effect(() => void stable());
 
     return buildHeldResource(
       computed(() => stable().snap),

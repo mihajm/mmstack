@@ -1,18 +1,39 @@
 import {
   computed,
   DestroyRef,
+  effect,
   inject,
   InjectionToken,
   type Injector,
   isDevMode,
   linkedSignal,
+  PendingTasks,
+  PLATFORM_ID,
+  runInInjectionContext,
   signal,
   untracked,
   type Provider,
-  type ResourceRef,
+  type ResourceStatus,
   type Signal,
 } from '@angular/core';
 import { mutable } from '../mutable';
+
+/**
+ * The structural surface a transition scope actually reads — everything a `ResourceRef`
+ * has, so any resource (query, mutation, plain Angular `resource`) passes as-is, but also
+ * satisfied by status-bearing derivations like `latest()`, so those register too.
+ *
+ * `abort` is the optional cancellation seam: a resource that knows how to tear down its
+ * in-flight work exposes it (`queryResource` does; mutations deliberately don't — a POST
+ * can't be unsent), and {@link TransitionScope.abortPending} calls it. Resources without
+ * it are simply left to settle.
+ */
+export type ResourceLike = {
+  readonly status: Signal<ResourceStatus>;
+  readonly isLoading: Signal<boolean>;
+  hasValue(): boolean;
+  abort?(): void;
+};
 
 /**
  * What "not ready" means for first-load suspense:
@@ -40,7 +61,7 @@ export type RegisterOptions = {
  */
 export type TransitionScope = {
   /** The currently-registered resources (read-only view). */
-  readonly resources: Signal<readonly ResourceRef<any>[]>;
+  readonly resources: Signal<readonly ResourceLike[]>;
   /**
    * Any registered resource has a request in flight (`status` is `loading`/`reloading`).
    * This is the transition indicator — true during a reload while `keepPrevious` holds
@@ -49,8 +70,8 @@ export type TransitionScope = {
   readonly pending: Signal<boolean>;
   /** Any *suspending* resource is not ready — drives the first-load placeholder. */
   suspended(type: SuspendType): boolean;
-  add(res: ResourceRef<any>, opt?: RegisterOptions): void;
-  remove(res: ResourceRef<any>): void;
+  add(res: ResourceLike, opt?: RegisterOptions): void;
+  remove(res: ResourceLike): void;
   /**
    * Coordinated commit: wraps a value signal so it FREEZES at its last-settled value
    * while the scope is `pending`, then reveals the current value once *everything*
@@ -59,6 +80,31 @@ export type TransitionScope = {
    * value: keepPrevious holds per-resource, `commit` gates the reveal on the aggregate.
    */
   commit<T>(value: Signal<T>): Signal<T>;
+  /**
+   * THE CANCELLATION CONTRACT, and its manual lever for shared-scope cases.
+   *
+   * What holds by construction (no call needed):
+   * - **View-scoped work dies with its view.** A superseded transition (outlet or
+   *   `*mmTransition`) destroys the hidden incoming view and its injector; resources
+   *   created there are destroyed, which aborts their in-flight loads.
+   * - **Abort is real, all the way down.** Deduped HTTP requests are refCounted — when
+   *   the last consumer lets go the request itself is torn down — and an aborted
+   *   response can never settle into the query cache (cache writes happen on the
+   *   subscriber side of the interceptor chain).
+   *
+   * What this method adds: resources registered in a scope that OUTLIVES the transition
+   * (a shared/root scope) aren't view-scoped, so nothing destroys them on supersede.
+   * `abortPending()` walks the registered resources and calls `abort()` on every
+   * in-flight one that exposes it ({@link ResourceLike.abort} — queries do, mutations
+   * deliberately don't, and a shared resource aborts for ALL its readers, so call this
+   * on interactions that invalidate the pending work, not as a reflex).
+   *
+   * Honest limit (true for every JS framework): only I/O is cancellable — an
+   * already-running synchronous computation cannot be preempted.
+   *
+   * @returns how many resources were actually aborted.
+   */
+  abortPending(): number;
   /**
    * Whether a transaction is currently HOLDING this scope's synchronous display reads (Tier 3).
    * A counter under the hood, so nested transactions compose. Distinct from `pending` (a resource
@@ -78,7 +124,7 @@ export type TransitionScope = {
   hold<T>(value: Signal<T>): Signal<T>;
 };
 
-type Entry = { readonly ref: ResourceRef<any>; readonly suspends: boolean };
+type Entry = { readonly ref: ResourceLike; readonly suspends: boolean };
 
 export function createTransitionScope(): TransitionScope {
   const list = mutable<Entry[]>([]);
@@ -118,6 +164,18 @@ export function createTransitionScope(): TransitionScope {
         computation: (curr, prev) =>
           curr.settled || prev === undefined ? curr.v : prev.value,
       }),
+    abortPending: () =>
+      untracked(() => {
+        let aborted = 0;
+        for (const { ref } of list()) {
+          const s = ref.status();
+          if ((s === 'loading' || s === 'reloading') && ref.abort) {
+            ref.abort();
+            aborted++;
+          }
+        }
+        return aborted;
+      }),
     holding,
     beginHold: () => untracked(() => holdCount.update((c) => c + 1)),
     endHold: () =>
@@ -143,6 +201,7 @@ function createNoopScope(): TransitionScope {
       // noop
     },
     commit: <T>(value: Signal<T>): Signal<T> => value,
+    abortPending: () => 0,
     holding: computed(() => false),
     beginHold: () => {
       // noop
@@ -158,9 +217,52 @@ const TRANSITION_SCOPE = new InjectionToken<TransitionScope>(
   '@mmstack/primitives:transition-scope',
 );
 
+/**
+ * The scope→`PendingTasks` bridge: while `scope.pending()` is true, hold an Angular
+ * pending task so SSR serialization waits for the scope's in-flight loads — HTTP loads
+ * already do this via HttpClient, but CUSTOM loaders (a `latest()` over a hand-rolled
+ * promise, a non-HTTP resource) would otherwise let the server render a boundary
+ * mid-load. Wired automatically by `provideTransitionScope` /
+ * `provideForwardingTransitionScope`; call it yourself only for scopes you construct
+ * directly with `createTransitionScope()`.
+ *
+ * Server-only by design: on the browser, tying `ApplicationRef.isStable` to every load
+ * would stall stability-gated machinery (testability, hydration timing) for no benefit.
+ */
+export function bridgeScopeToPendingTasks(
+  scope: TransitionScope,
+  injector?: Injector,
+): void {
+  const run = <T>(fn: () => T): T =>
+    injector ? runInInjectionContext(injector, fn) : fn();
+  run(() => {
+    if (inject(PLATFORM_ID) !== 'server') return;
+    const tasks = inject(PendingTasks);
+    let done: (() => void) | null = null;
+    effect(() => {
+      if (scope.pending()) done ??= tasks.add();
+      else {
+        done?.();
+        done = null;
+      }
+    });
+    inject(DestroyRef).onDestroy(() => {
+      done?.();
+      done = null;
+    });
+  });
+}
+
 /** Provide a fresh transition scope at a boundary so its subtree's resources are tracked independently. */
 export function provideTransitionScope(): Provider {
-  return { provide: TRANSITION_SCOPE, useFactory: createTransitionScope };
+  return {
+    provide: TRANSITION_SCOPE,
+    useFactory: () => {
+      const scope = createTransitionScope();
+      bridgeScopeToPendingTasks(scope);
+      return scope;
+    },
+  };
 }
 
 export function injectTransitionScope(): TransitionScope {
@@ -192,7 +294,7 @@ export function createForwardingScope(): ForwardingTransitionScope {
   const own = createTransitionScope();
   const target = signal<TransitionScope | null>(null);
   const eff = () => target() ?? own;
-  const owners = new Map<ResourceRef<any>, TransitionScope>();
+  const owners = new Map<ResourceLike, TransitionScope>();
 
   return {
     setTarget: (t) => target.set(t),
@@ -215,6 +317,7 @@ export function createForwardingScope(): ForwardingTransitionScope {
         computation: (curr, prev) =>
           curr.settled || prev === undefined ? curr.v : prev.value,
       }),
+    abortPending: () => (untracked(target) ?? own).abortPending(),
     holding: computed(() => eff().holding()),
     beginHold: () => (untracked(target) ?? own).beginHold(),
     endHold: () => (untracked(target) ?? own).endHold(),
@@ -229,7 +332,14 @@ export function createForwardingScope(): ForwardingTransitionScope {
 
 /** Provide a forwarding transition scope at a boundary (used by the transition outlet). */
 export function provideForwardingTransitionScope(): Provider {
-  return { provide: TRANSITION_SCOPE, useFactory: createForwardingScope };
+  return {
+    provide: TRANSITION_SCOPE,
+    useFactory: () => {
+      const scope = createForwardingScope();
+      bridgeScopeToPendingTasks(scope);
+      return scope;
+    },
+  };
 }
 
 /** Read the transition scope reachable from `injector`, or null if none is provided there. */
@@ -248,7 +358,7 @@ export function getTransitionScope(injector: Injector): TransitionScope | null {
 export function createAttributedPending(
   scope: TransitionScope,
 ): Signal<boolean> {
-  const isInFlight = (ref: ResourceRef<any>): boolean => {
+  const isInFlight = (ref: ResourceLike): boolean => {
     const s = untracked(ref.status);
     return s === 'loading' || s === 'reloading';
   };
@@ -280,7 +390,7 @@ export function injectRegisterResource() {
   const scope = injectTransitionScope();
   const destroyRef = inject(DestroyRef);
 
-  return <T extends ResourceRef<any>>(res: T, opt?: RegisterOptions): T => {
+  return <T extends ResourceLike>(res: T, opt?: RegisterOptions): T => {
     scope.add(res, opt);
     destroyRef.onDestroy(() => scope.remove(res));
     return res;
@@ -288,7 +398,7 @@ export function injectRegisterResource() {
 }
 
 /** Convenience: register a resource with the nearest transition scope. Must run in an injection context. */
-export function registerResource<T extends ResourceRef<any>>(
+export function registerResource<T extends ResourceLike>(
   res: T,
   opt?: RegisterOptions,
 ): T {

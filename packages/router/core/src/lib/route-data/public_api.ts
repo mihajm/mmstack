@@ -3,6 +3,8 @@ export {
   injectRouteData,
   provideRouteData,
   routeDataKey,
+  withPrefetch,
+  type CreateRouteDataOptions,
   type RouteDataContext,
   type RouteDataFactory,
   type RouteDataKey,

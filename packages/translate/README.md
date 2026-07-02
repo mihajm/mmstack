@@ -557,6 +557,90 @@ Inject a dynamic locale signal for runtime language switching.
 **`canMatchLocale(prefixSegments?: string[]): CanMatchFn`**  
 Route guard that validates locale parameters against `supportedLocales` and redirects invalid locales to the default.
 
+## Ecosystem recipes
+
+Three pairings with the rest of the mmstack — each is a few lines in YOUR app; the libraries stay decoupled.
+
+### Locale switching as a transition
+
+Locale switches load translation chunks through an internal resource; `injectLocaleLoadState()` exposes its status surface. Register it into a transition scope (`@mmstack/primitives`) and a locale switch behaves like any async transition — the UI **holds the old locale consistently** and reveals the new one in one frame, never a torn bilingual mix:
+
+```typescript
+import { registerResource, injectStartTransition } from '@mmstack/primitives';
+import { injectDynamicLocale, injectLocaleLoadState } from '@mmstack/translate';
+
+@Component({ /* lives under your <mm-suspense> / scope boundary */ })
+export class LocalePicker {
+  private readonly locale = injectDynamicLocale();
+  private readonly startTransition = injectStartTransition();
+
+  constructor() {
+    registerResource(injectLocaleLoadState(), { suspends: false });
+  }
+
+  switchTo(next: string) {
+    const t = this.startTransition(() => this.locale.set(next));
+    // t.pending() → disable the picker while the chunk loads; reveal is atomic
+  }
+}
+```
+
+### Prefetch translations on link hover
+
+`registerNamespace`'s resolver loads the locale chunk **at navigation**. Pair it with `@mmstack/router-core`'s `withPrefetch` and the same hover/visible signal that preloads the route's code also warms its translations — `warmNamespaceTranslation(locale?)` runs the identical idempotent load path without switching the locale, so the later resolve is instant:
+
+```typescript
+import { withPrefetch } from '@mmstack/router-core';
+
+const quoteNs = registerNamespace(() => import('./quote.en').then((m) => m.quoteEn), {
+  'sl-SI': () => import('./quote.sl').then((m) => m.quoteSl),
+});
+
+export const routes: Routes = [
+  {
+    path: ':locale/quotes',
+    loadComponent: () => import('./quotes.page'),
+    resolve: {
+      i18n: withPrefetch(quoteNs.resolveNamespaceTranslation, {
+        description: 'quote-i18n',
+        prefetch: (ctx) => quoteNs.warmNamespaceTranslation(ctx.params()['locale']),
+      }),
+    },
+  },
+];
+```
+
+(Requires `withRouteData()` + `PreloadStrategy` from router-core — the same wiring that warms route data. Prefetch never switches the active locale and repeated hovers are deduped on both sides.)
+
+### Translated validation messages (signal forms)
+
+With `@mmstack/forms`' compose layer, a field-type's error label is one projector — switch on the error `kind` explicitly so the exact-shape typing keeps working for you (dynamic keys are deliberately untypeable, which is also what makes `mmtranslate unused` reliable):
+
+```typescript
+import { composition, fromMetadata, type FieldRef } from '@mmstack/forms';
+import { REQUIRED } from '@angular/forms/signals';
+
+const t = injectFormT(); // your namespace's t — e.g. errors: { required: '...', min: 'At least {min}' }
+
+const errorLabel = (f: FieldRef) => () => {
+  const error = f.state().errors()[0];
+  if (!error) return '';
+  switch (error.kind) {
+    case 'required':
+      return t('form.errors.required');
+    case 'min':
+      return t('form.errors.min', { min: String(error.min) });
+    default:
+      return t('form.errors.generic');
+  }
+};
+
+const [textField, injectTextField] = composition({
+  required: fromMetadata(REQUIRED, false),
+  error: errorLabel,
+});
+```
+
 ## Advanced: Architecture & Performance
 
 ### Resource-Based Translation Loading

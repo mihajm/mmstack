@@ -9,7 +9,11 @@ import {
 } from '@angular/common/http';
 import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import {
+  injectTransitionScope,
+  provideTransitionScope,
+} from '@mmstack/primitives';
+import { Observable, of } from 'rxjs';
 import { infiniteQueryResource } from './infinite-query';
 import { provideQueryCache } from './util';
 
@@ -129,5 +133,85 @@ describe('infiniteQueryResource', () => {
     expect(res.pages().length).toBe(1);
     expect(res.pages()[0].items).toEqual(['item-0', 'item-1']);
     expect(requested).toEqual([0, 1, 0]);
+  });
+});
+
+describe('infiniteQueryResource — transition scope integration', () => {
+  // defer-capable interceptor so mid-flight boundary state is observable
+  let inFlight: Array<{ url: string; respond: (body: unknown) => void }>;
+  const deferredInterceptor = (req: HttpRequest<unknown>) =>
+    new Observable<HttpResponse<unknown>>((sub) => {
+      inFlight.push({
+        url: req.urlWithParams,
+        respond: (body) => {
+          sub.next(new HttpResponse({ body, status: 200 }));
+          sub.complete();
+        },
+      });
+    });
+
+  beforeEach(() => {
+    inFlight = [];
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideQueryCache(),
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([deferredInterceptor]),
+        ),
+        provideTransitionScope(),
+      ],
+    });
+  });
+
+  function createScoped(register: 'suspend' | 'indicator') {
+    return TestBed.runInInjectionContext(() => ({
+      scope: injectTransitionScope(),
+      res: infiniteQueryResource<PostPage, PostPage, number>(
+        ({ pageParam }) => ({
+          url: 'https://example.test/posts',
+          params: { page: `${pageParam}` },
+        }),
+        {
+          initialPageParam: 0,
+          getNextPageParam: (last) => last.nextCursor,
+          register,
+        },
+      ),
+    }));
+  }
+
+  it("register: 'suspend' — the first page suspends, later pages only indicate (no placeholder mid-list)", async () => {
+    const { scope, res } = createScoped('suspend');
+
+    await settle();
+    expect(scope.pending()).toBe(true); // first page in flight
+    expect(scope.suspended('value')).toBe(true); // nothing to show yet → suspend
+
+    inFlight.shift()?.respond(pageFor(0));
+    await settle();
+    expect(scope.suspended('value')).toBe(false);
+    expect(res.pages().length).toBe(1);
+
+    res.fetchNextPage();
+    await settle();
+    expect(res.isFetchingNextPage()).toBe(true);
+    expect(scope.pending()).toBe(true); // page 2 in flight → busy indicator
+    expect(scope.suspended('value')).toBe(false); // pages on screen → NO re-suspend
+
+    inFlight.shift()?.respond(pageFor(1));
+    await settle();
+    expect(res.pages().length).toBe(2);
+    expect(scope.pending()).toBe(false);
+  });
+
+  it('destroy() removes the aggregate registration from the scope', async () => {
+    const { scope, res } = createScoped('indicator');
+    await settle();
+    expect(scope.resources().length).toBe(1);
+
+    res.destroy();
+    expect(scope.resources().length).toBe(0);
   });
 });

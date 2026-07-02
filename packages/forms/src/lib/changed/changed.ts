@@ -170,9 +170,12 @@ type TrackNode = TrackConfig & { readonly state: FieldState<unknown> };
 export const CHANGED = createManagedMetadataKey<ChangedEntry, TrackNode>(
   (data) => {
     const initial: WritableSignal<unknown> = signal(undefined);
+    // v21: `create` receives only the accumulated data signal; this node's FieldState is fed in
+    // via the tracking rule (see applyTracking / TrackNode) and read back off it here.
+    const stateOf = (): FieldState<unknown> => (data() as TrackNode).state;
 
     const keySet = computed(() => {
-      const v = state.value();
+      const v = stateOf().value();
       return isRecord(v) ? Object.keys(v).sort().join('\u0001') : '';
     });
     const cfg = untracked(data);
@@ -186,12 +189,12 @@ export const CHANGED = createManagedMetadataKey<ChangedEntry, TrackNode>(
 
     return {
       initial,
-      changed: computed(() => nodeChanged(state, initial, keySet), {
+      changed: computed(() => nodeChanged(stateOf(), initial, keySet), {
         debugName: 'changed',
       }),
       // arity check, not a default: commit(undefined) must set a real `undefined` baseline
       commit: (...args: [value?: unknown]) =>
-        initial.set(args.length ? args[0] : untracked(state.value)),
+        initial.set(args.length ? args[0] : untracked(stateOf().value)),
     };
   },
 );

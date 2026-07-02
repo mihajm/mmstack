@@ -172,6 +172,54 @@ describe('pointerDrag', () => {
     expect(drag.unthrottled().active).toBe(false);
   });
 
+  // consumers branch on this to tell "drop here" from "abort" — see @mmstack/dnd
+  describe('cancelled (end reason)', () => {
+    it('a normal pointerup ends with cancelled: false', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+      el.dispatchEvent(pe('pointerup', { clientX: 10, clientY: 0 }));
+      expect(drag.unthrottled().cancelled).toBe(false);
+    });
+
+    it('Escape ends with cancelled: true', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(drag.unthrottled().active).toBe(false);
+      expect(drag.unthrottled().cancelled).toBe(true);
+    });
+
+    it('pointercancel ends with cancelled: true', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+      el.dispatchEvent(pe('pointercancel', { clientX: 10, clientY: 0 }));
+      expect(drag.unthrottled().cancelled).toBe(true);
+    });
+
+    it('cancel() ends with cancelled: true', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      drag.cancel();
+      expect(drag.unthrottled().cancelled).toBe(true);
+    });
+
+    it('is sticky until the next pointerdown, which clears it', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(drag.unthrottled().cancelled).toBe(true);
+
+      el.dispatchEvent(pe('pointerdown', { clientX: 5, clientY: 5, pointerId: 2 }));
+      expect(drag.unthrottled().cancelled).toBe(false);
+      el.dispatchEvent(pe('pointermove', { clientX: 20, clientY: 5, pointerId: 2 }));
+      el.dispatchEvent(pe('pointerup', { clientX: 20, clientY: 5, pointerId: 2 }));
+      expect(drag.unthrottled().cancelled).toBe(false);
+    });
+  });
+
   it('ignores non-allowed buttons', () => {
     const { drag, el } = setup({ buttons: [0] });
     el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0, button: 2 }));

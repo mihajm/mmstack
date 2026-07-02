@@ -797,6 +797,99 @@ describe('TransitionRouterOutlet', () => {
       delete (document as any).startViewTransition;
     }
   });
+
+  it('a deferred view-transition callback from an interrupted swap cannot destroy the re-targeted hold', async () => {
+    const C_REF = new InjectionToken<FakeRef>('test-c-ref');
+
+    @Component({ selector: 'route-a', template: `route-A` })
+    class RA {}
+    @Component({ selector: 'route-b', template: `route-B` })
+    class RB {
+      constructor() {
+        registerResource(inject(B_REF), { suspends: false });
+      }
+    }
+    @Component({ selector: 'route-c', template: `route-C` })
+    class RC {
+      constructor() {
+        registerResource(inject(C_REF), { suspends: false });
+      }
+    }
+    @Component({
+      selector: 'vt-race-host',
+      imports: [TransitionRouterOutlet],
+      template: `<mm-transition-outlet viewTransition />`,
+    })
+    class RaceHost {}
+
+    // A real browser DEFERS the callback (it snapshots the old frame first) — capture
+    // instead of invoking, so a navigation can interleave like it can in production.
+    const callbacks: Array<() => void> = [];
+    const startViewTransition = vi.fn((cb: () => void) => {
+      callbacks.push(cb);
+      return {};
+    });
+    (document as any).startViewTransition = startViewTransition;
+
+    try {
+      const refB = makeRef('loading');
+      const refC = makeRef('loading');
+      const { fixture, container } = await render(RaceHost, {
+        providers: [
+          provideRouter([
+            { path: 'a', component: RA },
+            { path: 'b', component: RB },
+            { path: 'c', component: RC },
+          ]),
+          provideLocationMocks(),
+          { provide: B_REF, useValue: refB },
+          { provide: C_REF, useValue: refC },
+        ],
+      });
+      const router = TestBed.inject(Router);
+      const flush = async () => {
+        for (let i = 0; i < 5; i++) {
+          fixture.detectChanges();
+          await Promise.resolve();
+        }
+        fixture.detectChanges();
+      };
+
+      await router.navigateByUrl('/a');
+      await flush();
+      await router.navigateByUrl('/b'); // hold: A stays visible, B mounts hidden
+      await flush();
+
+      refB.value.set({ ok: true });
+      refB.status.set('resolved'); // B settles → the swap is scheduled into the VT
+      await flush();
+      expect(startViewTransition).toHaveBeenCalledTimes(1);
+      const stale = callbacks[0];
+
+      await router.navigateByUrl('/c'); // interrupt BEFORE the browser ran the callback
+      await flush();
+
+      stale(); // the b-swap's deferred callback finally fires — must be a no-op now
+      fixture.detectChanges();
+
+      expect(container.querySelector('route-a')).not.toBeNull(); // stable view survives
+      const c = container.querySelector('route-c') as HTMLElement;
+      expect(c.style.display).toBe('none'); // C still hidden, loading
+
+      refC.value.set({ ok: true });
+      refC.status.set('resolved'); // the interrupting route settles → ITS swap commits
+      await flush();
+      callbacks[callbacks.length - 1]();
+      await flush();
+
+      expect(container.querySelector('route-a')).toBeNull();
+      expect(
+        (container.querySelector('route-c') as HTMLElement).style.display,
+      ).not.toBe('none');
+    } finally {
+      delete (document as any).startViewTransition;
+    }
+  });
 });
 
 describe('TransitionRouterOutlet — per-view attribution', () => {
@@ -1509,5 +1602,30 @@ describe('view transitions — real router wiring (integration)', () => {
     expect(router.url).toBe('/a'); // committed to the redirect target
     // exactly one transition for the committed navigation (not one per hop)
     expect(created.length).toBe(before + 1);
+  });
+
+  it('hands the transition off: Angular’s is skipped at activation, the outlet fires its OWN at the swap', async () => {
+    const { fixture, container, ref, router, created } = await setup();
+    await router.navigateByUrl('/a');
+    await flush(fixture);
+
+    await router.navigateByUrl('/b'); // held
+    await flush(fixture);
+    const angulars = created[created.length - 1];
+    expect(angulars.skipTransition).toHaveBeenCalledTimes(1); // inert one skipped
+    expect(container.querySelector('route-ia')).not.toBeNull(); // still holding A
+
+    const before = created.length;
+    ref.value.set({ ok: true });
+    ref.status.set('resolved'); // incoming settles → the outlet's swap
+    await flush(fixture);
+
+    expect(created.length).toBe(before + 1); // the outlet fired its own transition
+    expect(created[created.length - 1].skipTransition).not.toHaveBeenCalled();
+    expect(container.querySelector('route-ia')).toBeNull(); // swap committed inside it
+    expect(container.querySelector('route-ib')).not.toBeNull();
+    expect(
+      (container.querySelector('route-ib') as HTMLElement).style.display,
+    ).not.toBe('none');
   });
 });

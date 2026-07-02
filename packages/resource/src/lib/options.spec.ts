@@ -75,4 +75,18 @@ describe('resource options injection + auto-register', () => {
       expect(scope.resources().length).toBe(0);
     });
   });
+
+  it("a manually destroyed resource leaves the scope (doesn't wait for injector teardown)", () => {
+    setup([]);
+    TestBed.runInInjectionContext(() => {
+      const scope = injectTransitionScope();
+      const res = queryResource(() => 'https://example.test/a', {
+        register: 'indicator',
+      });
+      expect(scope.resources().length).toBe(1);
+
+      res.destroy();
+      expect(scope.resources().length).toBe(0);
+    });
+  });
 });

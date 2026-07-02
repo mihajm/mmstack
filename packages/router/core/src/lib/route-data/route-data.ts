@@ -194,10 +194,22 @@ function liveParams(
       const node =
         findByConfig(router.routerState.snapshot.root, snapshot.routeConfig) ??
         snapshot;
-      return toRecord(node.paramMap);
+      return mergedParams(node);
     },
     { equal: recordsEqual },
   );
+}
+
+/**
+ * Merge the ancestor chain's params (root → node), so a child factory sees inherited parent
+ * params (e.g. a parent route's `:orgId`) regardless of Angular's `paramsInheritanceStrategy`.
+ * This matches the prefetch path, which extracts params from the full config path — a child's
+ * own param shadows a same-named ancestor's (it's last in `pathFromRoot`).
+ */
+function mergedParams(node: ActivatedRouteSnapshot): Record<string, string> {
+  const rec: Record<string, string> = {};
+  for (const n of node.pathFromRoot) Object.assign(rec, toRecord(n.paramMap));
+  return rec;
 }
 
 function liveQueryParams(

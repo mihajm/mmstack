@@ -7,6 +7,7 @@ import {
   resolveAutoScroll,
   resolveHitbox,
   resolvePostMoveFlash,
+  ɵclearWarnedPlugins,
   type AutoScrollPlugin,
   type HitboxPlugin,
   type PostMoveFlash,
@@ -85,6 +86,8 @@ describe('plugin resolution order (option → DI → null)', () => {
 });
 
 describe('missing-plugin dev warning (baked into the resolver)', () => {
+  beforeEach(() => ɵclearWarnedPlugins());
+
   it('warns once when a required plugin resolves to null, then no-ops (memoized)', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const get = resolveHitbox(inj()); // warn defaults to true

@@ -103,6 +103,11 @@ export type OverrideOption<T extends Required<DndPlugins>[keyof DndPlugins]> =
 
 const warnedPlugins = new Set<string>();
 
+/** @internal Testing only */
+export function ɵclearWarnedPlugins() {
+  warnedPlugins.clear();
+}
+
 /**
  * Dev-only, warn-once notice that a requested feature has no plugin registered —
  * the caller then no-ops (graceful degradation, never a throw). Silent in prod.

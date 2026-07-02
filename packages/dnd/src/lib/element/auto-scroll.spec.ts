@@ -2,7 +2,7 @@ import { Component, ElementRef, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { autoScroll } from './auto-scroll';
-import { provideDnd, type AutoScrollPlugin } from '../provide';
+import { provideDnd, ɵclearWarnedPlugins, type AutoScrollPlugin } from '../provide';
 
 const scrollMock = vi.fn();
 const scrollCleanup = vi.fn();
@@ -22,6 +22,7 @@ beforeEach(() => {
   TestBed.resetTestingModule();
   scrollMock.mockReset();
   scrollCleanup.mockReset();
+  ɵclearWarnedPlugins();
 });
 
 describe('autoScroll', () => {

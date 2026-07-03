@@ -281,72 +281,136 @@ export type QueryResourceRef<TResult> = Omit<
   abort(): void;
 };
 
-/**
- * Creates an HTTP resource with features like caching, retries, refresh intervals, circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
- * This overload is for when a `defaultValue` is provided, ensuring that the resource's value is always defined.
- * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
- *               is called reactively, so the request can change over time.  If the function
- *              returns `undefined`, the resource is considered "disabled" and no request will be made.
- * @param options Configuration options for the resource.  These options extend the basic
- *               `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
- *                `onError`, `circuitBreaker`, and `cache`.  Additionally, when a `defaultValue` is provided, the resource's value will always be defined, even if the underlying HTTP request fails or is disabled.
- * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
- *
- * @example
- * ```ts
- * const userId = signal(1);
- *
- * const user = queryResource<User>(
- *   () => `/api/users/${userId()}`,
- *   { defaultValue: { id: 0, name: 'Anonymous' } },
- * );
- *
- * user.value(); // always User — never undefined, even before the first fetch resolves
- * ```
- */
-export function queryResource<TResult, TRaw = TResult>(
-  request: ResourceRequestFn,
-  options: QueryResourceOptions<TResult, TRaw> & {
-    defaultValue: NoInfer<TResult>;
-  },
-): QueryResourceRef<TResult>;
+/** How the response body is read, decided by which `queryResource` variant is called. */
+type QueryResponseType = 'json' | 'text' | 'arraybuffer' | 'blob';
 
 /**
- * Creates an extended HTTP resource with features like caching, retries, refresh intervals,
- * circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
- *
- * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
- *                is called reactively, so the request can change over time.  If the function
- *                returns `undefined`, the resource is considered "disabled" and no request will be made.
- * @param options Configuration options for the resource.  These options extend the basic
- *                `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
- *                `onError`, `circuitBreaker`, and `cache`.
- * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
- *
- * @example
- * ```ts
- * const userId = signal<number | undefined>(undefined);
- *
- * const user = queryResource<User>(
- *   () => userId() ? `/api/users/${userId()}` : undefined,
- *   {
- *     cache: { ttl: 60_000, staleTime: 10_000 },
- *     refresh: 30_000,
- *     retry: { max: 3 },
- *   },
- * );
- *
- * user.value();          // User | undefined
- * user.status();         // 'idle' | 'loading' | 'resolved' | 'error'
- * user.disabledReason(); // null while enabled; 'offline' / 'circuit-open' / 'no-request' otherwise
- * ```
+ * The callable shape of {@link queryResource}: the base call parses JSON (Angular's default), and,
+ * mirroring Angular's own `httpResource`, the `text` / `arrayBuffer` / `blob` sub-functions deliver
+ * the body raw. Every variant carries the full option set (cache, retries, refresh, circuit
+ * breaker, prefetch). A raw variant caches under a distinct key, so a JSON and a text query for
+ * the same URL never serve each other's body.
  */
-export function queryResource<TResult, TRaw = TResult>(
-  request: ResourceRequestFn,
-  options?: QueryResourceOptions<TResult, TRaw>,
-): QueryResourceRef<TResult | undefined>;
+export interface QueryResourceFn {
+  /**
+   * Creates an HTTP resource with features like caching, retries, refresh intervals, circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
+   * This overload is for when a `defaultValue` is provided, ensuring that the resource's value is always defined.
+   * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
+   *               is called reactively, so the request can change over time.  If the function
+   *              returns `undefined`, the resource is considered "disabled" and no request will be made.
+   * @param options Configuration options for the resource.  These options extend the basic
+   *               `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
+   *                `onError`, `circuitBreaker`, and `cache`.  Additionally, when a `defaultValue` is provided, the resource's value will always be defined, even if the underlying HTTP request fails or is disabled.
+   * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
+   *
+   * @example
+   * ```ts
+   * const userId = signal(1);
+   *
+   * const user = queryResource<User>(
+   *   () => `/api/users/${userId()}`,
+   *   { defaultValue: { id: 0, name: 'Anonymous' } },
+   * );
+   *
+   * user.value(); // always User — never undefined, even before the first fetch resolves
+   * ```
+   */
+  <TResult, TRaw = TResult>(
+    request: ResourceRequestFn,
+    options: QueryResourceOptions<TResult, TRaw> & {
+      defaultValue: NoInfer<TResult>;
+    },
+  ): QueryResourceRef<TResult>;
 
-export function queryResource<TResult, TRaw = TResult>(
+  /**
+   * Creates an extended HTTP resource with features like caching, retries, refresh intervals,
+   * circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
+   *
+   * @param request A function that returns the `HttpResourceRequest` or a URL string to be made.  This function
+   *                is called reactively, so the request can change over time.  If the function
+   *                returns `undefined`, the resource is considered "disabled" and no request will be made.
+   * @param options Configuration options for the resource.  These options extend the basic
+   *                `HttpResourceOptions` and add features like `keepPrevious`, `refresh`, `retry`,
+   *                `onError`, `circuitBreaker`, and `cache`.
+   * @returns An `QueryResourceRef` instance, which extends the basic `HttpResourceRef` with additional features.
+   *
+   * @example
+   * ```ts
+   * const userId = signal<number | undefined>(undefined);
+   *
+   * const user = queryResource<User>(
+   *   () => userId() ? `/api/users/${userId()}` : undefined,
+   *   {
+   *     cache: { ttl: 60_000, staleTime: 10_000 },
+   *     refresh: 30_000,
+   *     retry: { max: 3 },
+   *   },
+   * );
+   *
+   * user.value();          // User | undefined
+   * user.status();         // 'idle' | 'loading' | 'resolved' | 'error'
+   * user.disabledReason(); // null while enabled; 'offline' / 'circuit-open' / 'no-request' otherwise
+   * ```
+   */
+  <TResult, TRaw = TResult>(
+    request: ResourceRequestFn,
+    options?: QueryResourceOptions<TResult, TRaw>,
+  ): QueryResourceRef<TResult | undefined>;
+
+  /**
+   * Like `queryResource`, but the body is delivered as a raw `string` (no JSON parse on the main
+   * thread). Use `parse` to map it. Pairs with off-main parsing: fetch here (interceptors and auth
+   * intact), hand the string to a Web Worker to parse and own.
+   */
+  text: {
+    <TResult = string>(
+      request: ResourceRequestFn,
+      options: QueryResourceOptions<TResult, string> & {
+        defaultValue: NoInfer<TResult>;
+      },
+    ): QueryResourceRef<TResult>;
+    <TResult = string>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, string>,
+    ): QueryResourceRef<TResult | undefined>;
+  };
+
+  /**
+   * Like `queryResource`, but the body is delivered as an `ArrayBuffer`. Buffers are transferable,
+   * so they can move to a Web Worker zero-copy. When the query is cached AND you transfer the
+   * buffer, copy it first (`buf.slice(0)`): transferring detaches the cached copy (dev mode warns
+   * when a detached buffer is served from the cache).
+   */
+  arrayBuffer: {
+    <TResult = ArrayBuffer>(
+      request: ResourceRequestFn,
+      options: QueryResourceOptions<TResult, ArrayBuffer> & {
+        defaultValue: NoInfer<TResult>;
+      },
+    ): QueryResourceRef<TResult>;
+    <TResult = ArrayBuffer>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, ArrayBuffer>,
+    ): QueryResourceRef<TResult | undefined>;
+  };
+
+  /** Like `queryResource`, but the body is delivered as a `Blob`. */
+  blob: {
+    <TResult = Blob>(
+      request: ResourceRequestFn,
+      options: QueryResourceOptions<TResult, Blob> & {
+        defaultValue: NoInfer<TResult>;
+      },
+    ): QueryResourceRef<TResult>;
+    <TResult = Blob>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, Blob>,
+    ): QueryResourceRef<TResult | undefined>;
+  };
+}
+
+function createQueryResource<TResult, TRaw = TResult>(
+  responseType: QueryResponseType,
   request: ResourceRequestFn,
   options0?: QueryResourceOptions<TResult, TRaw>,
 ): QueryResourceRef<TResult | undefined> {
@@ -451,11 +515,19 @@ export function queryResource<TResult, TRaw = TResult>(
   const varyHeaders =
     typeof options?.cache === 'object' ? options.cache.varyHeaders : undefined;
 
-  const hashFn =
+  const baseHashFn =
     typeof options?.cache === 'object'
       ? (options.cache.hash ??
         ((r: HttpResourceRequest) => hashRequest(r, varyHeaders)))
       : hashRequest;
+
+  // a raw variant keys by responseType too — a text and a json query for the same URL must never
+  // serve each other's cached body. JSON passes through untouched, so existing keys don't change.
+  const hashFn =
+    responseType === 'json'
+      ? baseHashFn
+      : (r: HttpResourceRequest) =>
+          baseHashFn({ ...r, responseType } as HttpResourceRequest);
 
   const staleTime =
     typeof options?.cache === 'object' ? options.cache.staleTime : 0;
@@ -503,8 +575,20 @@ export function queryResource<TResult, TRaw = TResult>(
       })
     : stableRequest;
 
+  // the response type is decided here and nowhere else: json rides the base httpResource,
+  // the raw variants ride Angular's own sub-functions (which set responseType on the request)
+  const httpResourceFn = (
+    responseType === 'text'
+      ? httpResource.text
+      : responseType === 'arraybuffer'
+        ? httpResource.arrayBuffer
+        : responseType === 'blob'
+          ? httpResource.blob
+          : httpResource
+  ) as typeof httpResource;
+
   let resource = toResourceObject(
-    httpResource<TResult>(cachedRequest, {
+    httpResourceFn<TResult>(cachedRequest, {
       ...options,
       // when caching, the interceptor owns `parse` (parse-on-write) so it isn't
       // applied twice — keep it on httpResource only for the uncached path
@@ -538,6 +622,20 @@ export function queryResource<TResult, TRaw = TResult>(
 
       if (!(entry.value instanceof HttpResponse))
         return { key: entry.key, value: null };
+
+      if (isDevMode() && responseType === 'arraybuffer') {
+        const body = entry.value.body as unknown;
+        if (
+          body instanceof ArrayBuffer &&
+          (body as { detached?: boolean }).detached
+        ) {
+          console.warn(
+            `[@mmstack/resource] the cached ArrayBuffer for "${entry.key}" is detached — it was ` +
+              `transferred after being cached. Copy before transferring (buf.slice(0)) or disable ` +
+              `the cache for this query.`,
+          );
+        }
+      }
 
       return {
         value: entry.value.body,
@@ -687,6 +785,8 @@ export function queryResource<TResult, TRaw = TResult>(
         await firstValueFrom(
           client.request(prefetchRequest.method ?? 'GET', prefetchRequest.url, {
             ...prefetchRequest,
+            // the prefetch must cache the same body shape the resource will read
+            responseType,
             referrerPolicy: prefetchRequest.referrerPolicy as
               | ReferrerPolicy
               | undefined,
@@ -730,3 +830,34 @@ export function queryResource<TResult, TRaw = TResult>(
 
   return ref;
 }
+
+/**
+ * Creates an extended HTTP resource with caching, retries, refresh intervals, circuit breaker,
+ * and optimistic updates. Parses JSON by default; `queryResource.text` / `.arrayBuffer` / `.blob`
+ * deliver the body raw, mirroring Angular's `httpResource` sub-functions. See {@link QueryResourceFn}.
+ */
+export const queryResource: QueryResourceFn = Object.assign(
+  <TResult, TRaw = TResult>(
+    request: ResourceRequestFn,
+    options?: QueryResourceOptions<TResult, TRaw>,
+  ) => createQueryResource<TResult, TRaw>('json', request, options),
+  {
+    text: <TResult = string>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, string>,
+    ) => createQueryResource<TResult, string>('text', request, options),
+    arrayBuffer: <TResult = ArrayBuffer>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, ArrayBuffer>,
+    ) =>
+      createQueryResource<TResult, ArrayBuffer>(
+        'arraybuffer',
+        request,
+        options,
+      ),
+    blob: <TResult = Blob>(
+      request: ResourceRequestFn,
+      options?: QueryResourceOptions<TResult, Blob>,
+    ) => createQueryResource<TResult, Blob>('blob', request, options),
+  },
+) as QueryResourceFn;

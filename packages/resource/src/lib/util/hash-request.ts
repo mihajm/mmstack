@@ -105,11 +105,11 @@ const SAFE_RAW_HEADERS = new Set([
 const UNSAFE_HEADER_MESSAGES = new Map<string, string>([
   [
     'cookie',
-    "[@mmstack/resource]: varyHeaders includes 'cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on 'Authorization' or a tenant header.",
+    "[@mmstack/resource]: varyHeaders includes 'cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on a stable identity/tenant header (e.g. an 'x-identity' carrying the user's id).",
   ],
   [
     'set-cookie',
-    "[@mmstack/resource]: varyHeaders includes 'set-cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on 'Authorization' or a tenant header.",
+    "[@mmstack/resource]: varyHeaders includes 'set-cookie'. Browser-attached cookies never appear on the request object (so this usually partitions nothing), and manually-set cookie values often rotate per-request (shredding the hit rate). The header IS still honored (digested) — but prefer varying on a stable identity/tenant header (e.g. an 'x-identity' carrying the user's id).",
   ],
   [
     'authorization',

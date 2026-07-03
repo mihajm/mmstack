@@ -33,13 +33,30 @@ export type OpBatch = {
   readonly ops: readonly StoreOp[];
 };
 
+/**
+ * Drives an {@link opLog}'s emission reaction. Given the `run` closure (which reads the source in
+ * a tracking context and flushes the delta), a driver arranges for `run` to execute now and again
+ * on every subsequent change, returning a handle that stops it. The default driver is an Angular
+ * `effect` (needs an injector). Supply a custom driver to run an opLog with NO injector; a
+ * renderer-independent one built on `@angular/core/primitives/signals` `createWatch` ships as
+ * `microtaskOpLogDriver` from `@mmstack/worker/host` (the Web Worker seam).
+ */
+export type OpLogDriver = (run: () => void) => { destroy(): void };
+
 export type CreateOpLogOptions = {
   /** Transport identity for emitted batches. Defaults to a random id. */
   readonly origin?: string;
-  /** Injection context for the observing effect (required outside one). */
+  /** Injection context for the default effect-based driver (required outside one). */
   readonly injector?: Injector;
+  /**
+   * Replaces the default Angular-`effect` emission driver. Supply a custom driver (e.g.
+   * `microtaskOpLogDriver` from `@mmstack/worker/host`) to run an opLog with NO injector. When
+   * given, `injector` is ignored and no injection context is required.
+   */
+  readonly driver?: OpLogDriver;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export type OpLog<T extends object> = {
   /**
    * Ordered, lossless delivery of every emitted batch. Synchronous — don't write back into
@@ -48,6 +65,15 @@ export type OpLog<T extends object> = {
   subscribe(cb: (batch: OpBatch) => void): () => void;
   /** The most recent batch — a lossy sampling view (devtools); use `subscribe` for transport. */
   readonly latest: Signal<OpBatch | null>;
+  /**
+   * Synchronously diff the source and emit any pending change NOW, rather than waiting for the
+   * driver's scheduled run (an app tick, or a custom driver's microtask). Idempotent
+   * and coalescing: writes since the last emission compose into one batch, and a `flush()` with
+   * nothing pending is a no-op. Use it to make emission deterministic — the worker host calls it
+   * to settle its mirror synchronously (tests), and it underpins the flush-before-apply honesty of
+   * {@link OpLog.apply}. Independent of the driver: a later scheduled run simply finds no diff.
+   */
+  flush(): void;
   /**
    * Applies ops (a remote batch, a persisted journal entry, an {@link invertBatch} result)
    * atomically: ONE `set`, one notification wave. Also advances this log's diff baseline in
@@ -149,6 +175,38 @@ function applyAt(
 }
 
 /**
+ * Pure, store-free application of ops onto a plain root value, returning the next immutable root
+ * (structural-sharing along op paths, missing containers vivified `'auto'`-style). This is the
+ * same transform {@link OpLog.apply} runs, extracted so a replica can fold a received batch into
+ * a value WITHOUT owning a diffing {@link opLog} — e.g. the worker-graph read-replica seam.
+ * Accepts a batch or a bare op list.
+ */
+export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
+  const list = Array.isArray(ops) ? ops : (ops as OpBatch).ops;
+  let next: unknown = root;
+  for (const op of list) {
+    if (op.path.length === 0) {
+      if (op.kind === 'set') next = op.next;
+      continue; // a root delete is meaningless — ignore (mirrors OpLog.apply)
+    }
+    next = applyAt(next, op.path, 0, op);
+  }
+  return next as T;
+}
+
+/**
+ * Pure reference-pruned structural diff of two roots into minimal ops (the emission core of
+ * {@link opLog}, exported so code outside a log can produce a batch — e.g. diffing a scratch
+ * draft against a replica's current value to route a write to its owner). Trusts the
+ * copy-on-write contract: an untouched subtree that kept its reference is skipped.
+ */
+export function diffOps(prev: unknown, next: unknown): StoreOp[] {
+  const ops: StoreOp[] = [];
+  diffNode(prev, next, [], ops);
+  return ops;
+}
+
+/**
  * Inverts a batch for undo: reversed order, `set`↔its own inverse (an add — a `set` with no
  * `prev` — inverts to a `delete`; a `delete` inverts to a `set` restoring `prev`). Feed the
  * result to {@link OpLog.apply}. Requires the ops' `prev`s, which in-memory batches always
@@ -160,13 +218,23 @@ export function invertBatch(batch: OpBatch | readonly StoreOp[]): StoreOp[] {
   for (let i = ops.length - 1; i >= 0; i--) {
     const op = ops[i];
     if (op.kind === 'delete') {
-      inverted.push({ kind: 'set', path: op.path, next: op.prev, prev: undefined });
+      inverted.push({
+        kind: 'set',
+        path: op.path,
+        next: op.prev,
+        prev: undefined,
+      });
       continue;
     }
     if (!Object.hasOwn(op, 'prev')) {
       inverted.push({ kind: 'delete', path: op.path, prev: op.next });
     } else {
-      inverted.push({ kind: 'set', path: op.path, next: op.prev, prev: op.next });
+      inverted.push({
+        kind: 'set',
+        path: op.path,
+        next: op.prev,
+        prev: op.next,
+      });
     }
   }
   return inverted;
@@ -199,7 +267,6 @@ export function opLog<T extends object>(
   source: WritableSignal<T>,
   opt?: CreateOpLogOptions,
 ): OpLog<T> {
-  const injector = opt?.injector ?? inject(Injector);
   const origin = opt?.origin ?? generateOrigin();
 
   // a store proxy's `has` trap answers for the VALUE's keys, so `isMutable`'s `'mutate' in`
@@ -233,13 +300,16 @@ export function opLog<T extends object>(
     for (const cb of [...subscribers]) cb(batch);
   };
 
-  const ref = effect(
-    () => {
-      source(); // track every commit…
-      untracked(flush); // …and emit the delta since the last flush
-    },
-    { injector: opt?.injector },
-  );
+  const run = () => {
+    source(); // track every commit…
+    untracked(flush); // …and emit the delta since the last flush
+  };
+
+  // default driver is an Angular effect (needs an injector); a supplied driver runs injector-free
+  // (the worker-side seam, e.g. microtaskOpLogDriver from @mmstack/worker/host)
+  const ref = opt?.driver
+    ? opt.driver(run)
+    : effect(run, { injector: opt?.injector ?? inject(Injector) });
 
   return {
     latest: latest.asReadonly(),
@@ -247,6 +317,9 @@ export function opLog<T extends object>(
       subscribers.add(cb);
       return () => subscribers.delete(cb);
     },
+    // the emission core, callable on demand — reads the source untracked, so it never disturbs the
+    // driver's subscription; a subsequent scheduled run just finds the baseline already advanced
+    flush: () => flush(),
     apply: (batchOrOps) => {
       const ops = Array.isArray(batchOrOps)
         ? (batchOrOps as readonly StoreOp[])
@@ -254,16 +327,9 @@ export function opLog<T extends object>(
       if (!ops.length) return;
       // pending local writes must emit BEFORE the baseline advances past them
       flush();
-      let root: unknown = untracked(source);
-      for (const op of ops) {
-        if (op.path.length === 0) {
-          if (op.kind === 'set') root = op.next;
-          continue; // a root delete is meaningless — ignore
-        }
-        root = applyAt(root, op.path, 0, op);
-      }
-      source.set(root as T);
-      prevRoot = root as T; // baseline advance: an applied batch never echoes
+      const root = applyOps(untracked(source), ops); // one atomic root, structural-shared
+      source.set(root);
+      prevRoot = root; // baseline advance: an applied batch never echoes
     },
     destroy: () => {
       destroyed = true;

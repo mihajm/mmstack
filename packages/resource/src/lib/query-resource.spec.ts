@@ -1170,3 +1170,146 @@ describe('queryResource — parse option', () => {
   });
 });
 
+
+describe('queryResource — raw response variants (text / arrayBuffer / blob)', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideMockQueryCache(),
+        {
+          provide: ResourceSensors,
+          useValue: {
+            networkStatus: signal(true),
+            pageVisibility: signal<DocumentVisibilityState>('visible'),
+          },
+        },
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([
+            createCacheInterceptor(),
+            createDedupeRequestsInterceptor(),
+            testInterceptor,
+          ]),
+        ),
+      ],
+    });
+  });
+
+  it('text: sends responseType text and resolves the raw string body', async () => {
+    const url = 'https://example.com/raw.csv';
+    let seenResponseType: string | undefined;
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource.text(() => ({
+        url,
+        context: createTestContext((req) => {
+          seenResponseType = req.responseType;
+        }, 'a,b\n1,2'),
+      })),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(seenResponseType).toBe('text'); // the variant reached the HTTP layer
+    expect(result).toBe('a,b\n1,2'); // string body, no JSON parse
+  });
+
+  it('text: parse maps the raw string', async () => {
+    const url = 'https://example.com/raw-parse.csv';
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource.text(
+        () => ({
+          url,
+          context: createTestContext(() => {
+            /* noop */
+          }, 'a,b'),
+        }),
+        { parse: (s: string) => s.split(',') },
+      ),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(result).toEqual(['a', 'b']);
+  });
+
+  it('arrayBuffer: sends responseType arraybuffer and resolves the buffer', async () => {
+    const url = 'https://example.com/raw.bin';
+    let seenResponseType: string | undefined;
+    const body = new Uint8Array([1, 2, 3]).buffer;
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource.arrayBuffer(() => ({
+        url,
+        context: createTestContext((req) => {
+          seenResponseType = req.responseType;
+        }, body),
+      })),
+    );
+
+    const result = await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(seenResponseType).toBe('arraybuffer');
+    expect(result).toBeInstanceOf(ArrayBuffer);
+    expect(new Uint8Array(result as ArrayBuffer)).toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+  });
+
+  it('blob: sends responseType blob', async () => {
+    const url = 'https://example.com/raw.blob';
+    let seenResponseType: string | undefined;
+
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource.blob(() => ({
+        url,
+        context: createTestContext((req) => {
+          seenResponseType = req.responseType;
+        }, new Blob(['x'])),
+      })),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v !== undefined),
+    );
+    expect(seenResponseType).toBe('blob');
+  });
+
+  it('cache: a text and a json query for the same URL do not collide', async () => {
+    const url = 'https://example.com/shared';
+    let requests = 0;
+    const count = () => {
+      requests++;
+    };
+
+    const asJson = TestBed.runInInjectionContext(() =>
+      queryResource(
+        () => ({ url, context: createTestContext(count, { data: 'json' }) }),
+        { cache: { staleTime: 10_000 } },
+      ),
+    );
+    const jsonValue = await TestBed.runInInjectionContext(() =>
+      until(asJson.value, (v) => v !== undefined),
+    );
+    expect(jsonValue).toEqual({ data: 'json' });
+    expect(requests).toBe(1);
+
+    // same URL as text: a colliding key would serve the cached JSON without a request
+    const asText = TestBed.runInInjectionContext(() =>
+      queryResource.text(
+        () => ({ url, context: createTestContext(count, 'raw-text') }),
+        { cache: { staleTime: 10_000 } },
+      ),
+    );
+    const textValue = await TestBed.runInInjectionContext(() =>
+      until(asText.value, (v) => v !== undefined),
+    );
+    expect(textValue).toBe('raw-text'); // its own body, not the cached JSON
+    expect(requests).toBe(2); // distinct cache key → real second request
+  });
+});

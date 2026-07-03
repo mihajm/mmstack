@@ -197,7 +197,11 @@ export function toStore<T extends AnyRecord>(
 ): SignalStore<T> | WritableSignalStore<T> | MutableSignalStore<T> {
   if (isStore<T>(source)) return source;
 
-  if (!injector) injector = inject(Injector);
+  // injector is needed ONLY to resolve the two proxy-globals tokens; if a caller supplies the
+  // globals directly (createStoreContext — the worker-side seam with no DI), skip inject entirely
+  const sharedGlobals = rest[STORE_SHARED_GLOBALS];
+  const hasSharedGlobals = !!(sharedGlobals?.cache && sharedGlobals?.registry);
+  if (!injector && !hasSharedGlobals) injector = inject(Injector);
 
   const writableSource = isWritableSignal(source)
     ? source
@@ -216,15 +220,18 @@ export function toStore<T extends AnyRecord>(
   });
 
   const STORE_OPTIONS: Required<toStoreOptions> = {
-    injector,
+    // may be undefined in worker/DI-less mode; unused downstream once globals are resolved
+    // (children thread the resolved globals via STORE_SHARED_OPTIONS, derived needs no injector)
+    injector: injector as Injector,
     vivify,
     noUnionLeaves,
     [STORE_SHARED_GLOBALS]: {
-      cache:
-        rest[STORE_SHARED_GLOBALS]?.cache ?? injector.get(PROXY_CACHE_TOKEN),
-      registry:
-        rest[STORE_SHARED_GLOBALS]?.registry ??
-        injector.get(PROXY_CLEANUP_TOKEN),
+      // the `injector!` reads run only when a global is absent, which (per hasSharedGlobals) means
+      // an injector was resolved above
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      cache: sharedGlobals?.cache ?? injector!.get(PROXY_CACHE_TOKEN),
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      registry: sharedGlobals?.registry ?? injector!.get(PROXY_CLEANUP_TOKEN),
     },
   };
 
@@ -295,7 +302,14 @@ export function toStore<T extends AnyRecord>(
         return () => {
           if (!isWritableSource) return s;
           return untracked(() =>
-            toStore(source.asReadonly(), { injector, vivify, noUnionLeaves }),
+            toStore(source.asReadonly(), {
+              injector,
+              vivify,
+              noUnionLeaves,
+              // forward the resolved globals — re-resolving from the injector both re-injects
+              // needlessly and breaks in DI-less (worker) mode where injector is undefined
+              [STORE_SHARED_GLOBALS]: STORE_OPTIONS[STORE_SHARED_GLOBALS],
+            }),
           );
         };
 
@@ -587,4 +601,40 @@ export function mutableStore<T extends AnyRecord>(
     noUnionLeaves: false,
     ...opt,
   });
+}
+
+/**
+ * Builds a DI-less store context — the shared proxy-cache and cleanup registry that {@link toStore}
+ * normally resolves from the injector — so a `store`/`toStore`/`opLog` graph can run with NO Angular
+ * injection context. Spread the result into the options:
+ *
+ * ```ts
+ * import { microtaskOpLogDriver } from '@mmstack/worker/host';
+ * const ctx = createStoreContext();
+ * const s = store({ todos: [] }, ctx);
+ * const log = opLog(s, { driver: microtaskOpLogDriver(), origin: 'worker' }); // no injector anywhere
+ * ```
+ *
+ * **This is a worker-only fallback — do NOT use it on the main thread.** DI is the default and
+ * correct path in an app: the injector scopes the proxy-cache/cleanup singletons per app instance,
+ * which on the SERVER keeps one request's store identity from bleeding into another's (the exact
+ * hazard a module-scope singleton would reintroduce). A Web Worker is safe because it is a single
+ * store graph per thread and never runs during SSR (spawn is a `PLATFORM_ID === 'server'` no-op),
+ * so there is no cross-request scope to contaminate. Never hoist a `createStoreContext()` to module
+ * scope on a shared/main thread.
+ *
+ * **Share ONE context across every store in a worker** — the same way `providedIn: 'root'` shares
+ * one cache across all of an app's stores. `@mmstack/worker/host` memoizes this per worker
+ * (`workerStoreContext()`); reach for `createStoreContext()` directly only in a bare
+ * (non-worker-host) DI-less setup, and hold the single instance yourself.
+ */
+export function createStoreContext(): toStoreOptions {
+  const cache: ProxyCache = new WeakMap();
+  const registry: ProxyCleanupRegistry = new FinalizationRegistry(
+    ({ target, prop }) => {
+      const entry = cache.get(target);
+      if (entry) entry.delete(prop);
+    },
+  );
+  return { [STORE_SHARED_GLOBALS]: { cache, registry } };
 }

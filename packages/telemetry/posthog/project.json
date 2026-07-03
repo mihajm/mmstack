@@ -1,0 +1,29 @@
+{
+  "name": "telemetry-posthog",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/telemetry/posthog/src",
+  "prefix": "mm",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/angular:package",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "project": "packages/telemetry/posthog/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "packages/telemetry/posthog/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "packages/telemetry/posthog/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
+    }
+  }
+}

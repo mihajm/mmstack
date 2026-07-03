@@ -1,0 +1,29 @@
+{
+  "name": "telemetry-sentry",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/telemetry/sentry/src",
+  "prefix": "mm",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/angular:package",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "project": "packages/telemetry/sentry/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "packages/telemetry/sentry/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "packages/telemetry/sentry/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
+    }
+  }
+}

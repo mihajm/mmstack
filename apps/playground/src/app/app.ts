@@ -13,6 +13,7 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
       <a routerLink="/features" routerLinkActive="active">Features</a>
       <a routerLink="/board" routerLinkActive="active">Board</a>
       <a routerLink="/worker" routerLinkActive="active">Worker</a>
+      <a routerLink="/telemetry" routerLinkActive="active">Telemetry</a>
     </nav>
     <router-outlet />
   `,

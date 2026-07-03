@@ -1,4 +1,8 @@
-import { provideHttpClient, withFetch } from '@angular/common/http';
+import {
+  provideHttpClient,
+  withFetch,
+  withInterceptors,
+} from '@angular/common/http';
 import {
   type ApplicationConfig,
   provideBrowserGlobalErrorListeners,
@@ -15,13 +19,15 @@ import {
   extractClosestEdge,
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { appRoutes } from './app.routes';
+import { providePlaygroundTelemetry, telemetryInterceptor } from './telemetry';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideClientHydration(withEventReplay()),
     provideBrowserGlobalErrorListeners(),
-    provideHttpClient(withFetch()),
+    provideHttpClient(withFetch(), withInterceptors([telemetryInterceptor])),
     provideRouter(appRoutes),
+    providePlaygroundTelemetry(),
     // Optional plugins: pragmatic's hitbox for edge detection, and our zero-dep
     // `edgeAutoScroll` for reorderable auto-scroll (@mmstack/dnd/plugins).
     provideDnd({

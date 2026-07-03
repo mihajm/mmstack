@@ -42,6 +42,7 @@ import { Component, input } from '@angular/core';
 
     .body {
       padding: 1.25rem;
+      overflow-x: auto;
     }
   `,
 })

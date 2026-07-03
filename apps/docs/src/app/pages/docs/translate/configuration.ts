@@ -11,12 +11,12 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Configuration"
       pkg="@mmstack/translate"
-      lead="Decide how a locale reaches the browser. There are two modes: one build artifact per language, or a single build that loads languages at runtime."
+      lead="Two modes: one build artifact per language, or a single build that loads languages at runtime."
     >
       <p>
-        This is the one setup decision to make up front. If you only ever ship
-        one language, the default mode needs no configuration at all and you can
-        skip most of this page.
+        No need to worry, you can change this pretty easily if you ever change
+        your mind. If you only ever ship one language, the default mode needs no
+        configuration at all and you can skip most of this page.
       </p>
 
       <docs-section title="One build per language" id="multi-build">
@@ -75,8 +75,8 @@ import { DocSection } from '../../../layout/doc-section';
               <td><code>localeStorage</code></td>
               <td>
                 Persists a user-picked locale across reloads. Mutually exclusive
-                with <code>localeParamName</code>, since the URL would only fight
-                it.
+                with <code>localeParamName</code>, since the URL would only
+                fight it.
               </td>
             </tr>
             <tr>
@@ -127,7 +127,6 @@ import { provideIntlConfig } from '@mmstack/translate';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    { provide: LOCALE_ID, useValue: 'en-US' }, // initial / fallback locale
     provideIntlConfig({
       defaultLocale: 'en-US',
       supportedLocales: ['en-US', 'sl-SI', 'de-DE', 'fr-FR'],

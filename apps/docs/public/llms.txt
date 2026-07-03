@@ -1,6 +1,6 @@
 # mmstack
 
-> Reactive, type-safe libraries for Angular, built entirely on signals. Data fetching, routing, forms, i18n, drag and drop, dependency injection, and concurrent UI. Each library does one job and works on its own, and they compose because they share the same signals foundation.
+> Reactive, type-safe libraries for Angular, built entirely on signals. Data fetching, routing, forms, i18n, drag and drop, dependency injection, concurrent UI, and off-thread state and compute. Each library does one job and works on its own, and they compose because they share the same signals foundation.
 
 mmstack targets Angular 22 and up. It is not a framework. Each package is a focused set of utilities you add to an ordinary Angular app. This documentation site is built with the libraries it documents.
 
@@ -10,7 +10,7 @@ Low-level signal utilities: deep reactive stores, timing helpers, sensors, persi
 
 - [Overview](https://mihajm.github.io/mmstack/docs/primitives)
 - [Signal variants](https://mihajm.github.io/mmstack/docs/primitives/signals): mutable, derived, toWritable
-- [Store](https://mihajm.github.io/mmstack/docs/primitives/store): deep reactive store, extendStore, forkStore, opLog, opaque
+- [Store](https://mihajm.github.io/mmstack/docs/primitives/store): deep reactive store, extendStore, forkStore, projection, opLog, opaque
 - [Mapped collections](https://mihajm.github.io/mmstack/docs/primitives/collections): indexArray, keyArray, mapObject
 - [Timing](https://mihajm.github.io/mmstack/docs/primitives/timing): debounced, throttled, until
 - [Storage and history](https://mihajm.github.io/mmstack/docs/primitives/storage): stored, tabSync, withHistory
@@ -25,7 +25,7 @@ Low-level signal utilities: deep reactive stores, timing helpers, sensors, persi
 Data fetching on Angular's httpResource: caching, retries, stale-while-revalidate, circuit breakers, deduplication, and optimistic mutations, all opt-in.
 
 - [Overview](https://mihajm.github.io/mmstack/docs/resource)
-- [queryResource](https://mihajm.github.io/mmstack/docs/resource/query)
+- [queryResource](https://mihajm.github.io/mmstack/docs/resource/query): also raw-body variants queryResource.text / .arrayBuffer / .blob
 - [infiniteQueryResource](https://mihajm.github.io/mmstack/docs/resource/infinite-query)
 - [mutationResource](https://mihajm.github.io/mmstack/docs/resource/mutation)
 - [Optimistic updates](https://mihajm.github.io/mmstack/docs/resource/optimistic)
@@ -83,6 +83,15 @@ Ergonomic utilities on Angular Signal Forms: typed field metadata, reusable fiel
 - [Field metadata](https://mihajm.github.io/mmstack/docs/forms/field-metadata)
 - [Composition](https://mihajm.github.io/mmstack/docs/forms/composition)
 - [Change tracking](https://mihajm.github.io/mmstack/docs/forms/change-tracking): trackChanges, submitChanges
+
+## @mmstack/worker
+
+Split-graph state and compute. The main thread renders while a Web Worker owns state and runs heavy work, and the two stay in sync over minimal store deltas instead of full snapshots.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/worker)
+- [workerResource](https://mihajm.github.io/mmstack/docs/worker/resource): run a function off-main with the resource surface
+- [Replicas and writes](https://mihajm.github.io/mmstack/docs/worker/store): read-only replicas, routed writes, published derivations
+- [Host and typing](https://mihajm.github.io/mmstack/docs/worker/setup): createWorkerHost, connectWorker, manifest typing, SSR
 
 ## Optional
 

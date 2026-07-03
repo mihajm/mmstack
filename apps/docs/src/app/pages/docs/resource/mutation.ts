@@ -305,7 +305,7 @@ readonly createPost = mutationResource(
     onMutate: (post) => {
       const prev = untracked(this.posts.value);
       this.posts.set([...prev, post]); // apply optimistically
-      return prev; // ctx for rollback
+      return prev; // ctx for rollback, inferred & type-safe
     },
     onError: (_err, prev) => this.posts.set(prev), // roll back
     onSuccess: (saved) =>

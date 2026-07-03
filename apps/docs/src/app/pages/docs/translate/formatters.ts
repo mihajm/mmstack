@@ -80,8 +80,8 @@ import { DocSection } from '../../../layout/doc-section';
           for a value via <code>Intl.PluralRules</code>. Reach for it when you
           want to branch a class or a custom message map on plurality without
           writing a full ICU <code>plural</code> arm, and it re-resolves on a
-          locale switch like the others.
-          <code>injectSelectPlural</code> is the injected form.
+          locale switch like the others. <code>injectSelectPlural</code> is the
+          injected form.
         </p>
         <docs-code [code]="unit" lang="ts" />
       </docs-section>
@@ -139,19 +139,6 @@ import { DocSection } from '../../../layout/doc-section';
         </table>
       </docs-section>
 
-      <docs-section title="Standalone functions and SSR" id="standalone">
-        <p>
-          Outside an injection context, call the standalone functions and pass
-          the locale explicitly, either as a string or through the options
-          object. This matters for SSR: the overloads that require a locale are
-          safe, while the deprecated form that omits the locale reads a
-          process-level global that can cross-contaminate concurrent requests
-          rendering different locales on one Node process. Prefer the injected
-          formatters, or pass the locale.
-        </p>
-        <docs-code [code]="explicit" lang="ts" />
-      </docs-section>
-
       <docs-section title="App-wide defaults" id="defaults">
         <p>
           If you always want dates in a medium format or currency shown as a
@@ -165,8 +152,9 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Escape hatch: injectIntl" id="intl">
         <p>
-          For the rare case that no wrapper covers, <code>injectIntl()</code>
-          hands you the underlying <code>Signal&lt;IntlShape&gt;</code> from
+          For the rare case that no wrapper covers,
+          <code>injectIntl()</code> hands you the underlying
+          <code>Signal&lt;IntlShape&gt;</code> from
           <code>&#64;formatjs/intl</code> that the store keeps in step with the
           active locale. Read it inside a <code>computed</code> and call
           <code>intl().formatMessage(...)</code> or any other formatjs API

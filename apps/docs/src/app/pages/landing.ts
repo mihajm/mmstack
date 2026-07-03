@@ -48,6 +48,11 @@ const PACKAGES: Pkg[] = [
     link: '/docs/di',
     blurb: 'Dependency injection utilities.',
   },
+  {
+    name: '@mmstack/worker',
+    link: '/docs/worker',
+    blurb: 'Off-thread state & compute. A worker owns state, the UI reads a live replica.',
+  },
 ];
 
 @Component({

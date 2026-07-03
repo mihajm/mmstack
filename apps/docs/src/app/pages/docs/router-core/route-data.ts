@@ -11,7 +11,7 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Route-level data"
       pkg="@mmstack/router-core"
-      lead="Fetching in ngOnInit means the component mounts, then constructs, then asks for data, three round trips before the request even leaves. Route-level data moves the fetch to the resolve phase: the request is in flight before the component exists, and the component just reads the result."
+      lead="Fetching at construction time or ngOnInit means the component mounts, then constructs, then asks for data, three round trips before the request even leaves. Route-level data moves the fetch to the resolve phase: the request is in flight before the component exists, and the component just reads the result."
     >
       <p>
         There is an old tension in Angular routing. Fetch in the component and
@@ -31,11 +31,11 @@ import { DocSection } from '../../../layout/doc-section';
           <code>routeDataKey</code> names the slot and carries its type. Then
           <code>provideRouteData(key)</code> goes in the route's
           <code>providers</code>, setting up the per-route transition scope and
-          a memoization slot. And <code>createRouteData(key, factory)</code>
-          goes in the route's <code>resolve</code> map, which is what actually
-          fires the factory. The component reads it back with
-          <code>injectRouteData(key)</code>, getting the very same instance the
-          route already started.
+          a memoization slot. And
+          <code>createRouteData(key, factory)</code> goes in the route's
+          <code>resolve</code> map, which is what actually fires the factory.
+          The component reads it back with <code>injectRouteData(key)</code>,
+          getting the very same instance the route already started.
         </p>
         <docs-code [code]="define" lang="ts" />
         <p>
@@ -95,14 +95,16 @@ import { DocSection } from '../../../layout/doc-section';
         </ul>
       </docs-section>
 
-      <docs-section title="Recipe: kill the resolver dilemma" id="recipe-dilemma">
+      <docs-section
+        title="Recipe: kill the resolver dilemma"
+        id="recipe-dilemma"
+      >
         <p>
-          Here is the payoff, spelled out. A classic Angular resolver blocks the
-          navigation: click the link, the URL does not change, the app appears
-          to freeze, and only when the fetch resolves does the new page appear.
-          To avoid the freeze people skip resolvers and fetch in the component,
-          which brings back the waterfall and a page full of skeletons. Neither
-          feels good.
+          A classic Angular resolver blocks the navigation: click the link, the
+          URL does not change, the app appears to freeze, and only when the
+          fetch resolves does the new page appear. To avoid the freeze people
+          skip resolvers and fetch in the component, which brings back the
+          waterfall and a page full of skeletons. Neither feels good.
         </p>
         <p>
           Route-level data plus the transition outlet gives you the third
@@ -120,10 +122,10 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Click the link and this is what the user sees: the URL updates
           immediately (navigation is not blocked), the previous page stays fully
-          interactive on screen, and the fetch runs in the background. The moment
-          the data lands, the new page swaps in complete, with data already
-          present. No freeze, no skeleton, no flash of spinners. If you would
-          rather show a skeleton on a particular route, set
+          interactive on screen, and the fetch runs in the background. The
+          moment the data lands, the new page swaps in complete, with data
+          already present. No freeze, no skeleton, no flash of spinners. If you
+          would rather show a skeleton on a particular route, set
           <code>data: {{ '{' }} immediateTransition: true {{ '}' }}</code> on it
           and it swaps in immediately with its own loading state instead.
         </p>
@@ -163,9 +165,9 @@ import { DocSection } from '../../../layout/doc-section';
           <li>
             <strong>Needs a cache to pay off.</strong> The warm writes to
             whatever shared cache your factory's resource uses, for example
-            <code>&#64;mmstack/resource</code>'s <code>provideQueryCache()</code>.
-            Without a shared cache, the hover fetch has nowhere to live and the
-            navigation cannot reuse it.
+            <code>&#64;mmstack/resource</code>'s
+            <code>provideQueryCache()</code>. Without a shared cache, the hover
+            fetch has nowhere to live and the navigation cannot reuse it.
           </li>
           <li>
             <strong>Two hovers for lazy routes.</strong> The data factory is not
@@ -183,7 +185,9 @@ import { DocSection } from '../../../layout/doc-section';
           One edge to know: on a reused route (<code>/users/1</code> to
           <code>/users/2</code>) the resource refetches in place and there is no
           view swap for the outlet to hold. Wrap it with
-          <a mmLink="/docs/router-core/transition-outlet"><code>holdThroughNavigation</code></a>
+          <a mmLink="/docs/router-core/transition-outlet"
+            ><code>holdThroughNavigation</code></a
+          >
           for a flash-free, rollback-safe transition on the param change.
         </p>
       </docs-section>
@@ -204,11 +208,12 @@ import { DocSection } from '../../../layout/doc-section';
           The prefetch runs in the same throwaway root-parented injector as a
           route-data factory, with <code>ctx.isPrefetch</code> true and params
           extracted from the hovered URL, so anything it writes lands in your
-          shared cache for the eventual click to reuse. Runs are deduped per link
-          URL plus <code>description</code>. Reach for it when the speculative
-          work is idempotent and cache-shaped, the kind of thing a hover can
-          safely start and a click can safely repeat. Resolvers made by
-          <code>createRouteData</code> are already tagged, so do not wrap those.
+          shared cache for the eventual click to reuse. Runs are deduped per
+          link URL plus <code>description</code>. Reach for it when the
+          speculative work is idempotent and cache-shaped, the kind of thing a
+          hover can safely start and a click can safely repeat. Resolvers made
+          by <code>createRouteData</code> are already tagged, so do not wrap
+          those.
         </p>
       </docs-section>
     </docs-page>

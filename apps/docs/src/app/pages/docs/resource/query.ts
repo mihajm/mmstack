@@ -14,30 +14,29 @@ import { DocSection } from '../../../layout/doc-section';
       lead="The read. Give it a function that returns a request, and it fetches, tracks loading and errors, and refetches when the request changes. Layer on caching, retries, and refresh only where you need them."
     >
       <p>
-        A query is for data you display: a list, a profile, a search result.
-        You describe the request as a function of your signals, and the query
-        keeps the result in sync. Change the id, get the new record. It runs on
-        its own the first time and re-runs whenever the request comes out
-        different, so you never call a fetch method by hand.
+        A query is for data you display: a list, a profile, a search result. You
+        describe the request as a function of your signals, and the query keeps
+        the result in sync. Change the id, get the new record. It runs on its
+        own the first time and re-runs whenever the request comes out different,
+        so you never call a fetch method by hand.
       </p>
       <p>
-        With no options it is <code>httpResource</code> with a friendlier
-        return shape. Everything past that (cache, retry, refresh, circuit
-        breaker) is a flag you add per call.
+        With no options it is <code>httpResource</code> with a friendlier return
+        shape. Everything past that (cache, retry, refresh, circuit breaker) is
+        a flag you add per call.
       </p>
 
       <docs-section title="A first query" id="first">
         <p>
-          Return a string for the common case, or a full request object when
-          you need params, a method, or headers. Because the function reads
+          Return a string for the common case, or a full request object when you
+          need params, a method, or headers. Because the function reads
           <code>this.id()</code>, the query refetches every time that signal
           changes.
         </p>
         <docs-code [code]="request" lang="ts" />
         <p>
           The result is a ref of signals. Read them straight in a template and
-          it re-renders as the fetch moves through loading, resolved, and
-          error.
+          it re-renders as the fetch moves through loading, resolved, and error.
         </p>
         <docs-code [code]="reading" lang="html" />
         <p>
@@ -55,20 +54,24 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           A query often depends on something that isn't ready yet: an id that
           hasn't loaded, a filter the user hasn't touched. Return
-          <code>undefined</code> from the request function and the resource
-          goes quiet. It runs again the moment the function returns a real
-          request. No fetch fires while it's disabled.
+          <code>undefined/void</code> from the request function and the resource
+          goes quiet. Same behavior as the native resource it's built on. It
+          runs again the moment the function returns a real request. No fetch
+          fires while it's disabled.
         </p>
         <docs-code [code]="disabled" lang="ts" />
         <p>
-          To know why a resource is idle, read <code>disabledReason()</code>.
-          It is <code>'no-request'</code> when the function returned
+          To know why a resource is idle, read <code>disabledReason()</code>. It
+          is <code>'no-request'</code> when the function returned
           <code>undefined</code>, <code>'offline'</code> when the network is
           down, or <code>'circuit-open'</code> when a
           <a mmLink="/docs/resource/caching">circuit breaker</a> tripped, and
           <code>null</code> when the resource is enabled. Branch your UI on that
           rather than inspecting the combined status: an offline banner over a
-          held list reads differently from a "service is down" message.
+          held list reads differently from a "service is down" message. We
+          usually expand these with our own options, when appropriate via a
+          computed that listens to it + various other reasons it "could be
+          disabled".
         </p>
         <docs-code [code]="disabledReason" lang="html" />
       </docs-section>
@@ -165,18 +168,25 @@ import { DocSection } from '../../../layout/doc-section';
                 <a mmLink="/docs/primitives/transitions">transitions</a>.
               </td>
             </tr>
+            <tr>
+              <td><code>pause</code></td>
+              <td>
+                Join the nearest paused context.
+                <a mmLink="/docs/primitives/pausing">pausing</a>.
+              </td>
+            </tr>
           </tbody>
         </table>
       </docs-section>
 
       <docs-section title="onError fires on every attempt" id="on-error">
         <p>
-          This one trips people up, so it's worth calling out. With
+          Note: With
           <code>retry</code> set, <code>onError</code> runs on each failed
           attempt, not only the last. If you toast the user there, they get one
           toast per retry. The <code>isFinal</code> flag separates the two
           concerns: log every attempt, but only tell the user once the retries
-          are spent.
+          are spent. If you don't set retry onError fires once, so no worries.
         </p>
         <docs-code [code]="onError" lang="ts" />
         <p>
@@ -189,23 +199,47 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Warming the cache" id="prefetch">
         <p>
-          <code>prefetch()</code> fetches into the cache without subscribing,
-          so the data is already there when the user navigates. Wire it to a
-          hover and the click feels instant. It skips itself on slow
-          connections (<code>saveData</code>, 2g), so there is no need to guard
-          it.
+          <code>prefetch()</code> fetches into the cache without subscribing, so
+          the data is already there when the user navigates. Wire it to a hover
+          and the click feels instant. It skips itself on slow connections
+          (<code>saveData</code>, 2g), so there is no need to guard it.
         </p>
         <docs-code [code]="prefetch" lang="ts" />
+      </docs-section>
+
+      <docs-section title="Raw responses" id="raw">
+        <p>
+          The base call parses JSON, Angular's default. Three sub-functions
+          deliver the body raw instead, mirroring
+          <code>httpResource.text</code> and friends:
+          <code>queryResource.text</code>,
+          <code>queryResource.arrayBuffer</code>, and
+          <code>queryResource.blob</code>. Every option works the same way, and
+          a raw query caches under its own key, so a JSON and a text query for
+          one URL never serve each other's body.
+        </p>
+        <docs-code [code]="raw" lang="ts" />
+        <p>
+          The reason to reach for these is keeping a large parse off the main
+          thread. Parsing a 20MB JSON body blocks the thread that paints.
+          Fetching it as text or a buffer keeps your interceptors and auth
+          intact while the parse moves to a
+          <a mmLink="/docs/worker/overview">Web Worker</a> that owns the
+          result; an <code>ArrayBuffer</code> even moves zero-copy. If you
+          combine the cache with a transfer, copy the buffer first
+          (<code>buf.slice(0)</code>), since transferring detaches the cached
+          copy. Dev mode warns if a detached buffer is ever served.
+        </p>
       </docs-section>
 
       <docs-section title="Writing without persisting" id="set-local">
         <p>
           <code>value.set()</code> writes through to the cache, so a persisted
           entry hits IndexedDB and a synced one broadcasts to other tabs. That
-          round-trip is fine for plain data but lossy for anything a
-          structured clone can't carry: a class instance from a custom
-          <code>parse</code> comes back as a bare object on the other side.
-          When your parsed value can't survive that, write it with
+          round-trip is fine for plain data but lossy for anything a structured
+          clone can't carry: a class instance from a custom
+          <code>parse</code> comes back as a bare object on the other side. When
+          your parsed value can't survive that, write it with
           <code>setLocal()</code> instead. It updates this tab's memory only,
           skipping both persist and cross-tab sync, and a reload or another tab
           re-fetches to get its own.
@@ -293,8 +327,9 @@ onSubmit() {
   },
 });`;
 
+  // optionally override query, otherwise calls what the resource request is)"
   protected readonly prefetch = `<a
-  (mouseenter)="posts.prefetch({ url: '/api/posts/' + id() })"
+  (mouseenter)="posts.prefetch({ url: '/api/posts/' + id() }
   [routerLink]="['/posts', id()]"
 >
   {{ '{' }}{{ '{' }} title() {{ '}' }}{{ '}' }}
@@ -312,6 +347,19 @@ onSubmit() {
     <post-list [posts]="posts.value()" />
   }
 }`;
+
+  protected readonly raw = `// string body, no JSON parse on the main thread
+readonly csv = queryResource.text(() => '/api/report.csv');
+csv.value(); // string | undefined
+
+// parse maps the raw body (TRaw is string here)
+readonly rows = queryResource.text(() => '/api/report.csv', {
+  parse: (s) => s.split('\\n'),
+});
+
+// binary: transferable to a worker zero-copy
+readonly model = queryResource.arrayBuffer(() => '/api/model.bin');
+readonly invoice = queryResource.blob(() => '/api/invoice.pdf');`;
 
   protected readonly setLocal = `readonly user = queryResource<User>(() => \`/api/users/\${this.id()}\`, {
   parse: (raw) => new User(raw), // a class instance, not a plain object

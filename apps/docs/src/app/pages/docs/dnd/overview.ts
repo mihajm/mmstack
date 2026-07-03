@@ -15,18 +15,17 @@ import { DocSection } from '../../../layout/doc-section';
     >
       <docs-code [code]="install" lang="bash" />
       <p>
-        <code>&#64;atlaskit/pragmatic-drag-and-drop</code> is a peer
-        dependency. It powers the native engine and the shared monitor.
+        <code>&#64;atlaskit/pragmatic-drag-and-drop</code> is a peer dependency.
+        It powers the native engine and the shared monitor.
       </p>
 
       <docs-section title="Two engines" id="engines">
         <p>
-          Every draggable picks an engine. The <strong>native</strong> engine
-          uses the browser's HTML5 drag and drop, so it handles files, dragging
-          across windows, and the browser drag image. The
-          <strong>pointer</strong> engine uses pointer events with FLIP
-          animation, so siblings glide aside to open a gap and there is no
-          browser drag image to fight.
+          The <strong>native</strong> engine uses the browser's HTML5 drag and
+          drop, so it handles files, dragging across windows, and the browser
+          drag image. The <strong>pointer</strong> engine uses pointer events
+          with FLIP animation, so siblings glide aside to open a gap and there
+          is no browser drag image to fight.
         </p>
         <p>
           Both feed one session, so the state signals read the same either way.

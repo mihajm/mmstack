@@ -99,6 +99,15 @@ export const appRoutes: Route[] = [
               { label: 'Change tracking', link: 'forms/change-tracking' },
             ],
           },
+          {
+            label: '@mmstack/worker',
+            children: [
+              { label: 'Overview', link: 'worker' },
+              { label: 'workerResource', link: 'worker/resource' },
+              { label: 'Replicas & writes', link: 'worker/store' },
+              { label: 'Host & typing', link: 'worker/setup' },
+            ],
+          },
         ],
         { name: 'docs' },
       ),
@@ -440,6 +449,30 @@ export const appRoutes: Route[] = [
           import('./pages/docs/forms/change-tracking').then(
             (m) => m.ChangeTrackingDoc,
           ),
+      },
+      {
+        path: 'worker',
+        title: createTitle('Worker'),
+        loadComponent: () =>
+          import('./pages/docs/worker/overview').then((m) => m.WorkerOverview),
+      },
+      {
+        path: 'worker/resource',
+        title: createTitle('workerResource'),
+        loadComponent: () =>
+          import('./pages/docs/worker/resource').then((m) => m.WorkerResourceDoc),
+      },
+      {
+        path: 'worker/store',
+        title: createTitle('Replicas & writes'),
+        loadComponent: () =>
+          import('./pages/docs/worker/store').then((m) => m.WorkerStoreDoc),
+      },
+      {
+        path: 'worker/setup',
+        title: createTitle('Host & typing'),
+        loadComponent: () =>
+          import('./pages/docs/worker/setup').then((m) => m.WorkerSetupDoc),
       },
     ],
   },

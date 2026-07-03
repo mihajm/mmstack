@@ -37,11 +37,12 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="outlet" lang="ts" />
         <p>
           A resource joins the scope by registering. With
-          <code>&#64;mmstack/resource</code> that is the <code>register</code>
-          option; for a hand-rolled <code>ResourceRef</code> it is
-          <code>registerResource()</code>. Once registered, the outlet waits on
-          it, which is how it knows the difference between a route that is done
-          and one that is still fetching.
+          <code>&#64;mmstack/resource</code> that is the
+          <code>register</code> option; for a hand-rolled
+          <code>ResourceRef</code> it is <code>registerResource()</code>. Once
+          registered, the outlet waits on it, which is how it knows the
+          difference between a route that is done and one that is still
+          fetching.
         </p>
         <docs-code [code]="register" lang="ts" />
       </docs-section>
@@ -97,18 +98,19 @@ import { DocSection } from '../../../layout/doc-section';
           old view cross-fades into the new one according to your
           <code>::view-transition-*</code> CSS. It is feature-detected, so a
           browser without <code>document.startViewTransition</code> simply gets
-          the instant swap. If you only want it on one outlet, set the attribute.
+          the instant swap. If you only want it on one outlet, set the
+          attribute.
         </p>
         <docs-code [code]="viewTransitionAttr" lang="html" />
         <p>
           To use it alongside Angular's own router view transitions, wrap
           Angular's option with <code>mmRouterViewTransitions()</code> and no
           attribute is needed. The wrapper exists to fix a timing mismatch:
-          Angular fires its transition at route activation, but under this outlet
-          activation is visually inert, since the incoming view mounts hidden and
-          the real visual change happens later at the swap. So the wrapper skips
-          Angular's inert transition on held routes and fires the real one at the
-          swap, while non-held routes transition normally. Set
+          Angular fires its transition at route activation, but under this
+          outlet activation is visually inert, since the incoming view mounts
+          hidden and the real visual change happens later at the swap. So the
+          wrapper skips Angular's inert transition on held routes and fires the
+          real one at the swap, while non-held routes transition normally. Set
           <code>[viewTransition]="false"</code> on an outlet to opt it out even
           when router view transitions are enabled app-wide.
         </p>
@@ -121,16 +123,16 @@ import { DocSection } from '../../../layout/doc-section';
           two different routes. But some resources persist across a navigation
           and have no view swap to hide behind: an app-shell or layout resource
           that lives above the outlet, or a route reused on a param change
-          (<code>/users/1</code> to <code>/users/2</code>, same component). Those
-          just refetch in place and flash to loading. This is the signal-level
-          answer to that case.
+          (<code>/users/1</code> to <code>/users/2</code>, same component).
+          Those just refetch in place and flash to loading. This is the
+          signal-level answer to that case.
         </p>
         <p>
           <code>holdThroughNavigation</code> wraps any resource,
           <code>&#64;mmstack/resource</code>'s <code>queryResource</code>,
-          Angular's <code>httpResource</code>, or a plain <code>resource()</code>,
-          and returns a stabilized <code>Resource</code> whose state cannot flash
-          during a navigation.
+          Angular's <code>httpResource</code>, or a plain
+          <code>resource()</code>, and returns a stabilized
+          <code>Resource</code> whose state cannot flash during a navigation.
         </p>
         <docs-code [code]="hold" lang="ts" />
         <ul>
@@ -160,10 +162,12 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Flash-free route-data param navigation" id="hold-route-data">
+      <docs-section
+        title="Flash-free route-data param navigation"
+        id="hold-route-data"
+      >
         <p>
-          This composition earns its own note because it fills a real gap. On a
-          reused route, <code>/users/1</code> to <code>/users/2</code>, the
+          On a reused route, <code>/users/1</code> to <code>/users/2</code>, the
           component stays mounted and only the param changes. There is no view
           swap, so the transition outlet has nothing to hold. The route's data
           just refetches in place and flashes to loading, exactly the case the
@@ -172,7 +176,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Because <a mmLink="/docs/router-core/route-data">route data</a> hands
           you the resource ref directly, you can wrap it. Feed
-          <code>injectRouteData</code> through <code>holdThroughNavigation</code>
+          <code>injectRouteData</code> through
+          <code>holdThroughNavigation</code>
           and the same instance the route started now holds its state across the
           param navigation instead of flashing.
         </p>
@@ -182,7 +187,9 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Three tools, three scopes" id="three-tools">
         <p>
           These stack, and each holds a different thing. The
-          <a mmLink="/docs/router-core/transition-outlet#transition-outlet">transition outlet</a>
+          <a mmLink="/docs/router-core/transition-outlet#transition-outlet"
+            >transition outlet</a
+          >
           holds the outgoing <em>view</em> across a cross-route navigation.
           <code>holdThroughNavigation</code> holds a persisted
           <em>resource</em>'s state across the navigation lifecycle, rollback

@@ -17,8 +17,9 @@ import { DocSection } from '../../../layout/doc-section';
           <code>mutable</code> is a <code>WritableSignal</code> with two extra
           methods, <code>mutate</code> and <code>inline</code>, for editing an
           object or array in place. It is cheaper than spreading a large value
-          on every change (<code>update(prev =&gt; ({{ '{' }} ...prev
-          {{ '}' }}))</code>) and it still notifies readers.
+          on every change (<code
+            >update(prev =&gt; ({{ '{' }} ...prev {{ '}' }}))</code
+          >) and it still notifies readers.
         </p>
         <docs-code [code]="mutableEx" lang="ts" />
         <p>
@@ -33,10 +34,17 @@ import { DocSection } from '../../../layout/doc-section';
           <code>{{ '{' }} equal: false {{ '}' }}</code> (or
           <code>() =&gt; false</code>). The reference-equality default would
           otherwise suppress the change notification, because the object edited
-          in place keeps the same reference.
+          in place keeps the same reference, so stability is at the leaves of
+          the graph. Same principle applies to inputs, binding a non-primitive
+          mutable to an input wont trigger it, pass the whole signal through.
         </p>
         <docs-code [code]="mutableEqualEx" lang="ts" />
-      </docs-section>
+        <p>
+          mutable is an extension of signal so <code>.set() / .update</code> &
+          passed-in equality work in the same immutable manner as they would
+          otherwise, it just adds the option + handling for mutation.
+        </p></docs-section
+      >
 
       <docs-section title="derived" id="derived">
         <p>
@@ -44,6 +52,10 @@ import { DocSection } from '../../../layout/doc-section';
           <code>WritableSignal</code>. Writes to the slice update the source,
           and changes to the source flow through. Use a key or index shorthand
           for object and array slices.
+        </p>
+        <p>
+          Sidenote, this is fundementally just a reactive variation of a
+          write-through lens :)
         </p>
         <docs-code [code]="derivedKeyEx" lang="ts" />
         <p>
@@ -72,8 +84,9 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="toWritable" id="to-writable">
         <p>
-          <code>toWritable</code> turns any read-only <code>Signal&lt;T&gt;</code>
-          into a <code>WritableSignal&lt;T&gt;</code> by supplying your own
+          <code>toWritable</code> turns any read-only
+          <code>Signal&lt;T&gt;</code> into a
+          <code>WritableSignal&lt;T&gt;</code> by supplying your own
           <code>set</code> (and optional <code>update</code>) implementation. It
           powers <code>derived</code> under the hood. Reach for it directly when
           you have a <code>computed</code> you want to expose as writable.
@@ -95,7 +108,7 @@ user.mutate((prev) => {
 
 user.inline((prev) => {
   prev.age++;
-}); // void return, same effect`;
+}); // void return, same effect useful for array.push / map.set shorthand`;
 
   protected readonly mutableEqualEx = `import { computed } from '@angular/core';
 import { mutable } from '@mmstack/primitives';

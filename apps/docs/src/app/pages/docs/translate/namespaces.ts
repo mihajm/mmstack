@@ -19,15 +19,17 @@ import { DocSection } from '../../../layout/doc-section';
         makes lazy loading work: a route only pulls in the translations it
         needs, and the default locale for one feature is not tied to another's.
         The shape of the default-locale object is also the source of truth for
-        type checking, so every other locale is validated against it.
+        type checking, so every other locale is validated against it, so you can
+        never forget to add a key to one locale before deploying.
       </p>
 
       <docs-section title="Defining a namespace" id="create-namespace">
         <p>
           Write the default-locale translations as a plain nested object and
           pass them to <code>createNamespace</code> with a name. Values are ICU
-          messages, so a placeholder like <code>{{ '{' }} name {{ '}' }}</code>
-          declares a parameter, and <code>plural</code> or <code>select</code>
+          messages, so a placeholder like
+          <code>{{ '{' }} name {{ '}' }}</code> declares a parameter, and
+          <code>plural</code> or <code>select</code>
           arms work as usual. The nested shape becomes the set of valid keys,
           and each message's placeholders become that key's required parameters.
         </p>
@@ -62,7 +64,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Registering for lazy loading" id="register-namespace">
+      <docs-section
+        title="Registering for lazy loading"
+        id="register-namespace"
+      >
         <p>
           <code>registerNamespace</code> takes the default-locale loader and a
           map of the other locales, each a
@@ -82,7 +87,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Recipe: lazy-load via a route resolver" id="resolver">
+      <docs-section
+        title="Recipe: lazy-load via a route resolver"
+        id="resolver"
+      >
         <p>
           The second element of the tuple is a route resolver. Wire it into the
           route that owns the feature and the matching locale chunk loads before
@@ -100,7 +108,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Recipe: share Save and Cancel across features" id="shared">
+      <docs-section
+        title="Recipe: share Save and Cancel across features"
+        id="shared"
+      >
         <p>
           Strings like Save, Cancel, Yes, and No belong in one place, not copied
           into every feature. Define them once in a shared namespace and export
@@ -112,8 +123,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           A feature then builds on it with <code>createAppNamespace</code> in
           place of <code>createNamespace</code>. Its injected <code>t</code> now
-          resolves both <code>quote.pageTitle</code> and <code>common.save</code>,
-          both fully typed.
+          resolves both <code>quote.pageTitle</code> and
+          <code>common.save</code>, both fully typed.
         </p>
         <docs-code [code]="merged" lang="ts" label="quote.namespace.ts" />
         <p>

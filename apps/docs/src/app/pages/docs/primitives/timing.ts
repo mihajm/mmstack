@@ -14,18 +14,18 @@ import { DocSection } from '../../../layout/doc-section';
     >
       <docs-section title="debounced and debounce" id="debounce">
         <p>
-          A debounced signal holds its read value until <code>ms</code>
-          milliseconds after the last write. You still call <code>set</code> and
-          <code>update</code> normally. Dependents just see the value settle
-          instead of updating on every keystroke.
+          A debounced signal holds its read value until
+          <code>ms</code> milliseconds after the last write. You still call
+          <code>set</code> and <code>update</code> normally. Dependents just see
+          the value settle instead of updating on every keystroke.
         </p>
         <p>
           There are two entry points.
           <code>debounced(initial, {{ '{' }} ms {{ '}' }})</code> creates a new
           writable already debounced.
           <code>debounce(sourceSignal, {{ '{' }} ms {{ '}' }})</code> wraps an
-          existing signal. Both give you an <code>.original</code> signal for the
-          immediate, un-debounced value.
+          existing signal. Both give you an <code>.original</code> signal for
+          the immediate, un-debounced value.
         </p>
         <docs-code [code]="debounce" lang="ts" />
         <p>
@@ -58,8 +58,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>until</code> resolves a promise once a signal value satisfies a
           predicate. It handles type-narrowing predicates, an optional
-          <code>timeout</code>, and auto-cancellation when the calling context is
-          destroyed.
+          <code>timeout</code>, and auto-cancellation when the calling context
+          is destroyed.
         </p>
         <docs-code [code]="until" lang="ts" />
         <p>
@@ -68,6 +68,12 @@ import { DocSection } from '../../../layout/doc-section';
           immediately if the current value already passes, and it needs an
           injection context (or an explicit <code>injector</code> option) to run
           its watcher.
+        </p>
+        <p>
+          This primitive is useful for async interop, but primary I find myself
+          reaching for it in testing, so that i can await/assert the exact
+          signal change moment instead of working with fixture.whenStable &
+          similar.
         </p>
       </docs-section>
     </docs-page>

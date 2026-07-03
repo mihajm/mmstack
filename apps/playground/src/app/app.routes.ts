@@ -61,6 +61,11 @@ export const appRoutes: Route[] = [
     loadComponent: () =>
       import('./examples/board-example').then((m) => m.BoardExample),
   },
+  {
+    path: 'worker',
+    loadComponent: () =>
+      import('./examples/worker-example').then((m) => m.WorkerExample),
+  },
   { path: '', pathMatch: 'full', redirectTo: 'core' },
   { path: '**', redirectTo: 'core' },
 ];

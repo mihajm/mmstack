@@ -16,7 +16,7 @@ type Entry = {
 const ENTRIES: Entry[] = [
   {
     month: 'July 2026',
-    lead: 'The marquee wave. Drag and drop got its pointer engine, primitives got the *mmTransition directive and streaming resources, and this documentation site went live, built on the same libraries it documents.',
+    lead: 'The marquee wave. @mmstack/worker arrived to move state and compute off the main thread, drag and drop got its pointer engine, primitives got the *mmTransition directive and streaming resources, and this documentation site went live, built on the same libraries it documents.',
     highlights: [
       {
         pkg: '@mmstack/dnd',
@@ -33,6 +33,17 @@ const ENTRIES: Entry[] = [
         items: [
           '*mmTransition holds the current view until the next one has loaded, so tab switches and value changes stop flashing a spinner.',
           'The deep store gained an operation log, a compact record of every change for replay, sync, and undo.',
+          'projection, a derived store with keyed reconciliation, so a computation maps into a store that tracks per field.',
+        ],
+      },
+      {
+        pkg: '@mmstack/worker',
+        link: '/docs/worker',
+        items: [
+          'A new library for split-graph state and compute. The main thread renders while a Web Worker owns state and runs heavy work, kept in sync over the store operation log instead of full snapshots.',
+          'workerResource runs a function off-main with the resource surface, so a slow computation makes the UI pending, not frozen.',
+          'workerStore mirrors a worker-owned store as a live read-only replica and routes writes to the owner, which sequences them so every replica converges.',
+          'Worker-side derivations publish read-only and carry their pending state across, and the whole connection is typed from the worker you wrote.',
         ],
       },
       {

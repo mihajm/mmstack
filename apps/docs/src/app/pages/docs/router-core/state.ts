@@ -10,17 +10,8 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Reactive router state"
       pkg="@mmstack/router-core"
-      lead="The router already knows the current URL and query params. Getting at them from a component usually means subscribing to an observable, unsubscribing, and mirroring the value into local state. These helpers hand you the same information as plain signals instead."
+      lead="A few helpful utilities for getting router state, that I ended up writing often in various apps & power some larger features internally in router-core."
     >
-      <p>
-        If your component derives something from the URL, a filter read from
-        <code>?q=</code>, a page number, the active tab, you have probably
-        written the subscribe-store-unsubscribe dance more than once. A signal
-        removes all of it: read it in a computed, read it in a template, and it
-        stays current on its own. That is the whole idea here. Three helpers,
-        each one a signal over a piece of router state.
-      </p>
-
       <docs-section title="url" id="url">
         <p>
           <code>url</code> is the simplest of the three: a read-only signal that
@@ -53,8 +44,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>navigationEndTick</code> is a counter that increments on every
           successful navigation, same-URL ones included. Read it inside a
           computed and that computed recomputes once per navigation regardless
-          of whether the URL text moved. It is the reliable key for anything
-          you pull off <code>router.routerState.snapshot</code>.
+          of whether the URL text moved. It is the reliable key for anything you
+          pull off <code>router.routerState.snapshot</code>.
         </p>
         <docs-code [code]="tick" lang="ts" />
       </docs-section>
@@ -66,8 +57,8 @@ import { DocSection } from '../../../layout/doc-section';
           Reading gives the current value, or <code>null</code> when the param
           is absent. Setting a value writes it into the URL; setting
           <code>null</code> removes it. It reacts to external navigation too, so
-          if the URL changes from a link or a back button, the signal updates
-          to match.
+          if the URL changes from a link or a back button, the signal updates to
+          match.
         </p>
         <docs-code [code]="queryParam" lang="ts" />
         <p>
@@ -85,13 +76,14 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           URL params are always strings, but you rarely want them as strings.
           The second argument to <code>queryParam</code> lets you type and tune
-          the signal. Provide both <code>parse</code> and <code>serialize</code>
-          and the signal becomes a <code>WritableSignal&lt;T | null&gt;</code>:
-          <code>parse</code> runs on a present param, an absent one reads as
-          <code>null</code> without calling <code>parse</code>, and a
-          <code>serialize</code> that returns <code>null</code> drops the param
-          from the URL. That last detail is how you keep default values out of
-          the URL, page 1 does not need to show up as <code>?page=1</code>.
+          the signal. Provide both <code>parse</code> and
+          <code>serialize</code> and the signal becomes a
+          <code>WritableSignal&lt;T | null&gt;</code>: <code>parse</code> runs
+          on a present param, an absent one reads as <code>null</code> without
+          calling <code>parse</code>, and a <code>serialize</code> that returns
+          <code>null</code> drops the param from the URL. That last detail is
+          how you keep default values out of the URL, page 1 does not need to
+          show up as <code>?page=1</code>.
         </p>
         <docs-code [code]="typed" lang="ts" />
         <p>

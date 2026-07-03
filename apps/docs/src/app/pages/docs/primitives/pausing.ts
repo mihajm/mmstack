@@ -17,18 +17,18 @@ import { DocSection } from '../../../layout/doc-section';
     >
       <p>
         Switch away from a tab built with <code>&#64;switch</code> and the old
-        branch is destroyed: scroll position, half-filled inputs, a paused video,
-        and loaded data all reset when you come back. Leave it mounted instead
-        and the opposite problem appears, since its pollers, effects, and
-        recomputes keep running in the background. These tools handle both.
+        branch is destroyed: scroll position, half-filled inputs, a paused
+        video, and loaded data all reset when you come back. Leave it mounted
+        instead and the opposite problem appears, since its pollers, effects,
+        and recomputes keep running in the background. These tools handle both.
       </p>
 
       <docs-section title="mmActivity keeps a subtree alive" id="activity">
         <p>
           <code>*mmActivity</code> mounts its subtree once and keeps it. While
           the condition is false the subtree is hidden with
-          <code>display: none</code> and its change detection is paused, so state
-          is preserved. When it is true again the view shows and change
+          <code>display: none</code> and its change detection is paused, so
+          state is preserved. When it is true again the view shows and change
           detection resumes. Nothing is destroyed until the directive itself is.
         </p>
         <docs-code [code]="activity" lang="html" />
@@ -42,10 +42,11 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="The paused context" id="paused">
         <p>
-          <code>*mmActivity</code> also provides a paused context to its subtree,
-          the negation of the visible condition. Read it anywhere below with
-          <code>injectPaused()</code>, a <code>Signal&lt;boolean&gt;</code> that
-          is <code>true</code> while hidden.
+          <code>*mmActivity</code> also provides a paused context to its
+          subtree, the negation of the visible condition. Read it anywhere below
+          with <code>injectPaused()</code>, a
+          <code>Signal&lt;boolean&gt;</code> that is <code>true</code> while
+          hidden.
         </p>
         <docs-code [code]="paused" lang="ts" />
         <p>
@@ -72,10 +73,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="pausable" lang="ts" />
         <p>
-          A paused computed holds its last value and does not recompute. A paused
-          effect skips its body, and its dependencies collapse so a change cannot
-          wake it until it resumes. Writes to a paused signal still land and
-          surface on resume.
+          A paused computed holds its last value and does not recompute. A
+          paused effect skips its body, and its dependencies collapse so a
+          change cannot wake it until it resumes. Writes to a paused signal
+          still land and surface on resume.
         </p>
         <p>
           Both frames below read the same signal, ticking on a
@@ -95,24 +96,23 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Setting a default pause source" id="default-pause">
         <p>
-          <code>providePausableOptions</code> is a provider, not a global
-          switch. It sets the default <code>pause</code> for every
-          pausable-aware primitive within its injector scope, the
-          <code>pausable*</code> family plus the opt-in integrations in
-          <code>stored</code> and <code>chunked</code>. Like a suspense or pause
-          boundary, it applies from where you provide it down the tree, and a
-          nested <code>providePausableOptions</code> overrides it for that
-          subtree. A call-site <code>pause</code> always wins. Provide it at the
-          app root to make it the default everywhere, or on a route or component
-          to scope it there.
+          <code>providePausableOptions</code> is sets the default
+          <code>pause</code> for every pausable-aware primitive within its
+          injector scope, the <code>pausable*</code> family plus the opt-in
+          integrations in <code>stored</code> and <code>chunked</code>. Like a
+          suspense or pause boundary, it applies from where you provide it down
+          the tree, and a nested <code>providePausableOptions</code> overrides
+          it for that subtree. A call-site <code>pause</code> always wins.
+          Provide it at the app root to make it the default everywhere, or on a
+          route or component to scope it there.
         </p>
         <docs-code [code]="appWide" lang="ts" />
         <p>
           <code>pause: true</code> means honor the ambient paused context, so it
           needs an <code>*mmActivity</code> or <code>providePaused</code>
-          boundary above it to supply the paused state. The two compose: the
-          boundary decides when its subtree is paused, and this decides which
-          primitives listen.
+          boundary above any consumers to supply the paused state. The two
+          compose: the boundary decides when its subtree is paused, and this
+          decides which primitives listen.
         </p>
         <p>
           Data fetching plugs into the same context.

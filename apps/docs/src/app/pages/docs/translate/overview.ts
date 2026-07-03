@@ -11,7 +11,7 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Translate"
       pkg="@mmstack/translate"
-      lead="Internationalization that lives with your features instead of in one app-level bundle. Type-safe, signal-based, and built for monorepos, though it works in a single app too."
+      lead="Internationalization that lives with your features instead of in one app-level bundle. Type-safe, signal-based, and built for monorepos, but works for single-repo apps too."
     >
       <docs-code [code]="install" lang="bash" />
       <p>
@@ -21,7 +21,10 @@ import { DocSection } from '../../../layout/doc-section';
         different path, and three things make it worth a look.
       </p>
 
-      <docs-section title="Translations live with the feature" id="feature-level">
+      <docs-section
+        title="Translations live with the feature"
+        id="feature-level"
+      >
         <p>
           A namespace belongs to the feature or library that uses it, not to the
           app. In a monorepo, the <code>quote</code> library ships its own
@@ -37,6 +40,11 @@ import { DocSection } from '../../../layout/doc-section';
           <a mmLink="/docs/translate/namespaces">Namespaces</a> for the loading
           model.
         </p>
+        <p>
+          Note: We usually export routes from index.ts in our nx monorepo, the
+          root route attaches the resolver, so the rest of the repo knows
+          nothing about the features translation needs.
+        </p>
       </docs-section>
 
       <docs-section title="A wrong key is a build error" id="type-safe">
@@ -47,8 +55,8 @@ import { DocSection } from '../../../layout/doc-section';
           become the required parameters. So
           <code>t('quote.greeting', {{ '{' }} name {{ '}' }})</code> is checked
           like any other typed call. Rename a key and every call site fails to
-          compile. Drop a required argument and the call fails. You find these at
-          build time, not from a user.
+          compile. Drop a required argument and the call fails. You find these
+          at build time, not from a user.
         </p>
       </docs-section>
 
@@ -56,8 +64,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Everything you read is a signal: <code>t()</code>, the formatters, and
           the active locale. So the same call works in a template, a
-          <code>computed</code>, or an <code>effect</code>, and it updates on its
-          own when the locale changes, with no pipe and no subscription.
+          <code>computed</code>, or an <code>effect</code>, and it updates on
+          its own when the locale changes, with no pipe and no subscription.
         </p>
         <docs-code [code]="templateEx" lang="html" />
         <p>
@@ -102,13 +110,17 @@ import { DocSection } from '../../../layout/doc-section';
               <td><a mmLink="/docs/translate/namespaces">Namespaces</a></td>
             </tr>
             <tr>
-              <td>Read a key in code or a template, switch language at runtime</td>
+              <td>
+                Read a key in code or a template, switch language at runtime
+              </td>
               <td>
                 <a mmLink="/docs/translate/reading">Reading translations</a>
               </td>
             </tr>
             <tr>
-              <td>Format a price, a date, or a relative time like "3 days ago"</td>
+              <td>
+                Format a price, a date, or a relative time like "3 days ago"
+              </td>
               <td><a mmLink="/docs/translate/formatters">Formatters</a></td>
             </tr>
             <tr>

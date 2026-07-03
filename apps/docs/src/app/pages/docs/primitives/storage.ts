@@ -15,18 +15,18 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="stored" id="stored">
         <p>
           <code>stored</code> keeps a signal in sync with
-          <code>localStorage</code> (or any adapter with the same three methods).
-          You read and write it like a normal <code>WritableSignal</code>; it
-          persists every change under the given <code>key</code> and reloads that
-          value on the next visit. It is SSR-safe and falls back to the initial
-          value when nothing is stored.
+          <code>localStorage</code> (or any adapter with the same three
+          methods). You read and write it like a normal
+          <code>WritableSignal</code>; it persists every change under the given
+          <code>key</code> and reloads that value on the next visit. It is
+          SSR-safe and falls back to the initial value when nothing is stored.
         </p>
         <docs-code [code]="stored" lang="ts" />
         <p>
-          The returned signal adds two members. <code>.clear()</code> removes the
-          entry and restores the fallback, and <code>.key</code> is a reactive
-          signal of the active key. The key can be dynamic: point it at a signal
-          and the stored value follows wherever the key goes. Pass
+          The returned signal adds two members. <code>.clear()</code> removes
+          the entry and restores the fallback, and <code>.key</code> is a
+          reactive signal of the active key. The key can be dynamic: point it at
+          a signal and the stored value follows wherever the key goes. Pass
           <code>syncTabs: true</code> to keep the value in step across tabs
           through the browser <code>storage</code> event. Other tabs on the same
           key pick up each change.
@@ -54,14 +54,16 @@ import { DocSection } from '../../../layout/doc-section';
           initial value) into one that tracks its own edits. You get
           <code>.undo()</code>, <code>.redo()</code>, and <code>.clear()</code>,
           plus reactive <code>.canUndo</code>, <code>.canRedo</code>,
-          <code>.canClear</code>, and a <code>.history</code> stack.
+          <code>.canClear</code>, and a <code>.history</code> stack. As this
+          composes with any WritableSignal we most use it to wrap Signal Forms
+          sources and similar.
         </p>
         <docs-code [code]="withHistory" lang="ts" />
         <p>
           <code>maxSize</code> bounds both the undo and redo stacks. When the
           bound is hit, <code>cleanupStrategy</code> decides how to trim:
-          <code>'shift'</code> drops the oldest entry, <code>'halve'</code> drops
-          the older half at once.
+          <code>'shift'</code> drops the oldest entry,
+          <code>'halve'</code> drops the older half at once.
         </p>
       </docs-section>
     </docs-page>

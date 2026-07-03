@@ -31,9 +31,9 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="mutableStoreEx" lang="ts" />
         <p>
-          <code>store</code> and <code>mutableStore</code> take a plain value and
-          create the source for you. When you already own the signal, reach for
-          <code>toStore</code>, the factory both are built on: it proxies an
+          <code>store</code> and <code>mutableStore</code> take a plain value
+          and create the source for you. When you already own the signal, reach
+          for <code>toStore</code>, the factory both are built on: it proxies an
           existing <code>Signal</code> (or <code>WritableSignal</code> /
           <code>MutableSignal</code>) and preserves its writability, so a store
           layered over a signal you own writes back through it.
@@ -48,13 +48,13 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="vivifyEx" lang="ts" />
         <p>
-          Unions are supported by default. A node can flip between array,
-          record, primitive, and <code>null</code>, and a child signal you
-          grabbed before the flip stays correct after it. If you can promise a
-          node never flips between a leaf and a sub-store, pass
-          <code>{{ '{' }} noUnionLeaves: true {{ '}' }}</code> to resolve each
-          node's leaf-ness once instead of keeping it reactive. Leave it off if
-          a value can switch between a primitive and an object or array.
+          Unions are supported by default & throughout the graph. A node can
+          flip between array, record, primitive, and <code>null</code>, and a
+          child signal you grabbed before the flip stays correct after it. If
+          you can promise a node never flips between a leaf and a sub-store,
+          pass <code>{{ '{' }} noUnionLeaves: true {{ '}' }}</code> to resolve
+          each node's leaf-ness once instead of keeping it reactive. Leave it
+          off if a value can switch between a primitive and an object or array.
         </p>
         <p>
           The names <code>set</code>, <code>update</code>, <code>mutate</code>,
@@ -86,8 +86,8 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="opaqueEx" lang="ts" />
         <p>
           The marker is a non-enumerable symbol, so it never shows up in spreads
-          or iteration, and the call is idempotent. Mark before you freeze, since
-          the marker is written with <code>defineProperty</code>.
+          or iteration, and the call is idempotent. Mark before you freeze,
+          since the marker is written with <code>defineProperty</code>.
           <code>isOpaque(value)</code> is the matching guard, for niche interop.
         </p>
       </docs-section>
@@ -180,7 +180,41 @@ import { DocSection } from '../../../layout/doc-section';
           paths it cares about. It short-circuits untouched subtrees by
           reference identity (structural sharing keeps their references stable),
           so it deep-walks only the paths both sides changed. That same contract
-          is why it needs the copy-on-write reference stability a store gives it.
+          is why it needs the copy-on-write reference stability a store gives
+          it.
+        </p>
+      </docs-section>
+
+      <docs-section title="projection, a derived store" id="projection">
+        <p>
+          <code>projection</code> is the store-shaped counterpart to
+          <code>computed</code>. Where a <code>computed</code> derives one
+          value, <code>projection</code> derives a whole store subtree: the
+          function receives a mutable draft seeded with the current value,
+          mutates it in place or returns new data, and the result is reconciled
+          against the previous value by identity. Unchanged object subtrees
+          keep their reference, and array items matched by
+          <code>key</code> keep their identity across a reorder, insert, or
+          remove.
+        </p>
+        <docs-code [code]="projectionEx" lang="ts" />
+        <p>
+          That reconciliation is what makes reads through the result
+          fine-grained. The whole projection recomputes on the first read after
+          a signal it depends on changes, exactly like a
+          <code>computed</code> (memoized, lazy, coherent right after a write),
+          but a <code>computed</code> over one field only recomputes when that
+          field actually changed, because everything else kept its reference.
+          The function must be pure, it runs inside the reactive computation.
+          Prefer <code>computed</code> for a plain value; reach for
+          <code>projection</code> when a derivation should be read like a
+          store.
+        </p>
+        <p>
+          The reconciler is exported standalone as
+          <code>reconcile(prev, next, key)</code>, for producing a
+          reference-stable value by hand. Values must be structured-clonable,
+          since the draft is a clone of the current value.
         </p>
       </docs-section>
 
@@ -231,7 +265,7 @@ const state = store({
   tags: ['admin', 'editor'],
 });
 
-state.user.address.city();        // read: 'NYC'
+state.user.address.city();        // read: 'NYC' & trigger only on .city() changes
 state.user.address.zip.set(90210); // two-way write into the source
 state.tags[0]();                  // 'admin'
 state.tags.length();              // 2, reactive`;
@@ -294,6 +328,28 @@ base.user.name();                  // 'Alice'
 draft.commit();     // flush the edits onto the base
 base.user.name();   // 'Bob'
 // draft.discard(); // or throw the edits away`;
+
+  protected readonly projectionEx = `import { projection } from '@mmstack/primitives';
+
+const users = signal<User[]>([...]);
+
+// a read-only store derived from a computation, reconciled by 'id'
+const active = projection<User[]>(
+  () => users().filter((u) => u.active),
+  [],
+  { key: 'id' },
+);
+
+active[0].name(); // per-leaf reads, like any store
+
+// the draft form: mutate in place instead of returning
+const summary = projection<{ total: number; active: number }>(
+  (draft) => {
+    draft.total = users().length;
+    draft.active = users().filter((u) => u.active).length;
+  },
+  { total: 0, active: 0 },
+);`;
 
   protected readonly opLogEx = `import { opLog, store } from '@mmstack/primitives';
 

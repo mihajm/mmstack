@@ -11,7 +11,7 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Resource"
       pkg="@mmstack/resource"
-      lead="Data fetching for Angular, expressed with signals instead of RxJS. Caching, retries, refresh intervals, circuit breakers, request deduplication, and optimistic mutations, all opt-in one feature at a time."
+      lead="Fine-grained reactive data fetching. Caching, retries, refresh intervals, circuit breakers, request deduplication, and optimistic mutations, all opt-in one feature at a time."
     >
       <p>
         Fetching data in a component is rarely just the fetch. You end up
@@ -23,11 +23,10 @@ import { DocSection } from '../../../layout/doc-section';
         driven by signals.
       </p>
       <p>
-        If you know TanStack Query from the React side, this covers the same
-        ground. The difference is the surface: no <code>useQuery</code> hook
-        rules, no observables to subscribe and unsubscribe. A resource is a
-        bundle of signals you read in a template, and it cleans itself up with
-        the component.
+        If you know TanStack Query, this covers the same ground. The difference
+        is the surface: no <code>useQuery</code> hook rules, no observables to
+        subscribe and unsubscribe. A resource is a bundle of signals you read in
+        a template, and it cleans itself up with the component.
       </p>
 
       <docs-code [code]="install" lang="bash" />
@@ -44,9 +43,9 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Here is a read and a write side by side. The read fetches on its own
           and refetches when its request function returns something new; the
-          write waits for you to call <code>mutate()</code> and updates the
-          list optimistically. Don't worry about every option yet, just notice
-          that both give you back signals you read directly.
+          write waits for you to call <code>mutate()</code> and updates the list
+          optimistically. Don't worry about every option yet, just notice that
+          both give you back signals you read directly.
         </p>
         <docs-code [code]="shape" lang="ts" />
         <p>
@@ -61,9 +60,9 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Setup" id="setup">
         <p>
-          A plain <code>queryResource()</code> needs nothing but
-          <code>provideHttpClient()</code>, and an in-memory cache is wired up
-          for you. To turn on caching (dedup, stale-while-revalidate,
+          A plain <code>queryResource()</code> needs nothing, and an in-memory
+          cache is lazily wired up for you, when you first opt-in via a cache
+          option. To turn on caching (dedup, stale-while-revalidate,
           persistence), register the cache and dedupe interceptors and opt
           resources in. That, plus <code>provideQueryCache()</code> for a
           persistent or cross-tab cache, is covered on the
@@ -73,10 +72,10 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Picking a resource" id="picking">
         <p>
-          Five flavors cover the shapes fetching tends to take. All are built
-          on <code>httpResource</code> and hand back a ref of signals with at
-          least <code>value()</code>, <code>status()</code>, and
-          <code>error()</code>. The difference is what makes them run.
+          Five flavors cover the shapes fetching tends to take. All are built on
+          <code>httpResource</code> and hand back a ref of signals with at least
+          <code>value()</code>, <code>status()</code>, and <code>error()</code>.
+          The difference is what makes them run.
         </p>
         <table class="doc-table">
           <thead>
@@ -89,27 +88,45 @@ import { DocSection } from '../../../layout/doc-section';
           <tbody>
             <tr>
               <td>Read data, cached and refreshable</td>
-              <td><a mmLink="/docs/resource/query"><code>queryResource</code></a></td>
+              <td>
+                <a mmLink="/docs/resource/query"><code>queryResource</code></a>
+              </td>
               <td>Its request function returning a new value</td>
             </tr>
             <tr>
               <td>Read, but only when asked</td>
-              <td><a mmLink="/docs/resource/query"><code>manualQueryResource</code></a></td>
+              <td>
+                <a mmLink="/docs/resource/query"
+                  ><code>manualQueryResource</code></a
+                >
+              </td>
               <td>An explicit <code>.trigger()</code></td>
             </tr>
             <tr>
               <td>Write data, optimistically</td>
-              <td><a mmLink="/docs/resource/mutation"><code>mutationResource</code></a></td>
+              <td>
+                <a mmLink="/docs/resource/mutation"
+                  ><code>mutationResource</code></a
+                >
+              </td>
               <td>An explicit <code>.mutate(value)</code></td>
             </tr>
             <tr>
               <td>Paginate, accumulating pages</td>
-              <td><a mmLink="/docs/resource/infinite-query"><code>infiniteQueryResource</code></a></td>
+              <td>
+                <a mmLink="/docs/resource/infinite-query"
+                  ><code>infiniteQueryResource</code></a
+                >
+              </td>
               <td><code>.fetchNextPage()</code></td>
             </tr>
             <tr>
               <td>Read a live connection (SSE or WebSocket)</td>
-              <td><a mmLink="/docs/resource/streaming"><code>streamResource</code></a></td>
+              <td>
+                <a mmLink="/docs/resource/streaming"
+                  ><code>streamResource</code></a
+                >
+              </td>
               <td>Every message on the wire</td>
             </tr>
           </tbody>
@@ -129,8 +146,8 @@ import { DocSection } from '../../../layout/doc-section';
 
         <h3>Stale-while-revalidate list</h3>
         <p>
-          Show the cached list instantly, refresh it in the background, and
-          hold the old value so the view never flashes empty on reload.
+          Show the cached list instantly, refresh it in the background, and hold
+          the old value so the view never flashes empty on reload.
           <code>keepPrevious</code> is the flag that keeps
           <code>value()</code> populated while a refetch is in flight.
         </p>
@@ -139,8 +156,8 @@ import { DocSection } from '../../../layout/doc-section';
         <h3>Poll while the tab is visible, refresh on return</h3>
         <p>
           The object form of <code>refresh</code> combines an interval with
-          event triggers. This polls once a minute and also refetches the
-          moment the user switches back to the tab.
+          event triggers. This polls once a minute and also refetches the moment
+          the user switches back to the tab.
         </p>
         <docs-code [code]="pollRecipe" lang="ts" />
 
@@ -158,8 +175,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Two users share a URL but must not share cached responses. Opt the
           <code>Authorization</code> header into the cache key with
-          <code>varyHeaders</code> so each user gets their own entry. The
-          header value is one-way digested into the key, never stored raw.
+          <code>varyHeaders</code> so each user gets their own entry. The header
+          value is one-way digested into the key, never stored raw.
         </p>
         <docs-code [code]="varyRecipe" lang="ts" />
 
@@ -168,8 +185,8 @@ import { DocSection } from '../../../layout/doc-section';
           After a threshold of failures, stop hammering the endpoint and let it
           recover. Share one breaker across every resource hitting that service
           so one trip protects all of them. See
-          <a mmLink="/docs/resource/caching">circuit breakers</a> for the
-          states and recovery.
+          <a mmLink="/docs/resource/caching">circuit breakers</a> for the states
+          and recovery.
         </p>
         <docs-code [code]="cbRecipe" lang="ts" />
       </docs-section>
@@ -177,8 +194,8 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Global defaults" id="defaults">
         <p>
           When most of your resources want the same options, set them once
-          instead of repeating them per call. Defaults layer in three tiers,
-          and a per-call option always wins over both providers.
+          instead of repeating them per call. Defaults layer in three tiers, and
+          a per-call option always wins over both providers.
         </p>
         <p>
           <code>provideResourceOptions()</code> is the base layer: it applies to
@@ -194,15 +211,15 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="defaults" lang="ts" />
         <p>
-          Each provider takes a value or a factory (<code>() =&gt; options</code>).
-          Circuit breakers have their own default hook,
+          Each provider takes a value or a factory (<code>() =&gt; options</code
+          >). Circuit breakers have their own default hook,
           <code>provideCircuitBreakerDefaultOptions()</code>: every
-          <code>createCircuitBreaker()</code> call without explicit options picks
-          up the threshold and timeout you set there.
+          <code>createCircuitBreaker()</code> call without explicit options
+          picks up the threshold and timeout you set there.
         </p>
       </docs-section>
 
-      <docs-section title="Works with transitions" id="transitions">
+      <docs-section title="Works with transitions & pausing" id="transitions">
         <p>
           Resources plug into the transition scopes from
           <a mmLink="/docs/primitives/transitions">&#64;mmstack/primitives</a>.
@@ -211,7 +228,8 @@ import { DocSection } from '../../../layout/doc-section';
           loading state coordinates with the rest of the subtree instead of
           flashing a spinner on its own. Pair it with
           <code>keepPrevious</code> and reloads hold the last view while the
-          fresh one loads.
+          fresh one loads. Or use the <code>pause</code> option to hook into an
+          activity boundary. All 3 inter-op gracefully.
         </p>
       </docs-section>
     </docs-page>
@@ -269,15 +287,18 @@ readonly addPost = mutationResource(
     onMutate: (post) => {
       const prev = untracked(this.posts.value);
       this.posts.set([...prev, post]);
-      return prev; // context for rollback
+      return prev; // context for rollback, fully type-safe & inferred downstream
     },
     onError: (_err, prev) => this.posts.set(prev),
   },
 );`;
 
-  protected readonly varyRecipe = `queryResource<Profile>(() => ({ url: '/api/me', headers }), {
-  cache: { varyHeaders: ['Authorization'] }, // one entry per user
-});`;
+  protected readonly varyRecipe = `queryResource<Profile>(
+  () => ({ url: '/api/me', headers: { ...headers, 'x-identity': auth.id() } }),
+  {
+    cache: { varyHeaders: ['x-identity'] }, // one entry per user — stable across token refresh
+  },
+);`;
 
   protected readonly cbRecipe = `import { createCircuitBreaker } from '@mmstack/resource';
 

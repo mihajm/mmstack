@@ -36,7 +36,8 @@ import { DocSection } from '../../../layout/doc-section';
           the ICU formatter only re-runs when the locale changes or when the
           params actually change, so repeated passes cost nothing. That holds
           for inline object literals too, because Angular hands back the same
-          object reference across passes when the literal's inputs are unchanged.
+          object reference across passes when the literal's inputs are
+          unchanged.
         </p>
         <docs-code [code]="template" lang="html" />
       </docs-section>
@@ -61,9 +62,9 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Directive and pipe" id="template-helpers">
         <p>
           Some templates read better with a pipe or a directive. Both exist, but
-          they are abstract, so you subclass them once per namespace to bind them
-          to your <code>QuoteLocale</code> type. After that they are type-safe
-          for that namespace's keys and params.
+          they are abstract, so you subclass them once per namespace to bind
+          them to your <code>QuoteLocale</code> type. After that they are
+          type-safe for that namespace's keys and params.
         </p>
         <docs-code [code]="helpers" lang="ts" label="quote.helpers.ts" />
         <p>
@@ -110,8 +111,11 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Gotcha: params inside plural arms" id="withparams">
         <p>
-          Parameter inference is one level deep. A placeholder inside a
-          <code>plural</code>, <code>select</code>, or <code>selectordinal</code>
+          Parameter inference is one level deep, as TS instantiation would get
+          overly deep for the 1% neseting use-case otherwise. A placeholder
+          inside a
+          <code>plural</code>, <code>select</code>, or
+          <code>selectordinal</code>
           arm is not picked up automatically, so
           <code>{{ '{' }} name {{ '}' }}</code> sitting inside a plural arm
           would go untyped. Wrap the message with <code>withParams</code> at
@@ -129,15 +133,15 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Escape hatches for dynamic keys" id="unsafe">
         <p>
-          The typed <code>t()</code> is the path you want almost always. But some
-          keys are only known at runtime: content authored in a CMS, strings
-          shipped by a backend, a key computed from data. For those,
+          The typed <code>t()</code> is the path you want almost always. But
+          some keys are only known at runtime: content authored in a CMS,
+          strings shipped by a backend, a key computed from data. For those,
           <code>injectUnsafeT()</code> returns an untyped <code>t</code> where
           the key is <code>string</code> and params are a plain
           <code>Record</code>, with no per-key checking. It reads and reacts the
-          same way, and carries the same <code>asSignal</code> companion. It also
-          spans namespaces, so use it when a cross-namespace lookup would be
-          awkward through the typed functions.
+          same way, and carries the same <code>asSignal</code> companion. It
+          also spans namespaces, so use it when a cross-namespace lookup would
+          be awkward through the typed functions.
         </p>
         <docs-code [code]="unsafe" lang="ts" />
         <p>
@@ -146,15 +150,15 @@ import { DocSection } from '../../../layout/doc-section';
           land translations fetched after bootstrap. If the whole namespace is
           remote and its keys are unknown at compile time, declare it up front
           with <code>registerRemoteNamespace</code>: same loader shape as
-          <a mmLink="/docs/translate/namespaces"><code>registerNamespace</code></a>,
-          but the resulting <code>t</code> is typed as
+          <a mmLink="/docs/translate/namespaces"
+            ><code>registerNamespace</code></a
+          >, but the resulting <code>t</code> is typed as
           <code>{{ '{' }}ns{{ '}' }}.string</code> with
-          <code>Record</code> params. Anything added this way is invisible to the
-          <a mmLink="/docs/translate/tooling">tooling</a>, which reads static
-          source only.
+          <code>Record</code> params. Anything added this way is invisible to
+          the <a mmLink="/docs/translate/tooling">tooling</a>, which reads
+          static source only.
         </p>
       </docs-section>
-
     </docs-page>
   `,
 })

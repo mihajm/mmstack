@@ -11,7 +11,7 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Preloading"
       pkg="@mmstack/router-core"
-      lead="Lazy routes keep the initial bundle small, but the chunk only downloads after the click, so the user waits with a blank pane. Preloading closes that gap: fetch the chunk while the user is still deciding, on hover or as the link scrolls into view, so the navigation feels instant."
+      lead="Lazy routes keep the initial bundle small, but the chunk only downloads after the click, so the user has to wait. Preloading closes that gap: fetch the chunk while the user is still deciding, on hover or as the link scrolls into view, so the navigation feels instant."
     >
       <p>
         Angular ships two blunt strategies: preload nothing, or preload
@@ -26,11 +26,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="The setup" id="preload-strategy">
         <p>
           <code>PreloadStrategy</code> is the engine. It is a
-          <code>PreloadingStrategy</code> that, unlike Angular's built-in ones,
-          does nothing until something asks it to preload a specific route. On
-          its own it is inert. It listens for requests that
-          <code>mmLink</code> and <code>injectTriggerPreload</code> issue, so
-          you install it once and drive it from the other two.
+          <code>PreloadingStrategy</code> that, does nothing until something
+          asks it to preload a specific route. On its own it is inert. It
+          listens for requests that <code>mmLink</code> and
+          <code>injectTriggerPreload</code> issue, so you install it once and
+          drive it from the other two.
         </p>
         <docs-code [code]="strategy" lang="ts" />
         <p>
@@ -40,7 +40,8 @@ import { DocSection } from '../../../layout/doc-section';
           (<code>effectiveType: '2g'</code>) or when the browser reports
           <code>saveData</code>, evaluated at request time so a connection that
           improves later is not locked out. A route can opt out entirely with
-          <code>data: {{ '{' }} preload: false {{ '}' }}</code>, and
+          <code>data: {{ '{' }} preload: false {{ '}' }}</code
+          >, and
           <code>data: {{ '{' }} preloadDelay: 150 {{ '}' }}</code> debounces
           hover intent so a pointer skating across a menu does not fetch every
           chunk it passes. Each path is deduplicated, so it downloads at most
@@ -101,7 +102,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Recipe: warm a heavy route on hover" id="recipe-heavy">
+      <docs-section
+        title="Recipe: warm a heavy route on hover"
+        id="recipe-heavy"
+      >
         <p>
           Say your dashboard sits behind a fat chunk, charts, a grid library,
           the works, and first-time visitors feel the download. You do not want

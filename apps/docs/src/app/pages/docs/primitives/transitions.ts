@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { Link } from '@mmstack/router-core';
 import {
   DeferredValueDemo,
   LatestDemo,
   TransitionTabsDemo,
 } from '@mmstack/demos';
+import { Link } from '@mmstack/router-core';
 import { CodeExample } from '../../../layout/code-example';
 import { DemoBox } from '../../../layout/demo-box';
 import { DocPage } from '../../../layout/doc-page';
@@ -52,9 +52,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="scopeEx" lang="ts" />
         <p>
-          Resources from <a mmLink="/docs/resource">&#64;mmstack/resource</a>
-          and Angular's own <code>resource()</code> both work. The transition
-          primitives below read a scope to know when to swap.
+          Resources from
+          <a mmLink="/docs/resource">&#64;mmstack/resource</a> and Angular's own
+          <code>resource()</code> both work. The transition primitives below
+          read a scope to know when to swap.
         </p>
       </docs-section>
 
@@ -93,8 +94,8 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="suspenseEx" label="template" lang="html" />
         <p>
-          <code>&lt;mm-suspense&gt;</code> provides its own scope, so dropping it
-          anywhere just works. Use <code>&lt;mm-unscoped-suspense&gt;</code>
+          <code>&lt;mm-suspense&gt;</code> provides its own scope, so dropping
+          it anywhere just works. Use <code>&lt;mm-unscoped-suspense&gt;</code>
           instead when the resources to coordinate are registered above the
           boundary and you want it to read that outer scope rather than open a
           fresh one.
@@ -104,8 +105,8 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Imperative transitions" id="start-transition">
         <p>
           <code>injectStartTransition()</code> runs an update as a transition
-          from code, for cases where there is no structural directive to hang
-          it on.
+          from code, for cases where there is no structural directive to hang it
+          on.
         </p>
         <docs-code [code]="startEx" lang="ts" />
       </docs-section>
@@ -113,9 +114,10 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Transactions" id="transactions">
         <p>
           A transaction generalizes <code>startTransition</code> to a multi-step
-          update you might want to take back. <code>injectStartTransaction()</code>
-          returns a <code>startTransaction(fn)</code> bound to the nearest scope.
-          It freezes the scope's display at the pre-transaction values, then runs
+          update you might want to take back.
+          <code>injectStartTransaction()</code> returns a
+          <code>startTransaction(fn)</code> bound to the nearest scope. It
+          freezes the scope's display at the pre-transaction values, then runs
           <code>fn</code>. The writes land on live state right away, so derived
           values and connector requests see them and refetch, but the display
           stays held. On settle it releases the hold and keeps the writes; call
@@ -129,13 +131,17 @@ import { DocSection } from '../../../layout/doc-section';
           first render after the writes to be part of the transaction, so a
           loader behind a debounce or a chained resource is not attributable to
           it. Trigger such work eagerly inside <code>fn</code>. For the plumbing
-          under it, <code>createTransaction()</code> is the bare undo log
-          (<code>record</code> / <code>restore</code> / <code>clear</code>) with
-          no scope involved.
+          under it, <code>createTransaction()</code> is the bare undo log (<code
+            >record</code
+          >
+          / <code>restore</code> / <code>clear</code>) with no scope involved.
         </p>
       </docs-section>
 
-      <docs-section title="Morphing elements across a swap" id="view-transition-name">
+      <docs-section
+        title="Morphing elements across a swap"
+        id="view-transition-name"
+      >
         <p>
           When a held swap runs through the View Transitions API
           (<code>mmTransitionViewTransition</code>, or the transition outlet's
@@ -148,9 +154,9 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="viewNameEx" label="template" lang="html" />
         <p>
           The name is normalized to a valid CSS ident, and an empty string or
-          <code>'none'</code> clears it. The one rule to keep is that a name must
-          be unique among elements visible at capture time, so derive it from an
-          id for anything that repeats.
+          <code>'none'</code> clears it. The one rule to keep is that a name
+          must be unique among elements visible at capture time, so derive it
+          from an id for anything that repeats.
         </p>
       </docs-section>
 
@@ -173,14 +179,15 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Under <code>latest</code> sits <code>keepPrevious</code>, the base
           stale-while-revalidate primitive. It wraps a single signal so it holds
-          its last defined value whenever the source goes <code>undefined</code>,
-          which is exactly what a resource does mid-reload. Reach for it directly
-          when you want to hold one value rather than derive over several, and
-          for a structure rather than a value there is
-          <code>holdUntilReady(target, ready)</code>: it keeps yielding the
-          previous target until the <code>ready()</code> predicate flips, so you
-          can mount an incoming subtree off to the side and swap only once it has
-          settled.
+          its last defined value whenever the source goes
+          <code>undefined</code>, which is exactly what a resource does
+          mid-reload. Reach for it directly when you want to hold one value
+          rather than derive over several, and for a structure rather than a
+          value there is <code>holdUntilReady(target, ready)</code>: it keeps
+          yielding the previous target until the <code>ready()</code> predicate
+          flips, so you can mount an incoming subtree off to the side and swap
+          only once it has settled. Both are also useful for holding native
+          resource snapshots.
         </p>
         <docs-code [code]="keepPreviousEx" lang="ts" />
         <p>

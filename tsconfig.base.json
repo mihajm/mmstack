@@ -33,14 +33,17 @@
       "@mmstack/di": ["packages/di/src/index.ts"],
       "@mmstack/dnd": ["packages/dnd/src/index.ts"],
       "@mmstack/dnd/plugins": ["packages/dnd/plugins/src/index.ts"],
-      "@mmstack/forms": ["packages/forms/src/index.ts"]
-    }
+      "@mmstack/forms": ["packages/forms/src/index.ts"],
+      "@mmstack/worker": ["packages/worker/src/index.ts"],
+      "@mmstack/worker/host": ["packages/worker/host/src/index.ts"],
+      "@mmstack/worker/protocol": ["packages/worker/protocol/src/index.ts"],
+    },
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true,
-    "strictTemplates": true
+    "strictTemplates": true,
   },
-  "exclude": ["node_modules", "tmp"]
+  "exclude": ["node_modules", "tmp"],
 }

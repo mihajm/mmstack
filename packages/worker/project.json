@@ -1,0 +1,29 @@
+{
+  "name": "worker",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/worker/src",
+  "prefix": "mm",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/angular:package",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "project": "packages/worker/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "packages/worker/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "packages/worker/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
+    }
+  }
+}

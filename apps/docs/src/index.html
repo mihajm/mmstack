@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>mmstack</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="mmstack. Reactive, type-safe libraries for Angular signals."
+    />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <script>
+      // Apply a pinned theme before first paint so prerendered pages don't
+      // flash. 'auto' needs no work, since light-dark() follows the OS.
+      // Mirrors the `stored()` key used by the app shell.
+      (function () {
+        try {
+          var t = JSON.parse(localStorage.getItem('mmstack-docs-theme'));
+          document.documentElement.dataset.theme =
+            t === 'light' || t === 'dark' ? t : 'auto';
+        } catch (e) {
+          document.documentElement.dataset.theme = 'auto';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <docs-root></docs-root>
+  </body>
+</html>

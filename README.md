@@ -5,6 +5,8 @@ An ecosystem of reactive, type-safe libraries to supercharge your Angular Signal
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
 
+📖 **Docs & live demos: [mihajm.github.io/mmstack](https://mihajm.github.io/mmstack)**
+
 ## Vision
 
 Hey, thanks for checking out @mmstack! :) We're building an awesome ecosystem of libraries focused on highly reactive, type-safe, and performant tools, diving deep into areas where standard Angular patterns sometimes leave us wanting more – especially when chasing truly fine-grained reactivity and predictable state. Think advanced async/resource management [@mmstack/resource](https://www.npmjs.com/package/@mmstack/resource), signal forms [@mmstack/form-core](https://www.npmjs.com/package/@mmstack/form-core), powerful signal utilities [@mmstack/primitives](https://www.npmjs.com/package/@mmstack/primitives), a high-performance data grid (in progress...), routing/preload helpers [@mmstack/router-core](https://www.npmjs.com/package/@mmstack/router-core) & more. If that piques your fancy, give some of them a try, & you'll be sure to love 'em.

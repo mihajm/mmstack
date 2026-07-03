@@ -1,0 +1,90 @@
+# mmstack
+
+> Reactive, type-safe libraries for Angular, built entirely on signals. Data fetching, routing, forms, i18n, drag and drop, dependency injection, and concurrent UI. Each library does one job and works on its own, and they compose because they share the same signals foundation.
+
+mmstack targets Angular 22 and up. It is not a framework. Each package is a focused set of utilities you add to an ordinary Angular app. This documentation site is built with the libraries it documents.
+
+## @mmstack/primitives
+
+Low-level signal utilities: deep reactive stores, timing helpers, sensors, persistence, pipelines, and concurrent UI.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/primitives)
+- [Signal variants](https://mihajm.github.io/mmstack/docs/primitives/signals): mutable, derived, toWritable
+- [Store](https://mihajm.github.io/mmstack/docs/primitives/store): deep reactive store, extendStore, forkStore, opLog, opaque
+- [Mapped collections](https://mihajm.github.io/mmstack/docs/primitives/collections): indexArray, keyArray, mapObject
+- [Timing](https://mihajm.github.io/mmstack/docs/primitives/timing): debounced, throttled, until
+- [Storage and history](https://mihajm.github.io/mmstack/docs/primitives/storage): stored, tabSync, withHistory
+- [Sensors](https://mihajm.github.io/mmstack/docs/primitives/sensors): browser state as signals
+- [Pipelines](https://mihajm.github.io/mmstack/docs/primitives/pipelines): piped and operators
+- [Performance](https://mihajm.github.io/mmstack/docs/primitives/performance): chunked, pooled
+- [Transitions and suspense](https://mihajm.github.io/mmstack/docs/primitives/transitions): mmTransition, mm-suspense, latest, deferredValue, transactions
+- [Keep-alive and pausing](https://mihajm.github.io/mmstack/docs/primitives/pausing): mmActivity, pausable primitives
+
+## @mmstack/resource
+
+Data fetching on Angular's httpResource: caching, retries, stale-while-revalidate, circuit breakers, deduplication, and optimistic mutations, all opt-in.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/resource)
+- [queryResource](https://mihajm.github.io/mmstack/docs/resource/query)
+- [infiniteQueryResource](https://mihajm.github.io/mmstack/docs/resource/infinite-query)
+- [mutationResource](https://mihajm.github.io/mmstack/docs/resource/mutation)
+- [Optimistic updates](https://mihajm.github.io/mmstack/docs/resource/optimistic)
+- [Streaming (SSE and WebSocket)](https://mihajm.github.io/mmstack/docs/resource/streaming)
+- [Caching and circuit breakers](https://mihajm.github.io/mmstack/docs/resource/caching)
+- [Offline and reconnection](https://mihajm.github.io/mmstack/docs/resource/offline)
+- [Testing](https://mihajm.github.io/mmstack/docs/resource/testing)
+
+## @mmstack/router-core
+
+Signal-based helpers for the Angular router: reactive URL state, preloading links, route data, and a transition outlet that holds the current view until the next route settles.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/router-core)
+- [Reactive state](https://mihajm.github.io/mmstack/docs/router-core/state): url, navigationEndTick, queryParam
+- [Preloading](https://mihajm.github.io/mmstack/docs/router-core/preloading): mmLink, PreloadStrategy
+- [Route data](https://mihajm.github.io/mmstack/docs/router-core/route-data): provideRouteData, createRouteData, withPrefetch
+- [Transition outlet](https://mihajm.github.io/mmstack/docs/router-core/transition-outlet): mm-transition-outlet, holdThroughNavigation
+- [Titles, breadcrumbs, and nav](https://mihajm.github.io/mmstack/docs/router-core/route-ui)
+
+## @mmstack/translate
+
+Type-safe, signal-based i18n that scopes translations to a feature instead of one app-level bundle. Keys and ICU parameters are checked at compile time.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/translate)
+- [Configuration](https://mihajm.github.io/mmstack/docs/translate/configuration)
+- [Namespaces](https://mihajm.github.io/mmstack/docs/translate/namespaces)
+- [Reading translations](https://mihajm.github.io/mmstack/docs/translate/reading)
+- [Formatters](https://mihajm.github.io/mmstack/docs/translate/formatters)
+- [Tooling](https://mihajm.github.io/mmstack/docs/translate/tooling): the translate-tools CLI
+- [Testing](https://mihajm.github.io/mmstack/docs/translate/testing)
+
+## @mmstack/dnd
+
+Signals-first drag and drop with a native HTML5 engine and a pointer engine with FLIP animation. Sortable lists reorder your own array with a single splice on drop.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/dnd)
+- [Draggables and drop targets](https://mihajm.github.io/mmstack/docs/dnd/elements)
+- [Sortable lists](https://mihajm.github.io/mmstack/docs/dnd/reorderable)
+- [Advanced](https://mihajm.github.io/mmstack/docs/dnd/advanced): monitor, file drops, preview, accessibility, DI defaults
+
+## @mmstack/di
+
+Thin, typed helpers over Angular dependency injection: typed tokens, lazy and async services, and factory-built singletons.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/di)
+- [injectable](https://mihajm.github.io/mmstack/docs/di/injectable)
+- [Lazy and async](https://mihajm.github.io/mmstack/docs/di/lazy-async): injectLazy, injectAsync, provideLazy
+- [Scopes and singletons](https://mihajm.github.io/mmstack/docs/di/scopes): rootInjectable, createScope
+
+## @mmstack/forms
+
+Ergonomic utilities on Angular Signal Forms: typed field metadata, reusable field compositions, and change tracking.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/forms)
+- [Field metadata](https://mihajm.github.io/mmstack/docs/forms/field-metadata)
+- [Composition](https://mihajm.github.io/mmstack/docs/forms/composition)
+- [Change tracking](https://mihajm.github.io/mmstack/docs/forms/change-tracking): trackChanges, submitChanges
+
+## Optional
+
+- [What's new](https://mihajm.github.io/mmstack/updates)
+- [GitHub repository](https://github.com/mihajm/mmstack)

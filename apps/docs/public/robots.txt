@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mihajm.github.io/mmstack/sitemap.xml

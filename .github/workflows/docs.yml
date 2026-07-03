@@ -1,0 +1,67 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  NX_NO_CLOUD: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm nx build docs --base-href=${{ vars.DOCS_BASE_HREF || '/mmstack/' }}
+
+      # Prerender smoke check: a CSR-only regression would still "succeed",
+      # so assert real content made it into the static HTML.
+      - name: Verify prerendered output
+        run: |
+          test -s dist/apps/docs/browser/index.html
+          grep -q 'mmstack' dist/apps/docs/browser/index.html
+          grep -q 'Updates' dist/apps/docs/browser/updates/index.html
+
+      # GH Pages SPA fallback: serve the prerendered 404 page for unknown paths.
+      - name: Copy 404 fallback
+        run: cp dist/apps/docs/browser/404/index.html dist/apps/docs/browser/404.html
+
+      # sitemap.xml from the prerendered routes (for search + AI crawlers).
+      - name: Generate sitemap
+        run: node scripts/docs/gen-sitemap.mjs
+        env:
+          DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL || 'https://mihajm.github.io/mmstack' }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/apps/docs/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

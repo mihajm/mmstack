@@ -1,0 +1,13 @@
+{
+  "name": "demos",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/demos/src",
+  "prefix": "demo",
+  "projectType": "library",
+  "tags": ["scope:docs"],
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    }
+  }
+}

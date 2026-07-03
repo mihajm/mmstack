@@ -70,6 +70,13 @@ export type TransitionScope = {
   readonly pending: Signal<boolean>;
   /** Any *suspending* resource is not ready — drives the first-load placeholder. */
   suspended(type: SuspendType): boolean;
+  /**
+   * Register a resource. EVERY `add` must be paired with a `remove` when the
+   * registrant goes away — the scope holds the resource strongly and keeps
+   * reading its `status` forever otherwise (stale `pending`, pinned memory).
+   * Prefer {@link registerResource} / `injectRegisterResource`, which pair the
+   * removal with the caller's `DestroyRef` automatically.
+   */
   add(res: ResourceLike, opt?: RegisterOptions): void;
   remove(res: ResourceLike): void;
   /**
@@ -294,7 +301,11 @@ export function createForwardingScope(): ForwardingTransitionScope {
   const own = createTransitionScope();
   const target = signal<TransitionScope | null>(null);
   const eff = () => target() ?? own;
-  const owners = new Map<ResourceLike, TransitionScope>();
+  // WeakMap, deliberately: the forwarder usually outlives its targets (an outlet
+  // re-pointing at per-route scopes). If a registrant ever misses its `remove`,
+  // ephemeron semantics let the ref↔dead-target cycle collect once the registrant
+  // drops the ref, instead of this map pinning every stranded pair forever.
+  const owners = new WeakMap<ResourceLike, TransitionScope>();
 
   return {
     setTarget: (t) => target.set(t),

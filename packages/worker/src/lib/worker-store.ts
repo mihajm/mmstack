@@ -282,7 +282,20 @@ function build<T extends object>(
   if (opt?.register) {
     const scope = injectTransitionScope();
     scope.add(self, { suspends: opt.register === 'suspend' });
-    inject(DestroyRef).onDestroy(() => scope.remove(self));
+    // deregister on manual destroy() too, not only on context teardown — a
+    // long-lived context destroying a ref by hand must not leave a zombie entry
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      scope.remove(self);
+    };
+    inject(DestroyRef).onDestroy(remove);
+    const destroy = self.destroy;
+    self.destroy = () => {
+      remove();
+      destroy();
+    };
   }
 
   return self;

@@ -1,10 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
 import { mediaQuery } from '@mmstack/primitives';
 import { injectNavItems, Link, url } from '@mmstack/router-core';
 
@@ -25,14 +19,8 @@ import { injectNavItems, Link, url } from '@mmstack/router-core';
             class="page prev"
             [mmLink]="p.link()"
             [preloadOn]="mobile() ? 'visible' : 'hover'"
-            (preloading)="prevReady.set(true)"
           >
-            <span class="dir">
-              Previous
-              @if (prevReady()) {
-                <span class="ready" aria-hidden="true">ready</span>
-              }
-            </span>
+            <span class="dir">Previous</span>
             <span class="title">{{ p.label() }}</span>
           </a>
         } @else {
@@ -43,14 +31,8 @@ import { injectNavItems, Link, url } from '@mmstack/router-core';
             class="page next"
             [mmLink]="n.link()"
             [preloadOn]="mobile() ? 'visible' : 'hover'"
-            (preloading)="nextReady.set(true)"
           >
-            <span class="dir">
-              @if (nextReady()) {
-                <span class="ready" aria-hidden="true">ready</span>
-              }
-              Next
-            </span>
+            <span class="dir">Next</span>
             <span class="title">{{ n.label() }}</span>
           </a>
         }
@@ -71,7 +53,7 @@ import { injectNavItems, Link, url } from '@mmstack/router-core';
       display: flex;
       flex-direction: column;
       gap: 0.15rem;
-      max-width: 48%;
+      min-width: 0;
       padding: 0.65rem 0.9rem;
       border: 1px solid var(--line);
       border-radius: 2px;
@@ -91,9 +73,6 @@ import { injectNavItems, Link, url } from '@mmstack/router-core';
     }
 
     .dir {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
       font-family: var(--font-mono);
       font-size: 0.7rem;
       letter-spacing: 0.08em;
@@ -101,22 +80,29 @@ import { injectNavItems, Link, url } from '@mmstack/router-core';
       color: var(--fg-muted);
     }
 
-    .next .dir {
-      justify-content: flex-end;
-    }
-
-    .ready {
-      color: var(--accent);
-      letter-spacing: 0.06em;
-    }
-
     .title {
       font-weight: 600;
       font-size: 0.95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .page:hover .title {
       color: var(--accent);
+    }
+
+    @media (max-width: 760px) {
+      .footer-nav {
+        flex-direction: column;
+      }
+
+      .page,
+      .page.next {
+        max-width: none;
+        margin-left: 0;
+        text-align: left;
+      }
     }
   `,
 })
@@ -125,18 +111,6 @@ export class DocFooterNav {
   private readonly currentUrl = url();
 
   protected readonly mobile = mediaQuery('(max-width: 760px)');
-  protected readonly prevReady = signal(false);
-  protected readonly nextReady = signal(false);
-
-  constructor() {
-    // This lives outside the routed outlet, so it persists across navigations.
-    // Reset the preload indicators when the page (and its neighbors) change.
-    effect(() => {
-      this.currentUrl();
-      this.prevReady.set(false);
-      this.nextReady.set(false);
-    });
-  }
 
   private readonly flat = computed(() =>
     this.nav().flatMap((group) => group.children()),

@@ -1,4 +1,5 @@
 import { Component } from '@angular/core';
+import { mediaQuery } from '@mmstack/primitives';
 import { Link } from '@mmstack/router-core';
 import { Logo } from '../layout/logo';
 
@@ -74,7 +75,11 @@ const PACKAGES: Pkg[] = [
       <h2 class="kicker">Packages</h2>
       <div class="grid">
         @for (pkg of packages; track pkg.name) {
-          <a [mmLink]="pkg.link" class="card">
+          <a
+            [mmLink]="pkg.link"
+            [preloadOn]="mobile() ? 'visible' : 'hover'"
+            class="card"
+          >
             <h3>{{ pkg.name }}</h3>
             <p>{{ pkg.blurb }}</p>
           </a>
@@ -200,4 +205,5 @@ const PACKAGES: Pkg[] = [
 })
 export class Landing {
   protected readonly packages = PACKAGES;
+  protected readonly mobile = mediaQuery('(max-width: 760px)');
 }

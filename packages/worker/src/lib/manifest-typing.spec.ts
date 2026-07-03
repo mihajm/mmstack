@@ -12,7 +12,10 @@ import { workerStore } from './worker-store';
  * never runs against a real worker (guarded by `if (never)`), so no injection context is needed.
  */
 function makeHost() {
-  const counter = store({ value: 0, history: [] as number[] }, createStoreContext());
+  const counter = store(
+    { value: 0, history: [] as number[] },
+    createStoreContext(),
+  );
   const stats = computed(() => ({ sum: 0, count: 0 }));
   return createWorkerHost({
     stores: { counter },
@@ -29,7 +32,8 @@ describe('manifest typing (compile-time)', () => {
       const worker = null as unknown as WorkerRef<SchemaOf<App>>;
 
       const counter = workerStore(worker, 'counter'); // owned → CounterState, writable
-      const cv: { value: number; history: number[] } | undefined = counter.value();
+      const cv: { value: number; history: number[] } | undefined =
+        counter.value();
       void cv;
       counter.write((d) => d.value.set(1)); // OK — owned subtree
 
@@ -37,7 +41,9 @@ describe('manifest typing (compile-time)', () => {
       const sv: { sum: number; count: number } | undefined = stats.value();
       void sv;
       // @ts-expect-error published subtree is read-only — no write()
-      stats.write(() => {});
+      stats.write(() => {
+        // noop
+      });
 
       // named task typed from the schema
       const r: Promise<number> = worker.runTask('fib', 21);

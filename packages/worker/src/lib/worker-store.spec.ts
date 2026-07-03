@@ -52,7 +52,10 @@ describe('workerStore — read-only replica', () => {
     owned.user.name.set('grace');
     await tick();
     expect(replica.store.user.name()).toBe('grace');
-    expect(replica.value()).toEqual({ ...initial(), user: { name: 'grace', age: 36 } });
+    expect(replica.value()).toEqual({
+      ...initial(),
+      user: { name: 'grace', age: 36 },
+    });
   });
 
   it('applies a multi-op batch as ONE notification wave', async () => {
@@ -115,7 +118,11 @@ describe('workerStore — write() routed to the owner', () => {
   it('resolves immediately for a no-op write', async () => {
     const { replica } = wire();
     await tick();
-    await expect(replica.write(() => {})).resolves.toBeUndefined();
+    await expect(
+      replica.write(() => {
+        // noop
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('a write from one client converges on every replica (echo-free single-sequencer)', async () => {

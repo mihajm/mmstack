@@ -241,6 +241,27 @@ queryResource<TResult, TRaw = TResult>(
 | `prefetch`   | `(req?) => Promise<void>`                  | Warm the cache without subscribing. Silently skips on slow connections (`saveData` / 2g).     |
 | `destroy`    | `() => void`                               | –                                                                                             |
 
+### Raw responses: `queryResource.text` / `.arrayBuffer` / `.blob`
+
+Mirroring Angular's `httpResource` sub-functions, these variants deliver the body without JSON parsing. The full option set (cache, retry, refresh, circuit breaker, prefetch) applies to all of them.
+
+```ts
+const csv = queryResource.text(() => '/api/report.csv');
+csv.value(); // string | undefined
+
+const model = queryResource.arrayBuffer(() => '/api/model.bin');
+const invoice = queryResource.blob(() => '/api/invoice.pdf');
+
+// parse maps the raw body; TRaw is string for the text variant
+const rows = queryResource.text(() => '/api/report.csv', {
+  parse: (s) => s.split('\n'),
+});
+```
+
+A raw variant caches under a distinct key, so a JSON and a text query for the same URL never serve each other's body.
+
+The main reason these exist is keeping a large parse off the main thread. `response.json()` on a 20MB body blocks the thread that paints. Fetch it here as text or an `ArrayBuffer` (interceptors and auth intact), then hand it to a Web Worker to parse and own; a buffer moves zero-copy via `transfer()` from [`@mmstack/worker`](https://www.npmjs.com/package/@mmstack/worker). One caveat when combining the cache with `transfer()`: transferring detaches the cached buffer, so copy it first (`buf.slice(0)`) or disable the cache for that query. Dev mode warns if a detached buffer is ever served from the cache.
+
 ## `mutationResource`
 
 ```ts

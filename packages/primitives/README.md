@@ -17,7 +17,7 @@ npm install @mmstack/primitives
 
 - [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `forkStore`, `toWritable`
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
-- [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`
+- [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`, `projection`
 - [Effects](#effects) — `nestedEffect`
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`, `opLog`
@@ -302,6 +302,32 @@ const controls = mapObject(
   { onDestroy: (entry) => console.log(`Removed ${entry.label}`) },
 );
 ```
+
+### `projection`
+
+A derived **store**, the store-shaped counterpart to `computed`. Where `derived` slices one value out of a source and `indexArray` / `keyArray` map a list, `projection` derives a whole store subtree from a computation. `fn` receives a mutable draft seeded with the current value and either mutates it or returns new data; the result is reconciled against the previous value so unchanged object subtrees keep their reference and keyed array items keep their identity across recomputes. Reading through the returned store is per-leaf, so a `computed` over one field only recomputes when that field actually changes, even though the whole projection re-ran.
+
+```typescript
+import { projection } from '@mmstack/primitives';
+
+const users = signal<User[]>([]);
+
+// return form: derive a filtered collection, reconciled by id
+const active = projection<User[]>(() => users().filter((u) => u.active), [], {
+  key: 'id',
+});
+
+// mutate form: update fields on the draft
+const summary = projection<{ total: number; active: number }>(
+  (draft) => {
+    draft.total = users().length;
+    draft.active = users().filter((u) => u.active).length;
+  },
+  { total: 0, active: 0 },
+);
+```
+
+Recompute is pull-based, exactly like `computed`: memoized, re-run on the first read after a dependency changes, coherent immediately after a write (no waiting on an effect flush), and skipped entirely while nobody reads. `fn` must be pure since it runs inside the reactive computation. Prefer `computed` for a plain value, and reach for `projection` when you want the per-property tracking of a store on top of a derivation. The standalone `reconcile(prev, next, key)` is exported too, for producing a reference-stable value by hand. Values must be structured-clonable (the draft is a clone of the current value). With an explicit store context (`createStoreContext()`) a projection is injector-free, so it also runs on a worker host.
 
 ## Effects
 
@@ -681,12 +707,15 @@ log.latest(); // Signal<OpBatch | null> — lossy sampling (devtools-style)
 state.user.name.set('Bea');
 // → { origin, version, ops: [{ kind: 'set', path: ['user','name'], next: 'Bea', prev: 'Ann' }] }
 
+log.flush(); // synchronously emit any pending change now, instead of waiting for the tick. idempotent, no-op when clean.
 log.apply(remoteBatch); // applies ops in ONE commit AND advances the diff baseline —
 // so applying a remote batch emits no echo batch (sync loops terminate by construction)
 invertBatch(batch); // prev-based inverse — undo is a data transform
 ```
 
 Batching is per tick (two writes to one leaf in a tick emit one composed op), `prev` is always carried in-memory (structural sharing makes it free — wire serializers decide whether to keep it), arrays diff per-index at equal lengths and as whole-array ops on length change, and a `forkStore`'s `commit()` lands as a single batch — fork *is* the transaction primitive. Mutable stores are unsupported (in-place mutation defeats ref-identity diffing; dev warn). This is the substrate for worker mirrors, tab/mesh sync, persistence journals, and undo — one protocol, many consumers.
+
+An `opLog` can also run with no Angular injector, which is what lets the graph mirror into a Web Worker. Pass `driver: microtaskOpLogDriver()` to drive emission off the microtask queue instead of an `effect()`, and build the store with `createStoreContext()` (a self-contained proxy cache) so `store` and `opLog` work in a worker or a plain Node process. The pure helpers `applyOps(root, ops)` and `diffOps(prev, next)` apply and produce batches without owning a log. [`@mmstack/worker`](https://www.npmjs.com/package/@mmstack/worker) is built directly on these seams.
 
 ## Performance helpers
 

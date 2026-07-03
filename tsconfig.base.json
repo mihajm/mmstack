@@ -32,6 +32,9 @@
       "@mmstack/dnd/plugins": ["./packages/dnd/plugins/src/index.ts"],
       "@mmstack/forms": ["./packages/forms/src/index.ts"],
       "@mmstack/translate-tools": ["./packages/translate-tools/src/index.ts"],
+      "@mmstack/worker": ["./packages/worker/src/index.ts"],
+      "@mmstack/worker/host": ["./packages/worker/host/src/index.ts"],
+      "@mmstack/worker/protocol": ["./packages/worker/protocol/src/index.ts"],
       "@mmstack/demos": ["./libs/demos/src/index.ts"]
     }
   },

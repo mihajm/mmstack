@@ -7,7 +7,6 @@ import {
 } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
 import { applyOps, opLog, type OpLog } from '@mmstack/primitives';
-import { microtaskOpLogDriver } from './microtask-driver';
 import {
   generateId,
   PROTO_VERSION,
@@ -18,6 +17,7 @@ import {
   type WorkerPortLike,
   type WorkerSchema,
 } from '@mmstack/worker/protocol';
+import { microtaskOpLogDriver } from './microtask-driver';
 
 /** A named unit of compute a worker exposes (rung 1). `ctx.signal` aborts when the caller cancels. */
 export type WorkerTaskHandler<I = any, O = any> = (
@@ -90,7 +90,9 @@ type Subtree = {
 };
 
 /** Maps an Angular ResourceStatus to the wire status; only the states the protocol carries. */
-function toRemoteStatus(s: ResourceStatus): 'idle' | 'loading' | 'reloading' | 'resolved' | 'error' {
+function toRemoteStatus(
+  s: ResourceStatus,
+): 'idle' | 'loading' | 'reloading' | 'resolved' | 'error' {
   return s === 'idle' || s === 'loading' || s === 'reloading' || s === 'error'
     ? s
     : 'resolved';
@@ -109,13 +111,15 @@ function devAssertCloneable(value: unknown, what: string): void {
     throw new Error(
       `[@mmstack/worker] ${what} holds a value that cannot be sent across the worker boundary. ` +
         `Synced state must be structured-clonable: functions, class instances, and opaque() values ` +
-        `do not serialize. Keep it to plain JSON-like data. (${(err as Error).message})`,
+        `do not serialize. Keep it to plain JSON-like data.`,
+      { cause: err },
     );
   }
 }
 
 function isWorkerGlobal(g: unknown): g is WorkerPortLike {
-  const scope = (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope;
+  const scope = (globalThis as { WorkerGlobalScope?: unknown })
+    .WorkerGlobalScope;
   return (
     typeof scope === 'function' &&
     g instanceof (scope as new () => unknown) &&
@@ -171,7 +175,7 @@ export function createWorkerHost<
   const statusWatches: { destroy(): void }[] = [];
 
   const fanout = (store: string, message: WorkerEnvelope) => {
-    for (const conn of connections)
+    for (const conn of Array.from(connections))
       if (conn.stores.has(store)) conn.port.postMessage(message);
   };
 
@@ -217,7 +221,11 @@ export function createWorkerHost<
           const s = statusSig();
           if (s === last) return;
           last = s;
-          fanout(key, { type: 'store:status', store: key, status: toRemoteStatus(s) });
+          fanout(key, {
+            type: 'store:status',
+            store: key,
+            status: toRemoteStatus(s),
+          });
         },
         (watch) => {
           if (scheduled) return;
@@ -246,12 +254,19 @@ export function createWorkerHost<
       .then(() => handler(input, { signal: ac.signal }))
       .then(
         (value) => {
-          if (ac.signal.aborted) conn.port.postMessage({ type: 'task:aborted', runId });
+          if (ac.signal.aborted)
+            conn.port.postMessage({ type: 'task:aborted', runId });
           else conn.port.postMessage({ type: 'task:ok', runId, value });
         },
         (err) => {
-          if (ac.signal.aborted) conn.port.postMessage({ type: 'task:aborted', runId });
-          else conn.port.postMessage({ type: 'task:error', runId, error: serializeError(err) });
+          if (ac.signal.aborted)
+            conn.port.postMessage({ type: 'task:aborted', runId });
+          else
+            conn.port.postMessage({
+              type: 'task:error',
+              runId,
+              error: serializeError(err),
+            });
         },
       )
       .finally(() => {
@@ -308,7 +323,9 @@ export function createWorkerHost<
           conn.port.postMessage({
             type: 'task:error',
             runId: msg.runId,
-            error: serializeError(new Error(`[@mmstack/worker] unknown task: ${msg.task}`)),
+            error: serializeError(
+              new Error(`[@mmstack/worker] unknown task: ${msg.task}`),
+            ),
           });
           return;
         }

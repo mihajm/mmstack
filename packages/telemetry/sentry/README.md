@@ -1,5 +1,7 @@
 # @mmstack/telemetry-sentry
 
+> **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
+
 Sentry adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core). An `ErrorSink` over your own Sentry SDK, plus a reactive last-event-id handle.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)

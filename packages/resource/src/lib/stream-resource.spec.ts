@@ -13,7 +13,6 @@ import { ResourceSensors } from './util';
 
 type Msg = { n: number };
 
-/** Records every connection attempt; the test drives open/emit/fail by hand. */
 function fakeTransport() {
   const connections: {
     url: string;
@@ -54,7 +53,6 @@ describe('streamResource', () => {
 
   afterEach(() => vi.useRealTimers());
 
-  /** The FIRST item of a stream resolves the loader promise — flush that microtask hop. */
   const settle = async () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
     TestBed.tick();
@@ -66,7 +64,7 @@ describe('streamResource', () => {
     const res = TestBed.runInInjectionContext(() =>
       streamResource<Msg>(() => 'wss://x/feed', { transport: t.transport }),
     );
-    TestBed.tick(); // the resource's load effect connects
+    TestBed.tick();
 
     expect(t.connections.length).toBe(1);
     expect(res.status()).toBe('loading');
@@ -74,7 +72,7 @@ describe('streamResource', () => {
 
     t.last.ctx.open();
     expect(res.connected()).toBe(true);
-    expect(res.status()).toBe('loading'); // connected but no data yet — honestly not ready
+    expect(res.status()).toBe('loading');
 
     t.last.ctx.emit({ n: 1 });
     await settle();
@@ -107,7 +105,7 @@ describe('streamResource', () => {
     await settle();
     expect(res.value()).toEqual({ n: 9 });
 
-    url.set(undefined); // the disable lever
+    url.set(undefined);
     TestBed.tick();
     expect(t.last.closed).toBe(true);
     expect(res.status()).toBe('idle');
@@ -132,23 +130,23 @@ describe('streamResource', () => {
 
     t.last.ctx.fail(new Error('dropped'));
     expect(res.connected()).toBe(false);
-    expect(res.value()).toEqual({ n: 1 }); // the value HOLDS through the outage
-    expect(res.status()).toBe('resolved'); // a retried drop is not an error state
-    expect(t.connections.length).toBe(1); // backoff — not immediate
+    expect(res.value()).toEqual({ n: 1 });
+    expect(res.status()).toBe('resolved');
+    expect(t.connections.length).toBe(1);
 
     vi.advanceTimersByTime(1000);
-    expect(t.connections.length).toBe(2); // first retry after base backoff
+    expect(t.connections.length).toBe(2);
 
     t.last.ctx.fail(new Error('still down'));
     vi.advanceTimersByTime(1000);
-    expect(t.connections.length).toBe(2); // second retry doubles: not yet…
+    expect(t.connections.length).toBe(2);
     vi.advanceTimersByTime(1000);
-    expect(t.connections.length).toBe(3); // …now
+    expect(t.connections.length).toBe(3);
 
-    t.last.ctx.open(); // success resets the ladder
+    t.last.ctx.open();
     t.last.ctx.fail(new Error('dropped again'));
     vi.advanceTimersByTime(1000);
-    expect(t.connections.length).toBe(4); // back to base backoff
+    expect(t.connections.length).toBe(4);
 
     expect(errors.length).toBe(3);
   });
@@ -166,12 +164,12 @@ describe('streamResource', () => {
     TestBed.tick();
     t.last.ctx.fail(new Error('refused'));
     vi.advanceTimersByTime(1000);
-    t.last.ctx.fail(new Error('refused again')); // retries exhausted
+    t.last.ctx.fail(new Error('refused again'));
     await settle();
     expect(res.status()).toBe('error');
     expect(res.error()).toBeInstanceOf(Error);
 
-    res.reload(); // fresh attempt budget
+    res.reload();
     TestBed.tick();
     expect(t.connections.length).toBe(3);
     t.last.ctx.open();
@@ -205,11 +203,11 @@ describe('streamResource', () => {
       streamResource<Msg>(() => 'wss://x/feed', { transport: t.transport }),
     );
     TestBed.tick();
-    expect(t.connections.length).toBe(0); // offline — nothing burned
+    expect(t.connections.length).toBe(0);
 
     online.set(true);
-    TestBed.tick(); // the until() watcher observes the regain
-    await Promise.resolve(); // …and resolves its promise
+    TestBed.tick();
+    await Promise.resolve();
     expect(t.connections.length).toBe(1);
   });
 
@@ -227,11 +225,11 @@ describe('streamResource', () => {
     res.abort();
     expect(t.last.closed).toBe(true);
     expect(res.connected()).toBe(false);
-    expect(res.value()).toEqual({ n: 3 }); // kept
+    expect(res.value()).toEqual({ n: 3 });
     expect(res.status()).toBe('local');
-    expect(t.connections.length).toBe(1); // no sneaky reconnect
+    expect(t.connections.length).toBe(1);
 
-    res.reload(); // explicit resume
+    res.reload();
     TestBed.tick();
     expect(t.connections.length).toBe(2);
   });
@@ -247,9 +245,9 @@ describe('streamResource', () => {
       scope: injectTransitionScope(),
     }));
     TestBed.tick();
-    expect(scope.pending()).toBe(true); // first load in flight
+    expect(scope.pending()).toBe(true);
 
-    expect(scope.abortPending()).toBe(1); // the cancellation seam reaches streams
+    expect(scope.abortPending()).toBe(1);
     expect(t.last.closed).toBe(true);
     expect(res.status()).toBe('local');
     expect(scope.pending()).toBe(false);

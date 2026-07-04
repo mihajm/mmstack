@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
-/** What a preload request warms: route CODE always; `'all'` also warms route DATA. */
+/** `'code'` warms route code only; `'all'` also warms route data. */
 export type PreloadScope = 'all' | 'code';
 
 export type PreloadRequest = {

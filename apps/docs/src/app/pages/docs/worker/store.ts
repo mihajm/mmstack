@@ -10,42 +10,52 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Replicas and writes"
       pkg="@mmstack/worker"
-      lead="Mirror a worker-owned store to the main thread as a live, read-only replica, and route writes back to the owner."
+      lead="Mirror a worker-owned store to the main thread as a live, writable op-log endpoint: writes apply optimistically and route to the owner, and other readers (mesh, persist) attach to the same store."
     >
       <p>
-        <code>workerStore</code> gives the main thread a replica of a store the
-        worker owns. The replica is a real, read-only signal store: you read it
-        deeply, per leaf, like any store from
-        <code>&#64;mmstack/primitives</code>. It hydrates from the owner's first
-        snapshot, then applies each authoritative batch in one notification wave.
+        <code>workerStore</code> gives the main thread a store the worker owns.
+        For an owned subtree it is a real, writable signal store: you read it
+        deeply per leaf and route changes with <code>write</code>, like any store
+        from <code>&#64;mmstack/primitives</code>. It hydrates from the owner's
+        first snapshot, then folds each authoritative batch in through an
+        echo-free apply.
       </p>
 
       <docs-code [code]="replica" lang="ts" />
 
-      <docs-section title="Routing a write" id="write">
+      <docs-section title="Writing (optimistic)" id="write">
         <p>
-          You cannot set a leaf locally, because that would diverge from the
-          owner. To change owned state you route a write. Your recipe runs
-          against a scratch draft of the current replica, the difference is
-          shipped to the owner as minimal operations, the owner applies and
-          re-emits it, and the promise resolves once that authoritative batch has
-          landed back on your replica.
+          <code>write</code> applies your recipe locally right away, ships the
+          diff to the owner as minimal operations, and the owner (the single
+          sequencer) applies and re-emits it. The returned promise resolves once
+          that authoritative batch lands back, so you can await confirmation while
+          the value is already on screen. The owner stays authoritative: every
+          replica reconciles to its ordering, and interleaved writes converge to
+          the same state everywhere.
         </p>
         <docs-code [code]="write" lang="ts" />
-        <p>
-          Nothing is applied optimistically, which is exactly what guarantees
-          every replica converges to the owner's ordering. Interleaved writes
-          from several components end up identical everywhere.
-        </p>
       </docs-section>
 
-      <docs-section title="Optimistic UI" id="optimistic">
+      <docs-section title="Honest async (opt-in)" id="honest">
         <p>
-          Because writes are honest, optimism is opt-in. Keep a local overlay,
-          show it, route the write underneath, and drop the overlay when the
-          authoritative value lands.
+          Optimistic is the default because it matches how the rest of the stack
+          syncs. If you'd rather not show a value until the owner confirms it
+          (say the owner can reject the write), fork the store, write to the fork,
+          and reveal it only when the <code>write</code> promise resolves.
         </p>
-        <docs-code [code]="optimistic" lang="ts" />
+        <docs-code [code]="honest" lang="ts" />
+      </docs-section>
+
+      <docs-section title="Compose: sync and persistence" id="compose">
+        <p>
+          Because the owned store is a writable op-log endpoint, the readers from
+          <code>&#64;mmstack/primitives</code> and
+          <code>&#64;mmstack/mesh</code> attach to it directly, no bridge.
+          <code>persist</code> makes the worker-owned graph durable;
+          <code>meshSync</code> replicates it to peers. The worker owns the graph
+          off the main thread; sync and durability are readers over its op-log.
+        </p>
+        <docs-code [code]="compose" lang="ts" />
       </docs-section>
 
       <docs-section title="Published derivations" id="published">
@@ -82,7 +92,7 @@ export class WorkerStoreDoc {
 
 const todos = workerStore(this.worker, 'todos');
 
-todos.store;       // SignalStore<Todo[]>, read deeply like any store
+todos.store;       // WritableSignalStore<Todo[]> (owned): read deeply, route writes
 todos.value();     // Signal<Todo[] | undefined>, undefined before hydration
 todos.status();    // 'loading' until the first snapshot, then 'resolved'
 todos.hasValue();
@@ -91,20 +101,21 @@ todos.connected;   // the worker connection's liveness`;
   protected readonly write = `await todos.write((draft) => {
   draft.set([...draft(), { id: 1, text: 'buy milk', done: false }]);
 });
-// resolves after the owner's authoritative batch has updated this replica`;
+// visible immediately (optimistic); the promise resolves once the owner's
+// authoritative batch has reconciled this replica`;
 
-  protected readonly optimistic = `const overlay = signal<Todo[] | null>(null);
-const view = computed(() => overlay() ?? todos.value() ?? []); // render view()
+  protected readonly honest = `const draft = forkStore(todos.store);   // a detached copy
+draft.set(next);                         // edit the fork, not the shown store
+await todos.write((d) => d.set(next));   // owner confirms
+// only now is 'next' the authoritative value on todos.store`;
 
-async function add(todo: Todo) {
-  const next = [...(todos.value() ?? []), todo];
-  overlay.set(next);           // shown immediately
-  try {
-    await todos.write((d) => d.set(next));
-  } finally {
-    overlay.set(null);         // authoritative value has landed
-  }
-}`;
+  protected readonly compose = `import { persist, meshSync } from '@mmstack/primitives'; // + @mmstack/mesh transport
+
+const doc = workerStore(this.worker, 'doc'); // owned → writable op-log endpoint
+
+persist(doc.store, { key: 'doc', store: idbKeyval });      // durable to IndexedDB
+meshSync(doc.store, { room: 'doc-42', writer, transport }); // synced to peers
+// a persisted, meshed, worker-owned graph: three readers over one op-log`;
 
   protected readonly published = `// worker: a derivation recomputed off-main
 const visible = computed(() => todos().filter((t) => !t.done));

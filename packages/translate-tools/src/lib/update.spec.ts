@@ -26,8 +26,8 @@ describe('replaceTranslationLiteral', () => {
     expect(replaceTranslationLiteral(p, '/q.de.ts', 'quoteDe', next)).toBe(true);
 
     const text = p.getSourceFileOrThrow('/q.de.ts').getFullText();
-    expect(text).toContain("import { quote } from './quote'"); // import untouched
-    expect(liftObjectLiteral(secondArg(p))).toEqual(next); // literal swapped
+    expect(text).toContain("import { quote } from './quote'");
+    expect(liftObjectLiteral(secondArg(p))).toEqual(next);
   });
 
   it('returns false when the export is missing or not a call', () => {

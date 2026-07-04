@@ -17,11 +17,6 @@ import {
   injectFormatRelativeTimeToNow,
 } from './relative-time';
 
-/**
- * The library's headline feature: every injected formatter re-resolves when the
- * locale signal changes. One test per formatter, asserting through a `computed`
- * exactly the way templates consume them.
- */
 describe('formatter locale reactivity', () => {
   let store: TranslationStore;
 
@@ -49,7 +44,6 @@ describe('formatter locale reactivity', () => {
 
       expect(label()).toBe('50%');
       store.locale.set('de-DE');
-      // German separates with a space (regular/no-break varies by ICU version)
       expect(label()).toMatch(/^50\s%$/);
     });
   });
@@ -126,9 +120,9 @@ describe('formatter locale reactivity', () => {
       const plural = injectSelectPlural();
       const category = computed(() => plural(2));
 
-      expect(category()).toBe('other'); // en-US: 2 → other
+      expect(category()).toBe('other');
       store.locale.set('sl-SI');
-      expect(category()).toBe('two'); // Slovenian has a dual form
+      expect(category()).toBe('two');
     });
   });
 
@@ -218,10 +212,10 @@ describe('selectPluralCategory', () => {
   it('supports ordinal rules', () => {
     expect(
       selectPluralCategory(2, { locale: 'en-US', type: 'ordinal' }),
-    ).toBe('two'); // "2nd"
+    ).toBe('two');
     expect(
       selectPluralCategory(3, { locale: 'en-US', type: 'ordinal' }),
-    ).toBe('few'); // "3rd"
+    ).toBe('few');
   });
 
   it('coerces invalid input to other', () => {

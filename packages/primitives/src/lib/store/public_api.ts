@@ -12,6 +12,51 @@ export {
   type OpLogDriver,
   type StoreOp,
 } from './op-log';
+export {
+  compareHlc,
+  compareTotal,
+  createHlcClock,
+  type Hlc,
+  type HlcClock,
+} from './hlc';
+export {
+  createConvergingApply,
+  isConflicted,
+  keyedArray,
+  lww,
+  mergeThree,
+  OP_PROTO_VERSION,
+  opSync,
+  policyStrategy,
+  preserve,
+  rebaseOps,
+  type Conflicted,
+  type ConvergingApply,
+  type MergeContext,
+  type MergeFn,
+  type MergePolicyEntry,
+  type OpEnvelope,
+  type OpSync,
+  type OpSyncOptions,
+  type RebaseResult,
+} from './op-sync';
+export {
+  storeHistory,
+  type StoreHistory,
+  type StoreHistoryOptions,
+} from './store-history';
+export {
+  persist,
+  persistedStore,
+  providePersistedStoreOptions,
+  PERSISTED_STORE_OPTIONS,
+  type AsyncStore,
+  type PersistHandle,
+  type PersistOptions,
+  type PersistedStore,
+  type PersistedStoreDefaults,
+  type PersistedStoreOptions,
+} from './persisted-store';
 export { isOpaque, opaque, type Opaque } from './opaque';
 export {
   projection,

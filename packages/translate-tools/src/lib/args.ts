@@ -1,6 +1,3 @@
-/** Minimal argv option readers shared by the CLI. Both guard against a missing value so a typo
- * (`--out --in i18n`) throws instead of silently swallowing the next flag as the option's value. */
-
 /** Read a `--name value` option; throws if the value is missing or is itself a flag. Returns
  * undefined when the option is absent. */
 export function flag(args: string[], name: string): string | undefined {

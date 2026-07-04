@@ -18,7 +18,6 @@ import type { OpLogDriver } from '@mmstack/primitives';
 export function microtaskOpLogDriver(): OpLogDriver {
   return (run) => {
     let scheduled = false;
-    // run reads the source (tracking) and flushes; it never writes signals, so allowSignalWrites=false
     const watch = createWatch(
       () => run(),
       (w) => {
@@ -26,12 +25,12 @@ export function microtaskOpLogDriver(): OpLogDriver {
         scheduled = true;
         queueMicrotask(() => {
           scheduled = false;
-          w.run(); // no-op if the watch is not dirty
+          w.run();
         });
       },
       false,
     );
-    watch.notify(); // bootstrap: schedule the first run to establish the source dependency
+    watch.notify();
     return { destroy: () => watch.destroy() };
   };
 }

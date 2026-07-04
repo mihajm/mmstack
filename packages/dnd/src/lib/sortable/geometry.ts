@@ -12,12 +12,12 @@
 export type Axis = 'x' | 'y';
 
 /** Minimal `DOMRect`-compatible shape, so tests don't construct real rects. */
-export interface RectLike {
+export type RectLike = {
   readonly top: number;
   readonly left: number;
   readonly width: number;
   readonly height: number;
-}
+};
 
 /** Main-axis start coordinate (`left` for x, `top` for y). */
 export function startAlong(rect: RectLike, axis: Axis): number {

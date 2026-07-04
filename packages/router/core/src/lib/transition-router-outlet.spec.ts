@@ -54,8 +54,6 @@ const B_REF = new InjectionToken<FakeRef>('test-b-ref');
 @Component({ selector: 'route-a', template: `route-A` })
 class RouteA {}
 
-// Reads a route param (proves super-delegation kept the route injector intact) and
-// registers its loading resource into the outlet's transition scope.
 @Component({ selector: 'route-b', template: `route-B id={{ id }}` })
 class RouteB {
   protected readonly id = inject(ActivatedRoute).snapshot.paramMap.get('id');
@@ -99,18 +97,16 @@ describe('TransitionRouterOutlet', () => {
     expect(container.querySelector('route-a')).not.toBeNull();
     expect(container.querySelector('route-b')).toBeNull();
 
-    // navigate to B (still loading) — A must hold, B mounts hidden, param resolved
     await router.navigateByUrl('/b/42');
     await flush();
 
     const routeA = container.querySelector('route-a') as HTMLElement | null;
     const routeB = container.querySelector('route-b') as HTMLElement | null;
-    expect(routeA).not.toBeNull(); // held — did NOT swap early
-    expect(routeB).not.toBeNull(); // incoming mounted...
-    expect(routeB?.style.display).toBe('none'); // ...but hidden
-    expect(routeB?.textContent).toContain('id=42'); // ActivatedRoute param resolved via super
+    expect(routeA).not.toBeNull();
+    expect(routeB).not.toBeNull();
+    expect(routeB?.style.display).toBe('none');
+    expect(routeB?.textContent).toContain('id=42');
 
-    // settle B → swap in one frame, drop A
     ref.value.set({ ok: true });
     ref.status.set('resolved');
     await flush();
@@ -159,7 +155,6 @@ describe('TransitionRouterOutlet', () => {
 
     await router.navigateByUrl('/y');
     await flush();
-    // microtask fallback releases the swap — Y shown, X gone, no hidden host left behind
     expect(container.querySelector('route-x')).toBeNull();
     expect(container.textContent).toContain('route-Y');
   });
@@ -206,11 +201,10 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     expect(container.textContent).toContain('route-A');
 
-    // navigate to the opt-out route while it's still loading — it swaps in NOW, no hold
     await router.navigateByUrl('/b/9');
     await flush();
-    expect(container.querySelector('route-a')).toBeNull(); // previous dropped immediately
-    expect(container.textContent).toContain('route-B id=9'); // shown despite loading
+    expect(container.querySelector('route-a')).toBeNull();
+    expect(container.textContent).toContain('route-B id=9');
   });
 
   it('a denied canActivate guard leaves the current route in place (no held/incoming leak)', async () => {
@@ -247,11 +241,11 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     expect(container.textContent).toContain('route-A');
 
-    const ok = await router.navigateByUrl('/b'); // guard denies
+    const ok = await router.navigateByUrl('/b');
     await flush();
     expect(ok).toBe(false);
-    expect(container.textContent).toContain('route-A'); // stayed put
-    expect(container.querySelector('route-b')).toBeNull(); // never mounted/held
+    expect(container.textContent).toContain('route-A');
+    expect(container.querySelector('route-b')).toBeNull();
   });
 
   it('swaps even when the incoming route errors (does not hang the hold)', async () => {
@@ -294,12 +288,12 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     await router.navigateByUrl('/b');
     await flush();
-    expect(container.textContent).toContain('route-A'); // held while loading
+    expect(container.textContent).toContain('route-A');
 
-    ref.status.set('error'); // request fails → settles (not loading/reloading)
+    ref.status.set('error');
     await flush();
-    expect(container.querySelector('route-a')).toBeNull(); // swapped, didn't hang
-    expect(container.textContent).toContain('route-B'); // shows the (errored) route
+    expect(container.querySelector('route-a')).toBeNull();
+    expect(container.textContent).toContain('route-B');
   });
 
   it('composes with a route resolver: holds through the resolver, then through the load', async () => {
@@ -344,18 +338,15 @@ describe('TransitionRouterOutlet', () => {
     await router.navigateByUrl('/a');
     await flush();
 
-    // navigate to B — its resolver is pending, so B isn't activated yet; A stays (router-level hold)
     void router.navigateByUrl('/b');
     await flush();
     expect(container.textContent).toContain('route-A');
     expect(container.querySelector('route-b')).toBeNull();
 
-    // resolver completes → B activates, but its resource is still loading → outlet holds A
     resolveResolver(42);
     await flush();
-    expect(container.textContent).toContain('route-A'); // still held (now by the outlet)
+    expect(container.textContent).toContain('route-A');
 
-    // resource settles → swap
     ref.value.set({ ok: true });
     ref.status.set('resolved');
     await flush();
@@ -366,7 +357,6 @@ describe('TransitionRouterOutlet', () => {
   it('works when NESTED: a child outlet inside a parent route still holds-and-swaps', async () => {
     @Component({ selector: 'child-one', template: `child-1` })
     class ChildOne {}
-    // The deeper child loads data into the (nested) outlet's scope.
     @Component({ selector: 'child-two', template: `child-2` })
     class ChildTwo {
       constructor() {
@@ -417,27 +407,21 @@ describe('TransitionRouterOutlet', () => {
     expect(container.textContent).toContain('parent:');
     expect(container.textContent).toContain('child-1');
 
-    // navigate within the parent to c2 (loading) — the NESTED outlet holds c1
     await router.navigateByUrl('/p/c2');
     await flush();
-    expect(container.textContent).toContain('parent:'); // parent route unchanged, stays
-    expect(container.querySelector('child-one')).not.toBeNull(); // held
-    expect(container.querySelector('child-two')).not.toBeNull(); // incoming mounted (hidden)
+    expect(container.textContent).toContain('parent:');
+    expect(container.querySelector('child-one')).not.toBeNull();
+    expect(container.querySelector('child-two')).not.toBeNull();
 
-    // c2 settles → nested swap
     ref.value.set({ ok: true });
     ref.status.set('resolved');
     await flush();
     expect(container.querySelector('child-one')).toBeNull();
     expect(container.textContent).toContain('child-2');
-    expect(container.textContent).toContain('parent:'); // parent still there
+    expect(container.textContent).toContain('parent:');
   });
 
-  // ——— RouterOutlet-contract regressions: the bugs below all passed the old suite ———
-
   it('CanDeactivate guards receive the REAL component instance (outlet stays activated)', async () => {
-    // the old implementation detached the live activation, so the router saw
-    // `!outlet.isActivated` during preactivation and ran CanDeactivate(null, ...)
     let captured: unknown = 'never-called';
 
     @Component({ selector: 'route-a', template: `route-A` })
@@ -488,8 +472,6 @@ describe('TransitionRouterOutlet', () => {
   });
 
   it('withComponentInputBinding keeps re-binding on same-component param changes', async () => {
-    // the old implementation made the router unsubscribe its input-binding stream
-    // after the first emission (`!outlet.isActivated`) — inputs froze on /i/1
     @Component({ selector: 'route-i', template: `id={{ id() }}` })
     class RI {
       readonly id = input<string>();
@@ -523,7 +505,6 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     expect(container.textContent).toContain('id=1');
 
-    // same component instance, new param — no deactivation happens, only re-binding
     await router.navigateByUrl('/i/2');
     await flush();
     expect(container.textContent).toContain('id=2');
@@ -595,13 +576,10 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     expect(constructions).toBe(1);
 
-    // a → b: the router calls outlet.detach() to store A — the old implementation
-    // had already zeroed `activated`, so this threw RuntimeError 4012
     await router.navigateByUrl('/b');
     await flush();
     expect(container.textContent).toContain('route-B');
 
-    // b → a: the stored handle re-attaches; A must NOT be constructed again
     await router.navigateByUrl('/a');
     await flush();
     expect(container.textContent).toContain('route-A');
@@ -650,8 +628,6 @@ describe('TransitionRouterOutlet', () => {
     await flush();
     expect(container.querySelector('child-one')).not.toBeNull();
 
-    // the nested outlet deactivates with NOTHING following — the old implementation's
-    // deactivate-suppression left the child view mounted forever
     await router.navigateByUrl('/p');
     await flush();
     expect(container.querySelector('child-one')).toBeNull();
@@ -707,25 +683,21 @@ describe('TransitionRouterOutlet', () => {
 
     await router.navigateByUrl('/a');
     await flush();
-    await router.navigateByUrl('/b'); // B loading → A held, B hidden
+    await router.navigateByUrl('/b');
     await flush();
     expect(container.querySelector('route-a')).not.toBeNull();
 
-    // interrupt the hold BEFORE B settles: the half-loaded hidden B is destroyed
-    // outright (capturing it would both blank the screen AND keep its resource
-    // registered, deadlocking the scope); A keeps holding for C instead.
     await router.navigateByUrl('/c');
     await flush();
 
     const heldA = container.querySelector('route-a') as HTMLElement | null;
-    expect(heldA).not.toBeNull(); // stable view STILL visible
+    expect(heldA).not.toBeNull();
     expect(heldA?.style.display).not.toBe('none');
-    expect(container.querySelector('route-b')).toBeNull(); // half-loaded view gone
+    expect(container.querySelector('route-b')).toBeNull();
     const hiddenC = container.querySelector('route-c') as HTMLElement | null;
-    expect(hiddenC).not.toBeNull(); // new incoming mounted...
-    expect(hiddenC?.style.display).toBe('none'); // ...hidden while it loads
+    expect(hiddenC).not.toBeNull();
+    expect(hiddenC?.style.display).toBe('none');
 
-    // C settles → the re-targeted hold swaps A → C
     refC.value.set({ ok: true });
     refC.status.set('resolved');
     await flush();
@@ -752,7 +724,6 @@ describe('TransitionRouterOutlet', () => {
     })
     class VtHost {}
 
-    // jsdom has no View Transitions API — install a synchronous mock
     const startViewTransition = vi.fn((cb: () => void) => {
       cb();
       return {};
@@ -784,14 +755,14 @@ describe('TransitionRouterOutlet', () => {
       await flush();
       await router.navigateByUrl('/b');
       await flush();
-      expect(startViewTransition).not.toHaveBeenCalled(); // still holding
+      expect(startViewTransition).not.toHaveBeenCalled();
 
       ref.value.set({ ok: true });
       ref.status.set('resolved');
       await flush();
 
       expect(startViewTransition).toHaveBeenCalledTimes(1);
-      expect(container.querySelector('route-a')).toBeNull(); // swap ran inside the VT callback
+      expect(container.querySelector('route-a')).toBeNull();
       expect(container.textContent).toContain('route-B');
     } finally {
       delete (document as any).startViewTransition;
@@ -822,8 +793,7 @@ describe('TransitionRouterOutlet', () => {
     })
     class RaceHost {}
 
-    // A real browser DEFERS the callback (it snapshots the old frame first) — capture
-    // instead of invoking, so a navigation can interleave like it can in production.
+    // A real browser defers the callback; capture instead of invoking so a nav can interleave.
     const callbacks: Array<() => void> = [];
     const startViewTransition = vi.fn((cb: () => void) => {
       callbacks.push(cb);
@@ -857,27 +827,27 @@ describe('TransitionRouterOutlet', () => {
 
       await router.navigateByUrl('/a');
       await flush();
-      await router.navigateByUrl('/b'); // hold: A stays visible, B mounts hidden
+      await router.navigateByUrl('/b');
       await flush();
 
       refB.value.set({ ok: true });
-      refB.status.set('resolved'); // B settles → the swap is scheduled into the VT
+      refB.status.set('resolved');
       await flush();
       expect(startViewTransition).toHaveBeenCalledTimes(1);
       const stale = callbacks[0];
 
-      await router.navigateByUrl('/c'); // interrupt BEFORE the browser ran the callback
+      await router.navigateByUrl('/c');
       await flush();
 
-      stale(); // the b-swap's deferred callback finally fires — must be a no-op now
+      stale(); // b-swap's deferred callback fires late — must be a no-op
       fixture.detectChanges();
 
-      expect(container.querySelector('route-a')).not.toBeNull(); // stable view survives
+      expect(container.querySelector('route-a')).not.toBeNull();
       const c = container.querySelector('route-c') as HTMLElement;
-      expect(c.style.display).toBe('none'); // C still hidden, loading
+      expect(c.style.display).toBe('none');
 
       refC.value.set({ ok: true });
-      refC.status.set('resolved'); // the interrupting route settles → ITS swap commits
+      refC.status.set('resolved');
       await flush();
       callbacks[callbacks.length - 1]();
       await flush();
@@ -960,16 +930,16 @@ describe('TransitionRouterOutlet — per-view attribution', () => {
     a.status.set('resolved');
     await flush(fixture);
 
-    await router.navigateByUrl('/b'); // A held, B loading
+    await router.navigateByUrl('/b');
     await flush(fixture);
     expect(container.querySelector('route-a')).not.toBeNull();
 
-    a.status.set('reloading'); // held A starts a keepPrevious-style poll
+    a.status.set('reloading');
     b.value.set({ ok: true });
-    b.status.set('resolved'); // incoming settles
+    b.status.set('resolved');
     await flush(fixture);
 
-    expect(container.querySelector('route-a')).toBeNull(); // swapped despite A polling
+    expect(container.querySelector('route-a')).toBeNull();
     expect(container.textContent).toContain('route-B');
   });
 
@@ -980,16 +950,16 @@ describe('TransitionRouterOutlet — per-view attribution', () => {
 
     await router.navigateByUrl('/a');
     await flush(fixture);
-    await router.navigateByUrl('/b'); // A held, B loading
+    await router.navigateByUrl('/b');
     await flush(fixture);
     expect(container.querySelector('route-a')).not.toBeNull();
 
     a.status.set('loading');
     await flush(fixture);
-    a.status.set('resolved'); // a full outgoing cycle while B is still loading
+    a.status.set('resolved');
     await flush(fixture);
 
-    expect(container.querySelector('route-a')).not.toBeNull(); // still held — outgoing cycle ignored
+    expect(container.querySelector('route-a')).not.toBeNull();
     expect(
       (container.querySelector('route-b') as HTMLElement | null)?.style.display,
     ).toBe('none');
@@ -1007,12 +977,12 @@ describe('TransitionRouterOutlet — per-view attribution', () => {
 
     await router.navigateByUrl('/a');
     await flush(fixture);
-    a.status.set('reloading'); // A keeps polling
+    a.status.set('reloading');
 
-    await router.navigateByUrl('/n'); // incoming registers nothing
+    await router.navigateByUrl('/n');
     await flush(fixture);
 
-    expect(container.querySelector('route-a')).toBeNull(); // fallback fired despite A polling
+    expect(container.querySelector('route-a')).toBeNull();
     expect(container.textContent).toContain('route-N');
   });
 
@@ -1024,11 +994,11 @@ describe('TransitionRouterOutlet — per-view attribution', () => {
 
     await router.navigateByUrl('/a');
     await flush(fixture);
-    await router.navigateByUrl('/b'); // A held, B loading
+    await router.navigateByUrl('/b');
     await flush(fixture);
-    a.status.set('reloading'); // held A polls
+    a.status.set('reloading');
 
-    await router.navigateByUrl('/c'); // interrupt — B destroyed, A re-held for C
+    await router.navigateByUrl('/c');
     await flush(fixture);
     expect(container.querySelector('route-a')).not.toBeNull();
     expect(container.querySelector('route-b')).toBeNull();
@@ -1037,7 +1007,7 @@ describe('TransitionRouterOutlet — per-view attribution', () => {
     ).toBe('none');
 
     c.value.set({ ok: true });
-    c.status.set('resolved'); // C settles while A still reloading
+    c.status.set('resolved');
     await flush(fixture);
     expect(container.querySelector('route-a')).toBeNull();
     expect(container.textContent).toContain('route-C');
@@ -1096,9 +1066,9 @@ describe('TransitionRouterOutlet — per-route scopes (opt-in)', () => {
 
     await router.navigateByUrl('/a');
     await flush(fixture);
-    await router.navigateByUrl('/b'); // B's own scope is loading
+    await router.navigateByUrl('/b');
     await flush(fixture);
-    expect(container.querySelector('route-a')).not.toBeNull(); // held
+    expect(container.querySelector('route-a')).not.toBeNull();
 
     b.value.set({ ok: true });
     b.status.set('resolved');
@@ -1114,21 +1084,20 @@ describe('TransitionRouterOutlet — per-route scopes (opt-in)', () => {
 
     await router.navigateByUrl('/a');
     await flush(fixture);
-    await router.navigateByUrl('/b'); // A held in scope-A; B loading in scope-B
+    await router.navigateByUrl('/b');
     await flush(fixture);
 
-    a.status.set('reloading'); // held A polls in ITS scope — forwarder points at B's
+    a.status.set('reloading');
     b.value.set({ ok: true });
     b.status.set('resolved');
     await flush(fixture);
 
-    expect(container.querySelector('route-a')).toBeNull(); // swapped despite A polling
+    expect(container.querySelector('route-a')).toBeNull();
     expect(container.textContent).toContain('route-B');
   });
 });
 
-// A controllable fake of the DOM `ViewTransition`: `finished` only settles when WE say
-// so (mirroring reality, where it resolves at animation end — long after activation).
+// Controllable fake of the DOM `ViewTransition`: `finished` settles only when we resolve it.
 function deferredTransition() {
   let resolveFinished!: () => void;
   let rejectFinished!: (e?: unknown) => void;
@@ -1136,13 +1105,11 @@ function deferredTransition() {
     resolveFinished = res;
     rejectFinished = rej;
   });
-  // swallow the rejection path so an unhandled rejection can't fail the run
   finished.catch(() => undefined);
   return {
     skipTransition: vi.fn(),
     finished,
-    // Angular's createViewTransition attaches `.catch` to all three — provide them so
-    // the real-wiring integration tests don't trip on missing members.
+    // Angular's createViewTransition attaches `.catch` to all three.
     ready: Promise.resolve(),
     updateCallbackDone: Promise.resolve(),
     resolveFinished,
@@ -1159,8 +1126,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
       registerResource(inject(B_REF), { suspends: false });
     }
   }
-  // an immediate (no-hold) route that still loads — Angular should animate it, the
-  // outlet must NOT take over
+  // Immediate (no-hold) route that still loads: Angular animates it, not the outlet.
   @Component({ selector: 'route-vti', template: `route-I` })
   class RI {
     constructor() {
@@ -1232,17 +1198,17 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    coordinator.enabled = true; // as mmRouterViewTransitions would set on first transition
+    coordinator.enabled = true;
 
-    await router.navigateByUrl('/b'); // held (loading)
+    await router.navigateByUrl('/b');
     await flush(fixture);
-    expect(startViewTransition).not.toHaveBeenCalled(); // still holding
+    expect(startViewTransition).not.toHaveBeenCalled();
 
     ref.value.set({ ok: true });
     ref.status.set('resolved');
     await flush(fixture);
 
-    expect(startViewTransition).toHaveBeenCalledTimes(1); // swap animated, no attribute
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT animate when router view transitions are not enabled and no attribute is set', async () => {
@@ -1257,7 +1223,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     ref.status.set('resolved');
     await flush(fixture);
 
-    expect(startViewTransition).not.toHaveBeenCalled(); // instant swap
+    expect(startViewTransition).not.toHaveBeenCalled();
   });
 
   it('[viewTransition] (true) animates even when router view transitions are NOT enabled', async () => {
@@ -1273,7 +1239,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     ref.status.set('resolved');
     await flush(fixture);
 
-    expect(startViewTransition).toHaveBeenCalledTimes(1); // explicit opt-in wins
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
   });
 
   it('[viewTransition]="false" forces the swap instant even when enabled app-wide', async () => {
@@ -1290,7 +1256,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     ref.status.set('resolved');
     await flush(fixture);
 
-    expect(startViewTransition).not.toHaveBeenCalled(); // forced off
+    expect(startViewTransition).not.toHaveBeenCalled();
   });
 
   it("skips Angular's inert activation-time transition while holding", async () => {
@@ -1303,7 +1269,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     coordinator.enabled = true;
     coordinator.active = t;
 
-    await router.navigateByUrl('/b'); // outlet holds → skips Angular's transition
+    await router.navigateByUrl('/b');
     await flush(fixture);
 
     expect(t.skipTransition).toHaveBeenCalledTimes(1);
@@ -1319,7 +1285,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     coordinator.enabled = true;
     coordinator.active = t;
 
-    await router.navigateByUrl('/i'); // immediate route — must let Angular transition it
+    await router.navigateByUrl('/i');
     await flush(fixture);
 
     expect(t.skipTransition).not.toHaveBeenCalled();
@@ -1328,7 +1294,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
   it('does not throw when holding with no active router transition', async () => {
     const { fixture, ref, router, coordinator } = await setup(DefaultHost);
     coordinator.enabled = true;
-    coordinator.active = null; // enabled but nothing in flight
+    coordinator.active = null;
 
     await router.navigateByUrl('/a');
     await flush(fixture);
@@ -1338,7 +1304,7 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     ref.status.set('resolved');
     await flush(fixture);
 
-    expect(fixture).toBeTruthy(); // reached here without throwing
+    expect(fixture).toBeTruthy();
   });
 
   it('skips each navigation’s own transition exactly once across successive holds', async () => {
@@ -1348,15 +1314,13 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    // first held nav: its transition is active → skipped once
     const tB = deferredTransition();
     coordinator.active = tB;
     await router.navigateByUrl('/b');
     await flush(fixture);
     expect(tB.skipTransition).toHaveBeenCalledTimes(1);
 
-    // settle, then return to /a as housekeeping — clear `active` first so this
-    // (itself a held nav) doesn't consume a skip on tB
+    // clear `active` before returning to /a so this held nav doesn't consume a skip on tB
     ref.value.set({ ok: true });
     ref.status.set('resolved');
     await flush(fixture);
@@ -1366,8 +1330,6 @@ describe('TransitionRouterOutlet ↔ Angular view transitions (outlet side)', ()
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    // second held nav with its OWN active transition: the new one is skipped once,
-    // the old one is never skipped again
     const tB2 = deferredTransition();
     coordinator.active = tB2;
     await router.navigateByUrl('/b');
@@ -1402,7 +1364,7 @@ describe('mmRouterViewTransitions (coordinator side)', () => {
     t.resolveFinished();
     await t.finished;
     await Promise.resolve();
-    expect(coordinator.active).toBeNull(); // cleared on finish
+    expect(coordinator.active).toBeNull();
   });
 
   it('works without a user callback', () => {
@@ -1435,13 +1397,11 @@ describe('mmRouterViewTransitions (coordinator side)', () => {
     );
     expect(coordinator.active).toBe(t2);
 
-    // t1 finishes LATE — it must NOT null out t2 (the in-flight one)
     t1.resolveFinished();
     await t1.finished;
     await Promise.resolve();
     expect(coordinator.active).toBe(t2);
 
-    // t2 finishing clears it
     t2.resolveFinished();
     await t2.finished;
     await Promise.resolve();
@@ -1480,11 +1440,6 @@ describe('mmRouterViewTransitions (coordinator side)', () => {
   });
 });
 
-// Real wiring: `withViewTransitions(mmRouterViewTransitions())` + the actual router
-// navigation pipeline (guards, redirects, activation), with a stubbed
-// `document.startViewTransition`. This proves the guard/redirect/timing guarantees
-// (transitions are created post-guard, post-redirect, pre-activation, for the committed
-// navigation only) rather than relying on hand-set coordinator state.
 describe('view transitions — real router wiring (integration)', () => {
   @Component({ selector: 'route-ia', template: `route-A` })
   class IA {}
@@ -1552,7 +1507,6 @@ describe('view transitions — real router wiring (integration)', () => {
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    // Angular actually invoked our onViewTransitionCreated
     expect(coordinator.enabled).toBe(true);
     expect(created.length).toBeGreaterThan(0);
   });
@@ -1563,10 +1517,9 @@ describe('view transitions — real router wiring (integration)', () => {
     await flush(fixture);
 
     const before = created.length;
-    await router.navigateByUrl('/b'); // held (loading)
+    await router.navigateByUrl('/b');
     await flush(fixture);
 
-    // a transition was created for /b, and the outlet skipped Angular's inert one
     expect(created.length).toBe(before + 1);
     expect(created[created.length - 1].skipTransition).toHaveBeenCalledTimes(1);
   });
@@ -1576,7 +1529,6 @@ describe('view transitions — real router wiring (integration)', () => {
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    // resolve prior transitions so `active` returns to a clean null baseline
     created.forEach((t) => t.resolveFinished());
     await flush(fixture);
     expect(coordinator.active).toBeNull();
@@ -1585,22 +1537,22 @@ describe('view transitions — real router wiring (integration)', () => {
     const ok = await router.navigateByUrl('/denied');
     await flush(fixture);
 
-    expect(ok).toBe(false); // guard cancelled it upstream of the VT stage
-    expect(created.length).toBe(before); // nothing created for the denied nav
-    expect(coordinator.active).toBeNull(); // nothing leaked into the coordinator
+    expect(ok).toBe(false);
+    expect(created.length).toBe(before);
+    expect(coordinator.active).toBeNull();
   });
 
   it('a redirect produces a single committed transition and lands on the target', async () => {
     const { fixture, router, created } = await setup();
-    await router.navigateByUrl('/b'); // settle onto /b first so /a is a real change
+    await router.navigateByUrl('/b');
     await flush(fixture);
 
     const before = created.length;
-    await router.navigateByUrl('/redirect'); // → /a
+    await router.navigateByUrl('/redirect');
     await flush(fixture);
 
-    expect(router.url).toBe('/a'); // committed to the redirect target
-    // exactly one transition for the committed navigation (not one per hop)
+    expect(router.url).toBe('/a');
+    // one transition for the committed navigation, not one per hop
     expect(created.length).toBe(before + 1);
   });
 
@@ -1609,20 +1561,20 @@ describe('view transitions — real router wiring (integration)', () => {
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    await router.navigateByUrl('/b'); // held
+    await router.navigateByUrl('/b');
     await flush(fixture);
     const angulars = created[created.length - 1];
-    expect(angulars.skipTransition).toHaveBeenCalledTimes(1); // inert one skipped
-    expect(container.querySelector('route-ia')).not.toBeNull(); // still holding A
+    expect(angulars.skipTransition).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('route-ia')).not.toBeNull();
 
     const before = created.length;
     ref.value.set({ ok: true });
-    ref.status.set('resolved'); // incoming settles → the outlet's swap
+    ref.status.set('resolved');
     await flush(fixture);
 
-    expect(created.length).toBe(before + 1); // the outlet fired its own transition
+    expect(created.length).toBe(before + 1);
     expect(created[created.length - 1].skipTransition).not.toHaveBeenCalled();
-    expect(container.querySelector('route-ia')).toBeNull(); // swap committed inside it
+    expect(container.querySelector('route-ia')).toBeNull();
     expect(container.querySelector('route-ib')).not.toBeNull();
     expect(
       (container.querySelector('route-ib') as HTMLElement).style.display,

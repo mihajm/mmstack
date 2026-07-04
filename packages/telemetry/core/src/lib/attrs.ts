@@ -4,11 +4,11 @@
 export type AttrValue = string | number | boolean | null | undefined;
 export type Attrs = Record<string, AttrValue>;
 
-export interface AttrMeta {
-  readonly kind: 'span' | 'event' | 'error' | 'metric' | 'log';
+export type AttrMeta = {
+  readonly kind: 'span' | 'event' | 'error' | 'metric' | 'log' | 'identify';
   readonly name: string;
   readonly sink: string;
-}
+};
 
 /** Pure transform applied to attributes before a sink receives them. */
 export type AttributePolicy = (attrs: Attrs, meta: AttrMeta) => Attrs;
@@ -56,7 +56,10 @@ export function redactKeys(
 }
 
 /** Hash the listed keys' values via the provided hasher. */
-export function hashKeys(keys: readonly string[], hash: (value: AttrValue) => string): AttributePolicy {
+export function hashKeys(
+  keys: readonly string[],
+  hash: (value: AttrValue) => string,
+): AttributePolicy {
   const set = new Set(keys);
   return (attrs) => {
     const out: Attrs = { ...attrs };
@@ -68,6 +71,9 @@ export function hashKeys(keys: readonly string[], hash: (value: AttrValue) => st
 }
 
 /** Left-to-right composition: `compose(a, b)` applies `a` then `b`. */
-export function compose(...policies: readonly AttributePolicy[]): AttributePolicy {
-  return (attrs, meta) => policies.reduce((acc, policy) => policy(acc, meta), attrs);
+export function compose(
+  ...policies: readonly AttributePolicy[]
+): AttributePolicy {
+  return (attrs, meta) =>
+    policies.reduce((acc, policy) => policy(acc, meta), attrs);
 }

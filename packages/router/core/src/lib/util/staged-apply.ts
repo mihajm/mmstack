@@ -4,16 +4,12 @@ import { type Event, EventType, Router } from '@angular/router';
 
 /**
  * @internal
- * Buffers registrations made DURING a navigation and applies them only when it commits.
+ * Buffers registrations made during a navigation and applies them only when it commits.
  *
- * Resolvers run before a navigation lands, so naive `register()` calls flip shared
- * state (document title, breadcrumb labels) for navigations that are subsequently
- * cancelled or errored — the browser would show the new route's title while the app
- * remains on the old URL. Staged registrations flush on `NavigationEnd` and are dropped
- * on `NavigationCancel`/`NavigationError`; registrations made outside any navigation
- * apply immediately.
+ * Registrations flush on `NavigationEnd`, are dropped on `NavigationCancel`/`NavigationError`,
+ * and apply immediately when made outside any navigation.
  *
- * Must be created in an injection context (root-store constructors/field initializers).
+ * Must be created in an injection context.
  */
 export function createStagedApply<V>(
   apply: (id: string, value: V) => void,

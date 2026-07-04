@@ -114,7 +114,6 @@ export class MmTransition<T> {
 
   private onValue(v: T): void {
     if (!this.current) {
-      // first render: nothing to hold yet — show immediately (also what SSR serializes)
       this.current = this.createView(v).view;
       return;
     }
@@ -132,8 +131,7 @@ export class MmTransition<T> {
     this.setHidden(view, true);
     this.holding.set(true);
 
-    // Registration happens synchronously during view creation, so a resource already in
-    // flight counts from the start; later kickoffs are caught by the watcher.
+    // Registration happens synchronously during view creation, so a resource already incl. later kickoffs are caught by the watcher.
     let sawPending = untracked(scope.pending);
 
     const watcher = effect(
@@ -208,8 +206,6 @@ export class MmTransition<T> {
     view: EmbeddedViewRef<MmTransitionContext<T>>;
     scope: TransitionScope;
   } {
-    // Each view gets its own scope, so its subtree's resources register here by existing —
-    // and the outgoing view's background work can't block the swap (per-view isolation).
     const injector = Injector.create({
       parent: this.parent,
       providers: [provideTransitionScope()],

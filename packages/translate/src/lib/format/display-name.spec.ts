@@ -31,7 +31,6 @@ describe('formatDisplayName', () => {
 
     TestBed.runInInjectionContext(() => {
       const result = formatDisplayName(valSignal, typeSignal, optSignal);
-      // short region for GB in en-US is usually "UK"
       expect(result).toBe('UK');
     });
   });

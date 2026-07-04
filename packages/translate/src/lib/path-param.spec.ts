@@ -73,7 +73,7 @@ describe('pathParam', () => {
     const routeMock = {
       snapshot: { paramMap: convertToParamMap({ id: 'inherit' }) },
       paramMap: of(convertToParamMap({ id: 'inherit' })),
-      parent: null, // parent shouldn't matter here since the router has merged them into paramMap
+      parent: null,
     };
     
     TestBed.configureTestingModule({

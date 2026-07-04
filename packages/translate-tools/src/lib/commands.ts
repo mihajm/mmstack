@@ -54,13 +54,9 @@ export function validateImport(
     }
     const sourceMessage = src.get(key);
     if (sourceMessage === undefined) {
-      // `createTranslation` is typed to the source shape, so an unknown key would
-      // generate TypeScript that doesn't compile — reject it here with a clear message.
       issues.push({ key, message: 'unknown key (not in the source) — remove it' });
       continue;
     }
-    // The source comes from the developer's own TS; a broken source ICU would make
-    // placeholderParity throw, so reject it cleanly per-key instead of aborting the run.
     const sourceValid = validateMessage(sourceMessage);
     if (!sourceValid.ok) {
       issues.push({ key, message: `source message is invalid ICU — ${sourceValid.error}` });
@@ -103,8 +99,6 @@ export function applyImport(
       existing.exportName,
       translation,
     );
-    // A silent false would count as applied while writing nothing (e.g. the module was
-    // hand-edited and the export no longer is a createTranslation call).
     if (!replaced)
       throw new Error(
         `Could not update locale "${locale}": expected an export "${existing.exportName}" ` +
@@ -118,8 +112,6 @@ export function applyImport(
     throw new Error(
       `Locale "${locale}" has no alphanumeric characters to form a valid identifier.`,
     );
-  // The generated const name is derived from the namespace (so a `{ translation }` named export
-  // yields `settingsDe`, not `translationDe`); the import binding stays the actual source export.
   const exportName = `${toIdentifier(ns.namespace)}${localeId}`;
   const collision = ns.locales.find(
     (l) => l.locale !== locale && localeIdentifier(l.locale) === localeId,
@@ -142,8 +134,7 @@ export function applyImport(
         `Remove it or pass --force to overwrite.`,
     );
 
-  // Resolve + validate the registry call BEFORE creating the module, so a failure
-  // can't leave an orphan file in the project (the caller saves everything on success).
+  // Validate the registry call before creating the module, so a failure leaves no orphan file.
   const registrySf = project.getSourceFileOrThrow(ns.registryFilePath);
   const registryCall = registryCallFor(registrySf, ns);
   const otherArg = registryCall.getArguments()[1];
@@ -183,8 +174,6 @@ export function parseImportFileName(
   const m = /^([^.]+)\.([^.]+)\.json$/.exec(fileName);
   return m ? { namespace: m[1], locale: m[2] } : null;
 }
-
-// ---- fs-performing runners (thin wrappers the CLI calls) -------------------------------------
 
 export type ProjectOptions = { cwd: string; srcGlobs: string[] };
 
@@ -245,8 +234,7 @@ export function runExport(
     onWarn: warnToStderr,
   });
   assertUniqueNamespaces(namespaces);
-  // Import parses file names as <namespace>.<locale>.json — a dot in either segment
-  // exports a file the import will skip, so surface it now rather than at import time.
+  // A dot in a namespace/locale exports a file import can't re-parse; surface it now.
   for (const ns of namespaces) {
     for (const [what, value] of [
       ['Namespace', ns.namespace] as const,
@@ -279,8 +267,7 @@ export type ImportReport = {
 export function runImport(
   opts: ProjectOptions & { inDir: string; sourceLocale?: string; force?: boolean },
 ): ImportReport {
-  // Prefer the explicit flag, then the sidecar the matching export wrote, then the `en` default —
-  // so a round-trip with a non-`en` source locale doesn't re-import the source dump as a target.
+  // Prefer the explicit flag, then the export sidecar, then the `en` default.
   const sourceLocale = opts.sourceLocale ?? readMetaSourceLocale(opts.inDir);
   const project = buildProject(opts);
   const namespaces = discoverFromProject(project, {
@@ -313,7 +300,7 @@ export function runImport(
       });
       continue;
     }
-    if (parsed.locale === ns.source.locale) continue; // the source dump itself
+    if (parsed.locale === ns.source.locale) continue;
 
     let translation: NestedTranslation;
     try {
@@ -332,8 +319,7 @@ export function runImport(
       rejected.push({ file: fileName, issues });
       continue;
     }
-    // Per-file: one unappliable locale (e.g. an unregistered file already at the target
-    // path without --force) must not abort the other files' import.
+    // One unappliable locale must not abort the other files' import.
     try {
       applyImport(project, ns, parsed.locale, translation, opts.force);
       applied++;
@@ -372,8 +358,6 @@ export function runGenerateManifest(
   return content;
 }
 
-// ---- helpers ----------------------------------------------------------------------------------
-
 function localeIdentifier(locale: string): string {
   return locale
     .split(/[^A-Za-z0-9]/)
@@ -395,8 +379,7 @@ function registryCallFor(
   sf: ReturnType<Project['getSourceFileOrThrow']>,
   ns: DiscoveredNamespace,
 ) {
-  // Discovery records which call this namespace came from, so we re-find it by index rather than
-  // re-matching loader shapes (robust across every loader form, and unambiguous between namespaces).
+  // Re-find the call by discovery index, not by re-matching loader shapes.
   const call = findRegisterNamespaceCalls(sf)[ns.registryCallIndex];
   if (!call)
     throw new Error(

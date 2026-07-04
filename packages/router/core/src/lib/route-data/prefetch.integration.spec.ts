@@ -1,10 +1,4 @@
 /* eslint-disable @angular-eslint/component-selector */
-/**
- * Integration for `withRouteData()` data prefetch, driven by the real `PreloadRequester` signal
- * `mmLink` emits, with real `httpResource`. Covers: hover warms an eager route's data, dedupe,
- * non-match, and the two-phase behavior for lazily code-split (`loadChildren`) routes (the data
- * factory isn't discoverable until the chunk has loaded).
- */
 import { provideLocationMocks } from '@angular/common/testing';
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
@@ -126,7 +120,7 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
     preload.startPreload('/users/4');
     await flush(fixture);
 
-    http.expectOne('/api/users/4').flush('Four'); // request issued by prefetch, before nav
+    http.expectOne('/api/users/4').flush('Four');
     await flush(fixture);
   });
 
@@ -139,7 +133,7 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
     preload.startPreload('/users/4');
     await flush(fixture);
 
-    http.expectOne('/api/users/4').flush('Four'); // exactly one — second hover deduped
+    http.expectOne('/api/users/4').flush('Four');
     await flush(fixture);
   });
 
@@ -152,7 +146,7 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
     await flush(fixture);
 
     http.expectNone('/api/users/123');
-    http.expectNone(() => true); // no requests at all
+    http.expectNone(() => true);
   });
 
   it('two-phase for lazy routes: warms data only after the chunk is loaded', async () => {
@@ -160,18 +154,17 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
     await router.navigateByUrl('/home');
     await flush(fixture);
 
-    // phase 1 — chunk not loaded yet, the route's data factory isn't discoverable
+    // phase 1: chunk not loaded, factory not discoverable
     preload.startPreload('/lazy/item/5');
     await flush(fixture);
     http.expectNone('/api/items/5');
 
-    // load the lazy chunk by navigating into it (its own data fires)
     await router.navigateByUrl('/lazy/item/9');
     await flush(fixture);
     http.expectOne('/api/items/9').flush('Nine');
     await flush(fixture);
 
-    // phase 2 — the factory is now discoverable, a hover warms the data
+    // phase 2: factory discoverable, hover warms data
     preload.startPreload('/lazy/item/5');
     await flush(fixture);
     http.expectOne('/api/items/5').flush('Five');
@@ -220,16 +213,16 @@ describe('prefetch integration (withRouteData + httpResource)', () => {
 
     preload.startPreload('/docs/de/guide');
     await flush(rendered.fixture);
-    expect(prefetched).toEqual([{ locale: 'de' }, true]); // params from the LINK URL
-    expect(resolved).toBe(0); // the wrapped resolver never ran speculatively
+    expect(prefetched).toEqual([{ locale: 'de' }, true]);
+    expect(resolved).toBe(0);
 
-    preload.startPreload('/docs/de/guide'); // deduped per link+description
+    preload.startPreload('/docs/de/guide');
     await flush(rendered.fixture);
     expect(prefetched.length).toBe(2);
 
     await router.navigateByUrl('/docs/de/guide');
     await flush(rendered.fixture);
-    expect(resolved).toBe(1); // navigation runs the real resolver
-    expect(prefetched.length).toBe(2); // …and does not re-run prefetch
+    expect(resolved).toBe(1);
+    expect(prefetched.length).toBe(2);
   });
 });

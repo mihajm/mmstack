@@ -160,9 +160,8 @@ function resolveExport(
     isDefaultExport,
   };
 
-  // `createNamespace('ns', {…})` and `base.createMergedNamespace('ns', {…})` share the same
-  // (namespace, literal) shape — and a merged namespace's literal holds only ITS own keys (the
-  // merge is type-level), so each namespace exports independently with no duplication.
+  // createNamespace and createMergedNamespace share the (namespace, literal) shape; a merged
+  // literal holds only its own keys (merge is type-level).
   const isCreateNamespace =
     Node.isIdentifier(callee) && callee.getText() === 'createNamespace';
   const isMergedNamespace =
@@ -210,14 +209,12 @@ function resolveLoaderTarget(
   moduleFile: SourceFile,
   accessor: string[],
 ): LoaderTarget | null {
-  // Explicit named accessor: m.quote.translation, m.quoteDe, m.translation.
   if (accessor.length > 0 && accessor[0] !== 'default') {
     const call = variableCall(moduleFile, accessor[0]);
     return call ? { call, bindingName: accessor[0], isDefaultExport: false } : null;
   }
 
-  // `() => import('x')` (accessor []) or `.then((m) => m.default)`: resolve the default export,
-  // and for the shorthand fall back to a named `translation` export (the `{ translation }` shape).
+  // Shorthand/`.default`: resolve the default export, falling back to a named `translation`.
   const fromDefault = defaultExportCall(moduleFile);
   if (fromDefault) return fromDefault;
   if (accessor.length === 0) {

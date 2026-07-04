@@ -21,7 +21,6 @@ export type RetryErrorCallback<TError = unknown> = (
   isFinal: boolean,
 ) => void;
 
-// Retry on error, if number is provided it will retry that many times with exponential backoff, otherwise it will use the options provided
 export function retryOnError<T>(
   res: HttpResourceRef<T>,
   opt?: RetryOptions,
@@ -73,7 +72,7 @@ export function retryOnError<T>(
   return {
     ...res,
     destroy: () => {
-      ref.destroy(); // cleanup on manual destroy
+      ref.destroy();
       res.destroy();
     },
   };

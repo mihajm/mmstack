@@ -17,6 +17,10 @@ import {
   type Signal,
 } from '@angular/core';
 import { mutable } from '../mutable';
+import {
+  CONCURRENCY_INSTRUMENTATION,
+  type ConcurrencyInstrumentation,
+} from './instrumentation';
 
 /**
  * The structural surface a transition scope actually reads — everything a `ResourceRef`
@@ -133,8 +137,23 @@ export type TransitionScope = {
 
 type Entry = { readonly ref: ResourceLike; readonly suspends: boolean };
 
-export function createTransitionScope(): TransitionScope {
+export type CreateTransitionScopeOptions = {
+  /** Scope identity for instrumentation events (idea/concurrency-devtools.md). */
+  readonly name?: string;
+  /** Optional observability listener; taps are no-ops when omitted (zero cost). */
+  readonly instrumentation?: ConcurrencyInstrumentation;
+};
+
+export function createTransitionScope(
+  opt?: CreateTransitionScopeOptions,
+): TransitionScope {
   const list = mutable<Entry[]>([]);
+  const inst = opt?.instrumentation;
+  const name = opt?.name ?? 'scope';
+  const at = (): number =>
+    typeof globalThis.performance !== 'undefined'
+      ? globalThis.performance.now()
+      : Date.now();
 
   const pending = computed(() =>
     list().some(({ ref }) => {
@@ -154,15 +173,20 @@ export function createTransitionScope(): TransitionScope {
         ({ ref, suspends }) =>
           suspends && (type === 'loading' ? ref.isLoading() : !ref.hasValue()),
       ),
-    add: (ref, opt) =>
-      untracked(() =>
-        list.inline((c) => c.push({ ref, suspends: opt?.suspends ?? true })),
-      ),
+    add: (ref, o) =>
+      untracked(() => {
+        const suspends = o?.suspends ?? true;
+        list.inline((c) => c.push({ ref, suspends }));
+        inst?.resourceRegistered?.({ scope: name, suspends });
+      }),
     remove: (ref) =>
       untracked(() =>
         list.inline((c) => {
           const i = c.findIndex((e) => e.ref === ref);
-          if (i !== -1) c.splice(i, 1);
+          if (i !== -1) {
+            c.splice(i, 1);
+            inst?.resourceRemoved?.({ scope: name });
+          }
         }),
       ),
     commit: <T>(value: Signal<T>): Signal<T> =>
@@ -181,6 +205,7 @@ export function createTransitionScope(): TransitionScope {
             aborted++;
           }
         }
+        if (aborted > 0) inst?.abortPending?.({ scope: name, aborted, at: at() });
         return aborted;
       }),
     holding,
@@ -260,13 +285,66 @@ export function bridgeScopeToPendingTasks(
   });
 }
 
+/**
+ * While a listener is installed, bracket each pending window of `scope` with a
+ * `pendingStart`/`pendingEnd` span (the reactive tap that needs an injection context). No-op
+ * when no listener is provided, so it stays zero-cost by default.
+ */
+function bridgeScopeToInstrumentation(
+  scope: TransitionScope,
+  name: string,
+  injector?: Injector,
+): void {
+  const run = <T>(fn: () => T): T =>
+    injector ? runInInjectionContext(injector, fn) : fn();
+  run(() => {
+    const inst = inject(CONCURRENCY_INSTRUMENTATION, { optional: true });
+    if (!inst?.pendingStart && !inst?.pendingEnd) return;
+    const at = (): number =>
+      typeof globalThis.performance !== 'undefined'
+        ? globalThis.performance.now()
+        : Date.now();
+    let handle: unknown;
+    let open = false;
+    effect(() => {
+      const pending = scope.pending();
+      untracked(() => {
+        if (pending && !open) {
+          open = true;
+          handle = inst.pendingStart?.({
+            scope: name,
+            resources: scope.resources().length,
+            at: at(),
+          });
+        } else if (!pending && open) {
+          open = false;
+          inst.pendingEnd?.(handle, { at: at() });
+        }
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      if (open) inst.pendingEnd?.(handle, { at: at() });
+    });
+  });
+}
+
 /** Provide a fresh transition scope at a boundary so its subtree's resources are tracked independently. */
-export function provideTransitionScope(): Provider {
+export function provideTransitionScope(
+  opt?: CreateTransitionScopeOptions,
+): Provider {
   return {
     provide: TRANSITION_SCOPE,
     useFactory: () => {
-      const scope = createTransitionScope();
+      const listener =
+        opt?.instrumentation ??
+        inject(CONCURRENCY_INSTRUMENTATION, { optional: true }) ??
+        undefined;
+      const scope = createTransitionScope({
+        name: opt?.name,
+        instrumentation: listener,
+      });
       bridgeScopeToPendingTasks(scope);
+      bridgeScopeToInstrumentation(scope, opt?.name ?? 'scope');
       return scope;
     },
   };

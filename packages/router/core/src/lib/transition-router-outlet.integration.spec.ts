@@ -1,11 +1,5 @@
 /* eslint-disable @angular-eslint/component-selector */
-/**
- * Integration for the transition outlet itself, with real `httpResource` + `HttpTestingController`
- * — components create their own resource and register it via `registerResource` (no route-data),
- * exercising the outlet's hold/swap, per-view isolation, immediate opt-out, and nesting against
- * genuine async request timing. (Fine-grained edge timing is covered deterministically in the
- * unit spec; this proves it end-to-end with the real HTTP pipeline.)
- */
+// End-to-end outlet coverage with real httpResource + HttpTestingController.
 import { provideLocationMocks } from '@angular/common/testing';
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
@@ -117,7 +111,6 @@ const flush = async (fixture: { detectChanges: () => void }) => {
 };
 
 describe('transition outlet integration (real httpResource)', () => {
-  // destroyed components cancel their in-flight requests — expected here
   afterEach(() => TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true }));
 
   it('holds the current view until the incoming request settles, then swaps', async () => {
@@ -132,7 +125,7 @@ describe('transition outlet integration (real httpResource)', () => {
     await router.navigateByUrl('/b');
     await flush(fixture);
     const bReq = http.expectOne('/api/b');
-    expect(container.querySelector('page-a')).not.toBeNull(); // held while B loads
+    expect(container.querySelector('page-a')).not.toBeNull();
     expect(
       (container.querySelector('page-b') as HTMLElement | null)?.style.display,
     ).toBe('none');
@@ -151,7 +144,6 @@ describe('transition outlet integration (real httpResource)', () => {
     http.expectOne('/api/a').flush('AA');
     await flush(fixture);
 
-    // A reloads → its request goes in flight again while it's the outgoing view
     lastAData?.reload();
     await flush(fixture);
     const reloadReq = http.expectOne('/api/a');
@@ -159,15 +151,14 @@ describe('transition outlet integration (real httpResource)', () => {
     await router.navigateByUrl('/b');
     await flush(fixture);
     const bReq = http.expectOne('/api/b');
-    expect(container.querySelector('page-a')).not.toBeNull(); // A held, still reloading
+    expect(container.querySelector('page-a')).not.toBeNull();
 
     bReq.flush('BB');
     await flush(fixture);
 
-    // swapped even though A's reload never settled — the swap watches the incoming view only
     expect(container.querySelector('page-a')).toBeNull();
     expect(container.textContent).toContain('B:BB');
-    expect(reloadReq.cancelled).toBe(true); // A's reload was cancelled when A was destroyed
+    expect(reloadReq.cancelled).toBe(true);
   });
 
   it('an interrupting navigation mid-hold re-targets the hold', async () => {
@@ -178,16 +169,16 @@ describe('transition outlet integration (real httpResource)', () => {
     http.expectOne('/api/a').flush('AA');
     await flush(fixture);
 
-    await router.navigateByUrl('/b'); // B loading → A held, B hidden
+    await router.navigateByUrl('/b');
     await flush(fixture);
     const bReq = http.expectOne('/api/b');
     expect(container.querySelector('page-a')).not.toBeNull();
 
-    await router.navigateByUrl('/c'); // interrupt before B settles
+    await router.navigateByUrl('/c');
     await flush(fixture);
-    expect(bReq.cancelled).toBe(true); // half-loaded B destroyed
+    expect(bReq.cancelled).toBe(true);
     const cReq = http.expectOne('/api/c');
-    expect(container.querySelector('page-a')).not.toBeNull(); // stable A still visible
+    expect(container.querySelector('page-a')).not.toBeNull();
     expect(container.querySelector('page-b')).toBeNull();
 
     cReq.flush('CC');
@@ -204,11 +195,11 @@ describe('transition outlet integration (real httpResource)', () => {
     http.expectOne('/api/a').flush('AA');
     await flush(fixture);
 
-    await router.navigateByUrl('/imm'); // opted out of the hold
+    await router.navigateByUrl('/imm');
     await flush(fixture);
 
-    expect(container.querySelector('page-a')).toBeNull(); // previous dropped immediately
-    expect(container.textContent).toContain('B:...'); // shown despite still loading
+    expect(container.querySelector('page-a')).toBeNull();
+    expect(container.textContent).toContain('B:...');
     http.expectOne('/api/b').flush('BB');
     await flush(fixture);
     expect(container.textContent).toContain('B:BB');
@@ -222,16 +213,16 @@ describe('transition outlet integration (real httpResource)', () => {
     expect(container.textContent).toContain('parent|');
     expect(container.textContent).toContain('X');
 
-    await router.navigateByUrl('/p/deep'); // child loads data → nested outlet holds shallow
+    await router.navigateByUrl('/p/deep');
     await flush(fixture);
     const deepReq = http.expectOne('/api/deep');
-    expect(container.textContent).toContain('parent|'); // parent untouched
-    expect(container.querySelector('plain-x')).not.toBeNull(); // shallow held
+    expect(container.textContent).toContain('parent|');
+    expect(container.querySelector('plain-x')).not.toBeNull();
 
     deepReq.flush('DD');
     await flush(fixture);
     expect(container.querySelector('plain-x')).toBeNull();
     expect(container.textContent).toContain('deep:DD');
-    expect(container.textContent).toContain('parent|'); // still there
+    expect(container.textContent).toContain('parent|');
   });
 });

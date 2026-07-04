@@ -1,6 +1,7 @@
 import {
   DestroyRef,
   effect,
+  inject,
   InjectionToken,
   type Injector,
   isDevMode,
@@ -10,11 +11,11 @@ import {
 } from '@angular/core';
 import { type AttributePolicy, type Attrs, identityPolicy } from './attrs';
 import {
-  createConsentState,
-  createNoopConsent,
   type ConsentConfig,
   type ConsentDecision,
   type ConsentState,
+  createConsentState,
+  createNoopConsent,
   type TrackingRequirement,
 } from './consent';
 import {
@@ -32,7 +33,7 @@ import {
  *  can't grow memory for the app's lifetime). */
 export const DEFAULT_READY_TIMEOUT_MS = 5_000;
 
-export interface EmitOptions {
+export type EmitOptions = {
   /**
    * Consent category (e.g. 'perf' | 'errors' | 'product-analytics'). With
    * `TelemetryConfig.consent` configured, delivery is gated per sink on the
@@ -47,7 +48,7 @@ export interface EmitOptions {
    * link back to the trace.
    */
   readonly parent?: SpanHandle;
-}
+};
 
 /**
  * Options for `span()`/`startSpan()`. Unlike emits, `parent` here sets the new
@@ -91,7 +92,25 @@ export interface Telemetry {
   error(err: unknown, attrs?: Attrs, opt?: EmitOptions): void;
   metric(name: string, value: number, attrs?: Attrs, opt?: MetricOptions): void;
   /** A structured log line (OTLP logs). Distinct from `error()` (exception capture). */
-  log(severity: LogSeverity, message: string, attrs?: Attrs, opt?: EmitOptions): void;
+  log(
+    severity: LogSeverity,
+    message: string,
+    attrs?: Attrs,
+    opt?: EmitOptions,
+  ): void;
+  /**
+   * Associate subsequent telemetry with a user, on every sink that supports identity (PostHog
+   * person, Sentry user, …). `traits` run through the AttributePolicy like any attrs. Pass
+   * `userId: null` to clear identity (logout). No-op on sinks without an identity concept.
+   */
+  identify(userId: string | null, traits?: Attrs, opt?: EmitOptions): void;
+  /**
+   * Set "super-properties" — attributes merged into EVERY subsequent emit (event/error/metric/
+   * log/span) before dispatch, so all sinks carry them with no per-call repetition. Accumulates
+   * across calls; a key set to `undefined` removes it. Sinks with a native super-property
+   * mechanism additionally receive them via {@link GlobalAttrsSink} for their out-of-band capture.
+   */
+  setGlobalAttrs(attrs: Attrs): void;
 
   // ---- consent (RFC §7) — live only when `TelemetryConfig.consent` is set ----
   /** Everything the app declared it wants to track. */
@@ -244,12 +263,16 @@ class SinkDispatcher {
 
   emit(op: (sink: Sink) => void): void {
     if (this.state === 'ready') safe(this.sink.name, () => op(this.sink));
-    else if (this.state === 'pending')
-      this.queue.push(() => op(this.sink));
+    else if (this.state === 'pending') this.queue.push(() => op(this.sink));
     // dropped/destroyed → discard
   }
 
-  startSpan(name: string, ctx: SpanContext, attrs: Attrs, startMs: number): SinkSpan {
+  startSpan(
+    name: string,
+    ctx: SpanContext,
+    attrs: Attrs,
+    startMs: number,
+  ): SinkSpan {
     const start = this.sink.startSpan;
     if (!start) return NOOP_SINK_SPAN;
     if (this.state === 'ready') {
@@ -350,6 +373,12 @@ class NoopTelemetry implements Telemetry {
   log(): void {
     /* noop */
   }
+  identify(): void {
+    /* noop */
+  }
+  setGlobalAttrs(): void {
+    /* noop */
+  }
 }
 
 class ActiveTelemetry implements Telemetry {
@@ -404,7 +433,7 @@ class ActiveTelemetry implements Telemetry {
 
   /** A throwing (user-supplied) policy skips that sink instead of breaking the caller. */
   private apply(
-    kind: 'span' | 'event' | 'error' | 'metric' | 'log',
+    kind: 'span' | 'event' | 'error' | 'metric' | 'log' | 'identify',
     name: string,
     sink: Sink,
     attrs: Attrs | undefined,
@@ -413,7 +442,10 @@ class ActiveTelemetry implements Telemetry {
       return this.policy(attrs ?? {}, { kind, name, sink: sink.name });
     } catch (err) {
       if (isDevMode()) {
-        console.warn(`[telemetry] AttributePolicy threw for sink "${sink.name}" — emit skipped`, err);
+        console.warn(
+          `[telemetry] AttributePolicy threw for sink "${sink.name}" — emit skipped`,
+          err,
+        );
       }
       return null;
     }
@@ -423,19 +455,30 @@ class ActiveTelemetry implements Telemetry {
     return this.stack.at(-1);
   }
 
-  /** Merge correlation ids (from the explicit parent or the active span) into the attrs. */
-  private correlated(attrs?: Attrs, opt?: EmitOptions): Attrs | undefined {
+  /** Super-properties merged into every emit before dispatch (see {@link setGlobalAttrs}). */
+  private readonly globalAttrs: Attrs = {};
+
+  /** Fold global attrs + correlation ids (explicit parent or active span) into the attrs. */
+  private merged(attrs?: Attrs, opt?: EmitOptions): Attrs | undefined {
     const span = opt?.parent ?? this.activeSpan();
-    if (!span) return attrs;
+    const hasGlobal = this.hasGlobalAttrs;
+    if (!span && !hasGlobal) return attrs; // fast path: nothing to fold
     return {
-      ...attrs,
-      trace_id: span.ctx.traceId,
-      span_id: span.ctx.spanId,
+      ...(hasGlobal ? this.globalAttrs : undefined),
+      ...attrs, // caller attrs override globals
+      ...(span
+        ? { trace_id: span.ctx.traceId, span_id: span.ctx.spanId }
+        : undefined),
     };
   }
 
+  private get hasGlobalAttrs(): boolean {
+    for (const _ in this.globalAttrs) return true;
+    return false;
+  }
+
   event(name: string, eventAttrs?: Attrs, opt?: EmitOptions): void {
-    const base = this.correlated(eventAttrs, opt);
+    const base = this.merged(eventAttrs, opt);
     for (const d of this.dispatchers) {
       if (!d.sink.capture) continue;
       const attrs = this.apply('event', name, d.sink, base);
@@ -448,7 +491,7 @@ class ActiveTelemetry implements Telemetry {
 
   error(err: unknown, errorAttrs?: Attrs, opt?: EmitOptions): void {
     const name = err instanceof Error ? err.name : 'error';
-    const base = this.correlated(errorAttrs, opt);
+    const base = this.merged(errorAttrs, opt);
     for (const d of this.dispatchers) {
       if (!d.sink.recordError) continue;
       const attrs = this.apply('error', name, d.sink, base);
@@ -459,8 +502,13 @@ class ActiveTelemetry implements Telemetry {
     }
   }
 
-  metric(name: string, value: number, metricAttrs?: Attrs, opt?: MetricOptions): void {
-    const base = this.correlated(metricAttrs, opt);
+  metric(
+    name: string,
+    value: number,
+    metricAttrs?: Attrs,
+    opt?: MetricOptions,
+  ): void {
+    const base = this.merged(metricAttrs, opt);
     for (const d of this.dispatchers) {
       if (!d.sink.record) continue;
       const attrs = this.apply('metric', name, d.sink, base);
@@ -471,16 +519,55 @@ class ActiveTelemetry implements Telemetry {
     }
   }
 
-  log(severity: LogSeverity, message: string, logAttrs?: Attrs, opt?: EmitOptions): void {
-    const base = this.correlated(logAttrs, opt);
+  log(
+    severity: LogSeverity,
+    message: string,
+    logAttrs?: Attrs,
+    opt?: EmitOptions,
+  ): void {
+    const base = this.merged(logAttrs, opt);
     const timestamp = Date.now(); // stamped at emit time, so buffered logs replay with true clocks
     for (const d of this.dispatchers) {
       if (!d.sink.emitLog) continue;
       const attrs = this.apply('log', message, d.sink, base);
       if (!attrs) continue;
       this.gated(opt?.category, d.sink.name, () =>
-        d.emit((s) => s.emitLog?.({ severity, body: message, attrs, timestamp })),
+        d.emit((s) =>
+          s.emitLog?.({ severity, body: message, attrs, timestamp }),
+        ),
       );
+    }
+  }
+
+  identify(userId: string | null, traits?: Attrs, opt?: EmitOptions): void {
+    for (const d of this.dispatchers) {
+      if (!d.sink.identify) continue;
+      // traits run through the policy like any attrs; userId is the identity key, not redacted
+      const attrs = this.apply(
+        'identify',
+        userId ?? 'anonymous',
+        d.sink,
+        traits,
+      );
+      if (!attrs) continue;
+      this.gated(opt?.category, d.sink.name, () =>
+        d.emit((s) => s.identify?.(userId, attrs)),
+      );
+    }
+  }
+
+  setGlobalAttrs(attrs: Attrs): void {
+    // accumulate; an undefined value removes the key (super-property register + unregister)
+    for (const key of Object.keys(attrs)) {
+      const value = attrs[key];
+      if (value === undefined) delete this.globalAttrs[key];
+      else this.globalAttrs[key] = value;
+    }
+    // sinks with a native super-property mechanism (posthog.register) also get them, so their
+    // out-of-band capture carries them; buffered like any emit if the sink isn't ready yet
+    for (const d of this.dispatchers) {
+      if (!d.sink.setGlobalAttrs) continue;
+      d.emit((s) => s.setGlobalAttrs?.({ ...attrs }));
     }
   }
 
@@ -492,16 +579,24 @@ class ActiveTelemetry implements Telemetry {
       parentSpanId: parent?.ctx.spanId,
     };
     const startMs = Date.now();
+    // fold super-properties into the span's start attrs (correlation ids are the span's own)
+    const startAttrs = this.hasGlobalAttrs
+      ? { ...this.globalAttrs, ...opt?.attrs }
+      : opt?.attrs;
 
     const live: { sink: Sink; span: SinkSpan }[] = [];
     for (const d of this.dispatchers) {
       if (!d.sink.startSpan) continue;
       // spans don't defer during consent hydration — a gated-out sink is skipped;
       // the handle stays fully usable (ctx, children, correlation) either way
-      if (this.consentState.gate(opt?.category, d.sink.name) !== 'allow') continue;
-      const attrs = this.apply('span', name, d.sink, opt?.attrs);
+      if (this.consentState.gate(opt?.category, d.sink.name) !== 'allow')
+        continue;
+      const attrs = this.apply('span', name, d.sink, startAttrs);
       if (attrs) {
-        live.push({ sink: d.sink, span: d.startSpan(name, ctx, attrs, startMs) });
+        live.push({
+          sink: d.sink,
+          span: d.startSpan(name, ctx, attrs, startMs),
+        });
       }
     }
 
@@ -514,11 +609,13 @@ class ActiveTelemetry implements Telemetry {
         }
       },
       setError: (err) => {
-        for (const { sink, span } of live) safe(sink.name, () => span.setError(err));
+        for (const { sink, span } of live)
+          safe(sink.name, () => span.setError(err));
       },
       end: () => {
         const endMs = Date.now();
-        for (const { sink, span } of live) safe(sink.name, () => span.end(endMs));
+        for (const { sink, span } of live)
+          safe(sink.name, () => span.end(endMs));
       },
     };
   }
@@ -575,6 +672,10 @@ export const TELEMETRY = new InjectionToken<Telemetry>('@mmstack/telemetry', {
   providedIn: 'root',
   factory: () => new NoopTelemetry(),
 });
+
+export function injectTelemetry() {
+  return inject(TELEMETRY);
+}
 
 /** Escape hatch: read a span's raw correlation ids. Handles are otherwise opaque. */
 export function readSpan(handle: SpanHandle): SpanContext {

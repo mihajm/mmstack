@@ -1,5 +1,7 @@
 # @mmstack/telemetry-otel
 
+> **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
+
 OTLP interchange adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core), built on the official OpenTelemetry JS SDK. One config exports traces, metrics, and logs to any OTLP-compatible backend: Datadog, Honeycomb, Grafana, Sentry traces, a local collector, and so on.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)

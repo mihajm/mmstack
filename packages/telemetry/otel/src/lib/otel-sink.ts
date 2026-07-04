@@ -1,28 +1,5 @@
 import { isDevMode, signal } from '@angular/core';
 import {
-  type Attributes,
-  type Counter,
-  type Gauge,
-  type Histogram,
-  ROOT_CONTEXT,
-  type SpanContext as OtelSpanContext,
-  SpanStatusCode,
-  trace,
-  TraceFlags,
-} from '@opentelemetry/api';
-import { SeverityNumber } from '@opentelemetry/api-logs';
-import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { type LogRecordProcessor, LoggerProvider, SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
-import { type MetricReader, MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
-import {
-  type IdGenerator,
-  SimpleSpanProcessor,
-  type SpanProcessor,
-  WebTracerProvider,
-} from '@opentelemetry/sdk-trace-web';
-import {
   type Attrs,
   type LogRecord,
   type LogSeverity,
@@ -31,6 +8,37 @@ import {
   type SinkSpan,
   type SpanContext,
 } from '@mmstack/telemetry-core';
+import {
+  type Attributes,
+  type Counter,
+  type Gauge,
+  type Histogram,
+  type SpanContext as OtelSpanContext,
+  ROOT_CONTEXT,
+  SpanStatusCode,
+  trace,
+  TraceFlags,
+} from '@opentelemetry/api';
+import { SeverityNumber } from '@opentelemetry/api-logs';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import {
+  type LogRecordProcessor,
+  LoggerProvider,
+  SimpleLogRecordProcessor,
+} from '@opentelemetry/sdk-logs';
+import {
+  type MetricReader,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from '@opentelemetry/sdk-metrics';
+import {
+  type IdGenerator,
+  type SpanProcessor,
+  SimpleSpanProcessor,
+  WebTracerProvider,
+} from '@opentelemetry/sdk-trace-web';
 
 const TRACER_NAME = '@mmstack/telemetry';
 
@@ -96,7 +104,7 @@ const SEVERITY: Record<LogSeverity, SeverityNumber> = {
   fatal: SeverityNumber.FATAL,
 };
 
-export interface OtelSinkConfig {
+export type OtelSinkConfig = {
   /**
    * OTLP/HTTP base endpoint (e.g. `http://localhost:4318`) — drives traces,
    * metrics, and logs (each exporter appends `/v1/{traces,metrics,logs}`).
@@ -115,7 +123,7 @@ export interface OtelSinkConfig {
   readonly logProcessor?: LogRecordProcessor;
   /** Metric export cadence when building the OTLP reader (default 60s). */
   readonly metricIntervalMs?: number;
-}
+};
 
 /**
  * OTLP interchange adapter (one OTLP config → many backends). A capability sink
@@ -144,10 +152,17 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
     const traceUrl = config.url ?? (base ? `${base}/v1/traces` : undefined);
     const processor =
       config.processor ??
-      (traceUrl ? new SimpleSpanProcessor(new OTLPTraceExporter({ url: traceUrl, headers })) : null);
+      (traceUrl
+        ? new SimpleSpanProcessor(
+            new OTLPTraceExporter({ url: traceUrl, headers }),
+          )
+        : null);
     if (processor) {
       forced = new ForcedIdGenerator();
-      const own = new WebTracerProvider({ idGenerator: forced, spanProcessors: [processor] });
+      const own = new WebTracerProvider({
+        idGenerator: forced,
+        spanProcessors: [processor],
+      });
       provider = own;
       flushables.push(own);
       disposers.push(() => void own.shutdown());
@@ -159,8 +174,15 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
     // parenting through the OTel-side SpanContext (valid even after the parent
     // ends), FIFO-capped so a long session can't grow the map unboundedly.
     const byoCtx = forced ? null : new Map<string, OtelSpanContext>();
-    sink.startSpan = (name: string, ctx: SpanContext, attrs: Attrs = {}, startMs?: number): SinkSpan => {
-      const bridged = ctx.parentSpanId ? byoCtx?.get(ctx.parentSpanId) : undefined;
+    sink.startSpan = (
+      name: string,
+      ctx: SpanContext,
+      attrs: Attrs = {},
+      startMs?: number,
+    ): SinkSpan => {
+      const bridged = ctx.parentSpanId
+        ? byoCtx?.get(ctx.parentSpanId)
+        : undefined;
       const parent = bridged
         ? trace.setSpanContext(ROOT_CONTEXT, bridged)
         : forced && ctx.parentSpanId
@@ -176,12 +198,20 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
       // provider, surface them as correlation attributes instead.
       const attributes = forced
         ? toOtelAttrs(attrs)
-        : toOtelAttrs({ ...attrs, 'mmstack.trace_id': ctx.traceId, 'mmstack.span_id': ctx.spanId });
+        : toOtelAttrs({
+            ...attrs,
+            'mmstack.trace_id': ctx.traceId,
+            'mmstack.span_id': ctx.spanId,
+          });
 
       forced?.set(ctx);
       let span;
       try {
-        span = tracer.startSpan(name, { attributes, startTime: startMs }, parent);
+        span = tracer.startSpan(
+          name,
+          { attributes, startTime: startMs },
+          parent,
+        );
       } finally {
         forced?.clear();
       }
@@ -210,7 +240,10 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
     config.metricReader ??
     (base
       ? new PeriodicExportingMetricReader({
-          exporter: new OTLPMetricExporter({ url: `${base}/v1/metrics`, headers }),
+          exporter: new OTLPMetricExporter({
+            url: `${base}/v1/metrics`,
+            headers,
+          }),
           exportIntervalMillis: config.metricIntervalMs ?? 60_000,
         })
       : null);
@@ -221,9 +254,17 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
     disposers.push(() => void meterProvider.shutdown());
     // One instrument per name: recording the same name under two kinds would
     // export conflicting duplicate streams (backends reject them) — warn instead.
-    const instruments = new Map<string, { kind: MetricKind; inst: Counter | Gauge | Histogram }>();
+    const instruments = new Map<
+      string,
+      { kind: MetricKind; inst: Counter | Gauge | Histogram }
+    >();
 
-    sink.record = (name: string, value: number, attrs: Attrs = {}, kind: MetricKind = 'histogram'): void => {
+    sink.record = (
+      name: string,
+      value: number,
+      attrs: Attrs = {},
+      kind: MetricKind = 'histogram',
+    ): void => {
       let entry = instruments.get(name);
       if (!entry) {
         const inst =
@@ -251,7 +292,11 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
   // ---- logs ----
   const logProcessor =
     config.logProcessor ??
-    (base ? new SimpleLogRecordProcessor(new OTLPLogExporter({ url: `${base}/v1/logs`, headers })) : null);
+    (base
+      ? new SimpleLogRecordProcessor(
+          new OTLPLogExporter({ url: `${base}/v1/logs`, headers }),
+        )
+      : null);
   if (logProcessor) {
     const loggerProvider = new LoggerProvider({ processors: [logProcessor] });
     const logger = loggerProvider.getLogger(TRACER_NAME);

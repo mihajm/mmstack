@@ -1,6 +1,3 @@
-/** A bare (unquoted) JavaScript identifier — used by both codegen and registry insertion to decide
- * whether an object key / locale must be string-quoted. Kept in one place so the two emit paths
- * can't disagree on quoting. */
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 export function isIdentifier(value: string): boolean {

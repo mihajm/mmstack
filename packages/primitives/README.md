@@ -20,7 +20,9 @@ npm install @mmstack/primitives
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`, `projection`
 - [Effects](#effects) — `nestedEffect`
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
-- [History & persistence](#history--persistence) — `withHistory`, `stored`, `tabSync`, `opLog`
+- [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
+- [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, `rebaseOps`, `policyStrategy`
+- [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
 - [Pipelines](#pipelines) — `piped` / `pipeable`, operators (`select`, `map`, `filter`, `filterWith`, `distinct`, `combineWith`, `tap`, `startWith`, `pairwise`, `scan`)
@@ -716,6 +718,86 @@ invertBatch(batch); // prev-based inverse — undo is a data transform
 Batching is per tick (two writes to one leaf in a tick emit one composed op), `prev` is always carried in-memory (structural sharing makes it free — wire serializers decide whether to keep it), arrays diff per-index at equal lengths and as whole-array ops on length change, and a `forkStore`'s `commit()` lands as a single batch — fork *is* the transaction primitive. Mutable stores are unsupported (in-place mutation defeats ref-identity diffing; dev warn). This is the substrate for worker mirrors, tab/mesh sync, persistence journals, and undo — one protocol, many consumers.
 
 An `opLog` can also run with no Angular injector, which is what lets the graph mirror into a Web Worker. Pass `driver: microtaskOpLogDriver()` to drive emission off the microtask queue instead of an `effect()`, and build the store with `createStoreContext()` (a self-contained proxy cache) so `store` and `opLog` work in a worker or a plain Node process. The pure helpers `applyOps(root, ops)` and `diffOps(prev, next)` apply and produce batches without owning a log. [`@mmstack/worker`](https://www.npmjs.com/package/@mmstack/worker) is built directly on these seams.
+
+### `storeHistory`
+
+Undo and redo for a store, over the op-log rather than value snapshots, so each entry costs only the diff. `undo()` applies one inverse batch; a new edit after an undo forks the timeline.
+
+```typescript
+import { store, storeHistory } from '@mmstack/primitives';
+
+const doc = store({ title: 'Draft', body: '' });
+const history = storeHistory(doc);
+
+doc.title.set('Final');
+history.undo();     // title back to 'Draft'
+history.canRedo();  // Signal<boolean>
+
+storeHistory(doc, { track: syncClient }); // collaborative: only your own writes are undoable
+```
+
+### `persistedStore`
+
+Persists a whole store to an async backend (IndexedDB) and restores it on boot. It ships no IndexedDB code: you pass an `AsyncStore` adapter, which `idb-keyval` satisfies directly and a Dexie table satisfies with a few lines. Local durability, not sync (compose `tabSync` / `@mmstack/mesh` for that). Reads stay synchronous; because the backend is async, the store shows its initial value until the snapshot loads (`hydrated` is a signal you can gate on).
+
+```typescript
+import * as idbKeyval from 'idb-keyval';
+import { persistedStore, providePersistedStoreOptions } from '@mmstack/primitives';
+
+providePersistedStoreOptions({ store: idbKeyval }); // wire the backend once
+
+const draft = persistedStore({ title: '', body: '' }, { key: 'draft' });
+draft.store.title.set('Hi'); // persisted (debounced), restored on next load
+draft.hydrated();            // Signal<boolean>
+```
+
+When the persisted shape changes between releases, pass `version` and a `migrate` hook. An older snapshot is brought forward on boot before it is adopted, then re-persisted in the new shape (a newer snapshot than the running build is left untouched). Boot is already async, so `migrate` can be async, so the migration ladder can be lazy-loaded.
+
+```typescript
+const profile = persistedStore({ first: '', last: '' }, {
+  key: 'profile',
+  version: 2,
+  migrate: async (data, from) => (await import('./migrations')).run(data, from),
+});
+```
+
+`persistedStore` is `store()` + `persist()`. Reach for `persist(store, opt)` directly to add durability to a store you already have — one you also `meshSync`, or a worker-owned store's replica. Persistence is a reader over the op-log, so it composes with the other readers on the same store.
+
+```typescript
+import { store, persist, meshSync } from '@mmstack/primitives';
+
+const doc = store({ title: '', body: '' });
+persist(doc, { key: 'draft', store: idbKeyval });     // durable to IndexedDB
+meshSync(doc, { room: 'doc-42', writer, transport }); // and synced to peers
+```
+
+## Sync & convergence
+
+The op-log is the substrate; these keep two copies of a store in agreement across a boundary (tabs, a worker, a network). `opSync` wires a store to a transport: local writes emit stamped envelopes, received envelopes fold in through a per-path last-writer-wins register map, ordered by a hybrid logical clock so any arrival order converges to the same state. `tabSync(store, { id })` is `opSync` over `BroadcastChannel` with a join handshake.
+
+```typescript
+import { store, tabSync, keyedArray, preserve, isConflicted } from '@mmstack/primitives';
+
+const board = tabSync(store({ title: 'Board', todos: [] }), {
+  id: 'board',
+  policies: [
+    { path: 'todos', merge: keyedArray((t) => t.id) }, // reconcile a list by item identity
+    { path: 'title', merge: preserve },                // keep both sides of a clash as data
+  ],
+});
+```
+
+A **merge policy** decides the result when two peers change one path at once: `lww` (default), `mergeThree` (three-way against the common ancestor), `keyedArray(idFn)` (list reconcile by identity), or `preserve` (both sides survive as a `Conflicted` value; `isConflicted(v)` narrows it, resolution is a later write). `rebaseOps(root, pending, remote, policies)` is the pure invert-apply-reapply routine behind optimistic updates and offline queues, and `policyStrategy(policies)` gives a `forkStore` the same per-path resolution. This is what [`@mmstack/mesh`](https://www.npmjs.com/package/@mmstack/mesh) wraps for multiplayer.
+
+## Observability
+
+An optional listener seam on the concurrency layer. `provideConcurrencyInstrumentation(listener)` receives events as transition scopes coordinate pending, suspense, and transaction windows; with no listener the taps are no-ops. `perfCustomTracks()` is a ready listener that writes each window to a Chrome DevTools Performance track, and the window hooks are span-shaped, so forwarding to [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) is a direct mapping.
+
+```typescript
+import { provideConcurrencyInstrumentation, perfCustomTracks } from '@mmstack/primitives';
+
+providers: [provideConcurrencyInstrumentation(perfCustomTracks())];
+```
 
 ## Performance helpers
 

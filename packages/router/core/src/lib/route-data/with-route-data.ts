@@ -40,15 +40,11 @@ function isSettled(status: string): boolean {
 }
 
 /**
- * Warms route DATA on preload-intent (the same `mmLink` hover/visible signal that loads the
- * code chunk). For a hovered link it finds routes carrying a {@link createRouteData} tag,
- * extracts params from the URL, and runs the factory in a throwaway injector parented at
- * root — so the resource fetches into the shared resource cache. The later navigation reads
- * the warm cache (deduped). Opt-in via {@link withRouteData}.
- *
- * Two-phase for lazily code-split routes: the first hover loads the chunk (the route's tag
- * isn't visible until then); a subsequent hover warms the data. Eager routes warm on the
- * first hover.
+ * Warms route data on preload-intent (the same `mmLink` hover/visible signal that loads the
+ * code chunk): finds routes carrying a {@link createRouteData} tag, extracts params from the
+ * URL, and runs the factory in a throwaway root-parented injector so the resource fetches
+ * into the shared cache. Lazy routes are two-phase (first hover loads the chunk, next warms
+ * data); eager routes warm on the first hover. Opt-in via {@link withRouteData}.
  */
 @Injectable({ providedIn: 'root' })
 export class RouteDataPrefetcher {
@@ -60,7 +56,6 @@ export class RouteDataPrefetcher {
   private readonly prefetchTimeout =
     inject(PREFETCH_TIMEOUT, { optional: true }) ?? DEFAULT_PREFETCH_TIMEOUT;
   private connected = false;
-  /** linkPath::description already warmed — don't refetch on repeated hovers. */
   private readonly warmed = new Set<string>();
 
   connect(): void {
@@ -68,7 +63,6 @@ export class RouteDataPrefetcher {
     this.connected = true;
     this.req.preloadRequested$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      // scope 'code' = warm the chunk only — the link opted its DATA out (mmLink `preload`)
       .subscribe(({ path, scope }) => {
         if (scope === 'all') this.warm(path);
       });
@@ -95,8 +89,6 @@ export class RouteDataPrefetcher {
     },
     dedupeKey: string,
   ): void {
-    // throwaway scope so registration is harmless; parented at root so the resource resolves
-    // the shared (root) cache and writes the warm entry there.
     const ephemeral = createEnvironmentInjector(
       [provideTransitionScope()],
       this.rootInjector,
@@ -112,7 +104,6 @@ export class RouteDataPrefetcher {
           isPrefetch: true,
           injector: ephemeral,
         };
-        // the value itself, or each first-level member of a composite return
         const watched = statusBearers(tag.factory(ctx));
 
         if (!watched.length) {
@@ -121,14 +112,14 @@ export class RouteDataPrefetcher {
         }
 
         let settled = false;
-        // a failed warm should retry on the next hover: forget the dedupe entry
+        // failed warm forgets its dedupe entry so the next hover retries
         const finish = (failed: boolean) => {
           settled = true;
           clearTimeout(timer);
           if (failed) this.warmed.delete(dedupeKey);
           queueMicrotask(() => ephemeral.destroy());
         };
-        // safety net: never leak the injector if a request never settles
+        // leak guard: tear down if a request never settles
         const timer = setTimeout(() => {
           if (settled) return;
           this.warmed.delete(dedupeKey);
@@ -142,7 +133,7 @@ export class RouteDataPrefetcher {
         });
       });
     } catch (e) {
-      // user code — a throwing factory must not kill the preload subscription or block retries
+      // a throwing factory must not kill the preload subscription
       this.warmed.delete(dedupeKey);
       ephemeral.destroy();
       if (isDevMode())

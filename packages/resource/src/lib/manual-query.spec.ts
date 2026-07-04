@@ -158,7 +158,6 @@ describe('manualQueryResource', () => {
           () => {
             /* noop */
           },
-          // read at request time, so each trigger sees the current payload
           { data: payload },
         ),
       })),
@@ -169,8 +168,6 @@ describe('manualQueryResource', () => {
 
     payload = 'second';
 
-    // regression: the per-call watcher could observe the PREVIOUS request's
-    // `resolved` status before the new load started, resolving with stale data
     const second = await res.trigger();
     expect(second).toEqual({ data: 'second' });
   });
@@ -180,7 +177,6 @@ describe('manualQueryResource', () => {
       manualQueryResource(() => undefined),
     );
 
-    // a watcher would hang forever — there is no load to observe
     await expect(res.trigger()).rejects.toThrow('produced no request');
   });
 });

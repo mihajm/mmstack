@@ -38,10 +38,12 @@ export interface ConsentStore {
     | Readonly<Record<string, ConsentDecision>>
     | null
     | undefined;
-  set(decisions: Readonly<Record<string, ConsentDecision>>): PromiseLike<void> | void;
+  set(
+    decisions: Readonly<Record<string, ConsentDecision>>,
+  ): PromiseLike<void> | void;
 }
 
-export interface ConsentConfig {
+export type ConsentConfig = {
   /** What the app wants to track. Signal-backed for dynamic/SDUI delta re-consent. */
   readonly requirements:
     | readonly TrackingRequirement[]
@@ -54,7 +56,7 @@ export interface ConsentConfig {
   readonly store?: ConsentStore;
   /** How long to defer undecided emits while an async store hydrates (default 5s). */
   readonly hydrationTimeoutMs?: number;
-}
+};
 
 /** localStorage-backed {@link ConsentStore}; a no-op off the browser. */
 export function localStorageConsentStore(
@@ -133,7 +135,8 @@ export function createConsentState(config: ConsentConfig): ConsentState {
 
   let hydrating = false;
   let hydrationTimer: ReturnType<typeof setTimeout> | undefined;
-  const deferred: { category: string; sink: string; deliver: () => void }[] = [];
+  const deferred: { category: string; sink: string; deliver: () => void }[] =
+    [];
   const warned = new Set<string>();
 
   const settleHydration = (): void => {
@@ -160,7 +163,8 @@ export function createConsentState(config: ConsentConfig): ConsentState {
     if (category === undefined) return 'allow'; // uncategorized telemetry is not consent-gated
     const decided = untracked(decisions);
     const relevant = untracked(requirements).filter(
-      (r) => r.category === category && (r.sink === undefined || r.sink === sink),
+      (r) =>
+        r.category === category && (r.sink === undefined || r.sink === sink),
     );
 
     if (relevant.length === 0) {
@@ -194,7 +198,8 @@ export function createConsentState(config: ConsentConfig): ConsentState {
       const result = config.store.set(untracked(decisions));
       if (isThenable(result)) {
         result.then(undefined, (err: unknown) => {
-          if (isDevMode()) console.warn('[telemetry] ConsentStore.set failed', err);
+          if (isDevMode())
+            console.warn('[telemetry] ConsentStore.set failed', err);
         });
       }
     } catch (err) {
@@ -223,7 +228,8 @@ export function createConsentState(config: ConsentConfig): ConsentState {
           settleHydration();
         },
         (err: unknown) => {
-          if (isDevMode()) console.warn('[telemetry] ConsentStore.get failed', err);
+          if (isDevMode())
+            console.warn('[telemetry] ConsentStore.get failed', err);
           settleHydration();
         },
       );

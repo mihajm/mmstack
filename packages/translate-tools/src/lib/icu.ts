@@ -43,7 +43,7 @@ export function extractPlaceholders(message: string): Set<string> {
           walk(el.children);
           break;
         default:
-          break; // literal / pound carry no placeholder name
+          break;
       }
     }
   };

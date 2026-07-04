@@ -47,19 +47,16 @@ describe('dedupe-interceptor', () => {
 
       const req = new HttpRequest('GET', '/api/users');
 
-      // Subscribe twice while the request is still in-flight
       const results: HttpEvent<unknown>[] = [];
       interceptor(req, mockNext).subscribe((r) => results.push(r));
       interceptor(req, mockNext).subscribe((r) => results.push(r));
 
-      expect(callCount).toBe(1); // Only one actual HTTP call
+      expect(callCount).toBe(1);
 
-      // Complete the request
       const response = new HttpResponse({ status: 200, body: 'ok' });
       subject.next(response);
       subject.complete();
 
-      // Both subscribers received the same response
       expect(results.length).toBe(2);
       expect(results[0]).toBe(results[1]);
     });
@@ -91,11 +88,9 @@ describe('dedupe-interceptor', () => {
 
       const req = new HttpRequest('GET', '/api/users');
 
-      // First request completes synchronously
       interceptor(req, mockNext).subscribe();
       expect(callCount).toBe(1);
 
-      // After completion, a new request should go through
       interceptor(req, mockNext).subscribe();
       expect(callCount).toBe(2);
     });
@@ -155,15 +150,12 @@ describe('dedupe-interceptor', () => {
 
       const sub1 = interceptor(req, mockNext).subscribe();
       const sub2 = interceptor(req, mockNext).subscribe();
-      expect(callCount).toBe(1); // both subscribers share the same in-flight source
+      expect(callCount).toBe(1);
 
-      // All consumers leave before the response lands.
       sub1.unsubscribe();
       sub2.unsubscribe();
-      expect(teardownCount).toBe(1); // refCount:true → source unsubscribed (HTTP cancelled)
+      expect(teardownCount).toBe(1);
 
-      // A subsequent identical request should start a fresh source — the
-      // finalize from the previous teardown cleared the in-flight slot.
       interceptor(req, mockNext).subscribe();
       expect(callCount).toBe(2);
     });
@@ -171,7 +163,6 @@ describe('dedupe-interceptor', () => {
     it('should honor a custom keyFn override', () => {
       const subject = new Subject<HttpEvent<unknown>>();
       let calls = 0;
-      // Force every request to share the same key — both should dedupe together.
       const interceptor = createDedupeRequestsInterceptor(
         ['GET', 'POST'],
         () => 'shared',
@@ -202,7 +193,6 @@ describe('dedupe-interceptor', () => {
 
       const postReq = new HttpRequest('POST', '/api/data', null);
 
-      // POST should be deduped when in-flight
       postInterceptor(postReq, postNext).subscribe();
       postInterceptor(postReq, postNext).subscribe();
       expect(postCalls).toBe(1);
@@ -210,7 +200,6 @@ describe('dedupe-interceptor', () => {
       subject.next(new HttpResponse({ status: 200 }));
       subject.complete();
 
-      // GET should NOT be deduped (not in allowed list)
       let getCalls = 0;
       const getNext: HttpHandlerFn = () => {
         getCalls++;

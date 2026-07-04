@@ -16,7 +16,6 @@ describe('catchValueError', () => {
 
   it('should return fallback when value() throws', () => {
     TestBed.runInInjectionContext(() => {
-      // Build a throwing resource manually
       const setSpy = vi.fn();
       const throwingResource = {
         ...createMockResource('data'),

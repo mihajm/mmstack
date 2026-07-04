@@ -75,21 +75,16 @@ type Connection = {
   readonly port: WorkerPortLike;
   clientId: string | null;
   readonly stores: Set<string>;
-  /** In-flight named-task runs for THIS client, keyed by its runId (client runIds aren't global). */
   readonly taskRuns: Map<number, AbortController>;
 };
 
 type Subtree = {
-  /** Untracked read of the current root value (for snapshots). */
   readonly read: () => unknown;
   readonly log: OpLog<any>;
-  /** The version of the last batch emitted — a fresh subscriber's snapshot carries it. */
   version: number;
-  /** The writable store for an OWNED subtree; `null` for a PUBLISHED (read-only) one. */
   readonly writable: WritableSignal<any> | null;
 };
 
-/** Maps an Angular ResourceStatus to the wire status; only the states the protocol carries. */
 function toRemoteStatus(
   s: ResourceStatus,
 ): 'idle' | 'loading' | 'reloading' | 'resolved' | 'error' {
@@ -98,11 +93,7 @@ function toRemoteStatus(
     : 'resolved';
 }
 
-/**
- * Dev-only guard: a store value that is not structured-clonable (a function, a class instance, an
- * `opaque()` value) throws a bare `DataCloneError` from `postMessage` with no context. Catch it
- * before it hits the wire and name the store, so the fix is obvious. Stripped in production.
- */
+// dev-only: catch a non-cloneable store value before postMessage throws a context-free DataCloneError
 function devAssertCloneable(value: unknown, what: string): void {
   if (!isDevMode()) return;
   try {
@@ -153,7 +144,6 @@ export function createWorkerHost<
   readonly tasks: T;
 }> {
   const hostId = generateId();
-  // the S/P/T generics drive the RETURN type only; the body works over loose records
   const sources = (options.stores ?? {}) as Record<string, WritableSignal<any>>;
   const publishedSources = (options.published ?? {}) as Record<
     string,
@@ -166,8 +156,6 @@ export function createWorkerHost<
 
   const subtrees = new Map<string, Subtree>();
   const connections = new Set<Connection>();
-  // current wire status of each status-bearing published entry, read at subscribe time so a late
-  // subscriber sees an in-flight computation as pending instead of waiting for the next transition
   const publishedStatus = new Map<
     string,
     () => 'idle' | 'loading' | 'reloading' | 'resolved' | 'error'
@@ -179,8 +167,6 @@ export function createWorkerHost<
       if (conn.stores.has(store)) conn.port.postMessage(message);
   };
 
-  // observe a signal's value → snapshot/ops. Owned stores also route writes; published are read-only.
-  // Applied remote writes ride this same emission, echo-free (the owner is the single sequencer).
   const observe = (
     key: string,
     src: Signal<unknown>,
@@ -193,7 +179,6 @@ export function createWorkerHost<
       writable,
     };
     (entry as { log: OpLog<any> }).log = opLog(
-      // a published (read-only) signal is only ever READ by the log — apply() is never called on it
       src as unknown as WritableSignal<any>,
       { driver: microtaskOpLogDriver(), origin: hostId },
     );
@@ -210,7 +195,6 @@ export function createWorkerHost<
   for (const key of publishedKeys) {
     const src = publishedSources[key];
     observe(key, src as Signal<unknown>, null);
-    // rung 3: a status-bearing derivation (a latest()) propagates its pending/error to replicas
     const statusSig = (src as { status?: Signal<ResourceStatus> }).status;
     if (statusSig) {
       publishedStatus.set(key, () => toRemoteStatus(untracked(statusSig)));
@@ -290,9 +274,7 @@ export function createWorkerHost<
       }
       case 'store:subscribe': {
         const sub = subtrees.get(msg.store);
-        if (!sub) return; // unknown store — silently ignore (a client typo, not fatal)
-        // synchronous: read snapshot + version and register the client in one turn — no batch can
-        // interleave in a single-threaded worker, so every later op carries version > this one
+        if (!sub) return;
         conn.stores.add(msg.store);
         const snapshot = sub.read();
         devAssertCloneable(snapshot, `store '${msg.store}' snapshot`);
@@ -302,8 +284,6 @@ export function createWorkerHost<
           version: sub.version,
           value: snapshot,
         });
-        // a status-bearing published entry also reports its CURRENT status, so a subscriber
-        // arriving mid-computation shows pending now, not on the next transition
         const currentStatus = publishedStatus.get(msg.store);
         if (currentStatus)
           conn.port.postMessage({
@@ -355,10 +335,6 @@ export function createWorkerHost<
           return;
         }
         try {
-          // the owner is the single sequencer: apply the routed ops through the store root, then
-          // FLUSH so its opLog emits ONE authoritative owner-origin batch (fanned to every client,
-          // the writer included — the echo that IS the write's confirmation). No baseline-advance
-          // trick: this is a genuine owner write, indistinguishable from the worker writing itself.
           sub.writable.set(applyOps(sub.read(), msg.ops));
           sub.log.flush();
           conn.port.postMessage({
@@ -388,11 +364,10 @@ export function createWorkerHost<
       taskRuns: new Map(),
     };
     connections.add(conn);
-    // assigning onmessage starts a MessagePort; a Worker/self delivers the same way
     port.onmessage = (ev) => handle(conn, ev.data as WorkerEnvelope);
     return () => {
       connections.delete(conn);
-      port.onmessage = null; // a disconnected client must not keep invoking tasks/writes
+      port.onmessage = null;
       for (const ac of conn.taskRuns.values()) ac.abort();
       conn.taskRuns.clear();
     };

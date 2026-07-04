@@ -119,8 +119,7 @@ export function formatDisplayName(
       ''
     );
   } catch {
-    // Intl.DisplayNames.of throws RangeError on malformed codes (e.g. 'US 1');
-    // coerce to '' like every other formatter does for invalid input
+    // Intl.DisplayNames.of throws RangeError on malformed codes; coerce to ''
     return '';
   }
 }

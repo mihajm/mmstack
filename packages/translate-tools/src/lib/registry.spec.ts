@@ -32,12 +32,12 @@ describe('registry', () => {
     expect(text).toContain(
       'de: () => import("./quote.de").then((m) => m.quoteDe)',
     );
-    expect(text).toContain("'sl-SI'"); // existing untouched
+    expect(text).toContain("'sl-SI'");
 
     const other = call.getArguments()[1];
     if (!other || !Node.isObjectLiteralExpression(other))
       throw new Error('no other map');
-    expect(other.getProperties()).toHaveLength(2); // sl-SI + de
+    expect(other.getProperties()).toHaveLength(2);
   });
 
   it('quotes a non-identifier locale key', () => {

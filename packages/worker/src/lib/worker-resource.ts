@@ -119,7 +119,7 @@ function build<TInput, TResult>(
     runTask(input, ac.signal).then(
       (result) => {
         if (inFlight === ac) inFlight = null;
-        if (myEpoch !== epoch) return; // superseded — discard
+        if (myEpoch !== epoch) return;
         value.set(result);
         status.set('resolved');
       },
@@ -138,9 +138,8 @@ function build<TInput, TResult>(
 
   const ref = effect(() => {
     const i = input();
-    if (isServer || i === PAUSED) return; // server: never run · paused: hold
-    if (i === undefined) return; // disabled — keep current value/status
-    // dedup: a resume to the same input (e.g. after a pause) does not re-run
+    if (isServer || i === PAUSED) return;
+    if (i === undefined) return;
     if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error') return;
     untracked(() => start(i as TInput));
   });
@@ -162,11 +161,11 @@ function build<TInput, TResult>(
       start(i as TInput);
     },
     abort: () => {
-      if (!inFlight) return; // nothing in flight (a scope's abortPending must not disturb a settled value)
+      if (!inFlight) return;
       epoch++;
       inFlight.abort();
       inFlight = null;
-      status.set('local'); // value kept
+      status.set('local');
     },
     destroy: () => {
       epoch++;
@@ -178,8 +177,6 @@ function build<TInput, TResult>(
   if (options.register) {
     const scope = injectTransitionScope();
     scope.add(self, { suspends: options.register === 'suspend' });
-    // deregister on manual destroy() too, not only on context teardown — a
-    // long-lived context destroying a ref by hand must not leave a zombie entry
     let removed = false;
     const remove = () => {
       if (removed) return;

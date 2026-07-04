@@ -1,5 +1,7 @@
 # @mmstack/telemetry-core
 
+> **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
+
 Headless, signals-native telemetry for Angular. One facade for spans, events, errors, metrics, and logs, fanned out to capability-based sinks (OTLP, PostHog, Sentry, or your own). Context propagation is explicit and zone-free, consent-ready, and without configuration the injected facade is a noop whose empty methods cost effectively nothing.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
@@ -12,7 +14,8 @@ This suite answers that with explicit, zone-free context: spans parent through v
 
 ## Highlights
 
-- **Capability sinks.** A backend implements only what it supports (`SpanSink`, `EventSink`, `ErrorSink`, `MetricSink`, `LogSink`). The facade routes each emit to the sinks that can handle it and shares one trace context across all of them.
+- **Capability sinks.** A backend implements only what it supports (`SpanSink`, `EventSink`, `ErrorSink`, `MetricSink`, `LogSink`, `IdentitySink`). The facade routes each emit to the sinks that can handle it and shares one trace context across all of them.
+- **Identity and super-properties.** `identify(userId, traits?)` attaches subsequent telemetry to a user on every identity-capable sink (PostHog person, Sentry user); `identify(null)` clears it. `setGlobalAttrs(attrs)` sets attributes merged into every emit (event/error/metric/log/span), accumulating, with an `undefined` value removing a key. Both are no-ops on sinks that lack the concept, and both run through your `AttributePolicy`.
 - **Opt-in, noop by default.** `inject(TELEMETRY)` works with zero configuration and costs nothing. `provideTelemetry` activates it only when at least one sink validates; adapter factories return `null` for bad config and get filtered out.
 - **Signal-native readiness.** A sink declares `ready: Signal<boolean>`. While it initializes, telemetry buffers (spans record and replay), then flushes in order on ready, or drops after a timeout so a broken sink can't leak memory.
 - **Explicit context, no zones.** A synchronous active-span stack drives correlation: emits inside a `span()` body carry its trace ids, and nested `span()` calls join the active trace (`parent: null` opts out). Across async boundaries nothing is ambient: HTTP spans nest via `withTelemetryParent`, raw async via `traced()` or an explicit `parent`.

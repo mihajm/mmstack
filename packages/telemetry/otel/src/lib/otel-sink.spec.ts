@@ -155,6 +155,22 @@ describe('@mmstack/telemetry-otel', () => {
       // facade-level correlation rides along too
       expect(child.attributes['mmstack.trace_id']).toBe(parentSpan.attributes['mmstack.trace_id']);
     });
+
+    it('bounds the parent-context map: the oldest entry is evicted past the 2000 cap', () => {
+      const { exporter, telemetry } = byoSetup();
+      const oldParent = telemetry.startSpan('old-parent'); // first entry in the map
+      oldParent.end();
+      // overflow the cap so the oldest entry (old-parent) is evicted
+      for (let i = 0; i <= 2001; i++) telemetry.startSpan(`s${i}`).end();
+
+      // a child parented to the evicted span can no longer link → it starts a fresh OTel trace
+      telemetry.span('orphan', () => undefined, { parent: oldParent });
+
+      const spans = exporter.getFinishedSpans();
+      const old = spans.find((s) => s.name === 'old-parent')!;
+      const orphan = spans.find((s) => s.name === 'orphan')!;
+      expect(orphan.spanContext().traceId).not.toBe(old.spanContext().traceId);
+    });
   });
 
   it('maps every LogSeverity tier to the matching SeverityNumber', () => {

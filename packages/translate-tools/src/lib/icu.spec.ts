@@ -9,7 +9,7 @@ describe('validateMessage', () => {
       '{g, select, male {he} female {she} other {they}}',
       '{n, selectordinal, one {#st} two {#nd} other {#th}}',
       '<b>{x}</b> and {y}',
-      "5 o''clock", // escaped apostrophe
+      "5 o''clock",
       "'{' literal brace",
     ]) {
       expect(validateMessage(msg).ok).toBe(true);
@@ -17,8 +17,8 @@ describe('validateMessage', () => {
   });
 
   it('rejects malformed ICU', () => {
-    expect(validateMessage('{n, plural, one {# item}').ok).toBe(false); // unclosed
-    expect(validateMessage('{}').ok).toBe(false); // empty arg
+    expect(validateMessage('{n, plural, one {# item}').ok).toBe(false);
+    expect(validateMessage('{}').ok).toBe(false);
   });
 });
 

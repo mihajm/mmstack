@@ -25,6 +25,7 @@ export const appRoutes: Route[] = [
               { label: 'Overview', link: 'primitives' },
               { label: 'Signal variants', link: 'primitives/signals' },
               { label: 'Store', link: 'primitives/store' },
+              { label: 'Sync & convergence', link: 'primitives/sync' },
               { label: 'Mapped collections', link: 'primitives/collections' },
               { label: 'Timing', link: 'primitives/timing' },
               { label: 'Storage & history', link: 'primitives/storage' },
@@ -32,6 +33,7 @@ export const appRoutes: Route[] = [
               { label: 'Pipelines', link: 'primitives/pipelines' },
               { label: 'Performance', link: 'primitives/performance' },
               { label: 'Transitions & suspense', link: 'primitives/transitions' },
+              { label: 'Observability', link: 'primitives/observability' },
               { label: 'Keep-alive & pausing', link: 'primitives/pausing' },
             ],
           },
@@ -108,6 +110,22 @@ export const appRoutes: Route[] = [
               { label: 'Host & typing', link: 'worker/setup' },
             ],
           },
+          {
+            label: '@mmstack/telemetry',
+            children: [
+              { label: 'Overview', link: 'telemetry' },
+              { label: 'Adapters', link: 'telemetry/adapters' },
+              { label: 'Consent', link: 'telemetry/consent' },
+            ],
+          },
+          {
+            label: '@mmstack/mesh',
+            children: [
+              { label: 'Overview', link: 'mesh' },
+              { label: 'The client', link: 'mesh/client' },
+              { label: 'The relay', link: 'mesh/relay' },
+            ],
+          },
         ],
         { name: 'docs' },
       ),
@@ -137,6 +155,12 @@ export const appRoutes: Route[] = [
         title: createTitle('Store'),
         loadComponent: () =>
           import('./pages/docs/primitives/store').then((m) => m.StoreDoc),
+      },
+      {
+        path: 'primitives/sync',
+        title: createTitle('Sync & convergence'),
+        loadComponent: () =>
+          import('./pages/docs/primitives/sync').then((m) => m.SyncDoc),
       },
       {
         path: 'primitives/collections',
@@ -186,6 +210,14 @@ export const appRoutes: Route[] = [
         loadComponent: () =>
           import('./pages/docs/primitives/transitions').then(
             (m) => m.TransitionsDoc,
+          ),
+      },
+      {
+        path: 'primitives/observability',
+        title: createTitle('Observability'),
+        loadComponent: () =>
+          import('./pages/docs/primitives/observability').then(
+            (m) => m.ObservabilityDoc,
           ),
       },
       {
@@ -473,6 +505,48 @@ export const appRoutes: Route[] = [
         title: createTitle('Host & typing'),
         loadComponent: () =>
           import('./pages/docs/worker/setup').then((m) => m.WorkerSetupDoc),
+      },
+      {
+        path: 'telemetry',
+        title: createTitle('Telemetry'),
+        loadComponent: () =>
+          import('./pages/docs/telemetry/overview').then(
+            (m) => m.TelemetryOverview,
+          ),
+      },
+      {
+        path: 'telemetry/adapters',
+        title: createTitle('Telemetry adapters'),
+        loadComponent: () =>
+          import('./pages/docs/telemetry/adapters').then(
+            (m) => m.TelemetryAdapters,
+          ),
+      },
+      {
+        path: 'telemetry/consent',
+        title: createTitle('Telemetry consent'),
+        loadComponent: () =>
+          import('./pages/docs/telemetry/consent').then(
+            (m) => m.TelemetryConsent,
+          ),
+      },
+      {
+        path: 'mesh',
+        title: createTitle('Mesh'),
+        loadComponent: () =>
+          import('./pages/docs/mesh/overview').then((m) => m.MeshOverview),
+      },
+      {
+        path: 'mesh/client',
+        title: createTitle('Mesh client'),
+        loadComponent: () =>
+          import('./pages/docs/mesh/client').then((m) => m.MeshClient),
+      },
+      {
+        path: 'mesh/relay',
+        title: createTitle('Mesh relay'),
+        loadComponent: () =>
+          import('./pages/docs/mesh/relay').then((m) => m.MeshRelay),
       },
     ],
   },

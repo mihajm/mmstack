@@ -1,5 +1,7 @@
 # @mmstack/telemetry-posthog
 
+> **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
+
 PostHog adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core). An `EventSink` over your own `posthog-js` instance, plus a reactive session-replay URL handle.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)

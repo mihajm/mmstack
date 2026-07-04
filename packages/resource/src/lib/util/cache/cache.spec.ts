@@ -42,7 +42,6 @@ describe('Cache', () => {
   it('should invalidate no-op for missing key', () => {
     const cache = new Cache<string>();
 
-    // Should not throw
     expect(() => cache.invalidate('nonexistent')).not.toThrow();
   });
 
@@ -59,7 +58,6 @@ describe('Cache', () => {
     expect(cache.getUntracked('GET /api/posts')).toBeNull();
     expect(cache.getUntracked('GET /api/posts/1')).toBeNull();
     expect(cache.getUntracked('GET /api/posts/2')).toBeNull();
-    // unrelated key survives
     expect(cache.getUntracked('GET /api/users')).not.toBeNull();
   });
 
@@ -68,7 +66,6 @@ describe('Cache', () => {
     cache.store('GET /api/posts', 'list');
 
     expect(cache.invalidatePrefix('GET /api/users')).toBe(0);
-    // existing entry untouched
     expect(cache.getUntracked('GET /api/posts')).not.toBeNull();
   });
 
@@ -149,9 +146,7 @@ describe('Cache', () => {
       cache.store(hashRequest({ url: '/api/users' }), 'v');
       cache.store('totally-custom-key', 'v');
 
-      // zero matches for this prefix, but auto-shape keys are present → no hint
       expect(cache.invalidateUrlPrefix('/api/posts')).toBe(0);
-
       expect(warn).not.toHaveBeenCalled();
     });
   });
@@ -201,12 +196,10 @@ describe('Cache', () => {
 
     cache.store('key1', 'value', 5000, 1000);
 
-    // staleTime should be clamped to ttl (1000ms)
     vi.advanceTimersByTime(999);
     expect(cache.getUntracked('key1')!.isStale).toBe(false);
 
     vi.advanceTimersByTime(2);
-    // stale and expired at the same time
     expect(cache.getUntracked('key1')).toBeNull();
   });
 
@@ -222,7 +215,7 @@ describe('Cache', () => {
     const second = cache.getUntracked('key1')!;
 
     expect(second.value).toBe('second');
-    expect(second.created).toBe(first.created); // created timestamp preserved
+    expect(second.created).toBe(first.created);
     expect(second.updated).toBeGreaterThan(first.updated);
     expect(second.useCount).toBeGreaterThan(first.useCount);
   });
@@ -270,17 +263,13 @@ describe('Cache', () => {
       cache.store('a', 1);
       cache.store('b', 2);
       cache.store('c', 3);
-      cache.store('d', 4); // now exceeds maxSize
+      cache.store('d', 4);
 
-      // Access 'c' and 'd' to increase their useCount
       cache.getUntracked('c');
       cache.getUntracked('d');
 
-      // Trigger cleanup
       vi.advanceTimersByTime(checkInterval);
 
-      // 'a' and 'b' should be evicted (least used)
-      // keepCount = floor(3 / 2) = 1, so only 1 kept... but 'd' has most uses
       expect(cache.getUntracked('d')).not.toBeNull();
     });
   });
@@ -300,22 +289,17 @@ describe('Cache', () => {
       vi.advanceTimersByTime(10);
       cache.store('c', 3);
       vi.advanceTimersByTime(10);
-      cache.store('d', 4); // exceeds maxSize
+      cache.store('d', 4);
 
-      // Trigger cleanup
       vi.advanceTimersByTime(checkInterval);
 
-      // 'a' should be evicted first (oldest)
       expect(cache.getUntracked('a')).toBeNull();
-      // 'd' should survive (newest)
       expect(cache.getUntracked('d')).not.toBeNull();
     });
   });
 
   describe('cross-tab sync (BroadcastChannel)', () => {
     function waitForChannel() {
-      // BroadcastChannel delivery uses the macrotask queue; one setTimeout(0)
-      // is enough to let the message land.
       return new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
@@ -376,8 +360,7 @@ describe('Cache', () => {
         action: 'store',
         type: 'cache-sync-message',
         cacheId: 'some-other-cache',
-        // NOTE: deliberately no `lastAccessed` — simulates a message from a tab
-        // running an older version; the restore path must default it to `updated`
+        // no lastAccessed: restore must default it to updated
         entry: {
           key: 'k',
           value: 'newer-from-other-tab',
@@ -414,8 +397,6 @@ describe('Cache', () => {
       const cache = new Cache<string>();
       cache.store('immutable', 'forever', Infinity, Infinity);
 
-      // regression: setTimeout(…, Infinity) coerces to 0 — the entry used to be
-      // invalidated on the very next tick
       vi.advanceTimersByTime(60_000);
 
       const entry = cache.getUntracked('immutable');
@@ -425,7 +406,7 @@ describe('Cache', () => {
 
     it('a ttl beyond the int32 timer bound must not wrap negative', () => {
       const cache = new Cache<string>();
-      const sixtyDays = 1000 * 60 * 60 * 24 * 60; // > 2^31-1 ms
+      const sixtyDays = 1000 * 60 * 60 * 24 * 60;
       cache.store('long', 'lived', 1000, sixtyDays);
 
       vi.advanceTimersByTime(10_000);
@@ -453,12 +434,10 @@ describe('Cache', () => {
     it('uses the merged defaults when a partial cleanup option omits checkInterval', () => {
       const spy = vi.spyOn(globalThis, 'setInterval');
 
-      // regression: the raw partial was read directly → setInterval(fn, undefined)
-      // → a ~4ms sweep storm
       const cache = new Cache<string>(undefined, undefined, { maxSize: 50 });
 
       const delays = spy.mock.calls.map((c) => c[1]);
-      expect(delays).toContain(1000 * 60 * 60); // merged default: ONE_HOUR
+      expect(delays).toContain(1000 * 60 * 60);
       expect(delays).not.toContain(undefined);
 
       cache.destroy();
@@ -478,7 +457,6 @@ describe('Cache', () => {
       cache.store('a', 1);
       vi.advanceTimersByTime(10);
       cache.store('b', 2);
-      // pump b's frequency — under LFU this would protect it
       cache.getUntracked('b');
       cache.getUntracked('b');
       cache.getUntracked('b');
@@ -488,15 +466,15 @@ describe('Cache', () => {
       cache.store('d', 4);
       vi.advanceTimersByTime(10);
 
-      cache.getUntracked('a'); // 'a' becomes the most recently accessed
+      cache.getUntracked('a');
       vi.advanceTimersByTime(10);
-      cache.store('e', 5); // exceeds maxSize
+      cache.store('e', 5);
 
-      vi.advanceTimersByTime(checkInterval); // sweep: keepCount = floor(4/2) = 2
+      vi.advanceTimersByTime(checkInterval);
 
-      expect(cache.getUntracked('a')).not.toBeNull(); // recent access wins
-      expect(cache.getUntracked('e')).not.toBeNull(); // newest write
-      expect(cache.getUntracked('b')).toBeNull(); // frequent but old → evicted
+      expect(cache.getUntracked('a')).not.toBeNull();
+      expect(cache.getUntracked('e')).not.toBeNull();
+      expect(cache.getUntracked('b')).toBeNull();
       expect(cache.getUntracked('c')).toBeNull();
       expect(cache.getUntracked('d')).toBeNull();
     });
@@ -522,7 +500,6 @@ describe('Cache', () => {
 
     it('preserves ABSOLUTE freshness windows instead of re-anchoring to now', async () => {
       const now = Date.now();
-      // persisted 2h ago: staleTime was 1h (already passed), ttl 3h (1h remaining)
       const entry = makeStoredEntry('k', 'v', {
         updated: now - 2 * 60 * 60 * 1000,
         stale: now - 60 * 60 * 1000,
@@ -541,14 +518,12 @@ describe('Cache', () => {
         }),
       );
 
-      await vi.advanceTimersByTimeAsync(0); // flush hydration microtasks
+      await vi.advanceTimersByTimeAsync(0);
 
       const hydrated = cache.getUntracked('k');
       expect(hydrated).not.toBeNull();
-      // regression: re-anchoring used to make this FRESH for another full hour
       expect(hydrated!.isStale).toBe(true);
 
-      // and the remaining lifetime is honored, not extended
       await vi.advanceTimersByTimeAsync(61 * 60 * 1000);
       expect(cache.getUntracked('k')).toBeNull();
     });
@@ -575,14 +550,13 @@ describe('Cache', () => {
         }),
       );
 
-      await vi.advanceTimersByTimeAsync(0); // let the cache call getAll
+      await vi.advanceTimersByTimeAsync(0);
 
-      cache.invalidate('k'); // logout-on-boot style invalidation
+      cache.invalidate('k');
 
       resolveGetAll([entry]);
       await vi.advanceTimersByTimeAsync(0);
 
-      // regression: hydration used to re-insert the just-invalidated entry
       expect(cache.getUntracked('k')).toBeNull();
     });
   });

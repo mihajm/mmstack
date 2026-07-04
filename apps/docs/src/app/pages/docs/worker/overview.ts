@@ -10,6 +10,7 @@ import { DocSection } from '../../../layout/doc-section';
   template: `
     <docs-page
       title="Worker"
+      experimental
       pkg="@mmstack/worker"
       lead="Split-graph state and compute. Keep the reactive graph on the main thread for rendering, and hand owned state plus heavy work to a Web Worker that runs its own graph. State stays in sync over small deltas, never full snapshots."
     >

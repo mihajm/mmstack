@@ -7,6 +7,7 @@ type Pkg = {
   name: string;
   link: string;
   blurb: string;
+  experimental?: boolean;
 };
 
 const PACKAGES: Pkg[] = [
@@ -52,6 +53,21 @@ const PACKAGES: Pkg[] = [
     name: '@mmstack/worker',
     link: '/docs/worker',
     blurb: 'Off-thread state & compute. A worker owns state, the UI reads a live replica.',
+    experimental: true,
+  },
+  {
+    name: '@mmstack/telemetry',
+    link: '/docs/telemetry',
+    blurb:
+      'Signals-native telemetry. Spans, events, errors, metrics & logs to OTLP, PostHog or Sentry. Explicit, zone-free context.',
+    experimental: true,
+  },
+  {
+    name: '@mmstack/mesh',
+    link: '/docs/mesh',
+    blurb:
+      'Multiplayer for signal stores. Sync a store across tabs, a worker, a relay or peers. Reads exactly like a local store.',
+    experimental: true,
   },
 ];
 
@@ -85,7 +101,12 @@ const PACKAGES: Pkg[] = [
             [preloadOn]="mobile() ? 'visible' : 'hover'"
             class="card"
           >
-            <h3>{{ pkg.name }}</h3>
+            <h3>
+              {{ pkg.name }}
+              @if (pkg.experimental) {
+                <span class="badge">Experimental</span>
+              }
+            </h3>
             <p>{{ pkg.blurb }}</p>
           </a>
         }
@@ -205,6 +226,20 @@ const PACKAGES: Pkg[] = [
       margin: 0;
       font-size: 0.9rem;
       color: var(--fg-muted);
+    }
+
+    .card h3 .badge {
+      font-family: var(--font-sans, sans-serif);
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.1rem 0.4rem;
+      margin-left: 0.4rem;
+      border-radius: 999px;
+      background: var(--warn-bg, #fef9c3);
+      color: var(--warn-fg, #854d0e);
+      vertical-align: middle;
     }
   `,
 })

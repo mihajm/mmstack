@@ -1,5 +1,6 @@
 import { isDevMode, linkedSignal, untracked } from '@angular/core';
 import { STORE_SHARED_OPTIONS } from './internals';
+import { diffOps, type StoreOp } from './op-log';
 import type { UnwrapOpaque } from './opaque';
 import { toStore, type toStoreOptions } from './store';
 import type { WritableSignalStore } from './types';
@@ -48,6 +49,8 @@ export type Fork<T> = {
   commit(): void;
   /** Drop staged writes — the fork reads through to the base again. */
   discard(): void;
+  /** The staged delta vs the CURRENT base, as structural ops (inspect, persist, invert). */
+  ops(): StoreOp[];
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -132,9 +135,6 @@ export function forkStore<T extends Record<string, any>>(
     computation: (theirs, prev) =>
       prev === undefined ? theirs : merge(prev.source, prev.value, theirs),
   });
-  // Inherit the base's shared options (injector, vivify, noUnionLeaves + the
-  // proxy cache/registry), same as extendStore — a fork should vivify like its
-  // base and share its injector-scoped cache. `opt` overrides (advanced use).
   const store = toStore(staged, {
     ...(base as any)[STORE_SHARED_OPTIONS],
     ...opt,
@@ -144,5 +144,6 @@ export function forkStore<T extends Record<string, any>>(
     store,
     commit: () => base.set(untracked(staged)),
     discard: () => staged.set(untracked(base)),
+    ops: () => diffOps(untracked(base), untracked(staged)),
   };
 }

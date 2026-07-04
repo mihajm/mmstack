@@ -38,7 +38,6 @@ describe('canMatchLocale', () => {
       const guard = canMatchLocale();
       const segments: UrlSegment[] = [{ path: 'fr-FR', parameters: {} } as any];
 
-      // Should return a UrlTree containing the default segment (mocked returned commands array here)
       expect(guard({} as Route, segments, {} as any)).toEqual(['en-US']);
     });
   });
@@ -69,7 +68,6 @@ describe('canMatchLocale', () => {
         { path: 'app', parameters: {} } as any,
         { path: 'it-IT', parameters: {} } as any,
       ];
-      // Should return a UrlTree appending the default segment
       expect(guard({} as Route, segmentsInvalid, {} as any)).toEqual([
         'app',
         'en-US',

@@ -103,8 +103,6 @@ export type ScopeOverride<T = unknown> = readonly [() => T, () => NoInfer<T>];
 export function createScope(name?: string) {
   const token = new InjectionToken<ScopeRegistry>(name ?? '@mmstack/di/scope');
 
-  // links each returned inject helper back to its registered factory, so
-  // overrides can be keyed by the (public) inject helper
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   const factoryByInjectFn = new WeakMap<Function, Function>();
 

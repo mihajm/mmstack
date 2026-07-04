@@ -8,10 +8,10 @@ export {
   hashKeys,
   identityPolicy,
   redactKeys,
-  type AttrMeta,
-  type AttrValue,
-  type Attrs,
   type AttributePolicy,
+  type AttrMeta,
+  type Attrs,
+  type AttrValue,
 } from './lib/attrs';
 
 export {
@@ -25,6 +25,8 @@ export {
 export {
   type ErrorSink,
   type EventSink,
+  type GlobalAttrsSink,
+  type IdentitySink,
   type LogRecord,
   type LogSeverity,
   type LogSink,
@@ -40,6 +42,7 @@ export {
 
 export {
   DEFAULT_READY_TIMEOUT_MS,
+  injectTelemetry,
   readSpan,
   TELEMETRY,
   type EmitOptions,
@@ -51,13 +54,17 @@ export {
 
 export { provideTelemetry } from './lib/provide';
 
-export { TELEMETRY_HTTP_PARENT, telemetryInterceptor, withTelemetryParent } from './lib/http-interceptor';
+export {
+  TELEMETRY_HTTP_PARENT,
+  telemetryInterceptor,
+  withTelemetryParent,
+} from './lib/http-interceptor';
 
 // Hook-ins (Angular-idiomatic ways to attach telemetry to the facade).
 export { TelemetryHandles } from './lib/handles';
 export { traced, tracedCallback } from './lib/helpers';
-export { tracedSignal, type CausalSignal } from './lib/traced-signal';
 export { TelemetryScope } from './lib/scope.directive';
+export { tracedSignal, type CausalSignal } from './lib/traced-signal';
 
 // Test utility (importable by consumers' specs).
 export {

@@ -2,10 +2,10 @@ import { inject, signal, type WritableSignal } from '@angular/core';
 import { type SpanHandle } from './sink';
 import { TELEMETRY } from './telemetry';
 
-export interface CausalSignal<T> extends WritableSignal<T> {
+export type CausalSignal<T> = WritableSignal<T> & {
   /** The active span at the time of the most recent write — `interaction → signal → refetch`. */
   causedBy(): SpanHandle | undefined;
-}
+};
 
 /**
  * A writable signal that records the **active span at each write**, so a

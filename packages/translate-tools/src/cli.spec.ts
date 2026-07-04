@@ -64,7 +64,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       'settings.en.json',
     ]);
 
-    // the merged `quote` exports ONLY its own keys — none of common's
     expect(readJson(out, 'quote.en.json')).toEqual({
       title: 'Quotes',
       by: 'by {author}',
@@ -72,7 +71,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         '{state, select, draft {Draft} published {Published} other {Unknown}}',
     });
 
-    // withParams is exported as the full message string (nested {name} preserved)
     expect(readJson(out, 'common.en.json')).toEqual({
       save: 'Save',
       cancel: 'Cancel',
@@ -80,7 +78,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       greeting: '{count, plural, one {Hi {name}} other {Hi {name} (+{count})}}',
     });
 
-    // nested objects round-trip as nested JSON
     expect(readJson(out, 'settings.en.json')).toEqual({
       theme: { label: 'Theme', dark: 'Dark', light: 'Light' },
     });
@@ -118,7 +115,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     expect(report.rejected).toEqual([]);
     expect(report.applied).toBe(3);
 
-    // a TS module per locale + a registered loader per namespace
     for (const ns of ['common', 'quote', 'settings']) {
       expect(fs.existsSync(path.join(dir, `src/${ns}.de.ts`))).toBe(true);
     }
@@ -127,7 +123,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     expect(registry).toContain('m.quoteDe');
     expect(registry).toContain('m.settingsDe');
 
-    // re-export now includes every de file, identical to what we imported
     const out2 = path.join(dir, 'i18n2');
     const files2 = runExport({
       cwd: dir,
@@ -150,7 +145,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     const out = path.join(dir, 'i18n');
     runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
 
-    // `by` drops its {author} placeholder
     fs.writeFileSync(
       path.join(out, 'quote.de.json'),
       JSON.stringify({
@@ -191,7 +185,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         title: 'Zitate',
         by: 'von',
         status: '{state, select, other {x}}',
-      }), // by drops {author}
+      }),
     );
 
     const report = runImport({
@@ -227,7 +221,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         .applied,
     ).toBe(1);
 
-    // second import with a different greeting → updates in place
     write(
       '{count, plural, one {Hallo {name}} other {Hallo {name} (+{count})}}',
     );
@@ -247,7 +240,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       'Hallo {name}',
     );
 
-    // only one common.de.ts and one commonDe loader entry
     const registry = fs.readFileSync(path.join(dir, 'src/registry.ts'), 'utf8');
     expect(registry.match(/m\.commonDe/g)?.length).toBe(1);
   });
@@ -283,7 +275,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
   it('rejects a translation that omits a source key', () => {
     const out = path.join(dir, 'i18n');
     runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
-    // drops `status`
     fs.writeFileSync(
       path.join(out, 'quote.de.json'),
       JSON.stringify({ title: 'Zitate', by: 'von {author}' }),
@@ -338,12 +329,11 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         status: '{state, select, other {x}}',
       }),
     );
-    // this one has no obstacle and must still land despite quote's rejection
     fs.writeFileSync(
       path.join(out, 'settings.de.json'),
       JSON.stringify({ theme: { label: 'Thema', dark: 'Dunkel', light: 'Hell' } }),
     );
-    // a stale, unregistered module already sits at quote's target path
+    // A stale, unregistered module already sits at quote's target path.
     fs.writeFileSync(
       path.join(dir, 'src/quote.de.ts'),
       `export const hand = 'do not lose me';`,
@@ -355,7 +345,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       inDir: out,
       sourceLocale: 'en',
     });
-    expect(first.applied).toBe(1); // settings landed
+    expect(first.applied).toBe(1);
     expect(first.rejected).toEqual([
       {
         file: 'quote.de.json',
@@ -364,7 +354,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         ],
       },
     ]);
-    // the hand file is untouched
     expect(fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8')).toContain(
       'do not lose me',
     );
@@ -385,8 +374,8 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
   it('reports unknown-namespace and stray-dot json files as skipped (typo guard)', () => {
     const out = path.join(dir, 'i18n');
     runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
-    fs.writeFileSync(path.join(out, 'qoute.de.json'), JSON.stringify({ title: 'x' })); // typo'd namespace
-    fs.writeFileSync(path.join(out, 'quote.sl.si.json'), JSON.stringify({ title: 'x' })); // stray dot
+    fs.writeFileSync(path.join(out, 'qoute.de.json'), JSON.stringify({ title: 'x' }));
+    fs.writeFileSync(path.join(out, 'quote.sl.si.json'), JSON.stringify({ title: 'x' }));
 
     const report = runImport({
       cwd: dir,
@@ -401,7 +390,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         { file: 'quote.sl.si.json', reason: expect.stringContaining('<namespace>.<locale>.json') },
       ]),
     );
-    // the sidecar meta file is expected, not noise
     expect(report.skipped.some((s) => s.file.includes('mmtranslate-meta'))).toBe(false);
   });
 
@@ -414,7 +402,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         title: 'Zitate',
         by: 'von {author}',
         status: '{state, select, draft {Entwurf} published {Ok} other {x}}',
-        subtitle: 'Untertitel', // not in the source
+        subtitle: 'Untertitel',
       }),
     );
 
@@ -447,11 +435,9 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       }),
     );
 
-    // no --source-locale: import must learn `fr` from the sidecar export wrote
     const report = runImport({ cwd: dir, srcGlobs: globs, inDir: out });
     expect(report.applied).toBe(1);
     expect(report.rejected).toEqual([]);
-    // the fr source dump was skipped, not re-imported as a target locale
     expect(fs.existsSync(path.join(dir, 'src/quote.fr.ts'))).toBe(false);
     expect(fs.existsSync(path.join(dir, 'src/quote.de.ts'))).toBe(true);
   });
@@ -491,7 +477,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     expect(report.applied).toBe(1);
 
     const gen = fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8');
-    expect(gen).toContain('import quote from "./namespaces"'); // default import
+    expect(gen).toContain('import quote from "./namespaces"');
     expect(gen).toContain('quote.createTranslation');
     expect(
       fs.readFileSync(path.join(dir, 'src/registry.ts'), 'utf8'),
@@ -511,7 +497,6 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         outDir: path.join(dir, 'i18n'),
         sourceLocale: 'en',
       });
-      // the three valid namespaces still export
       expect(files).toHaveLength(3);
       expect(warn).toHaveBeenCalled();
     } finally {

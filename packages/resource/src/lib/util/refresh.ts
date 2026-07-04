@@ -42,7 +42,6 @@ export type RefreshTriggers = {
   online: Signal<boolean>;
 };
 
-// refresh resource every n milliseconds and/or on visibility/reconnect transitions.
 export function refresh<T>(
   resource: HttpResourceRef<T>,
   destroyRef: DestroyRef,
@@ -57,13 +56,13 @@ export function refresh<T>(
     onReconnect = false,
   } = normalized;
 
-  const hasInterval = !!ms; // 0 excluded — not a valid polling cadence
+  const hasInterval = !!ms;
   const hasTriggerEffects = !!triggers && (onFocus || onReconnect);
 
-  if (!hasInterval && !hasTriggerEffects) return resource; // no refresh requested
+  if (!hasInterval && !hasTriggerEffects) return resource;
 
   const tick = () => {
-    if (inactive?.()) return; // disabled / paused → skip
+    if (inactive?.()) return;
     resource.reload();
   };
 
@@ -78,7 +77,6 @@ export function refresh<T>(
           const next = vis();
           const was = prev;
           prev = next;
-          // only the hidden → visible TRANSITION refreshes — not the initial run
           if (was !== 'visible' && next === 'visible') untracked(tick);
         },
         { injector: triggers.injector },
@@ -112,17 +110,15 @@ export function refresh<T>(
     };
   }
 
-  // we can use RxJs here as reloading the resource will always be a side effect & as such does not impact the reactive graph in any way.
   let sub = interval(ms)
     .pipe(takeUntilDestroyed(destroyRef))
     .subscribe(tick);
 
   const reload = (): boolean => {
-    sub.unsubscribe(); // do not conflict with manual reload
+    sub.unsubscribe();
 
     const hasReloaded = resource.reload();
 
-    // resubscribe after manual reload
     sub = interval(ms)
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe(tick);

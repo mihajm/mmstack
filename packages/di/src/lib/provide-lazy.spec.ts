@@ -11,9 +11,9 @@ describe('provideLazy', () => {
   it('throws when injected but never provided; resolves null when optional', async () => {
     const [injectThing] = provideLazy<{ x: number }>('Thing');
 
-    expect(() =>
-      TestBed.runInInjectionContext(() => injectThing()),
-    ).toThrow(/never provided/i);
+    expect(() => TestBed.runInInjectionContext(() => injectThing())).toThrow(
+      /never provided/i,
+    );
 
     const getOptional = TestBed.runInInjectionContext(() =>
       injectThing({ optional: true }),
@@ -68,8 +68,14 @@ describe('provideLazy', () => {
     const loader = () => Promise.resolve(Scoped);
     const parent = TestBed.inject(Injector);
 
-    const i1 = Injector.create({ providers: [...provideScoped(loader)], parent });
-    const i2 = Injector.create({ providers: [...provideScoped(loader)], parent });
+    const i1 = Injector.create({
+      providers: [...provideScoped(loader)],
+      parent,
+    });
+    const i2 = Injector.create({
+      providers: [...provideScoped(loader)],
+      parent,
+    });
 
     const g1 = runInInjectionContext(i1, () => injectScoped());
     const g2 = runInInjectionContext(i2, () => injectScoped());
@@ -103,9 +109,9 @@ describe('provideLazy', () => {
   });
 
   it('supports swapping the loader via TestBed.overrideProvider', async () => {
-    interface Named {
+    type Named = {
       name(): string;
-    }
+    };
 
     @Injectable()
     class Real implements Named {
@@ -121,7 +127,8 @@ describe('provideLazy', () => {
       }
     }
 
-    const [injectThing, provideThing, loaderToken] = provideLazy<Named>('Thing');
+    const [injectThing, provideThing, loaderToken] =
+      provideLazy<Named>('Thing');
 
     TestBed.configureTestingModule({
       providers: [provideThing(() => Promise.resolve(Real))],

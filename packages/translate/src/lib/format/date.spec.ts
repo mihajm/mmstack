@@ -13,7 +13,6 @@ describe('formatDate', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({});
     store = TestBed.inject(TranslationStore);
-    // Reset to en-US for consistent tests
     store.locale.set('en-US');
   });
 
@@ -21,8 +20,6 @@ describe('formatDate', () => {
     const date = new Date('2024-01-01T12:00:00Z');
 
     TestBed.runInInjectionContext(() => {
-      // In en-US, medium format varies slightly by browser/node, but should look roughly like "Jan 1, 2024, 12:00:00 PM"
-      // Wait, node timezones vary, so better use UTC for the test
       const result = formatDate(date, { tz: 'UTC', locale: store.locale() });
       expect(result).toContain('Jan 1, 2024');
       expect(injectFormatDate()(date, { tz: 'UTC' })).toBe(result);
@@ -51,7 +48,6 @@ describe('formatDate', () => {
 
     TestBed.runInInjectionContext(() => {
       const result = formatDate(date, optSignal);
-      // shortDate typically "1/1/24" in en-US
       expect(result).toMatch(/1\/1\/24|01\/01\/2024/);
     });
   });
@@ -73,18 +69,15 @@ describe('formatDate', () => {
         tz: 'UTC',
         format: 'mediumDate',
       });
-      // German medium date is "01.01.2024" or "1. Jan. 2024" depending on node version, let's just check for "2024"
       expect(result).toContain('2024');
-      expect(result).not.toContain('Jan 1'); // Not english
+      expect(result).not.toContain('Jan 1');
     });
   });
 
   it('should honor a timeZone supplied inside a custom format object', () => {
-    // midnight UTC — in any negative-offset zone this is still the previous day
     const date = new Date('2024-06-01T00:30:00Z');
 
     TestBed.runInInjectionContext(() => {
-      // regression: the trailing `timeZone: undefined` used to clobber format.timeZone
       const viaFormat = formatDate(date, {
         locale: 'en-US',
         format: { dateStyle: 'short', timeZone: 'UTC' },

@@ -12,7 +12,6 @@ import { BreadcrumbStore } from './breadcrumb-store';
 
 /**
  * Options for defining a breadcrumb.
- *
  */
 type CreateBreadcrumbOptions = {
   /**
@@ -27,7 +26,7 @@ type CreateBreadcrumbOptions = {
    */
   ariaLabel?: string | (() => string);
   /**
-   * If `true`, the route resolver will wait until the `label` signal has a value before `resolving`
+   * If `true`, the route resolver will wait until the `label` signal has a value before resolving.
    */
   awaitValue?: boolean;
 };
@@ -100,8 +99,7 @@ export function createBreadcrumb(
 
     const fp = resolver(route);
 
-    // path only — query params / fragment must NOT be baked into a breadcrumb link
-    // (they'd be frozen at resolve time; the store overlays the live leaf link anyway)
+    // path only — query params/fragment must not be frozen into the link
     const tree = createUrlTreeFromSnapshot(route, []);
 
     const provided = factory(route);

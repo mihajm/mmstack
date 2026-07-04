@@ -4,7 +4,7 @@ import type {
   ViewTransitionsFeatureOptions,
 } from '@angular/router';
 
-/** Minimal structural view of the DOM `ViewTransition` (lib-version independent). */
+/** Structural view of the DOM `ViewTransition`. */
 type ViewTransitionLike = {
   skipTransition: () => void;
   finished: Promise<unknown>;
@@ -12,19 +12,14 @@ type ViewTransitionLike = {
 
 /**
  * @internal
- * Root coordinator shared between {@link mmRouterViewTransitions} (which feeds it from
- * Angular's `onViewTransitionCreated`) and {@link TransitionRouterOutlet}. It lets the
- * outlet know that router view transitions are enabled, and hands it the currently
- * active transition so it can skip Angular's (visually inert) activation-time transition
+ * Root coordinator shared between {@link mmRouterViewTransitions} and
+ * {@link TransitionRouterOutlet}. Tells the outlet router view transitions are enabled and
+ * hands it the active transition so it can skip Angular's inert activation-time transition
  * for held navigations.
- *
- * Root-provided → one instance per application, so SSR requests stay isolated.
  */
 @Injectable({ providedIn: 'root' })
 export class RouterViewTransitions {
-  /** True once {@link mmRouterViewTransitions} has been wired into `withViewTransitions`. */
   enabled = false;
-  /** The transition for the in-flight navigation, or `null` between navigations. */
   active: ViewTransitionLike | null = null;
 }
 

@@ -98,7 +98,6 @@ export function websocket<T = unknown>(opt?: {
         fail(err);
       }
     };
-    // onerror always precedes onclose; the close event carries the actionable signal
     ws.onclose = (ev) => {
       if (!closedByUs) fail(new Error(`websocket closed (code ${ev.code})`));
     };
@@ -175,9 +174,6 @@ export function streamResource<T>(
   const connected = signal(false);
   const policy = reconnectPolicy(opt.reconnect);
 
-  // Angular's loadEffect early-returns on an undefined request WITHOUT aborting the
-  // in-progress stream (status flips to idle, but a live connection would linger) —
-  // the current loader parks its teardown here so the disable lever can reach it.
   let activeDispose: (() => void) | null = null;
 
   const res = resource<T, string | undefined>({
@@ -216,7 +212,7 @@ export function streamResource<T>(
             until(online, (v) => v),
           ).then(() => {
             if (disposed) return;
-            attempts = 0; // a regained network is a fresh start
+            attempts = 0;
             connect();
           });
         };
@@ -262,7 +258,6 @@ export function streamResource<T>(
       }),
   });
 
-  // the disable lever: params → undefined must actually hang up (see activeDispose)
   effect(
     () => {
       const url = isServer ? undefined : source();
@@ -276,8 +271,6 @@ export function streamResource<T>(
     abort: () => {
       const s = untracked(res.status);
       if (s !== 'loading' && s !== 'reloading' && !untracked(connected)) return;
-      // a self-set aborts the stream loader (Angular's abortInProgressLoad) → the
-      // abort listener above closes the connection; value kept, status 'local'
       res.set(untracked(res.value));
     },
   });

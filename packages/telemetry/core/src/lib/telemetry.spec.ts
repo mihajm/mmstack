@@ -440,7 +440,10 @@ describe('AttributePolicy (deep)', () => {
       providers: [
         provideTelemetry({
           sinks: [sink],
-          policy: compose(redactKeys(['token'], () => 'X'), hashKeys(['token'], hash)),
+          policy: compose(
+            redactKeys(['token'], () => 'X'),
+            hashKeys(['token'], hash),
+          ),
         }),
       ],
     });
@@ -453,7 +456,10 @@ describe('AttributePolicy (deep)', () => {
       providers: [
         provideTelemetry({
           sinks: [sink2],
-          policy: compose(hashKeys(['token'], hash), redactKeys(['token'], () => 'X')),
+          policy: compose(
+            hashKeys(['token'], hash),
+            redactKeys(['token'], () => 'X'),
+          ),
         }),
       ],
     });
@@ -490,7 +496,10 @@ describe('AttributePolicy (deep)', () => {
     const sink = memorySink();
     TestBed.configureTestingModule({
       providers: [
-        provideTelemetry({ sinks: [sink], policy: deny(['trace_id', 'span_id']) }),
+        provideTelemetry({
+          sinks: [sink],
+          policy: deny(['trace_id', 'span_id']),
+        }),
       ],
     });
     const telemetry = TestBed.inject(TELEMETRY);
@@ -814,7 +823,9 @@ describe('buffering: order, time, resume, teardown', () => {
       const ready = signal(false);
       const sink = memorySink('m', ready);
       TestBed.configureTestingModule({
-        providers: [provideTelemetry({ sinks: [sink], readyTimeoutMs: 60_000 })],
+        providers: [
+          provideTelemetry({ sinks: [sink], readyTimeoutMs: 60_000 }),
+        ],
       });
       const telemetry = TestBed.inject(TELEMETRY);
 
@@ -913,10 +924,14 @@ describe('async span settle', () => {
     let resolve!: (v: number) => void;
     const inner = new Promise<number>((r) => (resolve = r));
     const thenable = {
-      then: (res: (v: number) => unknown, rej: (e: unknown) => unknown) => inner.then(res, rej),
+      then: (res: (v: number) => unknown, rej: (e: unknown) => unknown) =>
+        inner.then(res, rej),
     };
 
-    const out = telemetry.span('t', () => thenable) as unknown as Promise<number>;
+    const out = telemetry.span(
+      't',
+      () => thenable,
+    ) as unknown as Promise<number>;
     expect(sink.spans[0].ended).toBe(false); // still open after the sync return
 
     resolve(7);
@@ -934,10 +949,14 @@ describe('async span settle', () => {
     const boom = new Error('late');
     const inner = Promise.reject(boom);
     const thenable = {
-      then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => inner.then(res, rej),
+      then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
+        inner.then(res, rej),
     };
 
-    const out = telemetry.span('t', () => thenable) as unknown as Promise<unknown>;
+    const out = telemetry.span(
+      't',
+      () => thenable,
+    ) as unknown as Promise<unknown>;
     await expect(out).rejects.toBe(boom);
     expect(sink.spans[0].error).toBe(boom);
     expect(sink.spans[0].ended).toBe(true);
@@ -950,7 +969,96 @@ describe('category without consent config', () => {
     TestBed.configureTestingModule({
       providers: [provideTelemetry({ sinks: [sink] })],
     });
-    TestBed.inject(TELEMETRY).event('e', { a: 1 }, { category: 'product-analytics' });
+    TestBed.inject(TELEMETRY).event(
+      'e',
+      { a: 1 },
+      { category: 'product-analytics' },
+    );
     expect(sink.events).toEqual([{ name: 'e', attrs: { a: 1 } }]);
+  });
+});
+
+describe('identity + global attributes', () => {
+  function setup(opt?: { policy?: AttributePolicy }) {
+    const sink = memorySink();
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink], policy: opt?.policy })],
+    });
+    return { sink, telemetry: TestBed.inject(TELEMETRY) };
+  }
+
+  it('identify fans out to identity-capable sinks; null clears; traits run through the policy', () => {
+    const { sink, telemetry } = setup({ policy: redactKeys(['email']) });
+    telemetry.identify('user-1', { plan: 'pro', email: 'a@b.c' });
+    telemetry.identify(null); // logout
+
+    expect(sink.identifies).toEqual([
+      { userId: 'user-1', traits: { plan: 'pro', email: '[redacted]' } },
+      { userId: null, traits: {} },
+    ]);
+  });
+
+  it('identify is a safe no-op for a sink without an identity concept', () => {
+    const sink = memorySink();
+    delete (sink as { identify?: unknown }).identify; // strip the capability
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
+    expect(() => TestBed.inject(TELEMETRY).identify('u1')).not.toThrow();
+  });
+
+  it('setGlobalAttrs merges into every subsequent emit; caller attrs win', () => {
+    const { sink, telemetry } = setup();
+    telemetry.setGlobalAttrs({ tenant: 'acme', tool: 'etl' });
+
+    telemetry.event('e', { tool: 'override' }); // caller overrides the global 'tool'
+    telemetry.error(new Error('x'));
+    telemetry.metric('m', 1);
+    telemetry.log('info', 'hi');
+    telemetry.span('s', () => undefined);
+
+    expect(sink.events[0].attrs).toEqual({ tenant: 'acme', tool: 'override' });
+    expect(sink.errors[0].attrs).toEqual({ tenant: 'acme', tool: 'etl' });
+    expect(sink.metrics[0].attrs).toEqual({ tenant: 'acme', tool: 'etl' });
+    expect(sink.logs[0].attrs).toEqual({ tenant: 'acme', tool: 'etl' });
+    expect(sink.spans[0].attrs).toEqual({ tenant: 'acme', tool: 'etl' });
+  });
+
+  it('setGlobalAttrs accumulates, and an undefined value removes a key', () => {
+    const { sink, telemetry } = setup();
+    telemetry.setGlobalAttrs({ a: 1, b: 2 });
+    telemetry.setGlobalAttrs({ b: undefined, c: 3 }); // drop b, add c
+
+    telemetry.event('e');
+    expect(sink.events[0].attrs).toEqual({ a: 1, c: 3 });
+  });
+
+  it('setGlobalAttrs also notifies the native super-property hook', () => {
+    const { sink, telemetry } = setup();
+    telemetry.setGlobalAttrs({ tool: 'etl' });
+    expect(sink.globalAttrs).toEqual([{ tool: 'etl' }]);
+  });
+
+  it('identify and global attrs buffer before the sink is ready, then replay in order', () => {
+    const ready = signal(false);
+    const sink = memorySink('m', ready.asReadonly());
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+
+    t.identify('u1', { plan: 'pro' });
+    t.setGlobalAttrs({ tool: 'etl' });
+    t.event('e');
+    expect(sink.identifies).toEqual([]); // buffered while pending
+    expect(sink.events).toEqual([]);
+
+    ready.set(true);
+    TestBed.tick();
+    expect(sink.identifies).toEqual([
+      { userId: 'u1', traits: { plan: 'pro' } },
+    ]);
+    expect(sink.globalAttrs).toEqual([{ tool: 'etl' }]);
+    expect(sink.events[0].attrs).toEqual({ tool: 'etl' }); // global attr applied on replay
   });
 });

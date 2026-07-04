@@ -14,6 +14,13 @@ export const appRoutes: Route[] = [
       ),
   },
   {
+    path: 'persisted-store',
+    loadComponent: () =>
+      import('./examples/persisted-store-example').then(
+        (m) => m.PersistedStoreExample,
+      ),
+  },
+  {
     path: 'sortable-pointer',
     loadComponent: () =>
       import('./examples/pointer-sortable-example').then(
@@ -70,6 +77,28 @@ export const appRoutes: Route[] = [
     path: 'telemetry',
     loadComponent: () =>
       import('./examples/telemetry-example').then((m) => m.TelemetryExample),
+  },
+  {
+    path: 'mesh',
+    loadComponent: () =>
+      import('./examples/mesh-example').then((m) => m.MeshExample),
+  },
+  {
+    path: 'webrtc',
+    loadComponent: () =>
+      import('./examples/webrtc-example').then((m) => m.WebRtcExample),
+  },
+  {
+    path: 'mesh-agent',
+    loadComponent: () =>
+      import('./examples/mesh-agent-example').then((m) => m.MeshAgentExample),
+  },
+  {
+    path: 'worker-mesh',
+    loadComponent: () =>
+      import('./examples/worker-mesh-example').then(
+        (m) => m.WorkerMeshExample,
+      ),
   },
   { path: '', pathMatch: 'full', redirectTo: 'core' },
   { path: '**', redirectTo: 'core' },

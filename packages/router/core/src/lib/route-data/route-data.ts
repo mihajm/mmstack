@@ -23,31 +23,25 @@ import { provideTransitionScope } from '@mmstack/primitives';
 import { filter } from 'rxjs';
 
 /**
- * Context handed to a {@link RouteDataFactory}. Both `params` and `queryParams` are LIVE
- * signals: they update on every navigation, derived from the router state — so a factory
- * defined once keeps producing correct data across param/query changes regardless of the
- * route's `runGuardsAndResolvers` setting.
+ * Context handed to a {@link RouteDataFactory}. Both `params` and `queryParams` are live
+ * signals that update on every navigation, derived from router state — so a factory defined
+ * once keeps producing correct data across param/query changes.
  */
 export type RouteDataContext = {
   readonly params: Signal<Record<string, string>>;
   readonly queryParams: Signal<Record<string, string>>;
   /**
    * Single-param accessor: `param('id')` ≡ a memoized `computed(() => params()['id'] ?? '')`,
-   * with a dev-mode error the first time the param is ABSENT from the matched route — so a
-   * `:id` vs `param('userId')` typo screams at first navigation instead of silently
-   * producing `undefined` URLs. Runtime check only (no type-level path parsing).
+   * with a dev-mode error the first time the param is absent from the matched route.
    */
   param(name: string): Signal<string>;
-  /** `true` only on the prefetch path (no real activation) — lets a factory tune behavior. */
+  /** `true` only on the prefetch path (no real activation). */
   readonly isPrefetch: boolean;
   /** The injector the factory runs in (route env injector on activation). */
   readonly injector: Injector;
 };
 
-/**
- * @internal Builds {@link RouteDataContext.param} over a params signal (shared by the live
- * resolver ctx and the prefetch ctx). Memoized per name; warns once per name.
- */
+/** @internal Builds {@link RouteDataContext.param} over a params signal. Memoized per name; warns once per name. */
 export function paramAccessor(
   params: Signal<Record<string, string>>,
 ): (name: string) => Signal<string> {
@@ -75,10 +69,10 @@ export function paramAccessor(
   };
 }
 
-/** Builds the route's data from the context. User code — the only place a resource lib is referenced. */
+/** Builds the route's data from the context. */
 export type RouteDataFactory<T> = (ctx: RouteDataContext) => T;
 
-/** @internal Looks like a resource: a `status()` we can watch. Shared with the prefetcher. */
+/** @internal A `status()` we can watch. */
 export type StatusBearing = { status: () => string };
 
 /** @internal */
@@ -86,8 +80,7 @@ export function isStatusBearing(value: unknown): value is StatusBearing {
   return !!value && typeof (value as StatusBearing).status === 'function';
 }
 
-/** @internal The resource(s) a factory returned: the value itself, or the first-level
- * members of a composite (`{ user, posts }`). Shared with the prefetcher. */
+/** @internal The value itself, or the first-level status-bearing members of a composite. */
 export function statusBearers(value: unknown): StatusBearing[] {
   if (isStatusBearing(value)) return [value];
   if (value && typeof value === 'object')
@@ -97,30 +90,27 @@ export function statusBearers(value: unknown): StatusBearing[] {
 
 export type CreateRouteDataOptions = {
   /**
-   * Error hook for the route's data: fires when any status-bearing resource the factory
-   * returned (or any first-level member of a composite return) TRANSITIONS into
-   * `status() === 'error'` — first load, reloads, and param re-fetches alike. Runs on the
-   * LIVE path only: prefetch errors are speculative and never fire this.
+   * Fires when any status-bearing resource the factory returned transitions into
+   * `status() === 'error'` (first load, reloads, param re-fetches). Live path only:
+   * prefetch errors are speculative and never fire this. Use it to redirect, toast, or log.
    *
-   * This is the "what does the app do next" lever — redirect, toast-and-stay, log:
    * ```ts
    * createRouteData(USER, factory, {
    *   onError: (err, ctx) => ctx.injector.get(Router).navigateByUrl('/not-found'),
    * });
    * ```
-   * WITHOUT it the default stands: the outlet swaps on settle-by-error and the component
-   * renders the slot's `error()` — the in-view error-boundary pattern.
+   * Without it the outlet swaps on settle-by-error and the component renders the slot's `error()`.
    */
   onError?: (error: unknown, ctx: RouteDataContext) => void;
 };
 
 /** A typed handle linking a route's `providers` ({@link provideRouteData}), its `resolve` slot
  * ({@link createRouteData}) and its readers ({@link injectRouteData}). */
-export interface RouteDataKey<T> {
+export type RouteDataKey<T> = {
   readonly description: string;
   /** @internal */
   readonly token: InjectionToken<RouteDataSlot<T>>;
-}
+};
 
 export function routeDataKey<T>(description: string): RouteDataKey<T> {
   return {
@@ -222,8 +212,6 @@ export function createRouteData<T>(
     });
   };
 
-  // Tag the resolver so the prefetch path (withRouteData) can discover and run the same
-  // factory on preload-intent, keyed by route path — without re-declaring it.
   (resolver as RouteDataTagged)[ROUTE_DATA_TAG] = {
     description: key.description,
     factory: factory as RouteDataFactory<unknown>,
@@ -232,12 +220,7 @@ export function createRouteData<T>(
   return resolver;
 }
 
-/**
- * @internal Fire `onError` on every TRANSITION into `'error'` of any returned status-bearer.
- * The effect lives in the route's injection context (created inside `slot.ensure`), so it
- * dies with the route — and it exists only on the live path (the prefetch tag carries the
- * factory alone, never options, so speculative warms can't redirect the app).
- */
+/** @internal Fire `onError` on every transition into `'error'` of a returned status-bearer. */
 function watchForErrors(
   value: unknown,
   onError: (error: unknown, ctx: RouteDataContext) => void,
@@ -325,8 +308,6 @@ export function injectRouteData<T>(key: RouteDataKey<T>): T {
     );
   return slot.read();
 }
-
-// ——— live params, derived from router state (independent of resolver re-runs) ———
 
 function liveParams(
   router: Router,

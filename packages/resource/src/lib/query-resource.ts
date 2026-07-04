@@ -291,7 +291,7 @@ type QueryResponseType = 'json' | 'text' | 'arraybuffer' | 'blob';
  * breaker, prefetch). A raw variant caches under a distinct key, so a JSON and a text query for
  * the same URL never serve each other's body.
  */
-export interface QueryResourceFn {
+export type QueryResourceFn = {
   /**
    * Creates an HTTP resource with features like caching, retries, refresh intervals, circuit breaker, and optimistic updates. Without additional options it is equivalent to simply calling `httpResource`.
    * This overload is for when a `defaultValue` is provided, ensuring that the resource's value is always defined.
@@ -407,7 +407,7 @@ export interface QueryResourceFn {
       options?: QueryResourceOptions<TResult, Blob>,
     ): QueryResourceRef<TResult | undefined>;
   };
-}
+};
 
 function createQueryResource<TResult, TRaw = TResult>(
   responseType: QueryResponseType,
@@ -479,8 +479,6 @@ function createQueryResource<TResult, TRaw = TResult>(
     return null;
   });
 
-  // While PAUSED, hold the previous request so httpResource sees no change — it keeps its value and
-  // does NOT refetch. On resume the request is re-evaluated, so it refetches only if it changed.
   const heldRequest = linkedSignal<
     { req: HttpResourceRequest | undefined; held: boolean },
     HttpResourceRequest | undefined
@@ -498,8 +496,6 @@ function createQueryResource<TResult, TRaw = TResult>(
       curr.held && prev !== undefined ? prev.value : curr.req,
   });
 
-  // Dedup via the request-equality (the linkedSignal re-runs on every source tick; this computed
-  // is what actually gates httpResource — so an equal/held request never triggers a refetch).
   const stableRequest = computed(
     (): HttpResourceRequest | undefined => heldRequest(),
     {
@@ -521,8 +517,6 @@ function createQueryResource<TResult, TRaw = TResult>(
         ((r: HttpResourceRequest) => hashRequest(r, varyHeaders)))
       : hashRequest;
 
-  // a raw variant keys by responseType too — a text and a json query for the same URL must never
-  // serve each other's cached body. JSON passes through untouched, so existing keys don't change.
   const hashFn =
     responseType === 'json'
       ? baseHashFn
@@ -575,8 +569,6 @@ function createQueryResource<TResult, TRaw = TResult>(
       })
     : stableRequest;
 
-  // the response type is decided here and nowhere else: json rides the base httpResource,
-  // the raw variants ride Angular's own sub-functions (which set responseType on the request)
   const httpResourceFn = (
     responseType === 'text'
       ? httpResource.text
@@ -590,15 +582,12 @@ function createQueryResource<TResult, TRaw = TResult>(
   let resource = toResourceObject(
     httpResourceFn<TResult>(cachedRequest, {
       ...options,
-      // when caching, the interceptor owns `parse` (parse-on-write) so it isn't
-      // applied twice — keep it on httpResource only for the uncached path
       parse: (options?.cache ? undefined : options?.parse) as any,
     }) as HttpResourceRef<TResult>,
   );
 
   resource = catchValueError(resource, options?.defaultValue as TResult);
 
-  // cached values are stored already-parsed, so they're returned as-is
   const cachedEvent = cache.getEntryOrKey(cacheKey);
 
   const cacheEntry = linkedSignal<
@@ -644,7 +633,6 @@ function createQueryResource<TResult, TRaw = TResult>(
     },
   });
 
-  // A disabled (offline / circuit-open / no-request) or PAUSED resource must not poll or react to focus/reconnect.
   resource = refresh(
     resource,
     destroyRef,
@@ -688,7 +676,6 @@ function createQueryResource<TResult, TRaw = TResult>(
   };
 
   const set = (value: TResult) => writeValue(value, persist, !skipTabSync);
-  // memory-only, this tab only — no persist, no broadcast
   const setLocal = (value: TResult) => writeValue(value, false, false);
 
   const update = (updater: (value: TResult) => TResult) => {
@@ -716,7 +703,6 @@ function createQueryResource<TResult, TRaw = TResult>(
       )
     : resource.value;
 
-  // iterate circuit breaker state, is effect as a computed would cause a circular dependency (resource -> cb -> resource)
   const cbEffectRef = effect(
     () => {
       const status = resource.status();
@@ -743,15 +729,13 @@ function createQueryResource<TResult, TRaw = TResult>(
     disabled: computed(() => disabledReason() !== null),
     disabledReason,
     reload: () => {
-      cb.halfOpen(); // open the circuit for manual reload
+      cb.halfOpen();
       return resource.reload();
     },
     abort: () => {
       const s = untracked(resource.status);
       if (s !== 'loading' && s !== 'reloading') return;
-      // a self-set reaches ResourceImpl.set through the wrapper chain → Angular aborts
-      // the in-flight load; deliberately NOT writeValue: an abort must not touch the
-      // cache (no store, no staleness bump, no tab broadcast)
+      // self-set aborts the load; NOT writeValue, so the cache is untouched
       resource.value.set(untracked(resource.value));
     },
     destroy: () => {
@@ -785,7 +769,6 @@ function createQueryResource<TResult, TRaw = TResult>(
         await firstValueFrom(
           client.request(prefetchRequest.method ?? 'GET', prefetchRequest.url, {
             ...prefetchRequest,
-            // the prefetch must cache the same body shape the resource will read
             responseType,
             referrerPolicy: prefetchRequest.referrerPolicy as
               | ReferrerPolicy
@@ -821,7 +804,6 @@ function createQueryResource<TResult, TRaw = TResult>(
     },
   };
 
-  // Auto-register into the nearest transition scope if the (merged) options ask for it.
   applyResourceRegistration(
     ref as ResourceRef<unknown>,
     options.register,

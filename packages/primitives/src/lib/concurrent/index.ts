@@ -1,5 +1,6 @@
 export { injectPaused, MmActivity, providePaused } from './activity';
 export * from './deferred-value';
+export * from './instrumentation';
 export * from './hold-until-ready';
 export * from './latest';
 export * from './pausable';

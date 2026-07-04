@@ -18,7 +18,7 @@ describe('breadcrumb integration', () => {
           {
             path: 'home',
             component: DummyComponent,
-            title: 'Home Route', // Auto-generated fallback for breadcrumb
+            title: 'Home Route',
             children: [
               {
                 path: 'child',
@@ -79,7 +79,7 @@ describe('breadcrumb integration', () => {
       ],
     });
 
-    TestBed.inject(BreadcrumbStore); // Ensure store and its effects run
+    TestBed.inject(BreadcrumbStore);
   });
 
   it('should auto-generate breadcrumb from route title', async () => {

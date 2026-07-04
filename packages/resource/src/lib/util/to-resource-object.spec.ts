@@ -7,17 +7,13 @@ describe('toResourceObject', () => {
 
     const obj = toResourceObject(mock);
 
-    // Value should be forwarded
     expect(obj.value()).toBe('hello');
 
-    // Status should be forwarded
     expect(obj.status()).toBe('idle');
 
-    // Reload should delegate to original
     obj.reload();
     expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
 
-    // Destroy should delegate to original
     obj.destroy();
     expect(mock._destroySpy).toHaveBeenCalledTimes(1);
   });
@@ -45,6 +41,6 @@ describe('toResourceObject', () => {
     const obj = toResourceObject(mock);
 
     expect(obj).not.toBe(mock);
-    expect(obj.value).toBe(mock.value); // signals are shared
+    expect(obj.value).toBe(mock.value);
   });
 });

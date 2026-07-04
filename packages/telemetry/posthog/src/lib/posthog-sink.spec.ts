@@ -73,6 +73,79 @@ describe('@mmstack/telemetry-posthog', () => {
     expect(handles.keys()()).not.toContain(POSTHOG_REPLAY_URL);
   });
 
+  it('forwards errors to captureException when the client supports it', () => {
+    const errors: { error: unknown; props?: Record<string, unknown> }[] = [];
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      captureException: (error, props) => errors.push({ error, props }),
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+
+    const boom = new Error('boom');
+    TestBed.inject(TELEMETRY).error(boom, { tool: 'etl' });
+    expect(errors).toEqual([{ error: boom, props: { tool: 'etl' } }]);
+  });
+
+  it('does not advertise ErrorSink (error() no-ops) when the client lacks captureException', () => {
+    const { captured, posthog } = captureSpy();
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+
+    // no captureException on the client → error() has nowhere to go here, and must not throw
+    expect(() =>
+      TestBed.inject(TELEMETRY).error(new Error('ignored')),
+    ).not.toThrow();
+    expect(captured).toEqual([]); // errors are not smuggled in as events
+  });
+
+  it('identifies a user, and identify(null) resets (logout)', () => {
+    const calls: string[] = [];
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      identify: (id, props) => calls.push(`identify:${id}:${JSON.stringify(props)}`),
+      reset: () => calls.push('reset'),
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+    t.identify('user-1', { plan: 'pro' });
+    t.identify(null);
+    expect(calls).toEqual(['identify:user-1:{"plan":"pro"}', 'reset']);
+  });
+
+  it('maps setGlobalAttrs to session super-properties; undefined unregisters', () => {
+    const registered: Record<string, unknown>[] = [];
+    const unregistered: string[] = [];
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      register_for_session: (props) => registered.push(props),
+      unregister: (key) => unregistered.push(key),
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+    t.setGlobalAttrs({ tool: 'etl', drop: undefined });
+    expect(registered).toEqual([{ tool: 'etl' }]);
+    expect(unregistered).toEqual(['drop']);
+  });
+
+  it('does not advertise identity/super-props when the client lacks them (safe no-op)', () => {
+    const { posthog } = captureSpy(); // only capture
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+    expect(() => {
+      t.identify('u1');
+      t.setGlobalAttrs({ a: 1 });
+    }).not.toThrow();
+  });
+
   it('returns null without a client', () => {
     expect(posthogSink({ posthog: null })()).toBeNull();
   });

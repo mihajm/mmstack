@@ -226,8 +226,7 @@ export function toStore<T extends AnyRecord>(
     vivify,
     noUnionLeaves,
     [STORE_SHARED_GLOBALS]: {
-      // the `injector!` reads run only when a global is absent, which (per hasSharedGlobals) means
-      // an injector was resolved above
+      // the `injector!` reads run only when a global is absent
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       cache: sharedGlobals?.cache ?? injector!.get(PROXY_CACHE_TOKEN),
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -306,8 +305,6 @@ export function toStore<T extends AnyRecord>(
               injector,
               vivify,
               noUnionLeaves,
-              // forward the resolved globals — re-resolving from the injector both re-injects
-              // needlessly and breaks in DI-less (worker) mode where injector is undefined
               [STORE_SHARED_GLOBALS]: STORE_OPTIONS[STORE_SHARED_GLOBALS],
             }),
           );
@@ -332,8 +329,6 @@ export function toStore<T extends AnyRecord>(
         if (prop === 'length') return arrayLength();
         if (prop === Symbol.iterator)
           return function* () {
-            // read length reactively: a spread/for-of inside a computed/effect must re-run
-            // when items are added or removed, not only when already-read elements change
             const len = arrayLength();
             for (let i = 0; i < len(); i++) yield receiver[i];
           };

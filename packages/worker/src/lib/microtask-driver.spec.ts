@@ -2,7 +2,6 @@ import { createStoreContext, opLog, store, type OpBatch } from '@mmstack/primiti
 import { microtaskOpLogDriver } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 
-/** The concrete createWatch-based driver lives in the worker package; test its auto-emission here. */
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe('microtaskOpLogDriver', () => {

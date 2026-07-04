@@ -1,25 +1,8 @@
 /* eslint-disable @angular-eslint/component-selector */
 /* eslint-disable @angular-eslint/directive-selector */
 
-/**
- * Sanity probes for the Angular DI behaviors the route-level data work relies on. These
- * are deliberately framework-facing (real router, real outlet, real route env injectors):
- * if an Angular upgrade or a v21-lts backport changes any of these, a probe fails here
- * instead of the feature breaking in a subtle way.
- *
- * The three load-bearing facts:
- *  A. A provider on the OUTLET's element injector shadows a same-token provider in the
- *     ROUTE's environment injector for a routed component. (→ a per-route env scope is
- *     invisible to the component while the outlet provides an element scope — why the
- *     outlet must *forward* to the route scope rather than provide its own.)
- *  B. The route environment injector (and thus a per-route `provideTransitionScope()`) is
- *     reused across param-only navigations. (→ the route's scope persists; a resolver that
- *     re-runs on param change updates the same resource rather than leaking a new one.)
- *  C. A route resolver runs in the route's injector — it sees the route `providers` and the
- *     matched snapshot params, fires before the component constructs, and is non-blocking
- *     when it returns synchronously. (→ `provideRouteData` fires the resource here.)
- */
-
+// Probes for Angular DI behaviors the route-level data work relies on; a probe fails here
+// if an Angular upgrade or v21-lts backport changes them.
 import { provideLocationMocks } from '@angular/common/testing';
 import {
   Component,
@@ -89,7 +72,6 @@ describe('Angular DI assumptions for route-level data', () => {
     await TestBed.inject(Router).navigateByUrl('/x');
     await flush(fixture);
 
-    // element injector wins → the route-env 'env' is shadowed by the outlet element 'element'
     expect(resolvedInComponent).toBe('element');
   });
 
@@ -122,7 +104,7 @@ describe('Angular DI assumptions for route-level data', () => {
     await router.navigateByUrl('/z/2');
     await flush(fixture);
 
-    expect(initRuns).toBe(1); // same env injector → its initializer (and scope) persist
+    expect(initRuns).toBe(1);
   });
 
   it('C: a route resolver sees the route providers + snapshot params, and runs before the component', async () => {
@@ -163,17 +145,12 @@ describe('Angular DI assumptions for route-level data', () => {
     await TestBed.inject(Router).navigateByUrl('/v/55');
     await flush(fixture);
 
-    expect(seen.scope).toBe('env'); // resolver injection context includes route providers
-    expect(seen.paramId).toBe('55'); // snapshot params are real at resolve time
-    expect(order).toEqual(['resolver', 'component']); // resolve runs before construction
+    expect(seen.scope).toBe('env');
+    expect(seen.paramId).toBe('55');
+    expect(order).toEqual(['resolver', 'component']);
   });
 
   it('D: params derived from router state by routeConfig stay live across param navs (no resolver re-run dependency)', async () => {
-    // `inject(ActivatedRoute)` in a resolver yields the PARENT, not the matched route, so it
-    // is not a usable live params source. Instead derive params from the live router state,
-    // keyed by the snapshot's routeConfig, recomputed on NavigationEnd — built ONCE so it
-    // proves the source stays reactive even if the resolver never re-runs. This is exactly
-    // what `createRouteData` ships.
     const holder: { sig: Signal<string | null> | null } = { sig: null };
 
     @Component({ selector: 'probe-d', template: `probe-D` })
@@ -202,7 +179,7 @@ describe('Angular DI assumptions for route-level data', () => {
                         return n.paramMap.get('id');
                       stack.push(...n.children);
                     }
-                    return route.paramMap.get('id'); // fallback: resolve-time snapshot
+                    return route.paramMap.get('id');
                   };
                   holder.sig = computed(() => {
                     tick();
@@ -225,6 +202,6 @@ describe('Angular DI assumptions for route-level data', () => {
 
     await router.navigateByUrl('/v/66');
     await flush(fixture);
-    expect(holder.sig?.()).toBe('66'); // same signal, updated — no new resolver run needed
+    expect(holder.sig?.()).toBe('66');
   });
 });

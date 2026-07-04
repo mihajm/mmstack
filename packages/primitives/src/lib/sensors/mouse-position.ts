@@ -103,15 +103,11 @@ export type MousePositionSignal = Signal<MousePosition> & {
  * }
  * ```
  */
-export function mousePosition(
-  opt?: MousePositionOptions,
-): MousePositionSignal {
+export function mousePosition(opt?: MousePositionOptions): MousePositionSignal {
   return runInSensorContext(opt?.injector, () => createMousePosition(opt));
 }
 
-function createMousePosition(
-  opt?: MousePositionOptions,
-): MousePositionSignal {
+function createMousePosition(opt?: MousePositionOptions): MousePositionSignal {
   if (isPlatformServer(inject(PLATFORM_ID))) {
     const base = computed(
       () => ({
@@ -188,8 +184,6 @@ function createMousePosition(
     pos.set({ x, y });
   };
 
-  // passive: the handler never calls preventDefault, and a non-passive touchmove on
-  // window forces the browser to wait on JS before scrolling (scroll jank on touch)
   const attach = (el: Window | Document | HTMLElement): (() => void) => {
     const controller = new AbortController();
     el.addEventListener('mousemove', updatePosition, {
@@ -206,7 +200,7 @@ function createMousePosition(
   };
 
   if (isSignal(target)) {
-    // re-attach whenever the signal resolves to a (new) element — covers viewChild
+    // covers viewChild case
     effect((cleanup) => {
       const el = resolve(target());
       if (!el) return;

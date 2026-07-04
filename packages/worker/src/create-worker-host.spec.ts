@@ -13,11 +13,6 @@ type Model = { user: { name: string }; count: number };
 const initial = (): Model => ({ user: { name: 'ada' }, count: 0 });
 const appStore = () => store<Model>(initial(), createStoreContext());
 
-/**
- * The bulk of the protocol suite runs on the deterministic harness (controllable fake ports +
- * settle-until-quiescent). A thin real-`MessageChannel` block at the end guards actual async
- * delivery + structured-clone fidelity.
- */
 describe('createWorkerHost — handshake + store mirror (deterministic harness)', () => {
   it('answers hello with ready, advertising stores and tasks', async () => {
     const mesh = createTestMesh({ stores: { app: appStore() }, tasks: { echo: (x) => x } });
@@ -89,6 +84,53 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
     expect(c.ofType('store:ops')).toHaveLength(0);
   });
 
+  it('applies a routed store:write, fans the owner-sequenced batch, and acks the writer', async () => {
+    const app = appStore();
+    const mesh = createTestMesh({ stores: { app } });
+    const c = mesh.addClient();
+
+    c.subscribe('app');
+    await mesh.settle();
+    c.send({
+      type: 'store:write',
+      store: 'app',
+      writeId: 7,
+      clientId: c.id,
+      ops: [{ kind: 'set', path: ['count'], next: 5 }],
+    });
+    await mesh.settle();
+
+    expect(app().count).toBe(5);
+    expect(c.last('store:ops')?.batch.ops).toEqual([
+      { kind: 'set', path: ['count'], next: 5, prev: 0 },
+    ]);
+    const ack = c.ofType('store:write:ack');
+    expect(ack).toHaveLength(1);
+    expect(ack[0]).toMatchObject({ store: 'app', writeId: 7 });
+  });
+
+  it('rejects a store:write to an unknown store with a serialized error', async () => {
+    const mesh = createTestMesh({ stores: { app: appStore() } });
+    const c = mesh.addClient();
+
+    c.hello();
+    await mesh.settle();
+    c.send({
+      type: 'store:write',
+      store: 'nope',
+      writeId: 1,
+      clientId: c.id,
+      ops: [{ kind: 'set', path: ['x'], next: 1 }],
+    });
+    await mesh.settle();
+
+    const err = c.ofType('store:write:error');
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatchObject({ store: 'nope', writeId: 1 });
+    expect(err[0].error.message).toMatch(/unknown store/i);
+    expect(c.ofType('store:ops')).toHaveLength(0);
+  });
+
   it('fans one mutation to every subscribed client at the same version (single sequencer)', async () => {
     const app = appStore();
     const mesh = createTestMesh({ stores: { app } });
@@ -118,7 +160,6 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
     app.count.set(3);
     await mesh.settle();
 
-    // one microtask emission window → one batch carrying both ops
     const ops = c.ofType('store:ops');
     expect(ops).toHaveLength(1);
     expect(ops[0].batch.ops).toHaveLength(2);
@@ -157,7 +198,6 @@ describe('WorkerHost.flush() — synchronous emission', () => {
   it('emits owned-store batches synchronously, before the microtask would', () => {
     const app = appStore();
     const posted: WorkerEnvelope[] = [];
-    // a trivial synchronous stub port makes emission timing directly observable
     const port: WorkerPortLike = {
       postMessage: (m) => posted.push(m as WorkerEnvelope),
       onmessage: null,
@@ -168,7 +208,7 @@ describe('WorkerHost.flush() — synchronous emission', () => {
     expect(posted.filter((m) => m.type === 'store:snapshot')).toHaveLength(1);
 
     app.count.set(7);
-    expect(posted.filter((m) => m.type === 'store:ops')).toHaveLength(0); // microtask still pending
+    expect(posted.filter((m) => m.type === 'store:ops')).toHaveLength(0);
 
     host.flush();
     const ops = posted.filter((m) => m.type === 'store:ops');
@@ -180,9 +220,7 @@ describe('WorkerHost.flush() — synchronous emission', () => {
   });
 });
 
-// ── real MessageChannel: async delivery + structured-clone fidelity ──────────
 describe('createWorkerHost — real MessageChannel fidelity', () => {
-  // a real MessageChannel round-trip can span several event-loop turns; drain a handful
   const tick = async () => {
     for (let i = 0; i < 8; i++) await new Promise<void>((r) => setTimeout(r, 1));
   };

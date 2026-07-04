@@ -28,18 +28,18 @@ This library provides the following utilities:
 
 Angular's own DI primitives cover a lot of ground — these helpers are thin, named conveniences on top of them, and a couple of Angular's newer built-ins may already be exactly what you need:
 
-| You want to…                                                                | Reach for                                                              |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Inject a service, normally                                                  | Angular's `inject()`                                                    |
-| A class singleton for the whole app                                          | Angular's `@Injectable({ providedIn: 'root' })`                         |
-| A typed token + provide/inject pair without the `InjectionToken` boilerplate | `injectable` (think `createContext` for Angular)                        |
-| Defer **constructing** an already-bundled service until first use            | `injectLazy`                                                            |
-| Lazy-load the code for a `providedIn: 'root'` / `@Service()` service (v22+)   | Angular's native `injectAsync` — built in, nothing needed here 🎉        |
-| Lazy-load a service that **isn't** root-provided, or support v19–v21          | `injectAsync` (this lib)                                                |
+| You want to…                                                                     | Reach for                                                            |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Inject a service, normally                                                       | Angular's `inject()`                                                 |
+| A class singleton for the whole app                                              | Angular's `@Injectable({ providedIn: 'root' })`                      |
+| A typed token + provide/inject pair without the `InjectionToken` boilerplate     | `injectable` (think `createContext` for Angular)                     |
+| Defer **constructing** an already-bundled service until first use                | `injectLazy`                                                         |
+| Lazy-load the code for a `providedIn: 'root'` / `@Service()` service (v22+)      | Angular's native `injectAsync` — built in, nothing needed here 🎉    |
+| Lazy-load a service that **isn't** root-provided, or support v19–v21             | `injectAsync` (this lib)                                             |
 | Register a lazy dependency in a `providers` array and inject it deep in the tree | `provideLazy`                                                        |
-| A factory-built (non-class) app-wide singleton                               | `rootInjectable`                                                        |
-| A whole family of factory-built singletons scoped to a component subtree     | `createScope`                                                           |
-| Run `inject()` later, in a callback that lost the context                    | `createRunInInjectionContext` (or Angular's `runInInjectionContext`)    |
+| A factory-built (non-class) app-wide singleton                                   | `rootInjectable`                                                     |
+| A whole family of factory-built singletons scoped to a component subtree         | `createScope`                                                        |
+| Run `inject()` later, in a callback that lost the context                        | `createRunInInjectionContext` (or Angular's `runInInjectionContext`) |
 
 **Native `injectAsync` vs this one.** On Angular v22+, if the lazily-loaded service is auto-provided (`@Injectable({ providedIn: 'root' })` or `@Service()`), Angular's built-in `injectAsync` is all you need. Reach for **this** library's `injectAsync` when either is true: you're on **v19–v21** (no built-in), or the service **isn't** root-provided — a plain `@Injectable()`, or one you want scoped to a component/route. Native rejects those; this one auto-provides and scopes them (and adds `optional`, `prefetch`, `providedWith`, and lifecycle-tied teardown). `provideLazy` builds on it for the "provide once, inject anywhere below" pattern.
 
@@ -47,7 +47,7 @@ Angular's own DI primitives cover a lot of ground — these helpers are thin, na
 
 ### A note on SSR
 
-Fallbacks (`injectable`'s `fallback`/`lazyFallback`) and `rootInjectable` singletons are implemented as **token factories**, which Angular caches *per root injector*. That means every application — including every server-side request, which gets its own root injector — lazily constructs its own instance. Module-scope definition, per-app state: you can define these at the top of a file without anything leaking between requests, tests, or multiple apps on one page.
+Fallbacks (`injectable`'s `fallback`/`lazyFallback`) and `rootInjectable` singletons are implemented as **token factories**, which Angular caches _per root injector_. That means every application — including every server-side request, which gets its own root injector — lazily constructs its own instance. Module-scope definition, per-app state: you can define these at the top of a file without anything leaking between requests, tests, or multiple apps on one page.
 
 ---
 
@@ -59,7 +59,7 @@ The `injectable` function supports four patterns:
 
 1. **Basic** - Returns `T | null` when not provided
 2. **With Fallback** - Returns a default value when not provided
-3. **With Lazy Fallback** - Same as with fallback, but the fallback is lazily evaluated — useful for expensive fallbacks or ones that require injection. Evaluated at most once *per application* (SSR-safe, see the note above).
+3. **With Lazy Fallback** - Same as with fallback, but the fallback is lazily evaluated — useful for expensive fallbacks or ones that require injection. Evaluated at most once _per application_ (SSR-safe, see the note above).
 4. **With Error** - Throws a custom error message when not provided
 
 ### Basic Usage
@@ -100,10 +100,10 @@ export class DataService {
 import { HttpClient } from '@angular/common/http';
 import { injectable } from '@mmstack/di';
 
-interface ApiConfig {
+type ApiConfig = {
   baseUrl: string;
   timeout: number;
-}
+};
 
 const [injectApiConfig, provideApiConfig] = injectable<ApiConfig>('ApiConfig');
 
@@ -136,7 +136,7 @@ When you want to provide a default value instead of returning `null`:
 ```typescript
 import { injectable } from '@mmstack/di';
 
-interface Theme {
+type Theme = {
   primary: string;
   secondary: string;
 }
@@ -243,15 +243,18 @@ Create context-like dependency injection patterns:
 import { Component, Injectable } from '@angular/core';
 import { injectable } from '@mmstack/di';
 
-interface FormContext {
+type FormContext = {
   formId: string;
   isDirty: boolean;
   submit: () => void;
-}
+};
 
-const [injectFormContext, provideFormContext] = injectable<FormContext>('FormContext', {
-  errorMessage: 'FormContext must be provided by a parent form component',
-});
+const [injectFormContext, provideFormContext] = injectable<FormContext>(
+  'FormContext',
+  {
+    errorMessage: 'FormContext must be provided by a parent form component',
+  },
+);
 
 @Component({
   selector: 'app-form',
@@ -297,7 +300,7 @@ Defers the resolution and instantiation of an injection token until the returned
 
 Angular's native `inject()` resolves and instantiates dependencies immediately during the construction phase. If a service is heavily resource-intensive but only needed conditionally (like an export service or a complex editor), `injectLazy` allows you to capture the injection context immediately while delaying instantiation. The resolved value is cached, acting as a standard scoped singleton on subsequent calls.
 
-> **`injectLazy` vs `injectAsync`:** they solve adjacent problems. `injectAsync(() => import('./heavy'))` defers *loading the code* (a separate bundle chunk) and returns a `Promise`; `injectLazy(Heavy)` defers *constructing* an already-bundled service and stays synchronous. If your goal is bundle size, use [`injectAsync`](#injectasync). If your goal is construction timing (or you need a sync getter), `injectLazy` is the fit. They also compose.
+> **`injectLazy` vs `injectAsync`:** they solve adjacent problems. `injectAsync(() => import('./heavy'))` defers _loading the code_ (a separate bundle chunk) and returns a `Promise`; `injectLazy(Heavy)` defers _constructing_ an already-bundled service and stays synchronous. If your goal is bundle size, use [`injectAsync`](#injectasync). If your goal is construction timing (or you need a sync getter), `injectLazy` is the fit. They also compose.
 
 ### Basic Usage
 
@@ -400,14 +403,17 @@ import { Component } from '@angular/core';
 import { Routes } from '@angular/router';
 import { provideLazy } from '@mmstack/di';
 
-const [injectMarkdown, provideMarkdown] = provideLazy<MarkdownService>('Markdown');
+const [injectMarkdown, provideMarkdown] =
+  provideLazy<MarkdownService>('Markdown');
 
 // Register the lazy dependency at a route boundary:
 const routes: Routes = [
   {
     path: 'docs',
     providers: [
-      provideMarkdown(() => import('./markdown.service').then((m) => m.MarkdownService)),
+      provideMarkdown(() =>
+        import('./markdown.service').then((m) => m.MarkdownService),
+      ),
     ],
     loadComponent: () => import('./docs.component'),
   },
@@ -491,9 +497,9 @@ Creates a lazily-initialized root-level injectable that maintains a singleton in
 import { Injectable } from '@angular/core';
 import { rootInjectable } from '@mmstack/di';
 
-interface Logger {
+type Logger = {
   log: (message: string) => void;
-}
+};
 
 // Create a root-level injectable
 const injectLogger = rootInjectable<Logger>(() => ({
@@ -527,10 +533,10 @@ The factory function receives the root injector, allowing you to inject other se
 import { HttpClient } from '@angular/common/http';
 import { rootInjectable } from '@mmstack/di';
 
-interface ApiClient {
+type ApiClient = {
   get: (url: string) => Promise<any>;
   post: (url: string, data: any) => Promise<any>;
-}
+};
 
 const injectApiClient = rootInjectable<ApiClient>((injector) => {
   const http = injector.get(HttpClient); // or just inject(HttpClient)
@@ -563,16 +569,16 @@ Create a simple global state manager:
 import { signal, computed } from '@angular/core';
 import { rootInjectable } from '@mmstack/di';
 
-interface User {
+type User = {
   id: string;
   name: string;
   email: string;
-}
+};
 
-interface AuthState {
+type AuthState = {
   user: User | null;
   isAuthenticated: boolean;
-}
+};
 
 const injectAuthStore = rootInjectable(() => {
   const user = signal<User | null>(null);
@@ -635,7 +641,8 @@ import { Component, inject } from '@angular/core';
 import { createScope } from '@mmstack/di';
 
 // Create the scope
-const [injectableFeatureItem, provideFeatureScope] = createScope('FeatureScope');
+const [injectableFeatureItem, provideFeatureScope] =
+  createScope('FeatureScope');
 
 // Provide the scope at a specific component level boundary
 @Component({
@@ -703,7 +710,7 @@ providers: [
 ];
 ```
 
-> **Heads up:** functions are *always* treated as factories. If your token holds a function type, wrap the value: `provideAs(VALIDATOR, () => myValidatorFn)` — passing it bare would call it as a factory.
+> **Heads up:** functions are _always_ treated as factories. If your token holds a function type, wrap the value: `provideAs(VALIDATOR, () => myValidatorFn)` — passing it bare would call it as a factory.
 
 ---
 

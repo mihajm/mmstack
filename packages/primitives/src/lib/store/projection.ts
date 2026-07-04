@@ -26,7 +26,11 @@ export function reconcile<T>(prev: T, next: T, key: ReconcileKey = 'id'): T {
   return reconcileValue(prev, next, key) as T;
 }
 
-function reconcileValue(prev: unknown, next: unknown, key: ReconcileKey): unknown {
+function reconcileValue(
+  prev: unknown,
+  next: unknown,
+  key: ReconcileKey,
+): unknown {
   if (Object.is(prev, next)) return prev;
 
   if (isPlainArray(prev) && isPlainArray(next)) {
@@ -97,14 +101,10 @@ export function projection<T extends object>(
 ): SignalStore<T> {
   const { key = 'id', ...storeOpt } = opt ?? {};
 
-  // linkedSignal rather than an effect-driven signal: the computation runs in the tracked
-  // context (fn's reads are dependencies) and `previous` hands back the last emitted value for
-  // the reconcile, so the projection is glitch-free, lazy, and needs no effect scheduler.
   const root = linkedSignal<undefined, T>({
     source: () => undefined,
     computation: (_, previous) => {
       const base = previous ? previous.value : seed;
-      // a plain mutable scratch seeded with the current value; fn mutates it or returns new data
       const draft = structuredClone(base);
       const returned = fn(draft);
       const next = (returned === undefined ? draft : returned) as T;

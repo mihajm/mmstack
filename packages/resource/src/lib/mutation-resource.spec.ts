@@ -85,7 +85,6 @@ describe('mutationResource', () => {
     const hooks: string[] = [];
     let requests = 0;
 
-    // We will await a promise that resolves in onSettled
     const { promise, resolve } = Promise.withResolvers<void>();
 
     const res = TestBed.runInInjectionContext(() =>
@@ -125,14 +124,13 @@ describe('mutationResource', () => {
     );
 
     res.mutate({ id: 1 });
-    // while mutating, current should be set
     expect(res.current()).toEqual({ id: 1 });
 
     await promise;
 
     expect(requests).toBe(1);
     expect(hooks).toEqual(['onMutate', 'onSuccess', 'onSettled']);
-    expect(res.current()).toBeNull(); // should be cleared
+    expect(res.current()).toBeNull();
   });
 
   it('should call onError when request fails', async () => {
@@ -177,7 +175,6 @@ describe('mutationResource', () => {
     const list = hashRequest({ url: '/api/posts' });
     const listPage2 = hashRequest({ url: '/api/posts', params: { page: '2' } });
     const detail = hashRequest({ url: '/api/posts/1' });
-    // a POST-bodied read (e.g. a search endpoint) cached under the same URL
     const search = hashRequest({ method: 'POST', url: '/api/posts', body: { q: 'x' } });
     const users = hashRequest({ url: '/api/users' });
     cache.store(list, resp([1, 2]));
@@ -211,19 +208,16 @@ describe('mutationResource', () => {
     res.mutate({ title: 'new post' });
     await promise;
 
-    // everything under /api/posts is gone — any params, subpaths, ANY method
     expect(cache.getUntracked(list)).toBeNull();
     expect(cache.getUntracked(listPage2)).toBeNull();
     expect(cache.getUntracked(detail)).toBeNull();
     expect(cache.getUntracked(search)).toBeNull();
-    // unrelated keys survive
     expect(cache.getUntracked(users)).not.toBeNull();
   });
 
   it('invalidates namespace-prefixed keys (custom hash) via invalidateMatcher', async () => {
     const cache = TestBed.runInInjectionContext(() => injectQueryCache());
     const resp = (body: unknown) => new HttpResponse({ body, status: 200 });
-    // a fully-custom key scheme the default extractor can't read
     cache.store('tenant-7|url=/api/posts', resp([1, 2]));
     cache.store('tenant-7|url=/api/users', resp([]));
 
@@ -278,7 +272,7 @@ describe('mutationResource', () => {
             },
             { ok: true },
             false,
-            50, // keep the first mutation in flight
+            50,
           ),
         }),
         {
@@ -292,15 +286,12 @@ describe('mutationResource', () => {
       ),
     );
 
-    res.mutate({ id: 1 }); // in flight (50ms)
-    res.mutate({ id: 2 }); // supersedes — regression: id 1's context used to vanish
+    res.mutate({ id: 1 });
+    res.mutate({ id: 2 });
 
     await promise;
 
-    // the superseded mutation's context was settled (so optimistic state can be
-    // rolled back), then the winning mutation settled normally
     expect(settled).toEqual([{ forId: 1 }, { forId: 2 }]);
-    // only the winner gets a success callback
     expect(succeeded).toEqual([{ forId: 2 }]);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('superseded'),
@@ -325,7 +316,7 @@ describe('mutationResource', () => {
             { queued: body },
             false,
             10,
-          ), // provide a non-null return value
+          ),
         }),
         {
           queue: true,
@@ -347,7 +338,6 @@ describe('mutationResource', () => {
     }
 
     expect(settledCount).toBe(3);
-    // Ordered executions
     expect(executions).toEqual([1, 2, 3]);
   });
 
@@ -387,28 +377,25 @@ describe('mutationResource', () => {
     res.mutate(2);
     res.mutate(3);
 
-    // let the queue effect dequeue + fire the head request
     for (let i = 0; i < 20 && executions.length < 1; i++) {
       await new Promise((r) => setTimeout(r));
       TestBed.tick();
     }
-    expect(executions).toEqual([1]); // only the head is in flight
+    expect(executions).toEqual([1]);
 
-    res.clearQueue(); // drop pending 2 & 3
+    res.clearQueue();
 
-    // wait for the in-flight #1 to settle
     for (let i = 0; i < 50; i++) {
       if (settledCount === 1) break;
       await new Promise((r) => setTimeout(r, 10));
       TestBed.tick();
     }
 
-    // give any erroneously-retained queued mutations a chance to fire
     await new Promise((r) => setTimeout(r, 30));
     TestBed.tick();
 
-    expect(executions).toEqual([1]); // 2 & 3 never ran
-    expect(successCount).toBe(1); // in-flight #1 still resolved
+    expect(executions).toEqual([1]);
+    expect(successCount).toBe(1);
     expect(settledCount).toBe(1);
   });
 
@@ -455,7 +442,7 @@ describe('mutationResource', () => {
     }
     expect(executions).toEqual([1]);
 
-    key.set('b'); // reset the queue → drop pending 2 & 3
+    key.set('b');
     TestBed.tick();
 
     for (let i = 0; i < 50; i++) {
@@ -488,9 +475,6 @@ describe('mutationResource', () => {
   });
 
   it('triggerOnSameRequest: an identical mutation fired while one is in flight still triggers a request', async () => {
-    // Regression: without this, the mutation's own request-equality dedup swallowed a repeat
-    // mutate() with an identical body while one was in flight — so the optimistic update applied
-    // but no HTTP fired (the "every other click" symptom). triggerOnSameRequest must defeat it.
     let requests = 0;
 
     const res = TestBed.runInInjectionContext(() =>
@@ -505,7 +489,7 @@ describe('mutationResource', () => {
             },
             { ok: true },
             false,
-            100, // slow response → the first stays in flight while the second is fired
+            100,
           ),
         }),
         { triggerOnSameRequest: true },
@@ -517,14 +501,14 @@ describe('mutationResource', () => {
       await new Promise((r) => setTimeout(r));
       TestBed.tick();
     }
-    expect(requests).toBe(1); // first request is in flight
+    expect(requests).toBe(1);
 
-    res.mutate({ id: 1 }); // identical body, while #1 has not resolved
+    res.mutate({ id: 1 });
     for (let i = 0; i < 50 && requests < 2; i++) {
       await new Promise((r) => setTimeout(r, 10));
       TestBed.tick();
     }
-    expect(requests).toBe(2); // the identical in-flight repeat still fired
+    expect(requests).toBe(2);
   });
 
   it('should abort the mutation when onMutate throws (non-queued)', async () => {
@@ -562,12 +546,11 @@ describe('mutationResource', () => {
 
     res.mutate({ id: 1 });
 
-    // Give effects/microtasks a chance to flush — nothing should settle.
     await new Promise((r) => setTimeout(r, 20));
     TestBed.tick();
 
-    expect(requests).toBe(0); // HTTP never fired
-    expect(hooks).toEqual(['onMutate']); // only the throwing hook ran
+    expect(requests).toBe(0);
+    expect(hooks).toEqual(['onMutate']);
     expect(res.current()).toBeNull();
 
     errSpy.mockRestore();
@@ -764,7 +747,7 @@ describe('mutationResource', () => {
     const executions: number[] = [];
     let settledCount = 0;
 
-    networkStatusSignal.set(false); // start offline
+    networkStatusSignal.set(false);
 
     const res = TestBed.runInInjectionContext(() =>
       mutationResource(
@@ -795,18 +778,14 @@ describe('mutationResource', () => {
 
     TestBed.tick();
 
-    // It should have dequeued the first item but pending at network layer
     expect(res.current()).toEqual(1);
-    expect(executions.length).toBe(0); // network didn't fire
+    expect(executions.length).toBe(0);
 
-    // Wait a bit to ensure it really doesn't fire
     await new Promise((r) => setTimeout(r, 40));
     expect(executions.length).toBe(0);
 
-    // Go online!
     networkStatusSignal.set(true);
 
-    // Repeatedly flush effects until settledCount === 2
     for (let i = 0; i < 50; i++) {
       if (settledCount === 2) break;
       await new Promise((r) => setTimeout(r, 10));
@@ -814,7 +793,6 @@ describe('mutationResource', () => {
     }
 
     expect(settledCount).toBe(2);
-    // Ordered executions happened after coming online
     expect(executions).toEqual([1, 2]);
   });
 
@@ -899,13 +877,13 @@ describe('mutationResource', () => {
             },
             { id: body.id },
             false,
-            50, // keep #1 in flight
+            50,
           ),
         })),
       );
 
       const first = res.mutateAsync({ id: 1 });
-      const second = res.mutateAsync({ id: 2 }); // supersedes #1
+      const second = res.mutateAsync({ id: 2 });
 
       const err = (await first.catch((e) => e)) as MutationCancelledError;
       expect(err).toBeInstanceOf(MutationCancelledError);
@@ -1027,13 +1005,12 @@ describe('mutationResource', () => {
       const p2 = res.mutateAsync(2);
       const p3 = res.mutateAsync(3);
 
-      // let the head dequeue + fire
       for (let i = 0; i < 20 && res.current() === null; i++) {
         await new Promise((r) => setTimeout(r));
         TestBed.tick();
       }
 
-      res.clearQueue(); // drop pending 2 & 3
+      res.clearQueue();
 
       await expect(p2).rejects.toMatchObject({ type: 'queue-cleared' });
       await expect(p3).rejects.toMatchObject({ type: 'queue-cleared' });
@@ -1064,13 +1041,12 @@ describe('mutationResource', () => {
       const p1 = res.mutateAsync(1);
       const p2 = res.mutateAsync(2);
 
-      // let the head dequeue + fire
       for (let i = 0; i < 20 && res.current() === null; i++) {
         await new Promise((r) => setTimeout(r));
         TestBed.tick();
       }
 
-      key.set('b'); // reset the queue → drop pending 2
+      key.set('b');
       TestBed.tick();
 
       await expect(p2).rejects.toMatchObject({ type: 'queue-key-changed' });
@@ -1122,7 +1098,6 @@ describe('mutationResource', () => {
             app: ApplicationDef;
             summary: ApplicationSummary;
           }) => {
-            // params are typed `{ app, summary }`, but the wire body is a transform
             const fd = new FormData();
             fd.append('app', JSON.stringify(app));
             fd.append(summary['@type'], JSON.stringify(summary));
@@ -1140,9 +1115,8 @@ describe('mutationResource', () => {
             onMutate: ({ summary }) => {
               const prev = summaries();
               summaries.set([...prev, summary]);
-              return prev; // → TCTX = ApplicationSummary[]
+              return prev;
             },
-            // `prev` must infer as ApplicationSummary[], never `void`
             onError: (_err, prev) => summaries.set(prev),
             onSuccess: (_result, prev) => {
               const typed: ApplicationSummary[] = prev;

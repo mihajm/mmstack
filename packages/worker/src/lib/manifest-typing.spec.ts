@@ -6,11 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { WorkerRef } from './connect-worker';
 import { workerStore } from './worker-store';
 
-/**
- * Compile-time contract for the manifest typing: keys are constrained, value types inferred, and
- * `write()` exists ONLY on owned subtrees. These assertions are type-checked by the build; the body
- * never runs against a real worker (guarded by `if (never)`), so no injection context is needed.
- */
+// compile-time contract: assertions are type-checked by the build; the body never runs (if (never))
 function makeHost() {
   const counter = store(
     { value: 0, history: [] as number[] },
@@ -31,13 +27,13 @@ describe('manifest typing (compile-time)', () => {
     if (never) {
       const worker = null as unknown as WorkerRef<SchemaOf<App>>;
 
-      const counter = workerStore(worker, 'counter'); // owned → CounterState, writable
+      const counter = workerStore(worker, 'counter');
       const cv: { value: number; history: number[] } | undefined =
         counter.value();
       void cv;
-      counter.write((d) => d.value.set(1)); // OK — owned subtree
+      counter.write((d) => d.value.set(1));
 
-      const stats = workerStore(worker, 'stats'); // published → read-only
+      const stats = workerStore(worker, 'stats');
       const sv: { sum: number; count: number } | undefined = stats.value();
       void sv;
       // @ts-expect-error published subtree is read-only — no write()
@@ -45,7 +41,6 @@ describe('manifest typing (compile-time)', () => {
         // noop
       });
 
-      // named task typed from the schema
       const r: Promise<number> = worker.runTask('fib', 21);
       void r;
       // @ts-expect-error 'unknown' is not a task

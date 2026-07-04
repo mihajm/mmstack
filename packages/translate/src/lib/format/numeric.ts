@@ -128,7 +128,7 @@ function getFormatter(
       signDisplay: cfg.signDisplay,
       unit: cfg.unit,
       unitDisplay: cfg.unitDisplay,
-      // roundingMode is ES2023 — may be missing from older lib typings, runtime-safe
+      // roundingMode (ES2023) may be missing from older lib typings; runtime-safe
       ...({ roundingMode: cfg.roundingMode } as Intl.NumberFormatOptions),
     });
     cache.set(cacheKey, formatter);

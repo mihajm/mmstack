@@ -26,14 +26,9 @@ export type LintReport = {
   unknownKeys: { namespace: string; key: string }[];
 };
 
-// ---- suppression comments ----------------------------------------------------------------
-//
-// Two modes, same principle as eslint:
-//  - file-wide:  a comment containing `mmtranslate-disable [rules]` BEFORE the first statement
-//  - next-line:  `mmtranslate-disable-next-line [rules]` suppresses findings located on the
-//                line directly below the comment
-// No rule names = all rules. Comments are found with the TypeScript scanner, so a marker
-// inside a translation STRING can never suppress anything.
+// Two suppression modes (eslint-style): file-wide `mmtranslate-disable [rules]` before the first
+// statement, and `mmtranslate-disable-next-line [rules]`. No names = all rules. Found via the TS
+// scanner, so a marker inside a translation string can't suppress anything.
 
 export type SuppressionIndex = {
   isSuppressed(file: string, line: number | undefined, rule: LintRuleName): boolean;
@@ -81,7 +76,6 @@ export function buildSuppressions(files: SourceFile[]): SuppressionIndex {
           const where = `${filePath}:${line}`;
           const rules = parseRules(match[2] ?? '', where);
           if (match[1]) {
-            // -next-line
             let perLine = nextLine.get(filePath);
             if (!perLine) nextLine.set(filePath, (perLine = new Map()));
             const endLine = sf.getLineAndColumnAtPos(start + comment.length).line;
@@ -114,8 +108,6 @@ export function buildSuppressions(files: SourceFile[]): SuppressionIndex {
       (line !== undefined && has(nextLine.get(file)?.get(line), rule)),
   };
 }
-
-// ---- key locations -------------------------------------------------------------------------
 
 /**
  * Dotted key → line of its definition in the module's translation object literal (the object
@@ -157,8 +149,6 @@ export function keyLines(
   walk(obj, '');
   return out;
 }
-
-// ---- rule: duplicate -----------------------------------------------------------------------
 
 export function normalizeValue(value: string, ignoreCase: boolean): string {
   const collapsed = value.trim().replace(/\s+/g, ' ');
@@ -210,7 +200,7 @@ export function findDuplicates(
   for (const entry of entries) {
     if (suppressions.isSuppressed(entry.file, entry.line, 'duplicate')) continue;
     const norm = normalizeValue(entry.value, ignoreCase);
-    if (!norm) continue; // empty values are a different rule's business
+    if (!norm) continue;
     const group = groups.get(norm) ?? [];
     group.push(entry);
     groups.set(norm, group);
@@ -232,8 +222,6 @@ export function findDuplicates(
   }
   return findings;
 }
-
-// ---- rule: unused --------------------------------------------------------------------------
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -265,8 +253,7 @@ export function classifyUsage(key: string, appTexts: string[]): UsageVerdict {
     const chain = prefix.map(escapeRe).join('\\s*\\.\\s*');
     const computed = new RegExp(`\\b${chain}\\s*\\[`);
     if (appTexts.some((t) => computed.test(t))) return 'unknown';
-    // subtree passed as a value: the prefix chain NOT followed by a deeper member access;
-    // a lone identifier needs the leading `.` as evidence it's this tree at all
+    // Subtree passed as a value: prefix chain not followed by a deeper access.
     const bare =
       prefix.length >= 2
         ? new RegExp(`\\b${chain}\\b(?!\\s*[.[\\w])`)
@@ -275,8 +262,6 @@ export function classifyUsage(key: string, appTexts: string[]): UsageVerdict {
   }
   return 'unused';
 }
-
-// ---- runner --------------------------------------------------------------------------------
 
 export type LintRunOptions = {
   rules: LintRuleName[];
@@ -334,8 +319,7 @@ export function lintProject(
     );
 
   if (opts.rules.includes('unused')) {
-    // definition/locale/registry files must not count as usage — a key always "appears"
-    // where it's defined
+    // Definition/locale/registry files must not count as usage.
     const appTexts = (appProject ?? project)
       .getSourceFiles()
       .filter((sf) => !definitionFiles.has(sf.getFilePath()))
@@ -360,8 +344,6 @@ export function lintProject(
 
   return { findings, warnings: suppressions.warnings, unknownKeys };
 }
-
-// ---- report formatting ---------------------------------------------------------------------
 
 export function formatLintReport(report: LintReport): string {
   const lines: string[] = [];

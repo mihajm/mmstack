@@ -161,7 +161,6 @@ describe('applyImport', () => {
     const res = applyImport(p, quoteNs(p), 'fr-CA', fr);
 
     expect(res.created).toBe(true);
-    // exportName derives from source export + PascalCased locale: quote + FrCa
     expect(p.getSourceFileOrThrow(res.filePath).getFullText()).toContain(
       'quoteFrCa',
     );
@@ -175,7 +174,6 @@ describe('applyImport', () => {
 
   it('throws when a locale collides with an existing one on the same identifier', () => {
     const p = project();
-    // `sl-SI` is already registered → `sl_SI` PascalCases to the same `SlSi`
     expect(() =>
       applyImport(p, quoteNs(p), 'sl_SI', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
     ).toThrow(/collides/);
@@ -208,8 +206,8 @@ describe('applyImport', () => {
 
   it('throws instead of silently succeeding when an existing locale module no longer matches', () => {
     const p = project();
-    const ns = quoteNs(p); // discovered while sl-SI was still intact
-    // hand-edit the module: the export is no longer a createTranslation(...) call
+    const ns = quoteNs(p);
+    // Hand-edit the module so the export is no longer a createTranslation(...) call.
     p.getSourceFileOrThrow('/namespaces.ts')
       .getVariableDeclarationOrThrow('quoteSl')
       .setInitializer(`'hand-edited'`);

@@ -14,14 +14,6 @@ import {
   ResourceSensors,
 } from './util';
 
-// THE CANCELLATION CONTRACT, proven end-to-end against a real backend seam
-// (HttpTestingController = genuinely pending requests + `cancelled` introspection):
-// 1. `abort()` tears the HTTP request down and keeps the current value — no wedge.
-// 2. An aborted/destroyed request can never settle into the query cache.
-// 3. `scope.abortPending()` is the shared-scope lever over registered queries.
-// The view-destroy → abort path these mechanics serve is covered by the router
-// integration specs (`verify({ ignoreCancelled: true })` is that abort, observed).
-
 describe('cancellation contract', () => {
   let http: HttpTestingController;
 
@@ -60,7 +52,7 @@ describe('cancellation contract', () => {
 
   it('abort() cancels the in-flight reload, keeps the value, and never wedges', async () => {
     const res = make('/api/thing');
-    TestBed.tick(); // httpResource fires its load effect
+    TestBed.tick();
     http.expectOne('/api/thing').flush({ v: 1 });
     await TestBed.runInInjectionContext(() =>
       until(res.value, (v) => v !== undefined),
@@ -73,15 +65,15 @@ describe('cancellation contract', () => {
     expect(res.status()).toBe('reloading');
 
     res.abort();
-    expect(second.cancelled).toBe(true); // the request is genuinely torn down
-    expect(res.value()).toEqual({ v: 1 }); // the settled value is kept
+    expect(second.cancelled).toBe(true);
+    expect(res.value()).toEqual({ v: 1 });
     expect(res.status()).toBe('local');
     expect(res.isLoading()).toBe(false);
 
-    res.abort(); // nothing in flight — safe no-op
+    res.abort();
     http.expectNone('/api/thing');
 
-    res.reload(); // abort never wedges the resource
+    res.reload();
     TestBed.tick();
     http.expectOne('/api/thing').flush({ v: 2 });
     await TestBed.runInInjectionContext(() =>
@@ -98,7 +90,7 @@ describe('cancellation contract', () => {
 
     const second = make('/api/cached', { cache: true });
     TestBed.tick();
-    http.expectNone('/api/cached'); // served from cache — no network
+    http.expectNone('/api/cached');
     expect(second.value()).toEqual({ v: 1 });
   });
 
@@ -109,9 +101,8 @@ describe('cancellation contract', () => {
 
     first.abort();
     expect(req.cancelled).toBe(true);
-    expect(first.hasValue()).toBe(false); // first load aborted — honestly valueless
+    expect(first.hasValue()).toBe(false);
 
-    // nothing cached: an identical query must go to the network again
     const second = make('/api/aborted', { cache: true });
     TestBed.tick();
     http.expectOne('/api/aborted').flush({ v: 2 });
@@ -119,8 +110,6 @@ describe('cancellation contract', () => {
   });
 
   it('destroy mid-flight aborts the request and leaves the cache empty (the supersede path)', () => {
-    // this is what a superseded transition does: the hidden view's injector dies,
-    // resources created there are destroyed — the request must die with them
     const doomed = make('/api/superseded', { cache: true });
     TestBed.tick();
     const req = http.expectOne('/api/superseded');
@@ -130,7 +119,7 @@ describe('cancellation contract', () => {
 
     const successor = make('/api/superseded', { cache: true });
     TestBed.tick();
-    http.expectOne('/api/superseded').flush({ v: 3 }); // no stale settle to serve
+    http.expectOne('/api/superseded').flush({ v: 3 });
     expect(successor.value()).toEqual({ v: 3 });
   });
 
@@ -144,8 +133,8 @@ describe('cancellation contract', () => {
 
     expect(scope.abortPending()).toBe(1);
     expect(req.cancelled).toBe(true);
-    expect(scope.pending()).toBe(false); // the scope settles immediately
+    expect(scope.pending()).toBe(false);
 
-    expect(scope.abortPending()).toBe(0); // idempotent once quiet
+    expect(scope.abortPending()).toBe(0);
   });
 });

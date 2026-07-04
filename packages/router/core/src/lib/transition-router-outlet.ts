@@ -27,32 +27,23 @@ import { RouterViewTransitions } from './view-transition';
 /**
  * A `RouterOutlet` that turns navigation into a transition: the current route's view
  * stays mounted and visible while the incoming route mounts hidden and its resources
- * settle, then swaps in one frame — instead of flashing to a loading state.
+ * settle, then swaps in one frame — instead of flashing to a loading state. Drop-in for
+ * `<router-outlet>`.
  *
- * Provides its own transition scope, so the incoming route's connectors register HERE and
- * we can tell when it's ready. Drop-in for `<router-outlet>`.
+ * The base `RouterOutlet` bookkeeping stays fully intact — `isActivated` /
+ * `activatedRoute` reflect the live route, so `CanDeactivate` guards, `withComponentInputBinding()`
+ * and custom `RouteReuseStrategy` all work normally. The outgoing view is held on screen
+ * until the swap commits; `deactivateEvents` fires when it is finally destroyed.
  *
- * The base `RouterOutlet` bookkeeping is kept fully intact — `isActivated` /
- * `activatedRoute` always reflect the LIVE route, so `CanDeactivate` guards receive the
- * real component, `withComponentInputBinding()` keeps re-binding on param changes, and
- * custom `RouteReuseStrategy` detach/attach work normally. Only the *outgoing* view is
- * captured (via the public detach contract) and held on screen until the swap commits;
- * `deactivateEvents` fires when the held view is finally destroyed.
- *
- * The outgoing route is destroyed on swap — navigation respects "tree = f(URL)".
- *
- * An interrupting navigation mid-hold destroys the half-loaded (still hidden) incoming
- * view and RE-TARGETS the hold: the stable view stays visible until the interrupting
- * route settles.
+ * An interrupting navigation mid-hold re-targets the hold: the stable view stays visible
+ * until the interrupting route settles.
  *
  * Set `data: { immediateTransition: true }` on a route to skip holding for it.
  *
- * The outlet provides a *forwarding* transition scope: per navigation it re-points at the
- * incoming route's own scope when the route opts in (via `provideRouteData`/
- * `provideTransitionScope()` in its `providers`), giving true per-view isolation — the
- * held view's resources live in the outgoing route's scope and can't delay the swap. Routes
- * that don't opt in share the outlet's own scope, where the swap is attributed to the
- * incoming view by snapshotting the outgoing refs.
+ * Provides a forwarding transition scope: per navigation it re-points at the incoming
+ * route's own scope when the route opts in (via `provideRouteData`/`provideTransitionScope()`),
+ * giving per-view isolation. Routes that don't opt in share the outlet's own scope, where the
+ * swap ignores the snapshotted outgoing refs.
  */
 @Directive({
   // eslint-disable-next-line @angular-eslint/directive-selector
@@ -65,7 +56,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private readonly transitionScope = this.forwarder;
   private readonly container = inject(ViewContainerRef);
   private readonly outletInjector = inject(Injector);
-  /** Scope inherited from the outlet's own env injector — used to tell "route opted in" from "inherited". */
+  /** Scope inherited from the outlet's env injector — distinguishes "route opted in". */
   private readonly inheritedScope = getTransitionScope(
     inject(EnvironmentInjector),
   );
@@ -74,38 +65,29 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   /**
    * Wrap the swap in the View Transitions API (`document.startViewTransition`) for an
-   * animated cross-fade between the outgoing and incoming views. Feature-detected —
-   * browsers without support (pre-Chrome 111 / Safari 18 / Firefox 139) fall back to the
-   * instant swap.
+   * animated cross-fade. Feature-detected; unsupported browsers fall back to an instant swap.
    *
    * Tri-state: **unset** → follow the app's router-view-transitions setting (on when
    * `withViewTransitions(mmRouterViewTransitions())` is wired, off otherwise);
-   * **`true`** → always animate; **`false`** → never animate (force a specific outlet
-   * off even when router view transitions are enabled app-wide).
-   *
-   * So it "just works" alongside Angular's router view transitions — the outlet owns the
-   * transition for held routes, Angular owns it for non-held ones — without needing the
-   * attribute at all.
+   * **`true`** → always animate; **`false`** → never animate.
    */
   readonly viewTransition = input(undefined, {
     transform: (v: boolean | string | undefined) =>
       v === undefined ? undefined : booleanAttribute(v),
   });
 
-  /** The captured outgoing view, kept visible until the incoming view settles. */
+  /** Captured outgoing view, kept visible until the incoming view settles. */
   private held: ComponentRef<unknown> | null = null;
   private releaseHeldGuard: (() => void) | null = null;
-  /** Host nodes of the live (incoming) view while it is hidden during a hold. */
   private hiddenIncoming: HTMLElement[] | null = null;
-  /** Environment injector of the CURRENT activation — becomes the held view's on capture. */
   private currentEnv: EnvironmentInjector | null = null;
   private sawPending = false;
   private armed = false;
 
-  /** Resources held by the OUTGOING view, snapshotted at activation so the swap ignores them. */
+  /** Outgoing view's resources, snapshotted so the swap ignores them. */
   private outgoingRefs = new Set<ResourceLike>();
 
-  /** In-flight state of the INCOMING view only — what the swap waits on, so outgoing background work can't block it. */
+  /** In-flight state of the incoming view only. */
   private readonly incomingPending = computed(() => {
     for (const ref of this.transitionScope.resources()) {
       if (this.outgoingRefs.has(ref)) continue;
@@ -117,7 +99,6 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   constructor() {
     super();
-    // Swap once the incoming view's requests have gone in flight and then settled.
     effect(() => {
       const pending = this.incomingPending();
       untracked(() => {
@@ -132,19 +113,16 @@ export class TransitionRouterOutlet extends RouterOutlet {
     const hadHeld = !!this.held;
     this.currentEnv = env;
 
-    // Must run before super.activateWith so the incoming view's resources register into the right scope.
+    // Must run before super.activateWith so incoming resources register into the right scope.
     const routeScope = getTransitionScope(env);
     const usingRouteScope =
       routeScope !== null && routeScope !== this.inheritedScope;
     this.forwarder.setTarget(usingRouteScope ? routeScope : null);
 
-    // A per-route scope already isolates the incoming view; the shared scope needs the
-    // outgoing refs snapshotted so the swap ignores them.
     this.outgoingRefs = usingRouteScope
       ? new Set()
       : new Set(untracked(this.transitionScope.resources));
 
-    // base bookkeeping stays INTACT: isActivated/activatedRoute now reflect this route
     super.activateWith(route, env);
 
     if (!hadHeld || route.snapshot.data?.['immediateTransition'] === true) {
@@ -181,12 +159,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.scheduleOrphanCheck(ref);
   }
 
-  /**
-   * If a new activation follows a deactivation, it does so SYNCHRONOUSLY within the
-   * same router activation pass (and arms the hold). If none arrives (e.g.
-   * /parent/child → /parent, the outlet has no route in the new tree), the view is
-   * simply gone — drop the hold.
-   */
+  /** Drop the hold if no activation follows the deactivation in the same pass. */
   private scheduleOrphanCheck(ref: ComponentRef<unknown>): void {
     queueMicrotask(() => {
       if (this.held === ref && !this.armed) {
@@ -203,7 +176,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   }
 
   override ngOnDestroy(): void {
-    this.swapEpoch++; // a deferred view-transition callback must not touch destroyed state
+    this.swapEpoch++;
     this.dropHeld();
     super.ngOnDestroy();
   }
@@ -229,13 +202,11 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private resetArm(): void {
     this.armed = false;
     this.sawPending = false;
-    this.swapEpoch++; // invalidate any swap already scheduled into a view transition
+    this.swapEpoch++;
     this.outgoingRefs.clear();
   }
 
-  /** Bumped whenever the hold is re-targeted/reset, so a DEFERRED `startViewTransition`
-   * callback (the browser snapshots the old frame first) from a superseded swap can't fire
-   * against re-targeted state — destroying the stable view and revealing a half-loaded one. */
+  /** Bumped on re-target/reset so a deferred `startViewTransition` from a superseded swap can't fire. */
   private swapEpoch = 0;
 
   private commitSwap(): void {
@@ -256,10 +227,9 @@ export class TransitionRouterOutlet extends RouterOutlet {
     }
   }
 
-  /** The actual swap: destroy the held view, reveal the incoming one. Always instant. */
   private finishSwap(epoch: number): void {
-    if (epoch !== this.swapEpoch) return; // superseded while deferred — not ours to commit
-    this.dropHeld(); // drop the route we're leaving
+    if (epoch !== this.swapEpoch) return; // superseded while deferred
+    this.dropHeld();
     if (this.hiddenIncoming) {
       this.setHidden(this.hiddenIncoming, false);
       this.hiddenIncoming = null;
@@ -267,11 +237,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.resetArm();
   }
 
-  /**
-   * Under `withExperimentalAutoCleanupInjectors` the outgoing route's environment
-   * injector can be destroyed while we still display its view — commit immediately
-   * instead of going zombie (route-provided services dead under a visible view).
-   */
+  /** Commit immediately if the held view's env injector is destroyed under it. */
   private guardHeldInjector(
     env: EnvironmentInjector | null,
     ref: ComponentRef<unknown>,
@@ -285,7 +251,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
         if (this.held === ref) this.commitSwap();
       });
     } catch {
-      // injector already destroyed — nothing to guard
+      // injector already destroyed
     }
   }
 
@@ -296,11 +262,9 @@ export class TransitionRouterOutlet extends RouterOutlet {
     const instance = this.held.instance;
     this.held.destroy();
     this.held = null;
-    // the outgoing component is ACTUALLY gone now — notify like deactivate() would
     this.deactivateEvents.emit(instance);
   }
 
-  /** Host nodes of the most recently created view in the container — the incoming one. */
   private incomingRootNodes(): HTMLElement[] {
     const view = this.container.get(this.container.length - 1);
     if (!view) return [];

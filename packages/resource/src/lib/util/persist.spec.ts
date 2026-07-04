@@ -23,13 +23,10 @@ describe('persistResourceValues', () => {
 
       const persisted = persistResourceValues(mock, true);
 
-      // Read the initial persisted value
       expect(persisted.value()).toBe('initial');
 
-      // Simulate resource going to undefined (e.g. during reload)
       mock.value.set(undefined);
 
-      // Persisted value should retain the last defined value
       expect(persisted.value()).toBe('initial');
     });
   });
@@ -55,9 +52,8 @@ describe('persistResourceValues', () => {
 
       expect(persisted.statusCode()).toBe(200);
 
-      // Simulate statusCode becoming undefined
       mock._statusCode.set(undefined);
-      expect(persisted.statusCode()).toBe(200); // persisted
+      expect(persisted.statusCode()).toBe(200);
     });
   });
 

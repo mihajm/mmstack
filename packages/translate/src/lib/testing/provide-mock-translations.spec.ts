@@ -4,19 +4,16 @@ import { createNamespace } from '../create-namespace';
 import { registerNamespace } from '../register-namespace';
 import { provideMockTranslations } from './provide-mock-translations';
 
-// 1. Create a dummy namespace
 const dummyNs = createNamespace('dummy', {
   hello: 'Hello World',
   greet: 'Hello {name}',
 });
 
-// 2. Register namespace
 const { injectNamespaceT } = registerNamespace(
   () => Promise.resolve(dummyNs.translation),
-  {}, // no other locales
+  {},
 );
 
-// 3. Create a component that uses the function method
 @Component({
   selector: 'mm-cmp',
   template: `
@@ -71,7 +68,6 @@ describe('provideMockTranslations', () => {
 
       const el = fixture.nativeElement as HTMLElement;
 
-      // Without formatValues, the raw mocked string is returned (variables are not interpolated).
       expect(el.querySelector('#fn-test')?.textContent).toBe('Mocked Hello');
       expect(el.querySelector('#fn-var-test')?.textContent?.trim()).toBe(
         'Mocked Greet {name}',

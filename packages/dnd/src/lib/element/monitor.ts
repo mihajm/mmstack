@@ -74,7 +74,6 @@ export function monitor<TAccept = unknown, TMeta extends DragMeta = DragMeta>(
       data: Record<string | symbol, unknown>,
     ): { data: TAccept; meta: TMeta } | null => {
       const unboxed = unboxData<unknown>(data);
-      // No `accepts` → only report @mmstack drags, so source() is defined while isDragging() is true.
       if (providedAccept) {
         if (!untracked(() => providedAccept(unboxed))) return null;
       } else if (unboxed === undefined) {

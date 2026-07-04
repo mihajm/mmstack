@@ -9,7 +9,6 @@ import {
   type LintFinding,
 } from './lint';
 
-/** In-memory project mirroring the discovery fixtures: two namespaces + a registry. */
 function project(files?: Record<string, string>): Project {
   const p = new Project({ useInMemoryFileSystem: true });
   p.createSourceFile(
@@ -62,14 +61,12 @@ describe('keyLines', () => {
 describe('dupes', () => {
   it('groups duplicates within AND across namespaces, normalized', () => {
     const report = lint(project(), ['duplicate']);
-    // 'Save' appears as common:save, quote:save, and quote:detail.save ('  Save ' normalizes)
     const group = report.findings.filter((f) => f.group === 'Save');
     expect(group.map(keyOf).sort()).toEqual([
       'common:save',
       'quote:detail.save',
       'quote:save',
     ]);
-    // 'Cancel' and 'Author' are singletons — never reported
     expect(report.findings.every((f) => f.group === 'Save')).toBe(true);
   });
 
@@ -83,7 +80,7 @@ describe('dupes', () => {
       '/reg.ts',
       `registerNamespace(() => import('./ns').then((m) => m.a.translation), {});`,
     );
-    expect(lint(p, ['duplicate']).findings).toEqual([]); // case differs
+    expect(lint(p, ['duplicate']).findings).toEqual([]);
     expect(lint(p, ['duplicate'], true).findings.length).toBe(2);
   });
 });
@@ -103,7 +100,7 @@ describe('suppressions', () => {
       '/reg.ts',
       `registerNamespace(() => import('./ns').then((m) => m.a.translation), {});`,
     );
-    expect(lint(p, ['duplicate']).findings).toEqual([]); // only x remains → group of 1
+    expect(lint(p, ['duplicate']).findings).toEqual([]);
   });
 
   it('a file-top disable silences the whole file (all rules when unnamed)', () => {
@@ -134,7 +131,7 @@ describe('suppressions', () => {
     );
     const report = lint(p, ['duplicate', 'unused']);
     expect(report.findings.filter((f) => f.rule === 'duplicate')).toEqual([]);
-    expect(report.findings.filter((f) => f.rule === 'unused').length).toBe(2); // still on
+    expect(report.findings.filter((f) => f.rule === 'unused').length).toBe(2);
   });
 
   it('warns on unknown rule names and on a mid-file bare disable', () => {
@@ -165,7 +162,7 @@ describe('suppressions', () => {
       '/reg.ts',
       `registerNamespace(() => import('./ns').then((m) => m.a.translation), {});`,
     );
-    expect(lint(p, ['duplicate']).findings.length).toBe(2); // y+z still reported
+    expect(lint(p, ['duplicate']).findings.length).toBe(2);
   });
 });
 
@@ -179,7 +176,7 @@ describe('classifyUsage', () => {
     );
     expect(
       classifyUsage('detail.save', ['const x = t\n  .detail\n  .save;']),
-    ).toBe('used'); // whitespace-tolerant
+    ).toBe('used');
   });
 
   it('computed access on a prefix → unknown, not unused', () => {
@@ -193,7 +190,7 @@ describe('classifyUsage', () => {
 
   it('a ≥2-segment prefix passed around whole → unknown', () => {
     expect(
-      classifyUsage('detail.save', ['render(t.detail);']), // subtree as a value
+      classifyUsage('detail.save', ['render(t.detail);']),
     ).toBe('unknown');
   });
 
@@ -210,8 +207,6 @@ describe('unused (end to end over a project)', () => {
     });
     const report = lint(withApp, ['unused']);
     const unused = report.findings.map(keyOf).sort();
-    // common:save + quote:save are matched by `t.save`; detail.authorLabel by the chain;
-    // cancel + detail.save have no usage anywhere
     expect(unused).toEqual(['common:cancel', 'quote:detail.save']);
   });
 
@@ -225,7 +220,7 @@ describe('unused (end to end over a project)', () => {
       '/app.ts': `for (const k of keys) console.log(t.detail[k]); t.save; t.cancel;`,
     });
     const report = lint(withApp, ['unused']);
-    expect(report.findings.map(keyOf)).toEqual([]); // nothing confidently unused
+    expect(report.findings.map(keyOf)).toEqual([]);
     expect(report.unknownKeys.map((u) => `${u.namespace}:${u.key}`).sort()).toEqual(
       ['quote:detail.authorLabel', 'quote:detail.save'],
     );

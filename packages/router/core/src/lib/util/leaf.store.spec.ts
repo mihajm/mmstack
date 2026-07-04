@@ -86,7 +86,6 @@ describe('leafStore', () => {
          pathFromRoot: [{ routeConfig: { path: 'home' }, url: [{ path: 'home' }] }],
          firstChild: {
             url: [],
-            // Simulate duplicated path configuration
             pathFromRoot: [
               { routeConfig: { path: 'home' }, url: [{ path: 'home' }] },
               { routeConfig: { path: '' }, url: [] }
@@ -99,7 +98,7 @@ describe('leafStore', () => {
       eventsSubject.next({ type: EventType.NavigationEnd, urlAfterRedirects: '/home' });
       
       const resultAfter = store.leaves();
-      expect(resultAfter.length).toBe(1); // deduped
+      expect(resultAfter.length).toBe(1);
       
       expect(resultAfter[0].segment.path).toBe('home');
       expect(resultAfter[0].segment.resolved).toBe('home');

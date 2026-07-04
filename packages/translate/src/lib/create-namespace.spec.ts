@@ -20,7 +20,6 @@ describe('withParams', () => {
       complex: '{count, plural, one {Hi {name}} other {Hi {name}}}',
     });
 
-    // Non-default locale: branded key accepts any string, no withParams needed.
     const es = ns.createTranslation('es-ES', {
       simple: 'Hola',
       complex: 'Hola {name}',
@@ -44,7 +43,6 @@ describe('createNamespace', () => {
     const translation = { greeting: 'Hola' };
     const ns = createNamespace('core', { greeting: 'Hello' });
     
-    // We mock the shape to match translation input format
     const localeTranslation = ns.createTranslation('es', translation);
     
     expect(localeTranslation.locale).toBe('es');
@@ -59,7 +57,6 @@ describe('createNamespace', () => {
     expect(featureNs.translation.namespace).toBe('feature');
     expect(featureNs.translation.flat).toEqual({ action: 'Go' });
     
-    // Check if new translations on the merged ns are built properly
     const featureEs = featureNs.createTranslation('es', { action: 'Ir' });
     expect(featureEs.locale).toBe('es');
     expect(featureEs.flat).toEqual({ action: 'Ir' });

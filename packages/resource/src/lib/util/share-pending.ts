@@ -2,13 +2,7 @@ import { finalize, shareReplay, type Observable } from 'rxjs';
 
 /**
  * @internal
- * Single-flight sharing: if a pending observable is already registered under `key`,
- * return it; otherwise create one, share it (replaying the latest event to late
- * subscribers), and deregister it on teardown/settle.
- *
- * Used by both the dedupe interceptor (keyed by full request hash, app-wide) and the
- * cache interceptor (keyed by the CACHE key, guarding the miss/stale-revalidation path)
- * — same mechanism, different keying/scope, so it lives here exactly once.
+ * Single-flight sharing keyed by `key`; shares the pending observable and deregisters on settle.
  */
 export function sharePending<T>(
   pending: Map<string, Observable<T>>,

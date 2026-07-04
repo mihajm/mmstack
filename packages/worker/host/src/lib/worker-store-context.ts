@@ -1,9 +1,5 @@
 import { createStoreContext, type toStoreOptions } from '@mmstack/primitives';
 
-// Memoized at THIS module's scope. `@mmstack/worker/host` only ever loads inside a worker, so a
-// module-scope singleton here is a per-thread singleton — the worker equivalent of an app's root
-// injector (providedIn: 'root'). All stores in the worker share it; it is the graph's single
-// proxy-identity + GC-coordination point.
 let context: toStoreOptions | undefined;
 
 /**

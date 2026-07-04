@@ -4,7 +4,6 @@ import { liftObjectLiteral } from './lift';
 import { type NestedTranslation } from './nested';
 
 function liftBack(source: string): NestedTranslation {
-  // parse the generated module and lift its createTranslation literal back
   const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile('gen.ts', source);
   const call = sf.getFirstDescendant(Node.isCallExpression);
   const arg = call?.getArguments()[1];

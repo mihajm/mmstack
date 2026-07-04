@@ -77,6 +77,29 @@ describe('@mmstack/telemetry-sentry', () => {
     expect(handles.get<string>('sentry-b.last_event_id')()).toBe('b-1'); // not shadowed
   });
 
+  it('maps identify to Sentry setUser; identify(null) clears the user', () => {
+    const users: (({ id: string } & Record<string, unknown>) | null)[] = [];
+    const sentry: SentryClient = {
+      captureException: () => 'id',
+      setUser: (u) => users.push(u),
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sentrySink({ sentry })] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+    t.identify('user-1', { email: 'a@b.c' });
+    t.identify(null);
+    expect(users).toEqual([{ id: 'user-1', email: 'a@b.c' }, null]);
+  });
+
+  it('does not advertise identity when the client lacks setUser (safe no-op)', () => {
+    const sentry: SentryClient = { captureException: () => 'id' };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sentrySink({ sentry })] })],
+    });
+    expect(() => TestBed.inject(TELEMETRY).identify('u1')).not.toThrow();
+  });
+
   it('returns null without a client', () => {
     expect(sentrySink({ sentry: null })()).toBeNull();
   });

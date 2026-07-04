@@ -107,12 +107,13 @@ export const edgeAutoScroll: AutoScrollPlugin = (args) => {
     }
     const pos = axis === 'y' ? pointer().y : pointer().x;
     const scrollPos = axis === 'y' ? scrollEl.scrollTop : scrollEl.scrollLeft;
-    const clientExtent = axis === 'y' ? scrollEl.clientHeight : scrollEl.clientWidth;
-    const scrollExtent = axis === 'y' ? scrollEl.scrollHeight : scrollEl.scrollWidth;
+    const clientExtent =
+      axis === 'y' ? scrollEl.clientHeight : scrollEl.clientWidth;
+    const scrollExtent =
+      axis === 'y' ? scrollEl.scrollHeight : scrollEl.scrollWidth;
 
     const band = Math.min(edgeProportion * (hi - lo), edge);
     const rampDist = band * maxSpeedAt || band; // guard maxSpeedAt = 0
-    // Engage on real scroll limits (not list geometry) so a self-scrolling list works.
     let dir = 0;
     let ramp = 0;
     if (pos < lo + band && scrollPos > 0) {

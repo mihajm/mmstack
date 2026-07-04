@@ -101,20 +101,13 @@ export type CacheEntry<T> = {
   updated: number;
   stale: number;
   useCount: number;
-  /** Timestamp of the last read/write — drives LRU eviction. */
   lastAccessed: number;
   expiresAt: number;
-  /** Absent for non-finite/over-int32 TTLs — those rely on lazy expiry instead. */
   timeout?: ReturnType<typeof setTimeout>;
   key: string;
 };
 
-/**
- * setTimeout coerces its delay through a signed 32-bit conversion: `Infinity` becomes 0
- * (immediate!) and anything above 2^31-1 ms (~24.8 days) wraps negative. Entries beyond
- * this bound get NO timer and rely on lazy expiry (`expiresAt <= now` checks) plus the
- * periodic sweep instead.
- */
+// setTimeout coerces delay to signed 32-bit; larger delays get no timer (lazy expiry + sweep).
 const MAX_TIMER_DELAY = 2 ** 31 - 1;
 
 /**
@@ -142,12 +135,9 @@ export class Cache<T> {
   private readonly internal = mutable(new Map<string, CacheEntry<T>>());
   private readonly cleanupOpt: CleanupType;
   private readonly id = generateID();
-  /** True once async hydration from the persistence layer has completed (or was empty). */
   private hydrated = false;
-  /** Keys invalidated while hydration was still in flight — must not be resurrected by it. */
   private readonly hydrationTombstones = new Set<string>();
 
-  /** Dev-only: ensures the "foreign keys, no matcher" hint in invalidateUrlPrefix fires at most once. */
   private warnedForeignKeys = false;
 
   private readonly hitCount = signal(0);
@@ -210,7 +200,6 @@ export class Cache<T> {
     if (this.cleanupOpt.maxSize <= 0)
       throw new Error('maxSize must be greater than 0');
 
-    // a non-finite checkInterval disables the sweeper entirely (used by provideMockQueryCache)
     const cleanupInterval = Number.isFinite(this.cleanupOpt.checkInterval)
       ? setInterval(() => {
           this.cleanup();
@@ -246,13 +235,12 @@ export class Cache<T> {
       channel.onmessage = (event) => {
         const msg = event.data;
         if (!isSyncMessage<unknown>(msg)) return;
-        if (msg.cacheId === this.id) return; // ignore messages from this cache
+        if (msg.cacheId === this.id) return;
 
         if (msg.action === 'store') {
           const value = syncTabs.deserialize(msg.entry.value);
           if (value === null) return;
 
-          // Last-write-wins by `updated` timestamp.
           const existing = untracked(this.internal).get(msg.entry.key);
           if (existing && existing.updated >= msg.entry.updated) return;
 
@@ -285,7 +273,6 @@ export class Cache<T> {
         const current = untracked(this.internal);
         entries.forEach((entry) => {
           if (current.has(entry.key)) return;
-          // a key invalidated while hydration was in flight must stay dead
           if (this.hydrationTombstones.has(entry.key)) return;
           this.restoreInternal(entry);
         });
@@ -329,7 +316,6 @@ export class Cache<T> {
     );
   }
 
-  /** @internal Imperative access bookkeeping for LRU eviction. */
   private touch(entry: CacheEntry<T>) {
     entry.lastAccessed = Date.now();
     entry.useCount++;
@@ -420,7 +406,6 @@ export class Cache<T> {
   ) {
     const entry = untracked(this.internal).get(key);
 
-    // ttl cannot be less than staleTime
     if (ttl < staleTime) staleTime = ttl;
 
     const now = Date.now();
@@ -442,12 +427,6 @@ export class Cache<T> {
     );
   }
 
-  /**
-   * @internal
-   * Inserts an entry that already carries ABSOLUTE timestamps — hydration from the
-   * persistence layer and cross-tab sync messages. Never re-anchors freshness to
-   * `Date.now()`, never persists, never broadcasts.
-   */
   private restoreInternal(
     entry: Omit<CacheEntry<T>, 'timeout' | 'lastAccessed'> &
       Partial<Pick<CacheEntry<T>, 'lastAccessed'>>,
@@ -455,7 +434,6 @@ export class Cache<T> {
     this.setEntry(
       {
         ...entry,
-        // rows persisted by older versions may lack the field
         lastAccessed: entry.lastAccessed ?? entry.updated,
       },
       true,
@@ -463,7 +441,6 @@ export class Cache<T> {
     );
   }
 
-  /** @internal Shared writer: arms the expiry timer only within the safe delay range. */
   private setEntry(
     next: Omit<CacheEntry<T>, 'timeout'>,
     fromSync: boolean,
@@ -471,14 +448,11 @@ export class Cache<T> {
     broadcast = true,
   ) {
     const existing = untracked(this.internal).get(next.key);
-    if (existing) clearTimeout(existing.timeout); // stop the previous invalidation
+    if (existing) clearTimeout(existing.timeout);
 
     const remaining = next.expiresAt - Date.now();
-    // already expired (clock skew on a synced/restored entry) — don't insert
     if (remaining <= 0) return;
 
-    // Infinity (immutable) or > 2^31-1 would coerce to an IMMEDIATE timeout — such
-    // entries get no timer and rely on lazy expiry + the periodic sweep instead
     const timeout =
       Number.isFinite(remaining) && remaining <= MAX_TIMER_DELAY
         ? setTimeout(() => this.invalidate(next.key), remaining)
@@ -558,7 +532,7 @@ export class Cache<T> {
     let sawAutoKey = false;
     const removed = this.invalidateWhere((key) => {
       const url = extractUrlFromKey(key);
-      if (url === null) return false; // foreign-shaped key
+      if (url === null) return false;
       sawAutoKey = true;
       return url.startsWith(urlPrefix);
     });
@@ -594,7 +568,6 @@ export class Cache<T> {
   }
 
   private invalidateInternal(key: string, fromSync = false) {
-    // a key invalidated before async hydration completes must not be resurrected by it
     if (!this.hydrated) this.hydrationTombstones.add(key);
 
     const entry = untracked(this.internal).get(key);
@@ -621,12 +594,9 @@ export class Cache<T> {
     }
   }
 
-  /** @internal Drops expired entries, then enforces `maxSize` by the configured strategy. */
   private cleanup() {
     const now = Date.now();
 
-    // expired entries first — their timers may never have fired (throttled background
-    // tabs, or timer-less long-TTL entries)
     const expired = Array.from(untracked(this.internal).entries()).filter(
       ([, e]) => e.expiresAt <= now,
     );
@@ -643,9 +613,9 @@ export class Cache<T> {
     const sorted = Array.from(untracked(this.internal).entries()).toSorted(
       (a, b) => {
         if (this.cleanupOpt.type === 'lru') {
-          return a[1].lastAccessed - b[1].lastAccessed; // least recently accessed first
+          return a[1].lastAccessed - b[1].lastAccessed;
         } else {
-          return a[1].created - b[1].created; // oldest first
+          return a[1].created - b[1].created;
         }
       },
     );
@@ -762,8 +732,7 @@ export function provideMockQueryCache(opt?: {
   };
 }
 
-// Bump on any persisted-format change; composed with the user's `version` so a
-// format change drops stale persisted entries without users bumping `version`.
+// Bump on any persisted-format change; composed with the user's `version`.
 const STORE_FORMAT_VERSION = 2;
 
 /**
@@ -799,7 +768,6 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
     useFactory: () => {
       const onServer = inject(PLATFORM_ID) === 'server';
 
-      // no IndexedDB / BroadcastChannel on the server
       const syncTabsOpt =
         !onServer && opt?.syncTabs
           ? {
@@ -850,7 +818,6 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
         db,
       );
 
-      // release the sweep interval / channel with the providing injector
       inject(DestroyRef, { optional: true })?.onDestroy(() => cache.destroy());
 
       return cache;

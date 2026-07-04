@@ -1,4 +1,10 @@
-import { Component, effect, inject, input } from '@angular/core';
+import {
+  booleanAttribute,
+  Component,
+  effect,
+  inject,
+  input,
+} from '@angular/core';
 import { Meta } from '@angular/platform-browser';
 
 @Component({
@@ -6,7 +12,12 @@ import { Meta } from '@angular/platform-browser';
   template: `
     <article>
       <header>
-        <h1>{{ title() }}</h1>
+        <h1>
+          {{ title() }}
+          @if (experimental()) {
+            <span class="badge">Experimental</span>
+          }
+        </h1>
         @if (lead()) {
           <p class="lead">{{ lead() }}</p>
         }
@@ -21,6 +32,12 @@ import { Meta } from '@angular/platform-browser';
             >
           </p>
         }
+        @if (experimental()) {
+          <p class="experimental-note">
+            This package is experimental: the API may still change and it is not
+            yet battle-tested in production. Pin a version and expect some churn.
+          </p>
+        }
       </header>
       <ng-content />
     </article>
@@ -33,6 +50,25 @@ import { Meta } from '@angular/platform-browser';
     h1 {
       margin: 0 0 0.5rem;
       font-size: 2rem;
+    }
+
+    .badge {
+      vertical-align: middle;
+      margin-left: 0.6rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: var(--warn-bg, #fef9c3);
+      color: var(--warn-fg, #854d0e);
+    }
+
+    .experimental-note {
+      margin: 0.75rem 0 0;
+      font-size: 0.9rem;
+      color: var(--fg-muted);
     }
 
     .lead {
@@ -60,6 +96,7 @@ export class DocPage {
   readonly title = input.required<string>();
   readonly lead = input<string>();
   readonly pkg = input<string>();
+  readonly experimental = input(false, { transform: booleanAttribute });
 
   private readonly meta = inject(Meta);
 

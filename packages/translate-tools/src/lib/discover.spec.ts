@@ -45,7 +45,6 @@ describe('discoverFromProject', () => {
 
     // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const quote = result.find((n) => n.namespace === 'quote')!;
-    // merged namespace exports ONLY its own keys (no common.* leakage)
     expect(quote.source.translation).toEqual({
       title: 'Quotes',
       by: 'by {author}',
@@ -58,7 +57,7 @@ describe('discoverFromProject', () => {
 
     // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const common = result.find((n) => n.namespace === 'common')!;
-    expect(common.locales).toHaveLength(0); // default-only registry
+    expect(common.locales).toHaveLength(0);
     expect(common.source.translation).toEqual({
       save: 'Save',
       items: '{count, plural, one {# item} other {# items}}',
@@ -89,7 +88,7 @@ describe('discoverFromProject', () => {
       expect(r).toHaveLength(1);
       expect(r[0]?.namespace).toBe('quote');
       expect(r[0]?.source.isDefaultExport).toBe(true);
-      expect(r[0]?.source.exportName).toBe('quote'); // derived from the namespace name
+      expect(r[0]?.source.exportName).toBe('quote');
       expect(r[0]?.source.translation).toEqual({ title: 'Quotes' });
     });
 

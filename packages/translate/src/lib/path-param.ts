@@ -3,8 +3,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, type ParamMap, Router } from '@angular/router';
 
 /**
- * Dynamic path parameter signal, that allows resolution even when paramsInheritenceStrategy isnt always
- * This helper depends on an internal
+ * Dynamic path parameter signal that resolves even when
+ * `paramsInheritanceStrategy` is not `'always'`.
  */
 export function pathParam(
   key: string | (() => string),
@@ -40,7 +40,6 @@ export function pathParam(
       }),
     );
 
-    // For static keys, stop once we find the param, will find first in computed for loop already so basically noop for for loop
     if (isStatic && initial.has(key as string)) break;
 
     currentRoute = currentRoute.parent;

@@ -66,7 +66,6 @@ export type WorkerRef<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
   ): Promise<TaskOutput<M, K>>;
   destroy(): void;
 
-  // ── internal seam for workerStore (phase 4b) — not part of the friendly surface ──
   /** @internal Post an envelope to the worker. */
   _send(msg: WorkerEnvelope, transfer?: Transferable[]): void;
   /** @internal Receive every non-task envelope (store traffic). Returns an unsubscribe. */
@@ -115,17 +114,17 @@ function build(
   let attempt = 0;
   let runIdSeq = 0;
   let destroyed = false;
-  let crashed = false; // between a crash and the next successful handshake
+  let crashed = false;
   let port: WorkerPortLike = null as unknown as WorkerPortLike;
 
   const send = (msg: WorkerEnvelope, transfer?: Transferable[]): void => {
-    if (port) port.postMessage(msg, transfer); // no-op on the server / between crash and respawn
+    if (port) port.postMessage(msg, transfer);
   };
 
   const onMessage = (msg: WorkerEnvelope): void => {
     switch (msg.type) {
       case 'ready':
-        attempt = 0; // a successful handshake resets the backoff
+        attempt = 0;
         crashed = false;
         manifest.set({
           hostId: msg.hostId,
@@ -153,10 +152,9 @@ function build(
         return;
       }
       case 'task:aborted':
-        taskPending.delete(msg.runId); // caller already rejected at abort
+        taskPending.delete(msg.runId);
         return;
       default:
-        // store:* traffic → replicas
         for (const h of storeHandlers) h(msg);
     }
   };
@@ -165,7 +163,6 @@ function build(
     if (destroyed) return;
     crashed = true;
     connected.set(false);
-    // in-flight tasks can't survive a crash; store replicas hold their value and re-hydrate on reconnect
     for (const [, p] of taskPending) p.reject(new WorkerCrashedError());
     taskPending.clear();
     for (const fn of disconnectHooks) fn();
@@ -177,13 +174,10 @@ function build(
   };
 
   const openPort = (): void => {
-    // terminate the previous worker before respawning, so a transient/manual restart never orphans
-    // a live thread (a genuine crash already killed it; terminate() is then a harmless no-op)
     if (port) closePort(port);
     port = spawn();
     port.onmessage = (ev) => onMessage(ev.data as WorkerEnvelope);
-    // duck-typed crash detection via property setters (NOT addEventListener — that perturbs a node
-    // MessagePort's onmessage delivery). A real `Worker` has onerror; onmessageerror where present.
+    // crash detection via property setters, not addEventListener (perturbs node MessagePort delivery)
     const evt = port as unknown as {
       onerror?: ((e?: unknown) => void) | null;
       onmessageerror?: ((e?: unknown) => void) | null;
@@ -193,7 +187,6 @@ function build(
     send({ type: 'hello', proto: 1, clientId });
   };
 
-  // no workers on the server — connected stays false, runTask rejects, replicas render their default
   if (!isServer) openPort();
 
   inject(DestroyRef).onDestroy(() => teardown());
@@ -203,8 +196,6 @@ function build(
     connected.set(false);
     for (const [, p] of taskPending) p.reject(new WorkerAbortError('worker connection destroyed'));
     taskPending.clear();
-    // same contract as a crash: anything pending on the connection (replica writes) settles NOW
-    // rather than dangling — a destroyed port can never deliver the echo that would resolve them
     for (const fn of disconnectHooks) fn();
     if (port) closePort(port);
   };
@@ -220,9 +211,6 @@ function build(
     ): Promise<unknown> {
       if (isServer) return Promise.reject(new WorkerCrashedError('no worker on the server'));
       if (destroyed) return Promise.reject(new WorkerAbortError('worker connection destroyed'));
-      // between a crash and the respawned handshake the port is dead — a message posted into it
-      // vanishes and the promise would never settle. Reject honestly; the caller retries/reloads.
-      // (Before the FIRST handshake this is false: a starting worker buffers messages, so we send.)
       if (crashed) return Promise.reject(new WorkerCrashedError('worker is restarting'));
       if (o?.signal?.aborted) return Promise.reject(new WorkerAbortError());
       const runId = ++runIdSeq;

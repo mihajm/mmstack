@@ -7,10 +7,7 @@
  */
 export type WorkerPortLike = {
   postMessage(message: unknown, transfer?: Transferable[]): void;
-  // `ev` is intentionally `any`: a real `Worker`/`MessagePort` types this as `(ev: MessageEvent)`,
-  // and under `strictFunctionTypes` only an `any`-typed event param keeps those assignable to this
-  // shape cast-free (a `{ data }` param fails the contravariance check). Read `ev.data` and narrow
-  // it to a `WorkerEnvelope` at the handler.
+  // `any` ev: keeps a real Worker/MessagePort assignable under strictFunctionTypes
   onmessage: ((ev: any) => void) | null;
   /** `Worker` has `terminate()`, `MessagePort`/`BroadcastChannel` have `close()` — either, both optional. */
   terminate?(): void;
@@ -23,7 +20,6 @@ export function closePort(port: WorkerPortLike): void {
   port.close?.();
 }
 
-// values whose reachable Transferables should be MOVED (detached at the sender) rather than cloned
 const TRANSFERABLES = new WeakMap<object, Transferable[]>();
 
 /**

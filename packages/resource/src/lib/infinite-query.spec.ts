@@ -28,14 +28,12 @@ const testInterceptor = (req: HttpRequest<unknown>) => {
   return of(new HttpResponse({ body: respond(req), status: 200 }));
 };
 
-/** Three pages of two items each, addressed by a numeric cursor. */
 function pageFor(cursor: number): PostPage {
   const items = [`item-${cursor * 2}`, `item-${cursor * 2 + 1}`];
   return { items, nextCursor: cursor >= 2 ? null : cursor + 1 };
 }
 
 async function settle() {
-  // resource loads flush through effects + microtasks
   for (let i = 0; i < 4; i++) {
     TestBed.tick();
     await new Promise((r) => setTimeout(r));
@@ -97,9 +95,8 @@ describe('infiniteQueryResource', () => {
     await settle();
 
     expect(res.pages().length).toBe(3);
-    expect(res.hasNextPage()).toBe(false); // nextCursor null on the last page
+    expect(res.hasNextPage()).toBe(false);
 
-    // exhausted → no-op
     res.fetchNextPage();
     await settle();
     expect(res.pages().length).toBe(3);
@@ -112,10 +109,10 @@ describe('infiniteQueryResource', () => {
     await settle();
     expect(res.pages().length).toBe(2);
 
-    res.reload(); // refetch page with cursor 1
+    res.reload();
     await settle();
 
-    expect(res.pages().length).toBe(2); // replaced, not appended
+    expect(res.pages().length).toBe(2);
     expect(res.pages()[1].items).toEqual(['item-2', 'item-3']);
   });
 
@@ -137,7 +134,6 @@ describe('infiniteQueryResource', () => {
 });
 
 describe('infiniteQueryResource — transition scope integration', () => {
-  // defer-capable interceptor so mid-flight boundary state is observable
   let inFlight: Array<{ url: string; respond: (body: unknown) => void }>;
   const deferredInterceptor = (req: HttpRequest<unknown>) =>
     new Observable<HttpResponse<unknown>>((sub) => {
@@ -186,8 +182,8 @@ describe('infiniteQueryResource — transition scope integration', () => {
     const { scope, res } = createScoped('suspend');
 
     await settle();
-    expect(scope.pending()).toBe(true); // first page in flight
-    expect(scope.suspended('value')).toBe(true); // nothing to show yet → suspend
+    expect(scope.pending()).toBe(true);
+    expect(scope.suspended('value')).toBe(true);
 
     inFlight.shift()?.respond(pageFor(0));
     await settle();
@@ -197,8 +193,8 @@ describe('infiniteQueryResource — transition scope integration', () => {
     res.fetchNextPage();
     await settle();
     expect(res.isFetchingNextPage()).toBe(true);
-    expect(scope.pending()).toBe(true); // page 2 in flight → busy indicator
-    expect(scope.suspended('value')).toBe(false); // pages on screen → NO re-suspend
+    expect(scope.pending()).toBe(true);
+    expect(scope.suspended('value')).toBe(false);
 
     inFlight.shift()?.respond(pageFor(1));
     await settle();

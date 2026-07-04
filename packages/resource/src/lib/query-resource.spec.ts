@@ -183,7 +183,6 @@ describe('queryResource', () => {
       requests++;
     };
 
-    // Start offline
     networkStatusSignal.set(false);
 
     const res = TestBed.runInInjectionContext(() =>
@@ -193,10 +192,8 @@ describe('queryResource', () => {
       })),
     );
 
-    // It should immediately be disabled
     expect(res.disabled()).toBe(true);
 
-    // An explicit reload should be a no-op when disabled
     try {
       await res.reload();
     } catch {
@@ -205,11 +202,9 @@ describe('queryResource', () => {
     expect(requests).toBe(0);
     expect(res.value()).toBeUndefined();
 
-    // Re-online
     networkStatusSignal.set(true);
     expect(res.disabled()).toBe(false);
 
-    // It should automatically perform the fetch now
     const result = await TestBed.runInInjectionContext(() =>
       until(res.value, (v) => v !== undefined),
     );
@@ -280,7 +275,7 @@ describe('queryResource', () => {
         until(res.error, (v) => v !== undefined),
       );
     } catch {
-      // Ignored
+      // ignored
     }
 
     TestBed.tick();
@@ -306,7 +301,6 @@ describe('queryResource', () => {
     );
     expect(res.value()).toEqual({ data: 'first' });
 
-    // Change request to a new URL
     returnData = { data: 'second' };
     requestSignal.set({
       url: 'https://example.com/keep-prev-2',
@@ -315,10 +309,8 @@ describe('queryResource', () => {
       }, returnData),
     });
 
-    // We change the request, which triggers a reload, but prior value is synchronously kept
     expect(res.value()).toEqual({ data: 'first' });
 
-    // Wait for the new value to resolve
     await TestBed.runInInjectionContext(() =>
       until(res.value, (v: any) => v?.data === 'second'),
     );
@@ -332,7 +324,6 @@ describe('queryResource', () => {
       requests++;
     };
 
-    // identical contents, distinct references
     const reqObj1 = {
       url,
       context: createTestContext(validate, { data: 'test' }),
@@ -353,10 +344,8 @@ describe('queryResource', () => {
     );
     expect(requests).toBe(1);
 
-    // Provide new object (identical fields)
     reqSignal.set(reqObj2);
 
-    // allow microtasks to trigger the new request fetch cycle
     await new Promise((r) => setTimeout(r, 10));
     expect(requests).toBe(2);
   });
@@ -364,7 +353,7 @@ describe('queryResource', () => {
   it('should open circuit breaker after multiple failures', async () => {
     const url = 'https://example.com/circuit';
     const validate = () => {
-      // ignore
+      // noop
     };
 
     const res = TestBed.runInInjectionContext(() =>
@@ -377,28 +366,25 @@ describe('queryResource', () => {
       ),
     );
 
-    // Initial load throws
     try {
       await TestBed.runInInjectionContext(() =>
         until(res.error, (v) => v !== undefined),
       );
     } catch {
-      // Ignored
+      // ignored
     }
 
     TestBed.tick();
 
-    // Default circuit breaker threshold is 5, we did 1, so 4 more
     for (let i = 0; i < 4; i++) {
       try {
         await res.reload();
       } catch {
-        // Let it fail
+        // ignored
       }
       TestBed.tick();
     }
 
-    // Now circuit breaker should be open and the resource should be disabled
     await TestBed.runInInjectionContext(() =>
       until(res.disabled, (v) => v === true),
     );
@@ -429,7 +415,6 @@ describe('queryResource', () => {
     expect(requests).toBe(1);
     expect(res.value()).toEqual({ id: 1 });
 
-    // pause, then change the dependency — must NOT refetch while paused; value held
     hidden.set(true);
     id.set(2);
     TestBed.tick();
@@ -437,7 +422,6 @@ describe('queryResource', () => {
     expect(requests).toBe(1);
     expect(res.value()).toEqual({ id: 1 });
 
-    // resume → the deferred change now refetches
     hidden.set(false);
     await TestBed.runInInjectionContext(() =>
       until(res.value, (v) => (v as { id: number } | undefined)?.id === 2),
@@ -449,7 +433,6 @@ describe('queryResource', () => {
   it('does not refetch on resume when the request is unchanged', async () => {
     let requests = 0;
     const hidden = signal(false);
-    // stable request object → unchanged across pause/resume
     const reqObj = {
       url: 'https://example.com/api/stable',
       context: createTestContext(() => requests++, { ok: true }),
@@ -476,7 +459,7 @@ describe('queryResource', () => {
     TestBed.tick();
     await Promise.resolve();
 
-    expect(requests).toBe(1); // unchanged request → no refetch on resume
+    expect(requests).toBe(1);
     expect(res.value()).toEqual({ ok: true });
   });
 
@@ -495,14 +478,12 @@ describe('queryResource', () => {
 
     expect(requests).toBe(0);
 
-    // Prefetch triggers the initial caching
     await res.prefetch({
       url,
       context: createTestContext(validate, { data: 'prefetch-data' }),
     });
     expect(requests).toBe(1);
 
-    // Enable resource with the same request signature
     reqSignal.set({
       url,
       context: createTestContext(validate, { data: 'prefetch-data' }),
@@ -512,7 +493,6 @@ describe('queryResource', () => {
       until(res.value, (v) => v !== undefined),
     );
 
-    // Gets prefetch value instantly, and request count is not incremented
     expect(result).toEqual({ data: 'prefetch-data' });
     expect(requests).toBe(1);
   });
@@ -540,7 +520,6 @@ describe('queryResource', () => {
     expect(result).toEqual({ data: 'cache-data' });
     expect(requests).toBe(1);
 
-    // Wait slightly to ensure caching effect processed
     const res2 = TestBed.runInInjectionContext(() =>
       queryResource(
         () => ({
@@ -556,7 +535,6 @@ describe('queryResource', () => {
     );
     expect(result2).toEqual({ data: 'cache-data' });
 
-    // The request was intercepted and deduplicated/served from cache
     expect(requests).toBe(1);
   });
 
@@ -689,11 +667,11 @@ describe('queryResource', () => {
 
       pageVisibilitySignal.set('hidden');
       await settle();
-      expect(requests).toBe(1); // hiding must not refetch
+      expect(requests).toBe(1);
 
       pageVisibilitySignal.set('visible');
       await settle();
-      expect(requests).toBe(2); // regaining focus refetches
+      expect(requests).toBe(2);
     });
 
     it('onReconnect: refetches when the browser comes back online', async () => {
@@ -718,11 +696,11 @@ describe('queryResource', () => {
 
       networkStatusSignal.set(false);
       await settle();
-      expect(requests).toBe(1); // going offline must not refetch
+      expect(requests).toBe(1);
 
       networkStatusSignal.set(true);
       await settle();
-      expect(requests).toBe(2); // back online refetches
+      expect(requests).toBe(2);
     });
   });
 
@@ -752,21 +730,20 @@ describe('queryResource', () => {
       );
 
       await settle();
-      expect(requests).toBe(0); // created paused → nothing fetched
+      expect(requests).toBe(0);
       expect(res.disabledReason()).toBe('no-request');
 
       paused.set(false);
       await settle();
-      expect(requests).toBe(1); // unpaused → fetched
+      expect(requests).toBe(1);
       expect(res.value()).toEqual({ ok: true });
 
       paused.set(true);
       await settle();
-      expect(res.value()).toEqual({ ok: true }); // value held while paused
+      expect(res.value()).toEqual({ ok: true });
 
       paused.set(false);
       await settle();
-      // resume with an UNCHANGED request → no refetch (PAUSED semantics)
       expect(requests).toBe(1);
     });
 
@@ -792,11 +769,11 @@ describe('queryResource', () => {
       );
 
       await settle();
-      expect(requests).toBe(0); // boundary paused → held
+      expect(requests).toBe(0);
 
       boundaryPaused.set(false);
       await settle();
-      expect(requests).toBe(1); // boundary resumed → fetched
+      expect(requests).toBe(1);
       expect(res.value()).toEqual({ ok: true });
     });
 
@@ -818,7 +795,7 @@ describe('queryResource', () => {
       await TestBed.runInInjectionContext(() =>
         until(res.value, (v) => v !== undefined),
       );
-      expect(requests).toBe(1); // fetches normally — no PAUSED_CONTEXT in scope
+      expect(requests).toBe(1);
     });
   });
 });
@@ -829,7 +806,6 @@ describe('queryResource — cache provider ergonomics', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: PLATFORM_ID, useValue: 'browser' },
-        // intentionally NO provideQueryCache() — the providedIn:'root' default applies
         {
           provide: ResourceSensors,
           useValue: {
@@ -911,7 +887,7 @@ describe('queryResource — cache provider ergonomics', () => {
     );
 
     expect(result2).toEqual({ data: 'v' });
-    expect(requests).toBe(1); // second consumer served from the in-memory mock cache
+    expect(requests).toBe(1);
   });
 
   it('provideMockResourceSensors drives offline/online behavior', async () => {
@@ -929,7 +905,7 @@ describe('queryResource — cache provider ergonomics', () => {
     });
 
     let requests = 0;
-    online.set(false); // start offline
+    online.set(false);
 
     const res = TestBed.runInInjectionContext(() =>
       queryResource(() => ({
@@ -941,7 +917,7 @@ describe('queryResource — cache provider ergonomics', () => {
     expect(res.disabled()).toBe(true);
     expect(requests).toBe(0);
 
-    online.set(true); // back online → resource enables and fetches
+    online.set(true);
     expect(res.disabled()).toBe(false);
 
     const result = await TestBed.runInInjectionContext(() =>
@@ -1005,7 +981,6 @@ describe('queryResource — parse option', () => {
     const validate = () => { requests++; };
     const parse = (val: any) => ({ ...val, parsed: true });
 
-    // First request (network hit)
     const resA = TestBed.runInInjectionContext(() =>
       queryResource(
         () => ({
@@ -1022,7 +997,6 @@ describe('queryResource — parse option', () => {
     expect(resultA).toEqual({ data: 'raw', parsed: true });
     expect(requests).toBe(1);
 
-    // Second request (cache hit)
     const resB = TestBed.runInInjectionContext(() =>
       queryResource(
         () => ({
@@ -1036,20 +1010,16 @@ describe('queryResource — parse option', () => {
     const resultB = await TestBed.runInInjectionContext(() =>
       until(resB.value, (v) => v !== undefined),
     );
-    
-    // Ensure it was parsed correctly
+
     expect(resultB).toEqual({ data: 'raw', parsed: true });
-    // Ensure it was served from cache (no new network request)
-    expect(requests).toBe(1); 
+    expect(requests).toBe(1);
   });
 
   it('returns cached entries as-is without re-parsing (parse-on-write)', async () => {
     const url = 'https://example.com/parse-cached';
     const customKey = 'parse-cached-key';
-    // parse would add `parsed: true`; a cached (already-parsed) entry must NOT be re-parsed
     const parse = (val: any) => ({ ...val, parsed: true });
 
-    // seed the cache with an already-parsed value, as hydration/network would store it
     TestBed.runInInjectionContext(() => {
       const cache = injectQueryCache();
       cache.store(
@@ -1079,7 +1049,6 @@ describe('queryResource — parse option', () => {
 
   it('does not re-apply parse to values written via set (no double-parse)', async () => {
     const url = 'https://example.com/parse-set';
-    // non-idempotent: a double-parse would show up as count === 2
     const parse = (val: any) => ({ ...val, count: (val.count ?? 0) + 1 });
 
     const res = TestBed.runInInjectionContext(() =>
@@ -1097,15 +1066,11 @@ describe('queryResource — parse option', () => {
     const initial = await TestBed.runInInjectionContext(() =>
       until(res.value, (v) => v !== undefined),
     );
-    // network body parsed exactly once
     expect(initial).toEqual({ data: 'raw', count: 1 });
 
-    // write an already-parsed value through the resource's writable setter
     res.set({ data: 'local', count: 1 });
 
-    // read-back is verbatim — parse must NOT run again (would be count: 2)
     expect(res.value()).toEqual({ data: 'local', count: 1 });
-    // ...and stays stable across subsequent reads (no creeping re-parse)
     expect(res.value()).toEqual({ data: 'local', count: 1 });
   });
 
@@ -1132,11 +1097,11 @@ describe('queryResource — parse option', () => {
     res.set({ data: 'a' } as any);
     res.setLocal({ data: 'b' } as any);
 
-    // store(key, value, staleTime, ttl, persist, broadcast)
+    // store args: [key, value, staleTime, ttl, persist, broadcast]
     const flags = storeSpy.mock.calls.map((c) => [c[4], c[5]]);
     expect(flags).toEqual([
-      [true, true], // set → persisted + broadcast
-      [false, false], // setLocal → neither
+      [true, true],
+      [false, false],
     ]);
     expect(res.value()).toEqual({ data: 'b' });
   });
@@ -1163,7 +1128,7 @@ describe('queryResource — parse option', () => {
 
     res.set({ data: 'a' } as any);
 
-    // store(key, value, staleTime, ttl, persist, broadcast) — persist on, broadcast off
+    // store args: [key, value, staleTime, ttl, persist, broadcast]
     const [persistFlag, broadcastFlag] = storeSpy.mock.calls[0].slice(4);
     expect(persistFlag).toBe(true);
     expect(broadcastFlag).toBe(false);
@@ -1212,8 +1177,8 @@ describe('queryResource — raw response variants (text / arrayBuffer / blob)', 
     const result = await TestBed.runInInjectionContext(() =>
       until(res.value, (v) => v !== undefined),
     );
-    expect(seenResponseType).toBe('text'); // the variant reached the HTTP layer
-    expect(result).toBe('a,b\n1,2'); // string body, no JSON parse
+    expect(seenResponseType).toBe('text');
+    expect(result).toBe('a,b\n1,2');
   });
 
   it('text: parse maps the raw string', async () => {
@@ -1299,7 +1264,6 @@ describe('queryResource — raw response variants (text / arrayBuffer / blob)', 
     expect(jsonValue).toEqual({ data: 'json' });
     expect(requests).toBe(1);
 
-    // same URL as text: a colliding key would serve the cached JSON without a request
     const asText = TestBed.runInInjectionContext(() =>
       queryResource.text(
         () => ({ url, context: createTestContext(count, 'raw-text') }),
@@ -1309,7 +1273,7 @@ describe('queryResource — raw response variants (text / arrayBuffer / blob)', 
     const textValue = await TestBed.runInInjectionContext(() =>
       until(asText.value, (v) => v !== undefined),
     );
-    expect(textValue).toBe('raw-text'); // its own body, not the cached JSON
-    expect(requests).toBe(2); // distinct cache key → real second request
+    expect(textValue).toBe('raw-text');
+    expect(requests).toBe(2);
   });
 });

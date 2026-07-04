@@ -99,8 +99,8 @@ describe('route-data', () => {
     await TestBed.inject(Router).navigateByUrl('/users/42');
     await flush(fixture);
 
-    expect(order).toEqual(['resolver', 'component']); // fired before the component
-    expect(componentRef).toBe(factoryRef); // same instance
+    expect(order).toEqual(['resolver', 'component']);
+    expect(componentRef).toBe(factoryRef);
     expect((factoryRef as { id: Signal<string> }).id()).toBe('42');
   });
 
@@ -131,7 +131,7 @@ describe('route-data', () => {
             resolve: {
               d: createRouteData(KEY, (ctx) => ({
                 id: ctx.param('id'),
-                typo: ctx.param('userId'), // not a param on this route
+                typo: ctx.param('userId'),
               })),
             },
           },
@@ -145,12 +145,11 @@ describe('route-data', () => {
     await flush(fixture);
 
     const slotData = (fixture.debugElement.query(
-      // the rendered component instance carries the injected data
       (n) => n.componentInstance instanceof PCmp,
     )?.componentInstance as PCmp | undefined)?.data;
 
     expect(slotData?.id()).toBe('42');
-    expect(slotData?.typo()).toBe(''); // safe empty, not undefined
+    expect(slotData?.typo()).toBe('');
     expect(err).toHaveBeenCalledWith(
       expect.stringContaining("ctx.param('userId')"),
     );
@@ -158,8 +157,8 @@ describe('route-data', () => {
     err.mockClear();
     await router.navigateByUrl('/users/7');
     await flush(fixture);
-    expect(slotData?.id()).toBe('7'); // live across param navigation
-    expect(err).not.toHaveBeenCalled(); // warned once, not per read
+    expect(slotData?.id()).toBe('7');
+    expect(err).not.toHaveBeenCalled();
     err.mockRestore();
   });
 
@@ -201,7 +200,7 @@ describe('route-data', () => {
 
     await TestBed.inject(Router).navigateByUrl('/e');
     await flush(fixture);
-    expect(seen).toEqual([]); // loading — nothing yet
+    expect(seen).toEqual([]);
 
     (ref.error as WritableSignal<unknown>).set(new Error('boom'));
     ref.status.set('error');
@@ -209,13 +208,13 @@ describe('route-data', () => {
     expect(seen.length).toBe(1);
     expect((seen[0] as Error).message).toBe('boom');
 
-    ref.status.set('reloading'); // retry…
+    ref.status.set('reloading');
     await flush(fixture);
-    ref.status.set('error'); // …fails again: a NEW transition fires again
+    ref.status.set('error');
     await flush(fixture);
     expect(seen.length).toBe(2);
 
-    ref.status.set('resolved'); // recovery does not fire
+    ref.status.set('resolved');
     await flush(fixture);
     expect(seen.length).toBe(2);
   });
@@ -264,11 +263,11 @@ describe('route-data', () => {
     await flush(fixture);
     expect(container.textContent).toContain('id=1');
 
-    await router.navigateByUrl('/users/2'); // param change
+    await router.navigateByUrl('/users/2');
     await flush(fixture);
 
-    expect(created.length).toBe(1); // not recreated — memoized
-    expect(container.textContent).toContain('id=2'); // but params went live
+    expect(created.length).toBe(1);
+    expect(container.textContent).toContain('id=2');
   });
 
   it('params stay live even when the resolver does NOT re-run (query-param change, default runGuardsAndResolvers)', async () => {
@@ -316,11 +315,11 @@ describe('route-data', () => {
     expect(container.textContent).toContain('tab=a');
     expect(runs).toBe(1);
 
-    await router.navigateByUrl('/list?tab=b'); // query-only change — resolver does NOT re-run
+    await router.navigateByUrl('/list?tab=b');
     await flush(fixture);
 
-    expect(runs).toBe(1); // confirmed: no re-run
-    expect(container.textContent).toContain('tab=b'); // ...yet params went live anyway
+    expect(runs).toBe(1);
+    expect(container.textContent).toContain('tab=b');
   });
 
   it('the outlet holds the previous view until the route-data resource settles', async () => {
@@ -364,7 +363,7 @@ describe('route-data', () => {
     await router.navigateByUrl('/a');
     await flush(fixture);
 
-    await router.navigateByUrl('/b'); // route-data resource is loading → A holds
+    await router.navigateByUrl('/b');
     await flush(fixture);
     expect(container.querySelector('route-a')).not.toBeNull();
 

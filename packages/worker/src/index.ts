@@ -1,4 +1,3 @@
-// shared wire types, re-exported so main-thread consumers import only from '@mmstack/worker'
 export * from '@mmstack/worker/protocol';
 
 export {

@@ -37,7 +37,7 @@ import { inject, InjectionToken, Injector } from '@angular/core';
  * ```
  */
 export function rootInjectable<T>(
-  factory: (injector: Injector) => T, // Keeping the injector just in case
+  factory: (injector: Injector) => T,
   name?: string,
 ): (opt?: { injector?: Injector }) => T {
   const token = new InjectionToken<T>(name ?? '@mmstack/di/root-injectable', {

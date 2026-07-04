@@ -51,13 +51,14 @@ import { injectAsync, type AsyncLoader } from './inject-async';
  */
 export function provideLazy<T>(name = '@mmstack/di/provide-lazy') {
   const loaderToken = new InjectionToken<AsyncLoader<T>>(`${name}:loader`);
-  // The shared resolver: a token whose factory runs once per provider scope, in
-  // that scope's injection context, so injectAsync binds to the right injector.
   const handleToken = new InjectionToken<() => Promise<T>>(`${name}:handle`);
 
   const provideFn = (loader: AsyncLoader<T>): Provider[] => [
     { provide: loaderToken, useValue: loader },
-    { provide: handleToken, useFactory: () => injectAsync(inject(loaderToken)) },
+    {
+      provide: handleToken,
+      useFactory: () => injectAsync(inject(loaderToken)),
+    },
   ];
 
   function injectFn(): () => Promise<T>;

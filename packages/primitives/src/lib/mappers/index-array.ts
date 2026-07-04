@@ -117,8 +117,7 @@ export function indexArray<T, U>(
         // noop
       });
 
-  // copy before defaulting `equal` — assigning onto `opt` would mutate a caller-owned
-  // (possibly shared/reused) options object
+  // copy before defaulting `equal` — assigning onto `opt` would mutate a caller-owned (possibly shared/reused) options object
   if (isWritableSignal(data) && isMutable(data) && !opt.equal) {
     opt = {
       ...opt,

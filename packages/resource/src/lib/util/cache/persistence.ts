@@ -31,7 +31,7 @@ function toCacheDB<T>(db: IDBDatabase, storeName: string): CacheDB<T> {
 
       request.onsuccess = () => res(request.result);
       request.onerror = () => rej(request.error);
-      // some browsers abort (rather than error) e.g. on quota issues — without this the promise would stay pending forever
+      // some browsers abort rather than error
       transaction.onabort = () => rej(transaction.error);
     })
       .then((entries) => entries.filter((e) => e.expiresAt > now))
@@ -51,7 +51,6 @@ function toCacheDB<T>(db: IDBDatabase, storeName: string): CacheDB<T> {
 
       transaction.oncomplete = () => res();
       transaction.onerror = () => rej(transaction.error);
-      // QuotaExceededError surfaces as an abort in some browsers
       transaction.onabort = () => rej(transaction.error);
     }).catch((err) => {
       if (isDevMode()) console.error('Error storing item in cache DB:', err);
@@ -92,7 +91,7 @@ export function createSingleStoreDB<T>(
   return new Promise<IDBDatabase>((res, rej) => {
     if (version < 1) {
       rej(new Error('Version must be 1 or greater'));
-      return; // rej does not stop execution — without this, indexedDB.open(name, 0) still runs
+      return; // rej does not stop execution
     }
 
     const req = indexedDB.open(name, version);

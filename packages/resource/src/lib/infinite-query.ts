@@ -122,9 +122,7 @@ export function infiniteQueryResource<
   const loaded = signal<{ param: TPageParam; page: TPage }[]>([]);
 
   const resource = queryResource<TPage, TRaw>(
-    // forward queryResource's own context so the fn can return ctx.paused
     (qctx) => request({ ...qctx, pageParam: pageParam() }),
-    // register: false — the inner query's value RESETS on every page fetch
     { ...rest, injector, register: false } as QueryResourceOptions<TPage, TRaw>,
   );
 
@@ -161,7 +159,7 @@ export function infiniteQueryResource<
   const hasNextPage = computed(() => nextPageParam() !== null);
 
   const fetchNextPage = () => {
-    if (untracked(resource.isLoading)) return; // one page at a time
+    if (untracked(resource.isLoading)) return;
     const next = untracked(nextPageParam);
     if (next === null) return;
     pageParam.set(next);
@@ -170,13 +168,12 @@ export function infiniteQueryResource<
   const reset = () => {
     loaded.set([]);
     if (Object.is(untracked(pageParam), initialPageParam)) {
-      resource.reload(); // param unchanged — force the refetch
+      resource.reload();
     } else {
       pageParam.set(initialPageParam);
     }
   };
 
-  // Register the AGGREGATE with the transition scope
   const unregister = applyResourceRegistration(
     {
       status: resource.status,

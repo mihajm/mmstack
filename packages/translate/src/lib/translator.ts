@@ -30,10 +30,7 @@ function createTransformFn<
   const fn = <TKey extends keyof TMap & string>(
     key: TKey,
     variablesOrLocale?: string | AnyStringRecord,
-    // The locale argument is unused at runtime — the active locale comes from
-    // `TranslationStore`. It exists on the signature so consumers can pass
-    // `locale()` as a pipe argument (`'key' | translate : vars : locale()`)
-    // to bust Angular's pure-pipe memoization on locale changes.
+    // locale arg is unused at runtime; exists to bust pure-pipe memoization
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _?: string,
   ): string => {

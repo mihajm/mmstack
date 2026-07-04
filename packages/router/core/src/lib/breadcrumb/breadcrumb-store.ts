@@ -31,9 +31,7 @@ function parsePathSegment(pathSegment: string): string {
 }
 
 function generateLabel(leaf: ResolvedLeafRoute): string {
-  // read the RAW config title, not the resolved one — for routes using createTitle the
-  // resolved title has already been run through the configured parser/prefix, which
-  // would leak "App - Home" style strings into breadcrumbs
+  // raw config title, not the resolved one (createTitle would leak its prefix)
   const configTitle = leaf.route.routeConfig?.title;
   const title =
     (typeof configTitle === 'string' ? configTitle : undefined) ??
@@ -160,7 +158,6 @@ export class BreadcrumbStore {
             ) as InternalBreadcrumb);
           }
 
-          // ALL registered crumbs get the live leaf link
           if (cache.found !== found) {
             cache.found = found;
             cache.wrapped = {
@@ -185,8 +182,7 @@ export class BreadcrumbStore {
 
   readonly unwrapped = computed(() => this.crumbs().map((c) => c()));
 
-  // staged: a breadcrumb registered during a navigation must not appear (or replace an
-  // existing label) until that navigation actually commits — see createStagedApply
+  // staged: apply only once the navigation commits
   private readonly stagedApply = createStagedApply<InternalBreadcrumb>(
     (id, breadcrumb) => this.map.inline((m) => m.set(id, breadcrumb)),
   );

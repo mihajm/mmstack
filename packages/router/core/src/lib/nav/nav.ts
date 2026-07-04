@@ -148,12 +148,7 @@ function resolveMeta<TMeta>(input: CreateNavItem<TMeta>['meta']): TMeta {
   return typeof input === 'function' ? (input as () => TMeta)() : input;
 }
 
-/**
- * @internal
- * Recursively builds an {@link InternalNavItem} tree from {@link CreateNavItem} input.
- * Cascades parent `disabled`/`hidden` to descendants and computes `active` against the
- * current router URL using `Router.isActive`.
- */
+/** @internal */
 export function createInternalNavItem<TMeta = Record<string, unknown>>(
   input: CreateNavItem<TMeta>,
   router: Router,

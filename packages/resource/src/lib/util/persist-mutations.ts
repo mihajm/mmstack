@@ -305,8 +305,6 @@ export class MutationPersistence {
       };
     }
 
-    // announce liveness: held until teardown, so siblings can classify our rows as
-    // live-owned and be notified (via their shared death-watch) the moment we're gone
     if (this.locks) {
       this.locks
         .request(
@@ -328,7 +326,6 @@ export class MutationPersistence {
         .request(
           sessionLockName(session),
           { mode: 'shared', ifAvailable: true },
-          // shared join refused → the owner's exclusive hold is still up → alive
           async (lock) => resolve(lock === null),
         )
         .catch(() => resolve(false)),
@@ -428,7 +425,6 @@ export class MutationPersistence {
   readonly whenHydrated: Promise<void> = this.db
     .then((db) => db.getAll())
     .then(async (entries) => {
-      // rows written by a still-living tab are ITS to send — mirror them held-back
       const liveSessions = await this.probeSessions(entries);
       untracked(() =>
         this.rows.inline((map) => {
@@ -637,14 +633,13 @@ export class MutationPersistence {
           if (released) return;
           this.heldLocks.add(key);
           invokeIfCurrent();
-          // hold the lock until release — its lifetime IS the claim's lifetime
           await new Promise<void>((resolve) => {
             releaseHold = resolve;
             if (released) resolve();
           });
         },
       )
-      .catch(() => undefined); // released while still queued → AbortError, expected
+      .catch(() => undefined);
     return () => {
       released = true;
       this.heldLocks.delete(key);

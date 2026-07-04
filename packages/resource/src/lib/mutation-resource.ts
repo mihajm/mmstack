@@ -141,7 +141,7 @@ export type MutationResourceOptions<
   TError = unknown,
 > = Omit<
   QueryResourceOptions<TResult, TRaw>,
-  'equal' | 'onError' | 'keepPrevious' | 'refresh' | 'cache' | 'pause' // we can't keep previous values, refresh, cache or auto-pause mutations as they are meant to be one-off commands
+  'equal' | 'onError' | 'keepPrevious' | 'refresh' | 'cache' | 'pause'
 > & {
   /**
    * A callback function that is called before the mutation request is made.
@@ -278,7 +278,7 @@ export type MutationResourceRef<
   TICTX = void,
 > = Omit<
   QueryResourceRef<TResult>,
-  'prefetch' | 'value' | 'hasValue' | 'set' | 'setLocal' | 'update' | 'abort' // no manual viewing/updating of returned data, prefetching a mutation makes no sense; abort excluded BY DESIGN — cancelling a POST client-side can't unsend it, so scope.abortPending must never touch mutations
+  'prefetch' | 'value' | 'hasValue' | 'set' | 'setLocal' | 'update' | 'abort'
 > & {
   /**
    * Executes the mutation.
@@ -369,7 +369,6 @@ export function mutationResource<
   request: (params: TMutation) => HttpResourceRequest | undefined | void,
   options0: MutationResourceOptions<TResult, TRaw, TMutation, TCTX, TICTX> = {},
 ): MutationResourceRef<TResult, TMutation, TICTX> {
-  // Two-layer option injection: per-call > provideMutationResourceOptions > provideResourceOptions.
   const globalOpts = injectResourceOptions(options0.injector);
   const mutOpts = injectMutationResourceOptions(options0.injector);
 
@@ -410,7 +409,6 @@ export function mutationResource<
   const deserializeMutation =
     persist?.deserialize ??
     ((raw: unknown) => raw as { mutation: TMutation; ctx?: TICTX });
-  /** Stash a fresh mutation; returns the persisted ref carried through its lifecycle. */
   const stash = (
     value: TMutation,
     ictx: TICTX | undefined,
@@ -426,7 +424,6 @@ export function mutationResource<
         replayed: false,
       };
     } catch (err) {
-      // a failing serialize must not block the mutation itself — it just isn't persisted
       if (isDevMode())
         console.error(
           `[@mmstack/resource] persist.serialize threw for key '${persist.key}' — mutation runs unpersisted`,
@@ -467,8 +464,6 @@ export function mutationResource<
   >({
     source: () => queueKeyFn?.(),
     computation: (_key, prev) => {
-      // On a queue key change the previous pending entries are dropped — reject any
-      // mutateAsync promises waiting on them so awaiters don't hang.
       if (prev)
         for (const [, , deferred, persisted] of untracked(prev.value)) {
           deferred?.reject(
@@ -477,7 +472,6 @@ export function mutationResource<
               'mutation dropped: queue key changed before it ran',
             ),
           );
-          // an explicitly-dropped entry must not resurrect next session
           if (persisted) persistence?.remove(persisted.id);
         }
       return signal<QueueEntry[]>([]);
@@ -515,10 +509,8 @@ export function mutationResource<
     try {
       nextCtx = onMutate?.(value, ictx) as TCTX;
     } catch (mutationErr) {
-      // match legacy mutate(): the throw aborts the mutation and resets state
       ctx = undefined as TCTX;
       next.set(NULL_VALUE);
-      // aborted-by-hook is settled — a stash that crashes onMutate must not retry every boot
       if (persisted) persistence?.remove(persisted.id);
       deferred?.reject(mutationErr);
       if (isDevMode())
@@ -571,7 +563,6 @@ export function mutationResource<
       ),
     );
     currentDeferred = undefined;
-    // superseded = settled — the newer mutation carries its own stash
     if (currentPersisted) persistence?.remove(currentPersisted.id);
     currentPersisted = undefined;
     ctx = undefined as TCTX;
@@ -579,8 +570,8 @@ export function mutationResource<
 
   const queueRef = effect(
     () => {
-      const q = queue(); // subscribe to swaps (key change / clearQueue)
-      const nextInQueue = q().at(0); // subscribe to contents
+      const q = queue();
+      const nextInQueue = q().at(0);
       if (nextInQueue === undefined || next() !== NULL_VALUE) return;
       q.update((arr) => arr.slice(1));
       const [value, ictx, deferred, persisted] = nextInQueue;
@@ -625,10 +616,10 @@ export function mutationResource<
 
   const resource = queryResource<TResult, TRaw>(req, {
     ...rest,
-    register: false, // the mutation ref handles registration; never register the inner query
+    register: false,
     circuitBreaker: cb,
     equalRequest: requestEqual,
-    defaultValue: NULL_VALUE as unknown as TResult, // doesnt matter since .value is not accessible
+    defaultValue: NULL_VALUE as unknown as TResult,
   });
 
   const destroyRef = options.injector
@@ -672,7 +663,6 @@ export function mutationResource<
       currentDeferred = undefined;
       const persisted = currentPersisted;
       currentPersisted = undefined;
-      // settled either way — success is done; an errored stash is dropped unless opt-in
       if (persisted) {
         const meta: MutationErrorMeta = { replayed: persisted.replayed };
         const keep =
@@ -728,7 +718,7 @@ export function mutationResource<
       try {
         return deserializeMutation(row.raw);
       } catch (err) {
-        persistence.remove(row.id); // a poison stash must not boot-loop
+        persistence.remove(row.id);
         if (isDevMode())
           console.error(
             `[@mmstack/resource] persist.deserialize threw for key '${persistKey}' — stashed mutation dropped`,
@@ -740,10 +730,8 @@ export function mutationResource<
 
     const replay = () => {
       if (persistDestroyed || !untracked(online)) return;
-      // cross-tab: only the tab holding the Web Lock for this key replays stashed rows
       if (!persistence.holdsReplayLock(persistKey)) return;
 
-      // idempotence: rows already active in this resource (in flight / queued) don't re-run
       const active = new Set<string>();
       if (currentPersisted) active.add(currentPersisted.id);
       if (queueEnabled)
@@ -755,7 +743,6 @@ export function mutationResource<
       if (!rows.length) return;
 
       if (queueEnabled) {
-        // per-key FIFO: stashed (older) mutations run before this session's pending ones
         const entries: QueueEntry[] = [];
         for (const row of rows) {
           const parsed = deserializeRow(row);
@@ -771,10 +758,8 @@ export function mutationResource<
         return;
       }
 
-      // non-queue = latest-wins, applied across sessions: only the newest stash replays…
       const last = rows[rows.length - 1];
       for (const stale of rows.slice(0, -1)) persistence.remove(stale.id);
-      // …and a live session mutation is newer than any stash, so the stash is superseded
       if (untracked(next) !== NULL_VALUE) {
         persistence.remove(last.id);
         return;
@@ -787,7 +772,6 @@ export function mutationResource<
         });
     };
 
-    // claim schedules the initial replay itself (hydrated + cross-tab lock granted)
     releaseClaim = persistence.claim(persistKey, replay);
     if (releaseClaim) {
       const release = releaseClaim;
@@ -805,21 +789,16 @@ export function mutationResource<
     }
   }
 
-  // strip the inner query's abort at RUNTIME too, not just in the type: a scope's
-  // structural `abort?.()` probe must find nothing on a registered mutation
   const { abort: _abort, ...spreadableResource } = resource;
 
   const ref: MutationResourceRef<TResult, TMutation, TICTX> = {
     ...spreadableResource,
     destroy: () => {
-      // persistence first: stashes must survive destroy — stop replay, keep rows
       persistDestroyed = true;
       replayEffectRef?.destroy();
       releaseClaim?.();
-      // queue first — a late queue flush must not poke an already-destroyed resource
       queueRef.destroy();
       statusSub.unsubscribe();
-      // reject any outstanding mutateAsync promises so awaiters don't hang
       const cancelled = new MutationCancelledError(
         'destroyed',
         'mutation abandoned: resource destroyed',
@@ -858,7 +837,6 @@ export function mutationResource<
       if (!queueEnabled) return;
       const dropped = untracked(queue)();
       queue.set(signal<QueueEntry[]>([]));
-      // reject mutateAsync promises whose entries we just dropped
       for (const [, , deferred, persisted] of dropped) {
         deferred?.reject(
           new MutationCancelledError(
@@ -866,11 +844,9 @@ export function mutationResource<
             'mutation dropped: queue cleared before it ran',
           ),
         );
-        // explicit clear = explicit intent — the stash goes too
         if (persisted) persistence?.remove(persisted.id);
       }
     },
-    // redeclare disabled with last value so that it is not affected by the resource's internal disablement logic
     disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
   };
 

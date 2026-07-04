@@ -32,23 +32,11 @@ type BaseConfig = Omit<IntlConfig, 'locale' | 'messages'> & {
   /** Preloads the default locale ensuring sync fallback, not necessary for most cases as it will lazily load automatically when needed */
   preloadDefaultLocale?: boolean;
   /**
-   * Opt into lifecycle-aware caching of translation signals. When `true`, the
-   * internal caches hold signals via `WeakRef` and rely on consumers (the `t`
-   * functions returned by `injectNamespaceT` / `injectUnsafeT`) to pin signals
-   * for the lifetime of their injection context (typically a component). When
-   * a consumer is destroyed, signals it pinned become weakly held and may be
-   * collected; the corresponding cache entries are then dropped via
-   * `FinalizationRegistry`.
-   *
-   * Default `false` — caches grow with the set of translation keys ever read
-   * and never shrink. That's fine for almost every app (translation keys are
-   * a bounded set). Turn this on only for very large apps where measured
-   * memory pressure from cached signals matters, or for apps that construct
-   * translation keys dynamically (an anti-pattern, but this contains the leak).
-   *
-   * Cost when enabled: each cache hit goes through `WeakRef.deref()`, each
-   * `t()` consumer holds a `Set` of pinned signals + a `DestroyRef.onDestroy`
-   * hook. Negligible in practice but non-zero.
+   * Opt into lifecycle-aware (`WeakRef`) caching of translation signals so cache
+   * entries are collected when their consumer is destroyed. Default `false` —
+   * caches grow with the set of keys ever read and never shrink. Only worth
+   * enabling for very large apps under measured memory pressure, or apps that
+   * construct translation keys dynamically.
    */
   releaseCachedSignals?: boolean;
 };
@@ -187,10 +175,7 @@ export function injectSupportedLocales() {
   return injectIntlConfig()?.supportedLocales ?? [injectDefaultLocale()];
 }
 
-/**
- * @internal
- * the actual locale signal used to store the current locale string
- */
+/** @internal */
 const STORE_LOCALE = signal('en-US');
 
 /**
@@ -228,11 +213,7 @@ function isDynamicConfig(
   return !!cfg && 'localeStorage' in cfg && !!cfg.localeStorage;
 }
 
-/**
- * @internal
- * Reads `key` from the deepest route of a snapshot tree — the deepest match wins,
- * mirroring `paramsInheritanceStrategy: 'always'` semantics from the root's perspective.
- */
+// Reads `key` from the deepest route of a snapshot tree (deepest match wins).
 function readDeepestParam(
   root: ActivatedRouteSnapshot,
   key: string,
@@ -332,12 +313,6 @@ export function createSignalCache<V extends WeakKey>(
 export class TranslationStore {
   private readonly cache = createIntlCache();
   private readonly config = injectIntlConfig();
-  /**
-   * Reflects `provideIntlConfig({ releaseCachedSignals })`. Read by the `t`
-   * functions in `register-namespace.ts` to decide whether to pin signals
-   * via a `DestroyRef`-bound `Set`. Public so consumers can build their own
-   * `t`-like helpers without re-reading the config.
-   */
   readonly cacheIsWeak = this.config?.releaseCachedSignals ?? false;
   private readonly simpleKeyMap: SignalCache<Signal<string>> =
     createSignalCache(this.cacheIsWeak);
@@ -353,12 +328,8 @@ export class TranslationStore {
     [this.defaultLocale]: {},
   });
   private attemptedFallbackLoad = false;
-  /**
-   * Locales queued purely to fetch fallback DATA (missing-key default-locale loads).
-   * Completing such a load must never change the user's active locale.
-   */
+  // Locales queued only to fetch fallback data; must never change active locale.
   private readonly dataOnlyLoads = new Set<string>();
-  /** Keys already warned about in dev mode, so a missing key logs once, not per render. */
   private readonly warnedMissingKeys = new Set<string>();
 
   private readonly onDemandLoaders = new Map<
@@ -441,12 +412,7 @@ export class TranslationStore {
   readonly intl = computed(() =>
     createIntl(
       {
-        // Default error handling, overridable via the config's own `onError`:
-        // MISSING_TRANSLATION is the DESIGNED fallback path here — the store always
-        // supplies the default-locale message as `defaultMessage` — so formatjs's
-        // default screaming-stack-trace handler is pure noise for it, in tests AND
-        // in production. Real errors (e.g. FORMAT_ERROR from a missing variable)
-        // still surface in dev mode.
+        // MISSING_TRANSLATION is the designed fallback path; swallow it. Others surface in dev.
         onError: (err) => {
           if ((err as { code?: string })?.code === 'MISSING_TRANSLATION')
             return;
@@ -487,8 +453,6 @@ export class TranslationStore {
           untracked(this.loadQueue).includes(loc)
         )
           return;
-        // loaders exist → queue the load (the dequeue effect switches once data lands);
-        // no loaders → nothing to load, switch directly
         if (this.hasLocaleLoaders(loc))
           this.loadQueue.update((q) => [...q, loc]);
         else this.locale.set(loc);
@@ -497,7 +461,6 @@ export class TranslationStore {
 
     effect(() => {
       if (
-        // should never be in error state, but best to check in case something throws
         this.dynamicLocaleLoader.error() ||
         this.dynamicLocaleLoader.isLoading()
       )
@@ -515,7 +478,6 @@ export class TranslationStore {
       const requested = dynamicLocales.locale;
       const dataOnly = this.dataOnlyLoads.delete(requested);
 
-      // ALWAYS dequeue
       this.loadQueue.update((q) => q.filter((l) => l !== requested));
 
       const hasTranslations =
@@ -528,7 +490,6 @@ export class TranslationStore {
         );
       }
 
-      // a fallback DATA load must never change the user's active locale
       if (!dataOnly && hasTranslations) this.locale.set(requested);
     });
   }
@@ -542,16 +503,8 @@ export class TranslationStore {
     return sig;
   }
 
-  // Angular Ivy emits ɵɵpureFunctionN for inline object literals in template
-  // expressions, so `{...}` passed to t() in a template returns the same
-  // reference across CD passes until its inputs change. We exploit that by
-  // caching per-(key, paramsObj) computeds, collapsing repeated CD passes to
-  // a memoized signal read instead of a full ICU re-format.
-  //
-  // Returns both the signal and the inner WeakMap container — in `weak` cache
-  // mode the caller must pin BOTH against its own lifetime, otherwise the
-  // FinalizationRegistry on the outer map will reclaim the container as soon
-  // as the only strong reference (the cache's WeakRef) becomes irrelevant.
+  // Caches per-(key, paramsObj) computeds, keyed on Ivy's stable ɵɵpureFunction
+  // object refs. In weak mode the caller must pin both signal and container.
   buildParamKeySignal(
     key: string,
     values: Record<string, string | number>,
@@ -600,8 +553,6 @@ export class TranslationStore {
       this.attemptedFallbackLoad = true;
       untracked(() => {
         if (!this.loadQueue().includes(this.defaultLocale)) {
-          // data-only: fetch the default locale's messages as fallback content
-          // WITHOUT switching the app's active locale to it
           this.dataOnlyLoads.add(this.defaultLocale);
           this.loadQueue.update((q) => [...q, this.defaultLocale]);
         }
@@ -649,15 +600,11 @@ export class TranslationStore {
     loaders: Record<string, () => Promise<any>>,
   ) {
     this.onDemandLoaders.set(namespace, loaders);
-    // new loaders can satisfy keys that previously had nothing to fall back to —
-    // allow the missing-key fallback to attempt another default-locale load
+    // new loaders may satisfy previously-missing keys; allow another fallback attempt
     this.attemptedFallbackLoad = false;
   }
 
-  /**
-   * @internal Upgrade a queued data-only load into a user locale switch — used when
-   * `locale.set(x)` is called while `x` is already in flight as a fallback data load.
-   */
+  /** @internal Upgrade a queued data-only load into a user locale switch. */
   markSwitchIntent(locale: string) {
     this.dataOnlyLoads.delete(locale);
   }
@@ -758,8 +705,7 @@ export function injectDynamicLocale(): WritableSignal<string> & {
     if (value === untracked(source)) return;
 
     if (untracked(store.loadQueue).includes(value)) {
-      // already in flight — if it was queued as a fallback DATA load, upgrade it to a
-      // user switch so the locale flips once the load completes
+      // already in flight; upgrade a fallback-data load to a user switch
       store.markSwitchIntent(value);
       return;
     }

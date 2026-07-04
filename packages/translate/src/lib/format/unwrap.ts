@@ -6,9 +6,8 @@ export function unwrap<T>(value: T | Signal<T>): T {
 
 /**
  * @internal
- * Merge per-call overrides over provided defaults, skipping keys explicitly set to
- * `undefined`. A plain spread would let `{ locale: cond ? 'de' : undefined }` punch
- * through the defaults and silently degrade to the deprecated global-locale fallback.
+ * Merge overrides over defaults, skipping keys explicitly set to `undefined`
+ * (a plain spread would let those punch through the defaults).
  */
 export function mergeDefined<T extends object>(
   defaults: T,

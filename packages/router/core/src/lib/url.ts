@@ -8,10 +8,6 @@ import {
 } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
 
-/**
- * Type guard to check if a Router Event is a NavigationEnd event.
- * @internal
- */
 function isNavigationEnd(e: Event): e is NavigationEnd {
   return 'type' in e && e.type === EventType.NavigationEnd;
 }

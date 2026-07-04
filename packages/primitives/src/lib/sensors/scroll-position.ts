@@ -158,7 +158,6 @@ function createScrollPosition(
   );
 
   if (isSignal(target)) {
-    // re-attach whenever the signal resolves to a (new) element — covers viewChild
     effect((cleanup) => {
       const el = resolve(target());
       if (!el) return;

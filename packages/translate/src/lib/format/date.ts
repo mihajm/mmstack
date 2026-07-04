@@ -74,13 +74,10 @@ function getFormatter(
   let formatter = cache.get(cacheKey);
 
   if (!formatter) {
-    // widen: the presets `satisfies` clause keeps literal types whose union has no
-    // `timeZone` member, but a caller-supplied options object may legally carry one
     const base: Intl.DateTimeFormatOptions =
       typeof format === 'string' ? FORMAT_PRESETS[format] : format;
     formatter = new Intl.DateTimeFormat(locale, {
       ...base,
-      // an explicit `timeZone: undefined` would clobber a user-supplied format.timeZone
       timeZone: timeZone ?? base.timeZone,
     });
     cache.set(cacheKey, formatter);

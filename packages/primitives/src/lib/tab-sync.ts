@@ -5,11 +5,108 @@ import {
   inject,
   Injectable,
   Injector,
+  isDevMode,
   PLATFORM_ID,
   untracked,
   type OnDestroy,
   type WritableSignal,
 } from '@angular/core';
+import { STORE_KIND, type StoreKind } from './store/internals';
+import {
+  opSync,
+  type MergePolicyEntry,
+  type OpEnvelope,
+} from './store/op-sync';
+
+type TabMsg =
+  | { t: 'env'; env: OpEnvelope }
+  | { t: 'hello'; from: string; wm: Record<string, number> }
+  | { t: 'state'; to: string; root: unknown; wm: Record<string, number> }
+  | { t: 'uptodate'; to: string };
+
+/** Op-mode sync for a writable store: hello exchange, then live envelopes (RFC §6 tab flavor). */
+function storeTabSync(
+  sig: WritableSignal<object>,
+  opt: StoreTabSyncOptions & { id: string },
+  bus: MessageBus,
+  injector: Injector,
+): void {
+  const sync = opSync(sig, {
+    writer: opt.writer ?? 'local',
+    policies: opt.policies,
+    injector,
+  });
+  const helloTimeoutMs = opt.helloTimeoutMs ?? 250;
+  const jitterMs = opt.jitterMs ?? 25;
+
+  let phase: 'joining' | 'live' = 'joining';
+  const joinBuffer: OpEnvelope[] = [];
+  const responseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let helloTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function goLive(): void {
+    if (phase === 'live') return;
+    phase = 'live';
+    if (helloTimer !== undefined) {
+      clearTimeout(helloTimer);
+      helloTimer = undefined;
+    }
+    for (const env of joinBuffer.splice(0)) sync.receive(env);
+  }
+
+  const { unsub, post } = bus.subscribe<TabMsg>(opt.id, (msg) => {
+    if (!msg || typeof msg !== 'object') return;
+    switch (msg.t) {
+      case 'env':
+        if (phase === 'joining') joinBuffer.push(msg.env);
+        else sync.receive(msg.env);
+        return;
+      case 'hello': {
+        if (phase !== 'live' || msg.from === sync.origin) return;
+        // first responder wins: jittered answer, cancelled when someone else answers first
+        const timer = setTimeout(() => {
+          responseTimers.delete(msg.from);
+          const snap = sync.snapshot();
+          const covered = Object.entries(snap.wm).every(
+            ([origin, v]) => (msg.wm[origin] ?? 0) >= v,
+          );
+          post(
+            covered
+              ? { t: 'uptodate', to: msg.from }
+              : { t: 'state', to: msg.from, root: snap.root, wm: snap.wm },
+          );
+        }, Math.random() * jitterMs);
+        responseTimers.set(msg.from, timer);
+        return;
+      }
+      case 'state':
+      case 'uptodate': {
+        const scheduled = responseTimers.get(msg.to);
+        if (scheduled !== undefined) {
+          clearTimeout(scheduled);
+          responseTimers.delete(msg.to);
+        }
+        if (msg.to !== sync.origin || phase !== 'joining') return;
+        if (msg.t === 'state') sync.hydrate(msg.root as object, msg.wm);
+        goLive();
+        return;
+      }
+    }
+  });
+
+  const unsubEnv = sync.subscribe((env) => post({ t: 'env', env }));
+  post({ t: 'hello', from: sync.origin, wm: sync.watermark() });
+  helloTimer = setTimeout(goLive, helloTimeoutMs);
+
+  injector.get(DestroyRef).onDestroy(() => {
+    if (helloTimer !== undefined) clearTimeout(helloTimer);
+    for (const timer of responseTimers.values()) clearTimeout(timer);
+    responseTimers.clear();
+    unsubEnv();
+    unsub();
+    sync.destroy();
+  });
+}
 
 @Injectable({
   providedIn: 'root',
@@ -107,11 +204,27 @@ export type SyncSignalOptions = {
 };
 
 /**
+ * Store mode (`tabSync(store, …)`): syncs structural OPS instead of whole values — concurrent
+ * edits to different leaves merge instead of clobbering, and a joining tab hydrates from a
+ * peer via the hello exchange (up-to-date / snapshot; op-protocol RFC §6).
+ */
+export type StoreTabSyncOptions = SyncSignalOptions & {
+  /** Principal pseudonym on emitted envelopes. Tabs share one user, so a default is fine. */
+  writer?: string;
+  /** Per-path merge policies (`lww` default; `mergeThree`, `preserve`, or custom). */
+  policies?: readonly MergePolicyEntry[];
+  /** How long a joining tab waits for a peer's answer before deciding it IS the base. */
+  helloTimeoutMs?: number;
+  /** Max response jitter — first responder wins, others cancel. */
+  jitterMs?: number;
+};
+
+/**
  * @example tabSync(signal('dark'), { id: 'theme' })
  */
 export function tabSync<T extends WritableSignal<any>>(
   sig: T,
-  opt: SyncSignalOptions | string,
+  opt: StoreTabSyncOptions | SyncSignalOptions | string,
 ): T;
 
 /**
@@ -170,6 +283,30 @@ export function tabSync<T extends WritableSignal<any>>(
     typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());
 
   const bus = injector.get(MessageBus);
+
+  const storeKind = (sig as { [STORE_KIND]?: StoreKind })[STORE_KIND];
+  if (storeKind === 'writable') {
+    storeTabSync(
+      sig as WritableSignal<object>,
+      { ...(optObj as StoreTabSyncOptions), id },
+      bus,
+      injector,
+    );
+    return sig;
+  }
+  if (storeKind === 'readonly') {
+    if (isDevMode()) {
+      console.warn(
+        '[@mmstack/primitives] tabSync: a readonly store cannot receive remote ops — not synced.',
+      );
+    }
+    return sig;
+  }
+  if (storeKind === 'mutable' && isDevMode()) {
+    console.warn(
+      '[@mmstack/primitives] tabSync: mutable stores fall back to whole-value sync (op diffing needs copy-on-write).',
+    );
+  }
 
   const NONE = Symbol();
   let received: unknown = NONE;

@@ -95,8 +95,6 @@ export function elementVisibility(
   opt?: ElementVisibilityOptions,
 ): ElementVisibilitySignal {
   return runInSensorContext(opt?.injector, () =>
-    // the host-element default must resolve INSIDE the sensor context, not as a
-    // parameter default (which would run before the injector wrapper)
     createElementVisibility(target ?? inject(ElementRef), opt),
   );
 }

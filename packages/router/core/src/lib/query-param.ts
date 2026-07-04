@@ -59,11 +59,6 @@ export type TypedQueryParamOptions<T> = QueryParamOptions<T> & {
   serialize: (value: T) => string | null;
 };
 
-/**
- * Default write path: navigate immediately. `merge` PRESERVES keys absent from the
- * provided object and strips null-valued ones — removal therefore requires an explicit
- * `key: null` entry (this is why we patch `null`, never `delete`).
- */
 function writeParamNow(
   router: Router,
   route: ActivatedRoute,
@@ -79,13 +74,6 @@ function writeParamNow(
   });
 }
 
-/**
- * Opt-in (`batch: true`) write coalescing: each `set()` contributes a patch; ONE
- * navigation flushes them in a microtask. Without this, two params set in the same tick
- * each build their UrlTree from the pre-navigation URL and the second navigation drops
- * the first's change. Keyed per `Router` (per-app), entries deleted on flush — no
- * cross-request state on the server.
- */
 type PendingFlush = {
   patch: Record<string, string | null>;
   replaceAll: boolean;
@@ -109,7 +97,7 @@ function enqueueParamWrite(
   }
 
   pending.patch[key] = value;
-  // a history entry is only skipped when EVERY writer in the batch asked to skip it
+  // skip history only when every writer in the batch asked to
   pending.replaceAll &&= replaceUrl;
 
   if (pending.scheduled) return;
@@ -120,8 +108,6 @@ function enqueueParamWrite(
     pendingByRouter.delete(router);
     void router.navigate([], {
       relativeTo: flush.route,
-      // `merge` PRESERVES keys absent from this object and strips null-valued ones —
-      // removal therefore requires an explicit `key: null` entry, never `delete`
       queryParams: flush.patch,
       queryParamsHandling: 'merge',
       replaceUrl: flush.replaceAll,

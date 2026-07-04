@@ -3,6 +3,5 @@
   "dest": "../../dist/packages/resource",
   "lib": {
     "entryFile": "src/index.ts"
-  },
-  "allowedNonPeerDependencies": ["@mmstack/primitives", "@mmstack/di"]
+  }
 }

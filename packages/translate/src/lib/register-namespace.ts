@@ -74,17 +74,8 @@ type TFunctionWithSignalConstructor<
   asSignal: SignalTFunction<TMap>;
 };
 
-/**
- * Returns a pinning callback when the store is configured for weak-cache mode,
- * otherwise `null`. The callback adds objects (signals / WeakMap containers)
- * to a per-consumer `Set` so they stay strongly reachable while the consumer
- * lives. On `DestroyRef.onDestroy` the set is cleared, releasing strong refs
- * so the cache's `WeakRef` entries become collectable.
- *
- * Must be invoked in an injection context (it consumes `DestroyRef`). That's
- * already guaranteed by the call sites in `createT` and `addSignalFn`, both
- * of which run inside `inject(TranslationStore)`-bearing factories.
- */
+// Weak-cache pinning callback: keeps signals reachable for the consumer's
+// lifetime; null in strong mode. Must run in an injection context.
 function createPinner(
   store: TranslationStore,
 ): ((sig: object, container?: object) => void) | null {
@@ -207,10 +198,8 @@ function isCompiledTranslation(
 /**
  * @internal exported for unit testing
  *
- * Unwraps a loader result to a `CompiledTranslation`. Detection order:
- *   1. value is already a `CompiledTranslation` (has `flat` + `namespace`)
- *   2. value has a `default` export holding a `CompiledTranslation` (ESM default)
- *   3. value has a `translation` export holding a `CompiledTranslation` (named export)
+ * Unwraps a loader result to a `CompiledTranslation`, accepting a direct value
+ * or one under a `default` / `translation` export.
  */
 export function resolveTranslationModule<
   T extends CompiledTranslation<UnknownStringKeyObject, string>,
@@ -343,13 +332,8 @@ export function registerNamespace<
   let defaultTranslationLoaded = false;
   const loadedLocales = new Set<string>();
 
-  /**
-   * Load + register translations for `locale` WITHOUT touching the active locale — the
-   * shared core of the resolver and {@link warm}. Idempotent via the closure guards.
-   * `'ready'` = the locale's data is usable (the resolver may switch to it);
-   * `'default-cached'` preserves the resolver's historical no-switch behavior for the
-   * repeat default-fallback path.
-   */
+  // Load + register translations for `locale` without switching (shared by
+  // resolver and warm). Idempotent via closure guards.
   const loadForLocale = async (
     store: TranslationStore,
     locale: string,
@@ -368,7 +352,6 @@ export function registerNamespace<
     if (promise === unwrappedDefault && defaultTranslationLoaded)
       return 'default-cached';
 
-    // already loaded on a previous run — nothing to fetch or register
     if (tPromise && loadedLocales.has(locale)) return 'ready';
 
     try {
@@ -438,27 +421,11 @@ export function registerNamespace<
       shouldPreloadDefault,
     );
 
-    // only switch on success — switching to a locale whose load failed would render
-    // wholesale fallbacks (or '') with no signal to the router that anything failed
     if (result === 'ready' && locale !== untracked(store.locale))
       store.locale.set(locale);
   };
 
-  /**
-   * Speculatively load + register this namespace's translations for `locale` (the
-   * ACTIVE locale when omitted) WITHOUT switching — the warm half of hover-prefetch.
-   * Pair with `@mmstack/router-core`'s `withPrefetch` so hovering a link loads the
-   * locale chunk before navigation (idempotent; the later resolver run is then instant):
-   *
-   * ```ts
-   * resolve: {
-   *   i18n: withPrefetch(ns.resolveNamespaceTranslation, {
-   *     description: 'quote-i18n',
-   *     prefetch: (ctx) => ns.warmNamespaceTranslation(ctx.params()['locale']),
-   *   }),
-   * }
-   * ```
-   */
+  // Speculatively load a locale's chunk without switching (hover-prefetch warm half).
   const warm = async (locale?: string): Promise<void> => {
     const store = inject(TranslationStore);
     const defaultLocale = injectDefaultLocale();
@@ -525,7 +492,6 @@ export function registerRemoteNamespace<TNS extends string>(
 ) {
   const keyMap = new Map<string, string>();
 
-  // TransferState plumbing: remote translations fetched during SSR
   let transferState: TransferState | null = null;
   let onServer = false;
 
@@ -583,7 +549,6 @@ export function registerRemoteNamespace<TNS extends string>(
   const resolver: ResolveFn<void> = async (snapshot) => {
     const store = inject(TranslationStore);
 
-    // capture for loadRaw — the resolver always runs in an injection context
     transferState = inject(TransferState, { optional: true });
     onServer = isPlatformServer(inject(PLATFORM_ID));
 
@@ -603,7 +568,6 @@ export function registerRemoteNamespace<TNS extends string>(
 
     if (promise === defaultTranslation && defaultTranslationLoaded) return;
 
-    // already fetched on a previous navigation — just sync the locale, skip the refetch
     if (tPromise && loadedLocales.has(locale)) {
       if (locale !== untracked(store.locale)) store.locale.set(locale);
       return;
@@ -663,7 +627,6 @@ export function registerRemoteNamespace<TNS extends string>(
         );
       }
     } finally {
-      // only switch on success — see registerNamespace's resolver for rationale
       if (loaded && locale !== untracked(store.locale))
         store.locale.set(locale);
     }

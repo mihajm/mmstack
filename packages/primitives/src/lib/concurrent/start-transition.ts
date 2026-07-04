@@ -48,8 +48,7 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
   );
 
   return (fn: () => void): TransitionRef => {
-    // attributed: loads already in flight when the transition starts are not ours —
-    // they can neither settle this transition early nor block it forever
+    // attributed: loads already in flight when the transition starts are not ours
     const pending = createAttributedPending(scope);
     untracked(fn);
 
@@ -75,8 +74,7 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
         if (!untracked(pending)) settle();
         return;
       }
-      // no-async fallback: once the reactive system has processed the writes (afterNextRender),
-      // if nothing ever went in flight, the transition is already complete.
+      // no-async fallback: once the reactive system has processed the writes,
       afterNextRender(
         () => {
           if (!sawPending && !untracked(pending)) settle();

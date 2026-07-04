@@ -44,9 +44,6 @@ export function createTransaction(): Transaction {
   };
 }
 
-// The currently-active transaction, set only for the synchronous duration of a `startTransaction`
-// body (so stateful actions running inside it can record their writes). Module-level + sync
-// set/reset is the honest shape: a transaction is call-scoped, not structural-per-injector.
 let active: Transaction | null = null;
 
 /** The transaction in effect right now, or `null`. Stateful actions consult this to record undo. */
@@ -99,11 +96,8 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
 
   return (fn: () => void): TransactionRef => {
     const txn = createTransaction();
-    // attributed: loads already in flight when the transaction starts are not ours —
-    // they can neither commit this transaction early nor block its settle forever
     const pending = createAttributedPending(scope);
 
-    // Hold BEFORE the writes, so the display freezes at pre-transaction values.
     scope.beginHold();
 
     let finished = false;
@@ -114,9 +108,6 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
       resolveDone = resolve;
     });
 
-    // Every exit path funnels through here, so `done` always settles — including `abort()`
-    // and a throwing transaction body (which would otherwise leak the hold forever and
-    // freeze the boundary with no recovery).
     const finish = (restore: boolean) => {
       if (finished) return;
       finished = true;
@@ -128,9 +119,6 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
       resolveDone();
     };
 
-    // The scope may outlive the calling context (a component transacting on an ancestor
-    // boundary): a destroy mid-flight kills the settle watcher, so without this the hold
-    // would leak and freeze the surviving scope forever. Keep the writes — they landed live.
     const releaseDestroy = destroyRef.onDestroy(() => finish(false));
 
     try {
@@ -152,7 +140,7 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
     if (onServer) {
       if (!untracked(pending)) finish(false);
     } else {
-      // no-async fallback: if nothing ever went in flight, settle once the writes are processed.
+      // no-async fallback
       afterNextRender(
         () => {
           if (!sawPending && !untracked(pending)) finish(false);

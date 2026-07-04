@@ -25,7 +25,6 @@ export const DEFAULT_NAV_SCOPE: unique symbol = Symbol('mmstack.nav.default');
 
 type ScopeName = string | typeof DEFAULT_NAV_SCOPE;
 
-// Map stores items with an unknown meta — the public read API re-asserts TMeta.
 type AnyInternalNavItem = InternalNavItem<unknown>;
 
 @Injectable({ providedIn: 'root' })
@@ -38,12 +37,7 @@ export class NavStore {
   private readonly router = inject(Router);
   private readonly config = injectNavConfig();
   private readonly injector = inject(EnvironmentInjector);
-  /**
-   * @internal
-   * ONE shared navigation signal for every nav item's `active` computation —
-   * threaded into `createInternalNavItem` so items never open their own
-   * `Router.events` subscriptions (which would accrete per registration).
-   */
+  /** @internal Shared navigation signal for every item's `active` computation. */
   readonly trackNavigation = navigationEndTick(this.router);
   private readonly defaultsCache = new Map<
     ScopeName,

@@ -31,17 +31,7 @@ export type ResolvedLeafRoute = {
   link: string;
 };
 
-/**
- * Known limitations (by design, documented rather than handled):
- * - Only the PRIMARY outlet chain is walked. Routes rendered in named (auxiliary)
- *   outlets don't contribute leaves — their titles/breadcrumbs/nav registrations
- *   are keyed by paths that never appear in this chain, so they simply stay inert.
- * - Registrations in the title/breadcrumb/nav stores are keyed by route-config
- *   paths and are NOT evicted when the config changes via `Router.resetConfig`.
- *   Stale entries are only reachable if the new config reuses the same path —
- *   in which case re-resolving overwrites them. Apps that hot-swap configs with
- *   overlapping paths but different meaning should re-register via resolvers.
- */
+// Only the primary outlet chain is walked; aux-outlet routes stay inert.
 function leafRoutes(): Signal<ResolvedLeafRoute[]> {
   const router = inject(Router);
 
@@ -77,14 +67,11 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
         link,
       };
 
-      // empty-path children serialize to the same path as their parent — keep the
-      // DEEPEST snapshot so the component-bearing child's `title`/`data` win over
-      // the shell parent's
+      // empty-path children share their parent's path; keep the deepest snapshot
       const existingIdx = routes.findIndex((r) => r.path === path);
       if (existingIdx >= 0) routes[existingIdx] = entry;
       else routes.push(entry);
 
-      // walk the PRIMARY outlet — an aux outlet's child can sort first in `children`
       route =
         route.children?.find((c) => c.outlet === 'primary') ??
         route.firstChild;

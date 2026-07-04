@@ -39,7 +39,7 @@ export const deserialize = (parsed: any): HttpResponse<unknown> | null => {
       body: parsed.body,
       status: parsed.status,
       headers: headers,
-      url: parsed.url ?? undefined, // HttpResponse constructor requires string or undefined, url is string | null
+      url: parsed.url ?? undefined,
     });
   } catch (err) {
     if (isDevMode()) console.error('Failed to deserialize cache entry:', err);

@@ -145,9 +145,6 @@ function internalCeateCircuitBreaker(
     failureCount.set(threshold - 1);
   };
 
-  // Auto-probe effect: schedules a half-open retry after `resetTimeout` whenever
-  // the breaker is open, *unless* we've been failed forever (in which case only
-  // hardReset() can recover).
   const effectRef = effect((cleanup) => {
     if (!isOpen() || failedForever()) return;
 
@@ -170,7 +167,6 @@ function internalCeateCircuitBreaker(
   const fail = (err?: Error) => {
     if (shouldFailForever(err)) return failForever();
     if (shouldFail(err)) return failInternal();
-    // If the error does not trigger a failure, we do nothing.
   };
 
   const hardReset = () => {
@@ -261,7 +257,7 @@ function injectCircuitBreakerOptions(
   });
 }
 
-/** @internal — strips the deprecated `treshold` field and folds it into `threshold` */
+/** @internal */
 function normalizeThreshold(
   opt: CircuitBreakerOptions | undefined,
 ): Partial<Omit<CreateCircuitBreakerOptions, 'treshold'>> {

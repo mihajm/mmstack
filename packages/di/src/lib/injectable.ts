@@ -250,7 +250,6 @@ export function injectable<T>(
     fnOrValue: T | ((...deps: any[]) => T),
     deps?: any[],
   ): Provider => {
-    // explicit deps → factory with those deps
     if (deps !== undefined)
       return {
         provide: injectionToken,
@@ -258,8 +257,6 @@ export function injectable<T>(
         deps,
       };
 
-    // no deps → defer to provideAs: a function is a (no-dep) factory, anything
-    // else is a value. Provide a function *value* by wrapping it: `() => fn`.
     return provideAs(injectionToken, fnOrValue as T | (() => T));
   };
 

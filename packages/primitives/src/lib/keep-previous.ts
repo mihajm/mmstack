@@ -44,8 +44,6 @@ export function keepPrevious<T, P>(
 ): WritableSignal<T> | Signal<T> {
   const mutableSrc = isWritableSignal(src) && isMutable(src);
 
-  // For a mutable source the linkedSignal's equality must be suppressible: a forwarded
-  // `mutate` keeps the same reference, which default equality would otherwise swallow.
   let cnt = 0;
   const baseEqual = opt?.equal;
   const equal = mutableSrc
@@ -64,17 +62,12 @@ export function keepPrevious<T, P>(
   if (isWritableSignal(src)) {
     persisted.set = src.set;
     persisted.update = src.update;
-    // NOTE: `asReadonly` deliberately stays the linkedSignal's own — returning the
-    // source's readonly view would reintroduce the `undefined` flashes this wrapper exists
-    // to prevent.
 
     if (mutableSrc) {
       (persisted as MutableSignal<T>).mutate = (updater) => {
         cnt++;
         try {
           src.mutate(updater);
-          // force the recompute while equality is suppressed, so the reference-stable
-          // mutation bumps the wrapper's version (see derived.ts for the same pattern)
           untracked(persisted);
         } finally {
           cnt--;

@@ -2,10 +2,8 @@ import { inject, InjectionToken } from '@angular/core';
 import { ResolvedLeafRoute } from '../util';
 
 /**
- * A function that returns a custom label generation function.
- * The outer function is called in a root injection context
- * The returned function takes a `ResolvedLeafRoute` and produces a string label for the breadcrumb.
- * As the inner function is wrapped in a computed, changes to signals called within it will update the breadcrumb label reactively.
+ * Returns a label generator. The outer function runs in a root injection context;
+ * the returned function is wrapped in a computed, so signals it reads update labels reactively.
  */
 type GenerateBreadcrumbFn = () => (leaf: ResolvedLeafRoute) => string;
 
@@ -13,24 +11,12 @@ type GenerateBreadcrumbFn = () => (leaf: ResolvedLeafRoute) => string;
  * Configuration options for the breadcrumb system.
  * Use `provideBreadcrumbConfig` to supply these options to your application.
  */
-
 export type BreadcrumbConfig = {
   /**
    * Defines how breadcrumb labels are generated.
-   * - If set to `'manual'`, breadcrumbs will only be displayed if manually registered
-   * via `createBreadcrumb`. Automatic generation based on routes is disabled.
-   * - Alternatively provide a custom label generation function
-   * If left undefined, the system will automatically generate labels based on the route's title, data, or path.
-   * @see GenerateBreadcrumbFn
-   * @example
-   * ```typescript
-   * // For custom label generation:
-   * // const myCustomLabelGenerator = () => (leaf: ResolvedLeafRoute) => {
-   * //   return leaf.route.data?.['customTitle'] || leaf.route.routeConfig?.path || 'Default';
-   * // };
-   * //
-   * // config: { generation: myCustomLabelGenerator }
-   * ```
+   * - `'manual'`: only manually registered breadcrumbs (via `createBreadcrumb`) are shown.
+   * - a {@link GenerateBreadcrumbFn}: custom label generation.
+   * - undefined: labels are auto-generated from the route's title, data, or path.
    */
   generation?: 'manual' | GenerateBreadcrumbFn;
 };

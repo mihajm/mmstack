@@ -86,8 +86,7 @@ export class MmActivity {
     }
     if (this.onServer) return;
     for (const node of this.view.rootNodes) {
-      // covers HTML and SVG roots; text/comment roots can't be styled — their CD is still
-      // detached, but prefer an element root for true visual hiding
+      // covers HTML and SVG roots; text/comment roots can't be styled, their CD is still detached
       if (node instanceof HTMLElement || node instanceof SVGElement)
         node.style.display = visible ? '' : 'none';
     }
@@ -96,8 +95,6 @@ export class MmActivity {
   }
 }
 
-// Shared never-paused signal returned outside a boundary / on the server (SSR renders the full tree,
-// nothing is paused). Readonly so a consumer can't cast-and-`.set()` the shared default for everyone.
 const NEVER_PAUSED: Signal<boolean> = signal(false).asReadonly();
 
 /**

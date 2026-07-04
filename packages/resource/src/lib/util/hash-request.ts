@@ -56,12 +56,12 @@ export function extractUrlFromKey(key: string): string | null {
  * High-entropy secrets are not recoverable from the digest.
  */
 function digestHeaderValue(value: string): string {
-  let h1 = 0x811c9dc5; // FNV-1a offset basis
-  let h2 = 0xcbf29ce4; // independent second pass
+  let h1 = 0x811c9dc5;
+  let h2 = 0xcbf29ce4;
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193); // FNV prime
-    h2 = Math.imul(h2 ^ c, 0x01000197); // distinct odd multiplier
+    h1 = Math.imul(h1 ^ c, 0x01000193);
+    h2 = Math.imul(h2 ^ c, 0x01000197);
   }
   return (
     (h1 >>> 0).toString(16).padStart(8, '0') +
@@ -78,7 +78,6 @@ function readHeader(
     const all = headers.getAll(name);
     return all && all.length ? all.join(',') : null;
   }
-  // record form — header names are case-insensitive
   const lower = name.toLowerCase();
   for (const key of Object.keys(headers)) {
     if (key.toLowerCase() !== lower) continue;
@@ -89,12 +88,6 @@ function readHeader(
   return null;
 }
 
-/**
- * Content-negotiation headers whose values are low-entropy and non-identifying —
- * embedded (URI-encoded) raw, keeping keys human-readable and skipping the digest.
- * Anything NOT on this list (Authorization, api keys, tenant/x-* headers — we can't
- * know what they carry) is one-way digested instead.
- */
 const SAFE_RAW_HEADERS = new Set([
   'accept',
   'accept-language',
@@ -150,8 +143,6 @@ function normalizeVaryHeaders(
       const value = readHeader(headers, name);
       if (value === null) return `${name}=`;
 
-      // known-safe values raw (readable, cheap); everything else digested, NEVER raw —
-      // keys are persisted to IndexedDB and broadcast across tabs
       return SAFE_RAW_HEADERS.has(name)
         ? `${name}=${encodeURIComponent(value)}`
         : `${name}=${digestHeaderValue(value)}`;
@@ -180,7 +171,7 @@ function normalizeParams(
 }
 
 function hashBody(body: unknown): string {
-  // File extends Blob — must check File first
+  // File extends Blob — check File first
   if (typeof File !== 'undefined' && body instanceof File) {
     return `File:${body.name}:${body.type}:${body.size}:${body.lastModified}`;
   }

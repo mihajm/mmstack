@@ -25,7 +25,7 @@ describe('translation-store', () => {
       TestBed.runInInjectionContext(() => {
         const config = injectIntlConfig();
         expect(config).toBeDefined();
-        expect(config?.supportedLocales).toBeUndefined(); // It gets updated in factory? No, if supportedLocales is missing, it doesn't add defaultLocale
+        expect(config?.supportedLocales).toBeUndefined();
       });
     });
 
@@ -79,7 +79,6 @@ describe('translation-store', () => {
     let store: TranslationStore;
 
     beforeEach(() => {
-      // Mock router dependencies which format/pathParam might need
       const routeMock = {
         snapshot: { paramMap: convertToParamMap({}) },
         paramMap: of(convertToParamMap({})),
@@ -95,7 +94,6 @@ describe('translation-store', () => {
         ],
       });
 
-      // Need to reset internal locale signal before each test to prevent bleed
       TestBed.runInInjectionContext(() => {
         injectLocaleInternal().set('en-US');
       });
@@ -117,7 +115,6 @@ describe('translation-store', () => {
         store.formatMessage('home::MMT_DELIM::goodbye', { name: 'John' }),
       ).toBe('Bye John');
 
-      // Update locale
       store.locale.set('es-ES');
       expect(store.formatMessage('home::MMT_DELIM::greeting')).toBe(
         'Bienvenido',
@@ -143,7 +140,7 @@ describe('translation-store', () => {
       });
 
       expect(store.hasLocaleLoaders('es-ES')).toBe(true);
-      expect(store.hasLocaleLoaders('en-US')).toBe(false); // No loader registered for en-US under any namespace
+      expect(store.hasLocaleLoaders('en-US')).toBe(false);
     });
 
     describe('buildSimpleKeySignal', () => {
@@ -214,7 +211,6 @@ describe('translation-store', () => {
           name: 'Alice',
         });
         expect(r1.signal).not.toBe(r2.signal);
-        // Same key → same container instance even when params reference differs.
         expect(r1.container).toBe(r2.container);
         expect(r1.signal()).toBe('Hello Alice');
         expect(r2.signal()).toBe('Hello Alice');
@@ -228,7 +224,6 @@ describe('translation-store', () => {
         );
         const bye = store.buildParamKeySignal('ns::MMT_DELIM::bye', params);
         expect(greet.signal).not.toBe(bye.signal);
-        // Different keys → different containers.
         expect(greet.container).not.toBe(bye.container);
         expect(greet.signal()).toBe('Hello Alice');
         expect(bye.signal()).toBe('Bye Alice');
@@ -270,8 +265,6 @@ describe('translation-store', () => {
       });
 
       it('with variables: interpolates and does not populate the simple-key cache', () => {
-        // formatting a parameterized message without values is a (deliberate, here)
-        // FORMAT_ERROR — silence the dev-mode report so the suite output stays clean
         const errorSpy = vi
           .spyOn(console, 'error')
           .mockImplementation(() => undefined);
@@ -281,8 +274,6 @@ describe('translation-store', () => {
         });
         expect(result).toBe('Hello Alice');
 
-        // The key should not be in the simple-key cache — a subsequent no-variable
-        // call should still resolve correctly (not blow up from a missing cache entry).
         expect(store.formatMessage('ns::MMT_DELIM::greet')).toBe(
           'Hello {name}',
         );
@@ -302,11 +293,6 @@ describe('translation-store', () => {
       });
     });
 
-    // End-to-end proof that `t({ ... })` calls behave as if pure in templates:
-    // Angular Ivy emits `ɵɵpureFunctionN` for inline object literals (including
-    // in function-argument position), giving the same params reference back
-    // across CD passes until inputs change. Combined with `paramKeyMap`,
-    // unrelated CD ticks should NOT re-run the ICU formatter.
     describe('template integration: pure-function memoization', () => {
       it('does not re-run formatMessageInternal when an unrelated signal triggers CD', () => {
         store.register('ns', {
@@ -346,12 +332,8 @@ describe('translation-store', () => {
           '.g',
         ) as HTMLElement;
         expect(greetEl.textContent).toBe('Hello Alice');
-        // One format call for the initial render.
         expect(spy).toHaveBeenCalledTimes(1);
 
-        // Trigger CD via a signal that's NOT in the params object. Angular's
-        // pureFunction1 must return the cached `{ name: 'Alice' }` reference,
-        // paramKeyMap must hit, and the inner computed must short-circuit.
         fixture.componentInstance.unrelated.set(1);
         fixture.detectChanges();
         fixture.componentInstance.unrelated.set(2);
@@ -360,16 +342,11 @@ describe('translation-store', () => {
         fixture.detectChanges();
         expect(spy).toHaveBeenCalledTimes(1);
 
-        // Changing the params input invalidates pureFunction1 → new object
-        // reference → paramKeyMap miss → fresh format call.
         fixture.componentInstance.name.set('Bob');
         fixture.detectChanges();
         expect(greetEl.textContent).toBe('Hello Bob');
         expect(spy).toHaveBeenCalledTimes(2);
 
-        // Setting back to 'Alice' is another distinct paramFunction1 output
-        // (the previous obj has been replaced in the LView slot), so it's a
-        // fresh miss. This documents the invalidation granularity.
         fixture.componentInstance.name.set('Alice');
         fixture.detectChanges();
         expect(greetEl.textContent).toBe('Hello Alice');
@@ -404,7 +381,6 @@ describe('translation-store', () => {
         ],
       });
 
-      // Ensure clean module-level signal before construction
       TestBed.runInInjectionContext(() => {
         injectLocaleInternal().set('en-US');
       });
@@ -465,7 +441,7 @@ describe('translation-store', () => {
       expect(() => TestBed.inject(TranslationStore)).not.toThrow();
       const store = TestBed.inject(TranslationStore);
       expect(store.locale()).toBe('en-US');
-      expect(errorSpy).toHaveBeenCalled(); // swallowed, but reported in dev
+      expect(errorSpy).toHaveBeenCalled();
       errorSpy.mockRestore();
     });
 
@@ -483,7 +459,7 @@ describe('translation-store', () => {
         store.locale.set('sl-SI');
         TestBed.tick();
       }).not.toThrow();
-      expect(errorSpy).toHaveBeenCalled(); // swallowed, but reported in dev
+      expect(errorSpy).toHaveBeenCalled();
       errorSpy.mockRestore();
     });
   });
@@ -505,7 +481,6 @@ describe('translation-store', () => {
       const cache = createSignalCache<{ id: number }>(true);
       const v = { id: 1 };
       cache.set('a', v);
-      // We hold a strong ref via `v`, so deref must succeed.
       expect(cache.get('a')).toBe(v);
       expect(cache.get('missing')).toBeUndefined();
     });
@@ -553,11 +528,8 @@ describe('translation-store', () => {
       const store = configure(true);
       store.register('ns', { 'en-US': { title: 'Hello' } });
 
-      // Pin via a local variable so the WeakRef doesn't drop the signal mid-test.
       const sig = store.buildSimpleKeySignal('ns::MMT_DELIM::title');
       expect(sig()).toBe('Hello');
-      // Second lookup must hit the same cache entry — pinning keeps the
-      // WeakRef live, and the cache must return the same Signal instance.
       const sig2 = store.buildSimpleKeySignal('ns::MMT_DELIM::title');
       expect(sig2).toBe(sig);
     });
@@ -608,7 +580,6 @@ describe('translation-store', () => {
         .mockImplementation(() => undefined);
 
       dynamicLocale.set('fr-FR');
-      // Should remain the same as fr-FR is not in supportedLocales
       expect(dynamicLocale()).not.toBe('fr-FR');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
@@ -620,9 +591,7 @@ describe('translation-store', () => {
         .mockImplementation(() => undefined);
 
       dynamicLocale.set('es-ES');
-      // Should be queued in loadQueue since there are no loaders yet
       expect(store.loadQueue()).toContain('es-ES');
-      // Locale itself doesn't change until loaded (or if it has loaders)
       warnSpy.mockRestore();
     });
   });
@@ -670,16 +639,12 @@ describe('translation-store', () => {
       store.register('home', { 'de-DE': { greeting: 'Hallo' } });
       store.locale.set('de-DE');
 
-      // reading a key missing in BOTH locales queues a default-locale DATA load
       expect(store.formatMessage('home::MMT_DELIM::missingKey')).toBe('');
       await flush();
 
-      // regression: the dequeue effect used to treat this as a user switch and
-      // flip the whole app back to en-US
       expect(store.locale()).toBe('de-DE');
       expect(store.loadQueue()).toEqual([]);
 
-      // the missing key is reported (once) in dev mode
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Missing translation'),
       );
@@ -710,16 +675,13 @@ describe('translation-store', () => {
       dynamicLocale.set('es-ES');
       await flush();
 
-      // regression: the failed head used to stay queued forever, deadlocking
-      // all future locale switches
       expect(store.loadQueue()).toEqual([]);
-      expect(store.locale()).toBe('en-US'); // not switched on total failure
-      // ...and the failure is surfaced with retry guidance
+      expect(store.locale()).toBe('en-US');
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('again will retry'),
       );
 
-      dynamicLocale.set('es-ES'); // retry
+      dynamicLocale.set('es-ES');
       await flush();
 
       expect(attempts).toBe(2);
@@ -733,7 +695,6 @@ describe('translation-store', () => {
 
   describe('initial locale propagation to the compat singleton', () => {
     afterEach(() => {
-      // prevent module-global bleed into other suites
       TestBed.runInInjectionContext(() => {
         injectLocaleInternal().set('en-US');
       });
@@ -755,10 +716,8 @@ describe('translation-store', () => {
         ],
       });
 
-      TestBed.inject(TranslationStore); // construct — initLocale runs
+      TestBed.inject(TranslationStore);
 
-      // regression: initLocale used to write the raw signal BEFORE the proxy
-      // wrapped `set`, so the global stayed 'en-US' until the first runtime switch
       TestBed.runInInjectionContext(() => {
         expect(injectLocaleInternal()()).toBe('sl-SI');
       });
@@ -809,15 +768,14 @@ describe('translation-store', () => {
     });
 
     it('should ignore translations for unsupported locales', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {
-        // noop
-      });
+      const warnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
 
       addTranslations('remote', {
         'fr-FR': { greeting: 'Bonjour' },
       });
 
-      // It shouldn't be possible to get 'Bonjour' since fr-FR is not supported
       store.locale.set('en-US');
       expect(store.formatMessage('remote::MMT_DELIM::greeting')).toBe('');
 
@@ -840,13 +798,10 @@ describe('injectLocaleLoadState', () => {
     TestBed.configureTestingModule({});
     const state = TestBed.runInInjectionContext(() => injectLocaleLoadState());
 
-    // the shape @mmstack/primitives' registerResource/scopes accept structurally
-    // (values not asserted — the store queues its initial locale at construction)
     expect(typeof state.status()).toBe('string');
     expect(typeof state.isLoading()).toBe('boolean');
     expect(typeof state.hasValue()).toBe('boolean');
 
-    // deliberately NOT the raw ResourceRef: no way to reload/destroy the store's loader
     expect('reload' in state).toBe(false);
     expect('destroy' in state).toBe(false);
     expect('set' in state).toBe(false);

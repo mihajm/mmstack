@@ -1,12 +1,4 @@
 /* eslint-disable @angular-eslint/component-selector */
-/**
- * Cross-feature integration: title + breadcrumbs + nav + transition outlet + route-data +
- * mmLink prefetch, wired into one nested, lazily-loaded app shell and driven through real
- * navigation. Each feature is unit-tested in isolation elsewhere; this proves they
- * cooperate — one navigation updates the title, breadcrumb chain and nav-active state while
- * the outlet holds the previous view until the route's data settles, and an mmLink hover
- * warms the matched routes' data.
- */
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
   HttpTestingController,
@@ -190,7 +182,6 @@ describe('app-shell cross-feature integration', () => {
     await router.navigateByUrl('/orgs/1/users/5');
     await flush(fixture);
 
-    // both route-data loaders fired; the top outlet holds /home until the parent settles
     const orgReq = http.expectOne('/api/orgs/1');
     const userReq = http.expectOne('/api/users/5');
     expect(container.querySelector('route-home')).not.toBeNull();
@@ -199,13 +190,12 @@ describe('app-shell cross-feature integration', () => {
     userReq.flush({ name: 'Cara' });
     await flush(fixture);
 
-    // everything cooperated off the one navigation
     expect(container.querySelector('route-home')).toBeNull();
     expect(container.textContent).toContain('org:Acme');
     expect(container.textContent).toContain('user:Cara');
-    expect(title.getTitle()).toBe('User 5'); // deepest leaf's title
+    expect(title.getTitle()).toBe('User 5');
     expect(crumbLabels(container)).toEqual(['Org 1', 'User 5']);
-    expect(activeNav(container)).toEqual(['Users']); // /orgs/1/users/5 → Users active
+    expect(activeNav(container)).toEqual(['Users']);
   });
 
   it('sibling navigation re-derives title/breadcrumbs/nav and retains the parent data', async () => {
@@ -221,9 +211,9 @@ describe('app-shell cross-feature integration', () => {
     await router.navigateByUrl('/orgs/1/settings');
     await flush(fixture);
 
-    http.expectNone('/api/orgs/1'); // parent org data retained (not refetched)
+    http.expectNone('/api/orgs/1');
     expect(container.textContent).toContain('settings');
-    expect(container.textContent).toContain('org:Acme'); // parent layout still shown
+    expect(container.textContent).toContain('org:Acme');
     expect(title.getTitle()).toBe('Settings');
     expect(crumbLabels(container)).toEqual(['Org 1', 'Settings']);
     expect(activeNav(container)).toEqual(['Settings']);
@@ -238,7 +228,6 @@ describe('app-shell cross-feature integration', () => {
     link.dispatchEvent(new MouseEvent('mouseenter'));
     await flush(fixture);
 
-    // hovering /orgs/2/users/9 warmed BOTH matched route-data loaders
     http.expectOne('/api/orgs/2').flush({ name: 'Beta' });
     http.expectOne('/api/users/9').flush({ name: 'Nine' });
     await flush(fixture);

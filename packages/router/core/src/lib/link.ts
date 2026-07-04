@@ -56,11 +56,7 @@ function treeToSerializedUrl(
   return router.serializeUrl(urlTree);
 }
 
-/**
- * Mirrors `RouterLink`'s anchor detection (Angular 20+): `<a>`/`<area>`, or a custom element
- * whose definition observes the `href` attribute. Must stay byte-for-byte aligned with
- * RouterLink so {@link Link}'s click gating matches it exactly.
- */
+// Mirrors RouterLink's anchor detection (keep in sync); Link's click gating depends on it.
 function isAnchorLikeHost(el: HTMLElement): boolean {
   const tagName = el.tagName?.toLowerCase();
   if (tagName === 'a' || tagName === 'area') return true;
@@ -147,7 +143,7 @@ export type MMLinkConfig = {
    * the route's data (`createRouteData` factories, when `withRouteData()` is wired);
    * `'code'` warms only the chunk — for links to routes whose data is expensive or
    * shouldn't fire speculatively. Per-KEY opt-out belongs in the factory itself via
-   * `ctx.isPrefetch`. String literal so future scopes can slot in.
+   * `ctx.isPrefetch`.
    * @default 'all'
    */
   preload: 'all' | 'code';
@@ -248,9 +244,7 @@ function injectConfig() {
   hostDirectives: [
     {
       directive: RouterLink,
-      // Every RouterLink input is forwarded so mmLink stays a drop-in replacement.
-      // Parity is enforced by link.parity.spec.ts — if that test fails, Angular
-      // changed RouterLink's inputs and this list (+ docs) needs updating.
+      // Full RouterLink input forwarding; parity enforced by link.parity.spec.ts.
       inputs: [
         'routerLink: mmLink',
         'target',
@@ -277,12 +271,6 @@ export class Link {
   private readonly req = inject(PreloadRequester);
   private readonly router = inject(Router);
   private readonly el: HTMLElement = inject(ElementRef).nativeElement;
-  /**
-   * Whether RouterLink treats this host as an anchor — `<a>`/`<area>` OR a custom element
-   * whose definition observes the `href` attribute. The modifier/target gating below applies
-   * only to anchor-like hosts. Mirrors RouterLink's own `isAnchorElement` (Angular 20+) —
-   * KEEP IN SYNC; see {@link isAnchorLikeHost}.
-   */
   private readonly isAnchorElement = isAnchorLikeHost(this.el);
 
   readonly target = input<string>();
@@ -297,7 +285,6 @@ export class Link {
   readonly preloadOn = input<'hover' | 'visible' | null>(
     injectConfig().preloadOn,
   );
-  /** What to warm (`preloadOn` is when): `'all'` = code + route data, `'code'` = chunk only. */
   readonly preload = input<'all' | 'code'>(injectConfig().preload);
   readonly useMouseDown = input(injectConfig().useMouseDown, {
     transform: booleanAttribute,
@@ -322,7 +309,6 @@ export class Link {
     return treeToSerializedUrl(this.router, this.urlTree());
   });
 
-  /** Set after a mousedown-triggered navigation so the press's own click is swallowed. */
   private suppressNextClick = false;
 
   onHover() {
@@ -333,7 +319,6 @@ export class Link {
   @HostListener('mousedown', ['$event'])
   onMouseDown(event: MouseEvent) {
     if (!untracked(this.useMouseDown)) return;
-    // same gating as routerLink
     if (!this.isSpaNavigation(event)) return;
 
     untracked(this.beforeNavigate)?.();
@@ -383,10 +368,7 @@ export class Link {
     this.preloading.emit();
   }
 
-  /**
-   * Mirrors `RouterLink.onClick`'s decision: would this event result in an SPA
-   * navigation (as opposed to no-op / browser default)?
-   */
+  // Mirrors RouterLink.onClick: would this event trigger an SPA navigation?
   private isSpaNavigation(event: MouseEvent): boolean {
     if (!untracked(this.urlTree)) return false;
 

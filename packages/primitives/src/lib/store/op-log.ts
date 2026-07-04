@@ -269,8 +269,6 @@ export function opLog<T extends object>(
 ): OpLog<T> {
   const origin = opt?.origin ?? generateOrigin();
 
-  // a store proxy's `has` trap answers for the VALUE's keys, so `isMutable`'s `'mutate' in`
-  // probe can't see the brand — ask the store's own kind symbol first
   const storeKind = (source as { [STORE_KIND]?: StoreKind })[STORE_KIND];
   const mutableSource = storeKind ? storeKind === 'mutable' : isMutable(source);
 

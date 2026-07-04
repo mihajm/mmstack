@@ -131,26 +131,21 @@ describe('breadcrumb-resolver', () => {
     });
 
     const router = TestBed.inject(Router);
-    
-    // Start navigation, but don't await immediately because it will block
+
     let navigationComplete = false;
     router.navigateByUrl('/test').then(() => {
       navigationComplete = true;
     });
 
-    // Let the event loop cycle
     await new Promise((r) => setTimeout(r, 0));
-    
-    // Navigation should be blocked waiting for labelSignal to be truthy
+
     expect(navigationComplete).toBe(false);
 
-    // Provide truthy value
     labelSignal.set('Truthy Label');
     TestBed.flushEffects();
 
-    // Now await the navigation
-    await new Promise((r) => setTimeout(r, 20)); // wait a bit more for router
-    
+    await new Promise((r) => setTimeout(r, 20));
+
     expect(navigationComplete).toBe(true);
     
     const registered = mockStore.register.mock.calls[0][0];

@@ -79,12 +79,10 @@ describe('holdThroughNavigation integration — reused route-data resource (the 
     await flush(fixture);
     expect(container.textContent).toContain('user:Alice');
 
-    // param-only navigation — same route reused, refetch starts around NavigationEnd
     await router.navigateByUrl('/users/2');
     await flush(fixture);
 
-    // the new request is in flight — the held view must still show Alice, not a blank/loading flash
-    const req = http.expectOne('/api/users/2'); // request went out
+    const req = http.expectOne('/api/users/2');
     expect(container.textContent).toContain('user:Alice');
     expect(container.textContent).toContain('loading:false');
 
@@ -95,9 +93,6 @@ describe('holdThroughNavigation integration — reused route-data resource (the 
 });
 
 describe('holdThroughNavigation — eager settledness (unread consumers)', () => {
-  // The settle machine is pull-based; these tests drive a navigation + refetch cycle
-  // WITHOUT ever reading the held resource (the unmounted-consumer case), then check
-  // whether a later manual reload's indicator passes through live.
   const snap = (status: string, value: unknown) =>
     ({ status, value, error: undefined }) as never;
 
@@ -121,15 +116,13 @@ describe('holdThroughNavigation — eager settledness (unread consumers)', () =>
       ),
     );
 
-    // navigation succeeds; the refetch runs just after NavigationEnd — all UNREAD
     await TestBed.inject(Router).navigateByUrl('/a');
     TestBed.tick();
     snapshot.set(snap('loading', undefined));
-    TestBed.tick(); // eager watcher (when present) observes the in-flight frame
+    TestBed.tick();
     snapshot.set(snap('resolved', { name: 'Bob' }));
     TestBed.tick();
 
-    // ...now a manual reload, long after the navigation settled
     snapshot.set(snap('reloading', { name: 'Bob' }));
     TestBed.tick();
     return held;
@@ -137,12 +130,12 @@ describe('holdThroughNavigation — eager settledness (unread consumers)', () =>
 
   it('without eager, an unread consumer misses the cycle and the reload is held (the caveat)', async () => {
     const held = await driveUnreadCycle(false);
-    expect(held.isLoading()).toBe(false); // indicator wrongly hidden — documented caveat
+    expect(held.isLoading()).toBe(false);
   });
 
   it('eager: true keeps settledness tracked with zero readers — the reload passes live', async () => {
     const held = await driveUnreadCycle(true);
-    expect(held.isLoading()).toBe(true); // cycle was observed → live pass-through
+    expect(held.isLoading()).toBe(true);
     expect(held.value()).toEqual({ name: 'Bob' });
   });
 });

@@ -11,5 +11,5 @@ export function getSignalEquality<T>(sig: Signal<T>): ValueEqualityFn<T> {
   if (internal && typeof internal.equal === 'function') {
     return internal.equal;
   }
-  return Object.is; // Default equality check
+  return Object.is;
 }

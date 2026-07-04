@@ -120,8 +120,6 @@ describe('withRouteData (mmLink data prefetch)', () => {
   });
 });
 
-// ——— failure paths: a throwing/erroring warm must never wedge the pipeline ———
-
 function failureSetup(
   factory: (ctx: { isPrefetch: boolean }) => unknown,
   other?: () => void,
@@ -174,11 +172,11 @@ describe('withRouteData — failure paths', () => {
     await tick();
     expect(attempts).toBe(1);
 
-    req.startPreload('/other'); // the subscription must still be alive
+    req.startPreload('/other');
     await tick();
     expect(otherRuns).toBe(1);
 
-    req.startPreload('/fragile/1'); // a failed warm is retryable
+    req.startPreload('/fragile/1');
     await tick();
     expect(attempts).toBe(2);
     expect(warn).toHaveBeenCalled();
@@ -199,7 +197,7 @@ describe('withRouteData — failure paths', () => {
 
     status.set('error');
     await tick();
-    TestBed.tick(); // flush the settle effect
+    TestBed.tick();
 
     req.startPreload('/fragile/2');
     await tick();
@@ -240,14 +238,14 @@ describe('withRouteData — failure paths', () => {
     a.set('resolved');
     await tick();
     TestBed.tick();
-    req.startPreload('/fragile/4'); // still in flight (b loading) → deduped
+    req.startPreload('/fragile/4');
     await tick();
     expect(attempts).toBe(1);
 
     b.set('error');
     await tick();
     TestBed.tick();
-    req.startPreload('/fragile/4'); // the composite settled with an error → retry
+    req.startPreload('/fragile/4');
     await tick();
     expect(attempts).toBe(2);
   });

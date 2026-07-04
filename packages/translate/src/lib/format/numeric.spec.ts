@@ -68,7 +68,6 @@ describe('numeric formatting', () => {
     it('should respect the locale', () => {
       TestBed.runInInjectionContext(() => {
         const result = formatNumber(1234.56, { locale: 'de-DE' });
-        // German uses period for grouping and comma for decimals: "1.234,56"
         expect(result).toBe('1.234,56');
       });
     });
@@ -81,7 +80,6 @@ describe('numeric formatting', () => {
   describe('formatPercent', () => {
     it('should format a number as a percentage', () => {
       TestBed.runInInjectionContext(() => {
-        // 0.5 is 50%
         expect(formatPercent(0.5)).toBe('50%');
       });
     });
@@ -117,7 +115,7 @@ describe('numeric formatting', () => {
       TestBed.runInInjectionContext(() => {
         expect(formatCurrency(100, 'USD', { display: 'code' })).toBe(
           'USD 100.00',
-        ); // Might contain a non-breaking space
+        );
       });
     });
 
@@ -132,7 +130,6 @@ describe('numeric formatting', () => {
     });
 
     it('should accept an explicit locale string (SSR-safe overload)', () => {
-      // German formatting: "1.234,50 €"
       expect(formatCurrency(1234.5, 'EUR', 'de-DE')).toBe('1.234,50 €');
     });
     it('should support fraction-digit control', () => {

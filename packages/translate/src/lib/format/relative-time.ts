@@ -99,7 +99,7 @@ export function formatRelativeTime(
     | Signal<UnsafeFormatRelativeTimeOptions>,
 ): string {
   const unwrappedValue = unwrap(value);
-  // Number.isFinite also rejects ±Infinity, which Intl.RelativeTimeFormat throws on
+  // rejects ±Infinity, which Intl.RelativeTimeFormat throws on
   if (unwrappedValue == null || !Number.isFinite(unwrappedValue)) return '';
 
   const unwrappedUnit = unwrap(unit);
@@ -142,12 +142,7 @@ const [provideFormatRelativeTimeDefaults, injectFormatRelativeTimeOptions] =
  */
 export { provideFormatRelativeTimeDefaults };
 
-/**
- * Reference instants in seconds per unit, used by {@link formatRelativeTimeToNow} to pick
- * the largest unit whose magnitude is at least 1. Weeks/months use calendar averages
- * (4.34524 weeks/month), which is the standard approximation for "x ago" displays —
- * supply an explicit unit via {@link formatRelativeTime} when exactness matters.
- */
+// Unit thresholds for picking the largest fitting unit; months use calendar averages.
 const DIVISIONS: { amount: number; unit: RelativeTimeUnit }[] = [
   { amount: 60, unit: 'second' },
   { amount: 60, unit: 'minute' },

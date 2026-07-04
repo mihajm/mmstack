@@ -1,12 +1,4 @@
 /* eslint-disable @angular-eslint/component-selector */
-/**
- * End-to-end integration for the route-level data features, wired the way an app would:
- * lazy `loadComponent` routes, real `httpResource` (Angular-native — no @mmstack/resource
- * dependency; queryResource sits on the same primitive, so what holds here holds there),
- * `HttpTestingController` for real request timing, the `TransitionRouterOutlet`,
- * `provideRouteData`/`createRouteData`/`injectRouteData`, and `withRouteData()` prefetch
- * driven by the same `PreloadRequester` signal `mmLink` emits.
- */
 import { provideLocationMocks } from '@angular/common/testing';
 import {
   httpResource,
@@ -55,7 +47,6 @@ function userRoutes() {
     { path: 'home', component: HomeCmp },
     {
       path: 'users/:id',
-      // lazy, like a real code-split route
       loadComponent: () => Promise.resolve(UserCmp),
       providers: [provideRouteData(USER)],
       resolve: {
@@ -109,14 +100,12 @@ describe('route-data integration (lazy routes + httpResource + transition outlet
     await router.navigateByUrl('/users/1');
     await flush(fixture);
 
-    // the route-data request is in flight → the outlet still shows home
     const req = http.expectOne('/api/users/1');
     expect(container.querySelector('route-home')).not.toBeNull();
 
     req.flush({ name: 'Alice' });
     await flush(fixture);
 
-    // settled → swapped to the lazy user view showing the resolved data
     expect(container.querySelector('route-home')).toBeNull();
     expect(container.textContent).toContain('user:Alice');
   });
@@ -144,18 +133,14 @@ describe('route-data integration (lazy routes + httpResource + transition outlet
     await router.navigateByUrl('/home');
     await flush(fixture);
 
-    // simulate mmLink hover/visible intent for /users/9
     TestBed.inject(PreloadRequester).startPreload('/users/9');
     await flush(fixture);
 
-    // the data request was issued by the prefetch path, before any navigation
     const req = http.expectOne('/api/users/9');
     req.flush({ name: 'Nine' });
     await flush(fixture);
   });
 });
-
-// ——— nested resolvers: a parent layout route + child routes, each with its own data ———
 
 type Org = { name: string };
 type Settings = { theme: string };
@@ -249,15 +234,13 @@ describe('route-data integration — nested resolvers', () => {
     await router.navigateByUrl('/org/7/users/3');
     await flush(fixture);
 
-    // BOTH loaders fired at match — the two requests are in flight at the same time,
-    // before either has resolved (proves parallel, match-time firing across the chain)
     const orgReq = http.expectOne('/api/orgs/7');
     const userReq = http.expectOne('/api/users/3');
-    expect(container.querySelector('route-home')).not.toBeNull(); // top outlet still holding
+    expect(container.querySelector('route-home')).not.toBeNull();
 
     orgReq.flush({ name: 'Acme' });
     await flush(fixture);
-    expect(container.textContent).toContain('org:Acme'); // parent settled → top swapped in
+    expect(container.textContent).toContain('org:Acme');
 
     userReq.flush({ name: 'Cara' });
     await flush(fixture);
@@ -294,8 +277,6 @@ describe('route-data integration — nested resolvers', () => {
                 providers: [provideRouteData(AUDIT)],
                 resolve: {
                   audit: createRouteData(AUDIT, (ctx) => {
-                    // reads the PARENT's :orgId — the prefetch path extracts it from the
-                    // full config path, so activation must see it too
                     const res = httpResource<{ ok: boolean }>(
                       () => `/api/orgs/${ctx.params()['orgId']}/audit`,
                     );
@@ -319,7 +300,7 @@ describe('route-data integration — nested resolvers', () => {
     await flush(rendered.fixture);
 
     http.expectOne('/api/orgs/7').flush({ name: 'Acme' });
-    http.expectOne('/api/orgs/7/audit').flush({ ok: true }); // parent param visible in the child
+    http.expectOne('/api/orgs/7/audit').flush({ ok: true });
     await flush(rendered.fixture);
     expect(rendered.container.textContent).toContain('audit:true');
   });
@@ -335,25 +316,22 @@ describe('route-data integration — nested resolvers', () => {
     expect(container.textContent).toContain('org:Acme');
     expect(container.textContent).toContain('user:Cara');
 
-    // navigate to a SIBLING child — parent route is retained
     await router.navigateByUrl('/org/7/settings');
     await flush(fixture);
 
-    http.expectNone('/api/orgs/7'); // parent loader did NOT re-fire (memoized, same orgId)
+    http.expectNone('/api/orgs/7');
     const settingsReq = http.expectOne('/api/settings');
-    expect(container.textContent).toContain('user:Cara'); // child outlet holds the old child
+    expect(container.textContent).toContain('user:Cara');
 
     settingsReq.flush({ theme: 'dark' });
     await flush(fixture);
 
     expect(container.textContent).toContain('settings:dark');
-    expect(container.textContent).not.toContain('user:Cara'); // child swapped
-    expect(container.textContent).toContain('org:Acme'); // parent untouched, still shown
+    expect(container.textContent).not.toContain('user:Cara');
+    expect(container.textContent).toContain('org:Acme');
   });
 
   it("a CHILD factory reads the PARENT's SLOT via injectRouteData(PARENT_KEY) (cross-data access)", async () => {
-    // resolve order is parent-first and the child factory's injector sees ancestor route
-    // providers — so the parent's slot is populated and injectable by the time the child runs
     const PARENT = routeDataKey<HttpResourceRef<User | undefined>>('p-user');
     const CHILD = routeDataKey<{
       parentRef: unknown;
@@ -396,7 +374,6 @@ describe('route-data integration — nested resolvers', () => {
                   providers: [provideRouteData(CHILD)],
                   resolve: {
                     posts: createRouteData(CHILD, () => ({
-                      // the cross-data access under test:
                       parentRef: injectRouteData(PARENT),
                       posts: httpResource<string[]>(() => '/api/p-posts'),
                     })),
@@ -426,7 +403,7 @@ describe('route-data integration — nested resolvers', () => {
     const child = fixture.debugElement.query(
       (n) => n.componentInstance instanceof ChildCmp,
     )?.componentInstance as ChildCmp;
-    expect(child.data.parentRef).toBe(parentInstance); // the SAME parent slot instance
+    expect(child.data.parentRef).toBe(parentInstance);
     expect(fixture.nativeElement.textContent).toContain('posts:2');
   });
 });

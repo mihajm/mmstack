@@ -49,7 +49,6 @@ describe('hash', () => {
       a = 1;
       b = 2;
     }
-    // Different construction orders but identical own enumerable state → same hash.
     expect(hash(new Foo())).toBe(hash(new Bar()));
     expect(hash(new Foo())).toBe('[{"a":1,"b":2}]');
   });
@@ -71,7 +70,6 @@ describe('hash', () => {
     });
 
     it('does not collide with an empty plain object', () => {
-      // Pre-change behavior: JSON.stringify(new Map()) was '{}'. Now it has a marker.
       expect(hash(new Map())).not.toBe(hash({}));
     });
 
@@ -82,10 +80,6 @@ describe('hash', () => {
     });
 
     it('sorts by recursive hash so logically-equal object keys produce stable order', () => {
-      // Both maps hold the same two keys ({a:1,b:2} and {x:1}) and same values,
-      // but the first key is constructed in different orders. Sort must consider
-      // the recursive (key-sorted) hash, otherwise the entries array order
-      // diverges.
       const m1 = new Map<unknown, unknown>([
         [{ a: 1, b: 2 }, 'v1'],
         [{ x: 1 }, 'v2'],

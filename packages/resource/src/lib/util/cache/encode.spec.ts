@@ -66,7 +66,7 @@ describe('encode', () => {
       const deserialized = deserialize(pojo);
 
       expect(deserialized).toBeInstanceOf(HttpResponse);
-      expect(deserialized?.body).toBe(blob); // The exact same blob instance survives
+      expect(deserialized?.body).toBe(blob);
       expect(deserialized?.status).toBe(200);
       expect(deserialized?.url).toBe('https://example.com/blob');
     });
@@ -74,7 +74,7 @@ describe('encode', () => {
     it('should return null if the pojo is invalid', () => {
       expect(deserialize(null)).toBeNull();
       expect(deserialize('not an object')).toBeNull();
-      expect(deserialize({ status: 200 })).toBeNull(); // missing body
+      expect(deserialize({ status: 200 })).toBeNull();
     });
   });
 });

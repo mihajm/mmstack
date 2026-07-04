@@ -16,7 +16,7 @@ function setup(extra: Provider[]) {
       provideHttpClient(),
       provideHttpClientTesting(),
       provideQueryCache(),
-      provideTransitionScope(), // a scope for resources to register into
+      provideTransitionScope(),
       ...extra,
     ],
   });
@@ -30,7 +30,6 @@ describe('resource options injection + auto-register', () => {
       expect(scope.resources().length).toBe(0);
       queryResource(() => 'https://example.test/a', { register: 'indicator' });
       expect(scope.resources().length).toBe(1);
-      // 'indicator' drives pending/hold-stale but never blanks the boundary.
       expect(scope.suspended('value')).toBe(false);
     });
   });
@@ -41,7 +40,6 @@ describe('resource options injection + auto-register', () => {
       const scope = injectTransitionScope();
       queryResource(() => 'https://example.test/a', { register: 'suspend' });
       expect(scope.resources().length).toBe(1);
-      // no value yet → a suspending resource suspends the boundary's first paint.
       expect(scope.suspended('value')).toBe(true);
     });
   });
@@ -50,7 +48,7 @@ describe('resource options injection + auto-register', () => {
     setup([provideResourceOptions({ register: 'indicator' })]);
     TestBed.runInInjectionContext(() => {
       const scope = injectTransitionScope();
-      queryResource(() => 'https://example.test/a'); // no per-call register → inherits default
+      queryResource(() => 'https://example.test/a');
       expect(scope.resources().length).toBe(1);
     });
   });
@@ -71,7 +69,7 @@ describe('resource options injection + auto-register', () => {
     ]);
     TestBed.runInInjectionContext(() => {
       const scope = injectTransitionScope();
-      queryResource(() => 'https://example.test/a'); // query layer (false) overrides general (true)
+      queryResource(() => 'https://example.test/a');
       expect(scope.resources().length).toBe(0);
     });
   });

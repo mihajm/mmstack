@@ -138,7 +138,6 @@ export function fieldMetadata<T>(
   const name = opts?.debugName ?? 'metadata';
 
   // Defer the field-state read until the [formField] host has bound.
-  // Only `undefined` counts as unset — a schema-provided `null` is a real value.
   const project =
     (componentFallback?: T): FieldProjector<T | undefined> =>
     (field) =>

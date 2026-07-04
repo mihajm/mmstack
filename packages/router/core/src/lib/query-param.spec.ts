@@ -65,7 +65,6 @@ describe('queryParam', () => {
 
     q.set('zoneless');
 
-    // default: each set navigates immediately, no microtask
     expect(routerMock.navigate).toHaveBeenCalledWith([], {
       relativeTo: activatedRouteMock,
       queryParams: { q: 'zoneless' },
@@ -79,7 +78,6 @@ describe('queryParam', () => {
 
     q.set(null);
 
-    // `merge` PRESERVES absent keys — removal must patch an explicit null
     expect(routerMock.navigate).toHaveBeenCalledWith([], {
       relativeTo: activatedRouteMock,
       queryParams: { q: null },
@@ -109,7 +107,6 @@ describe('queryParam', () => {
     q.set('signals');
     filter.set('active');
 
-    // nothing yet — coalesced writes flush on a microtask
     expect(routerMock.navigate).not.toHaveBeenCalled();
     await Promise.resolve();
 
@@ -118,7 +115,6 @@ describe('queryParam', () => {
       relativeTo: activatedRouteMock,
       queryParams: { q: 'signals', filter: 'active' },
       queryParamsHandling: 'merge',
-      // only skips the history entry when EVERY writer in the batch opted in
       replaceUrl: false,
     });
   });

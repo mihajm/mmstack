@@ -44,8 +44,6 @@ export function focusWithin(
   opt?: SensorRunOptions,
 ): Signal<boolean> {
   return runInSensorContext(opt?.injector, () =>
-    // the host-element default must resolve INSIDE the sensor context, not as a
-    // parameter default (which would run before the injector wrapper)
     createFocusWithin(target ?? inject(ElementRef), opt),
   );
 }

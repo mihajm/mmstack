@@ -1,5 +1,7 @@
 # @mmstack/worker
 
+> **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
+
 Split-graph state and compute for Angular. Keep the reactive graph on the main thread for rendering, and hand owned state plus heavy computation to a Web Worker that runs its own graph. The main thread reads live replicas and routes writes; the worker owns the data, derives from it, and answers tasks. State stays in sync automatically over minimal deltas, never full snapshots.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/worker/LICENSE)
@@ -8,10 +10,10 @@ Built on the store op-log from [`@mmstack/primitives`](https://www.npmjs.com/pac
 
 ## Highlights
 
-- **Main renders, worker computes.** The worker owns stores and derivations and runs off the main thread. The main thread holds read-only replicas and reads them like any signal store, so heavy work makes the UI pending, not frozen.
+- **Main renders, worker computes.** The worker owns stores and derivations and runs off the main thread. The main thread holds a live replica of each owned store (a real, writable signal store), so heavy work makes the UI pending, not frozen.
 - **Deltas, not snapshots.** State mirrors as op batches (one `set`/`delete` per changed path), diffed by reference identity. The initial hydration is the only snapshot; everything after is a minimal delta.
-- **Single writer, provable convergence.** Each store subtree has exactly one owner (the worker). Writes from the main thread route to that owner, which sequences them and fans the authoritative result back to every replica. No optimistic divergence, no CRDTs. Interleaved writes converge to identical state by construction.
-- **Honest async.** A replica read is synchronous (the value is always held). Only writes and settles are async, and they surface as `pending` through transition scopes rather than promises you await in the template.
+- **Single sequencer, provable convergence.** Each store subtree has exactly one owner (the worker). Writes apply optimistically on the main thread and route to that owner, which sequences them and fans the authoritative result back to every replica; because every op is idempotent, replicas reconcile without divergence. Owner-authoritative, no CRDTs. Interleaved writes converge to identical state.
+- **Optimistic by default, composable.** A write is visible immediately and its promise resolves once the owner confirms; fork the store if you want honest hide-until-confirmed. And because an owned store is a writable op-log endpoint, `persist` and `@mmstack/mesh`'s `meshSync` attach to it directly: a persisted, meshed, worker-owned graph with no bridge.
 - **The resource surface you already know.** `workerResource` runs a function off-main and exposes `value` / `status` / `error` / `isLoading`, so it drops into `latest()` / `use()` and Suspense boundaries with no adapter.
 - **Typed from the worker's contract.** `connectWorker<typeof host>()` infers store keys, value types, task signatures, and whether a subtree is writable, all from the worker you wrote.
 - **SSR safe.** On the server nothing spawns. Replicas render their default value and resolve once the worker connects in the browser.
@@ -37,7 +39,7 @@ There are two reactive graphs and a wire between them.
 
 **The main graph** renders. From a component you `connectWorker` (which spawns the worker) and then:
 
-1. `workerStore(worker, key)` gives a live, read-only replica of an owned store, plus `write()` to route a change to the owner,
+1. `workerStore(worker, key)` gives a live replica of an owned store (a writable op-log endpoint): read it, `write()` to route a change to the owner (optimistic), and attach `persist`/`meshSync` readers to it,
 2. `workerStore(worker, key)` on a published key gives a read-only mirror of a derivation (no `write()`),
 3. `workerResource(...)` runs a task and exposes it with the standard resource surface.
 

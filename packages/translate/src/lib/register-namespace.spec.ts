@@ -79,10 +79,8 @@ describe('createT', () => {
       const snapshot = t('myNs.greet', { name: 'Alice' });
       expect(snapshot).toBe('Hello Alice');
 
-      // Calling t again with different variables produces a new snapshot
       expect(t('myNs.greet', { name: 'Bob' })).toBe('Hello Bob');
 
-      // The original snapshot is unchanged
       expect(snapshot).toBe('Hello Alice');
     });
 
@@ -258,8 +256,6 @@ describe('injectUnsafeT', () => {
     const t1 = TestBed.runInInjectionContext(() => injectUnsafeT());
     const t2 = TestBed.runInInjectionContext(() => injectUnsafeT());
 
-    // Both call sites resolve to the same cached delim form. If the cache
-    // weren't shared, both would still work — this just exercises the path.
     expect(t1('myNs.hello')).toBe('Hello World');
     expect(t2('myNs.hello')).toBe('Hello World');
   });
@@ -273,8 +269,6 @@ describe('resolveTranslationModule', () => {
   });
 
   it('unwraps an ES-module default export (`{ default }`)', () => {
-    // Shape returned by `await import('./quote.namespace')` when the file
-    // does `export default ns.translation`.
     const moduleLike = {
       default: compiled,
       [Symbol.toStringTag]: 'Module',
@@ -284,7 +278,6 @@ describe('resolveTranslationModule', () => {
   });
 
   it('unwraps a named `translation` export (`{ translation }`)', () => {
-    // Shape returned when the file does `export const translation = ns.translation`.
     const moduleLike = {
       translation: compiled,
       [Symbol.toStringTag]: 'Module',
@@ -317,23 +310,19 @@ describe('registerNamespace return shape', () => {
       {},
     );
 
-    // tuple form (third element = warmNamespaceTranslation, added 2026-07)
     expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(3);
     expect(result[2]).toBe(result.warmNamespaceTranslation);
 
-    // tuple and object access return the same function references
     expect(result[0]).toBe(result.injectNamespaceT);
     expect(result[1]).toBe(result.resolveNamespaceTranslation);
     expect(typeof result[0]).toBe('function');
     expect(typeof result[1]).toBe('function');
 
-    // tuple destructure works
     const [injectT, resolveT] = result;
     expect(injectT).toBe(result.injectNamespaceT);
     expect(resolveT).toBe(result.resolveNamespaceTranslation);
 
-    // object destructure still works (back-compat)
     const { injectNamespaceT, resolveNamespaceTranslation } = result;
     expect(injectNamespaceT).toBe(result[0]);
     expect(resolveNamespaceTranslation).toBe(result[1]);
@@ -369,16 +358,14 @@ describe('warmNamespaceTranslation', () => {
       ns.warmNamespaceTranslation('sl-SI'),
     );
 
-    expect(slLoads).toBe(1); // the locale chunk was fetched…
-    expect(defaultLoads).toBe(0); // …only that one (no preloadDefaultLocale configured)
-    expect(untracked(store.locale)).toBe('en-US'); // warm NEVER switches the locale
+    expect(slLoads).toBe(1);
+    expect(defaultLoads).toBe(0);
+    expect(untracked(store.locale)).toBe('en-US');
 
-    // the data is registered: switching later reads it synchronously (no load)
     const t = TestBed.runInInjectionContext(() => ns.injectNamespaceT());
     store.locale.set('sl-SI');
     expect(t('warmdemo.hello')).toBe('Zivjo');
 
-    // idempotent — a repeat warm (e.g. a second hover) never re-runs the loader
     await TestBed.runInInjectionContext(() =>
       ns.warmNamespaceTranslation('sl-SI'),
     );
@@ -391,7 +378,7 @@ describe('warmNamespaceTranslation', () => {
       injectLocaleInternal().set('en-US');
     });
     const store = TestBed.inject(TranslationStore);
-    store.locale.set('sl-SI'); // after construction — the store seeds the global on init
+    store.locale.set('sl-SI');
 
     const demo = createNamespace('warmdemo2', { hello: 'Hi' });
     const sl = demo.createTranslation('sl-SI', { hello: 'Zivjo' });
@@ -405,10 +392,10 @@ describe('warmNamespaceTranslation', () => {
 
     await TestBed.runInInjectionContext(() => ns.warmNamespaceTranslation());
     expect(slLoads).toBe(1);
-    expect(untracked(store.locale)).toBe('sl-SI'); // unchanged
+    expect(untracked(store.locale)).toBe('sl-SI');
 
     const t = TestBed.runInInjectionContext(() => ns.injectNamespaceT());
-    expect(t('warmdemo2.hello')).toBe('Zivjo'); // already readable — no switch needed
+    expect(t('warmdemo2.hello')).toBe('Zivjo');
   });
 });
 
@@ -420,22 +407,18 @@ describe('registerRemoteNamespace return shape', () => {
       {},
     );
 
-    // tuple form
     expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(2);
 
-    // tuple and object access return the same function references
     expect(result[0]).toBe(result.injectNamespaceT);
     expect(result[1]).toBe(result.resolveNamespaceTranslation);
     expect(typeof result[0]).toBe('function');
     expect(typeof result[1]).toBe('function');
 
-    // tuple destructure works
     const [injectT, resolveT] = result;
     expect(injectT).toBe(result.injectNamespaceT);
     expect(resolveT).toBe(result.resolveNamespaceTranslation);
 
-    // object destructure still works (back-compat)
     const { injectNamespaceT, resolveNamespaceTranslation } = result;
     expect(injectNamespaceT).toBe(result[0]);
     expect(resolveNamespaceTranslation).toBe(result[1]);

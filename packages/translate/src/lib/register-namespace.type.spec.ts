@@ -1,17 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
-/**
- * Type-level coverage for the surface that `parameterize.type.spec.ts` doesn't
- * touch: namespace shape enforcement (createNamespace / createTranslation),
- * the LoadedTranslation union accepted by registerNamespace, the cross-locale
- * namespace constraint, the merged-namespace consumer type, and how
- * `withParams` loosens non-default locales for branded keys.
- *
- * These tests pass as long as the file compiles. Type mismatches surface as
- * build errors with line numbers pointing into this file. `@ts-expect-error`
- * directives must sit on the line immediately above the failing call/property.
- */
-
 import { createNamespace } from './create-namespace';
 import type {
   inferCompiledTranslationMap,
@@ -29,10 +17,6 @@ type Equals<X, Y> =
     : false;
 
 type Expect<T extends true> = T;
-
-// -----------------------------------------------------------------------------
-// createNamespace — inferred Namespace and Map
-// -----------------------------------------------------------------------------
 
 const ns = createNamespace('quote', {
   pageTitle: 'Famous Quotes',
@@ -57,7 +41,6 @@ type _ns_map = Expect<
   >
 >;
 
-// Nested objects flatten into dotted keys, not nested record types.
 type _ns_map_keys = Expect<
   Equals<
     keyof inferCompiledTranslationMap<typeof ns.translation>,
@@ -68,11 +51,6 @@ type _ns_map_keys = Expect<
   >
 >;
 
-// -----------------------------------------------------------------------------
-// createTranslation — shape enforcement for non-default locales
-// -----------------------------------------------------------------------------
-
-// Valid: matches the inferred shape exactly, with the right placeholder.
 const _sl_valid = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   greeting: 'Zdravo {name}',
@@ -80,13 +58,11 @@ const _sl_valid = ns.createTranslation('sl-SI', {
   stats: '{count, plural, =1 {# citat} other {# citatov}}',
 });
 
-// Missing top-level keys — error attaches to the call argument.
 // @ts-expect-error - missing `greeting`, `detail`, `stats`
 const _sl_missing_top_level = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
 });
 
-// Missing a nested key — error attaches to the inner literal.
 const _sl_missing_nested = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   greeting: 'Zdravo {name}',
@@ -95,7 +71,6 @@ const _sl_missing_nested = ns.createTranslation('sl-SI', {
   stats: '{count, plural, =1 {# citat} other {# citatov}}',
 });
 
-// Extra top-level key (object-literal excess property check).
 const _sl_extra_key = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   greeting: 'Zdravo {name}',
@@ -105,7 +80,6 @@ const _sl_extra_key = ns.createTranslation('sl-SI', {
   extra: 'not allowed',
 });
 
-// Placeholder dropped — value no longer satisfies `${string}{name}${string}`.
 const _sl_missing_placeholder = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   // @ts-expect-error - missing the `{name}` placeholder required by the shape
@@ -114,7 +88,6 @@ const _sl_missing_placeholder = ns.createTranslation('sl-SI', {
   stats: '{count, plural, =1 {# citat} other {# citatov}}',
 });
 
-// Plain `string` widened — non-literal strings are rejected.
 const _sl_arbitrary_string = ns.createTranslation('sl-SI', {
   pageTitle: 'Znani Citati',
   // @ts-expect-error - widened `string` is not assignable to the placeholder type
@@ -122,10 +95,6 @@ const _sl_arbitrary_string = ns.createTranslation('sl-SI', {
   detail: { authorLabel: 'Avtor' },
   stats: '{count, plural, =1 {# citat} other {# citatov}}',
 });
-
-// -----------------------------------------------------------------------------
-// createMergedNamespace — merged compiled translation exposes both namespaces
-// -----------------------------------------------------------------------------
 
 const common = createNamespace('common', {
   yes: 'Yes',
@@ -137,11 +106,6 @@ const quoteWithCommon = common.createMergedNamespace('quote', {
   pageTitle: 'Quotes',
   greeting: 'Hi {name}',
 });
-
-// Spot-check that keys from each namespace exist in the merged map with the
-// right param type. A full `keyof` equality is brittle here because the
-// merged map is built via an intersection of two `Simplify<>` types — the
-// per-key indexing is the stable surface.
 
 type _merged_has_quote_key = Expect<
   Equals<
@@ -170,17 +134,12 @@ type _merged_has_common_key = Expect<
   >
 >;
 
-// The merged namespace's literal is preserved (not widened to `string`).
 type _merged_namespace_literal = Expect<
   Equals<
     inferCompiledTranslationNamespace<typeof quoteWithCommon.translation>,
     'quote'
   >
 >;
-
-// -----------------------------------------------------------------------------
-// LoadedTranslation — the loader-shape union accepted by registerNamespace
-// -----------------------------------------------------------------------------
 
 type _loaded_union_shape = Expect<
   Equals<
@@ -191,18 +150,12 @@ type _loaded_union_shape = Expect<
   >
 >;
 
-// All four practical loader shapes typecheck:
-
-// 1. Direct CompiledTranslation
 registerNamespace(() => Promise.resolve(ns.translation), {});
 
-// 2. ES default export wrapping
 registerNamespace(() => Promise.resolve({ default: ns.translation }), {});
 
-// 3. Named `translation` export wrapping
 registerNamespace(() => Promise.resolve({ translation: ns.translation }), {});
 
-// 4. Module Namespace–like (extra named exports allowed via structural typing)
 registerNamespace(
   () =>
     Promise.resolve({
@@ -213,7 +166,6 @@ registerNamespace(
   {},
 );
 
-// Garbage payloads are rejected at the loader signature.
 registerNamespace(
   // @ts-expect-error - string is not a CompiledTranslation or wrapper
   () => Promise.resolve('garbage'),
@@ -226,28 +178,18 @@ registerNamespace(
   {},
 );
 
-// -----------------------------------------------------------------------------
-// registerNamespace — `other` locales must share the default's namespace string
-// -----------------------------------------------------------------------------
-
 const nsA = createNamespace('a', { hello: 'Hi' });
 const nsB = createNamespace('b', { hello: 'Hello' });
 
-// Valid: same namespace literal across the default and the alt locale.
 registerNamespace(() => Promise.resolve(nsA.translation), {
   'sl-SI': () =>
     Promise.resolve(nsA.createTranslation('sl-SI', { hello: 'Pozdravljen' })),
 });
 
-// Alt locale's namespace literal disagrees with the default's.
 registerNamespace(() => Promise.resolve(nsA.translation), {
   // @ts-expect-error - 'b' is not assignable to namespace constraint 'a'
   'sl-SI': () => Promise.resolve(nsB.translation),
 });
-
-// -----------------------------------------------------------------------------
-// withParams — branded keys widen their shape in non-default locales
-// -----------------------------------------------------------------------------
 
 const branded = createNamespace('branded', {
   stats: withParams<{ name: string }>(
@@ -256,8 +198,6 @@ const branded = createNamespace('branded', {
   normal: 'Hi {n}',
 });
 
-// Wrapped key's shape widens to `string`, so any literal works in non-defaults.
-// Sibling non-branded keys still enforce their placeholder.
 const _branded_translation_valid = branded.createTranslation('sl-SI', {
   stats: '{count, plural, =1 {1 citat od {name}} other {# citatov od {name}}}',
   normal: 'Hi {n}',
@@ -271,16 +211,11 @@ const _branded_translation_freeform_branded_key = branded.createTranslation(
   },
 );
 
-// But sibling non-branded keys still require their placeholder.
 const _branded_sibling_still_enforced = branded.createTranslation('de-DE', {
   stats: 'anything goes for branded keys',
   // @ts-expect-error - `{n}` placeholder still required on a non-branded sibling
   normal: 'Hi without placeholder',
 });
-
-// -----------------------------------------------------------------------------
-// boilerplate runner — passes iff the file compiles
-// -----------------------------------------------------------------------------
 
 describe('register-namespace types', () => {
   it('compiles type-level assertions', () => {

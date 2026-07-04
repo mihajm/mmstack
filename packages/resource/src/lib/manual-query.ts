@@ -134,10 +134,6 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
   const resource = queryResource(req, options);
 
-  // Shared across trigger() calls: a per-call watcher could observe the PREVIOUS
-  // request's `resolved` status before this trigger's load flips the resource to
-  // loading (effect ordering within a flush is unspecified) and resolve with stale
-  // data; concurrent triggers would also cross-resolve each other's promises.
   let pending: {
     res: (value: TResult) => void;
     rej: (err: unknown) => void;
@@ -154,8 +150,6 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
       return new Promise<TResult>((res, rej) => {
         if (untracked(req) === undefined) {
-          // the request fn produced nothing — no load will ever start, so a watcher
-          // would hang this promise forever
           rej(
             new Error(
               '[@mmstack/resource]: trigger() produced no request (the request fn returned undefined)',
@@ -166,12 +160,8 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
         pending.push({ res, rej });
 
-        // an active watcher (concurrent trigger) settles ALL pending promises with
-        // the final result of the latest request — TanStack-style latest-wins
         if (watcher) return;
 
-        // only accept a settle AFTER the load for this trigger has been observed —
-        // the pre-trigger status may still be a stale `resolved`/`error`
         let sawLoading = false;
 
         watcher = nestedEffect(

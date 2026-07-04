@@ -7,7 +7,7 @@ import { TranslationStore } from '../translation-store';
 /**
  * Options designed to feed into the mock translations function.
  */
-export interface MockTranslationOptions {
+export type MockTranslationOptions = {
   /**
    * If provided, allows overriding the default behavior of simply echoing translation keys back.
    * Format: Record of namespace -> (Translation shape similar to what you pass to `createNamespace`)
@@ -44,7 +44,7 @@ export interface MockTranslationOptions {
    * @default 'en-US'
    */
   locale?: string;
-}
+};
 
 /**
  * Provides an isolated mock `TranslationStore` usable across testing modules that use components
@@ -63,7 +63,6 @@ export interface MockTranslationOptions {
 export function provideMockTranslations(
   options?: MockTranslationOptions,
 ): Provider[] {
-  // We compile the mock strings to flat delimiters just like the internal compile module.
   const mappedMocks: Record<string, string> = {};
 
   if (options?.translations) {
@@ -73,7 +72,6 @@ export function provideMockTranslations(
       const compiled = compileTranslation(translationObj, namespace);
 
       for (const [key, val] of Object.entries(compiled.flat)) {
-        // e.g. from 'home::MMT_DELIM::title'
         const fullKey = `${namespace}::MMT_DELIM::${key}`;
         mappedMocks[fullKey] = val;
       }
@@ -88,7 +86,6 @@ export function provideMockTranslations(
     intl = createIntl({ locale, messages: mappedMocks }, createIntlCache());
   }
 
-  // always available for `injectIntl()` consumers, even when formatValues is off
   const intlForInjection =
     intl ?? createIntl({ locale, messages: mappedMocks }, createIntlCache());
 
@@ -99,7 +96,6 @@ export function provideMockTranslations(
     const message = mappedMocks[key];
 
     if (!message) {
-      // Fallback to echoing the key back in dot notation (more readable for unit assertions).
       return key.replaceAll('::MMT_DELIM::', '.');
     }
 
@@ -128,13 +124,13 @@ export function provideMockTranslations(
         }),
         hasLocaleLoaders: () => false,
         register: () => {
-          // noop
+          /* noop */
         },
         registerOnDemandLoaders: () => {
-          // noop
+          /* noop */
         },
         markSwitchIntent: () => {
-          // noop
+          /* noop */
         },
         dynamicLocaleLoader: {
           isLoading: signal(false),
@@ -142,7 +138,6 @@ export function provideMockTranslations(
           error: signal(null),
         },
         loadQueue: signal([]),
-        // components under test may use the public injectIntl()
         intl: computed(() => intlForInjection),
       },
     },

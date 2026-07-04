@@ -88,7 +88,7 @@ export function deferredValue<T>(
   const watch = effect(
     () => {
       const v = source();
-      cancel?.(); // latest wins: rapid changes coalesce into one catch-up
+      cancel?.();
       cancel = schedule(() => {
         cancel = null;
         out.set(v);
@@ -105,8 +105,6 @@ export function deferredValue<T>(
   const result = computed(() => out()) as Signal<T> & {
     pending: Signal<boolean>;
   };
-  // "behind" is a value comparison, not a schedule flag: an equal-valued catch-up
-  // (e.g. type a char, delete it before the deferred view caught up) is not pending
   result.pending = computed(() => !equal(out(), source()));
   return result;
 }

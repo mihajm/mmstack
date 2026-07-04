@@ -48,19 +48,15 @@ describe('refresh', () => {
       const destroyRef = TestBed.inject(DestroyRef);
       const wrapped = refresh(mock, destroyRef, 5000);
 
-      // Advance partway through the interval
       vi.advanceTimersByTime(3000);
       expect(mock._reloadSpy).not.toHaveBeenCalled();
 
-      // Manual reload should reset the interval
       wrapped.reload();
       expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
 
-      // The old interval should not fire at 5000ms
       vi.advanceTimersByTime(2000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
 
-      // New interval fires at 3000 + 5000 = 8000ms total
       vi.advanceTimersByTime(3000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(2);
     });

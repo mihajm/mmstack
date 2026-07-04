@@ -74,10 +74,8 @@ export function droppingPort(
 
 type Delivery = { readonly to: FakePort; readonly data: unknown };
 
-/** Shared delivery queue for one mesh — every fake port enqueues here; the mesh drains it. */
 class Bus {
   readonly pending: Delivery[] = [];
-  /** Injected before enqueue; return `null` to DROP, or a (possibly mutated/duplicated) list. */
   fault: ((d: Delivery) => Delivery[] | null) | null = null;
 
   enqueue(d: Delivery): void {
@@ -85,10 +83,8 @@ class Bus {
     if (out) this.pending.push(...out);
   }
 
-  /** Deliver every currently-queued message (FIFO) to its port's `onmessage`. Returns the count. */
   drain(): number {
     if (!this.pending.length) return 0;
-    // snapshot: messages produced BY these deliveries wait for the next drain (one hop per round)
     const batch = this.pending.splice(0, this.pending.length);
     for (const { to, data } of batch) to.onmessage?.({ data });
     return batch.length;
@@ -106,7 +102,6 @@ class FakePort implements WorkerPortLike {
   constructor(
     private readonly bus: Bus,
     private readonly clone: boolean,
-    /** The role of THIS port's owner — a message delivered here is bound for this side. */
     readonly role: Side,
   ) {}
 
@@ -116,7 +111,6 @@ class FakePort implements WorkerPortLike {
     this.bus.enqueue({ to: this.peer, data });
   }
 
-  // teardown hooks — a disconnected/terminated port drops future delivery
   terminate(): void {
     this.onmessage = null;
   }
@@ -125,7 +119,6 @@ class FakePort implements WorkerPortLike {
   }
 }
 
-/** `host` end receives client→host traffic; `client` end receives host→client traffic. */
 function portPair(bus: Bus, clone: boolean): { host: FakePort; client: FakePort } {
   const host = new FakePort(bus, clone, 'host');
   const client = new FakePort(bus, clone, 'client');
@@ -236,10 +229,9 @@ export function createTestMesh(
 
   const settle = async (maxRounds = 100): Promise<void> => {
     for (let round = 0; round < maxRounds; round++) {
-      host.flush(); // synchronously emit pending owned-store batches (no microtask wait)
-      // macrotask flush: lets any real async work (rung-1 task promises) settle
+      host.flush();
       await new Promise<void>((r) => setTimeout(r, 0));
-      host.flush(); // emit anything that async work produced
+      host.flush();
       if (bus.drain() === 0 && bus.pending.length === 0) return;
     }
     throw new Error(

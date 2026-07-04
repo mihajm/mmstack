@@ -34,8 +34,6 @@ class TestHostComponent {
   preloading = new Subject<void>();
 }
 
-// Custom elements for the anchor-detection parity tests: one observes `href` (RouterLink
-// treats it as an anchor → modifier-gated), one doesn't (navigates on any click).
 class MmHrefEl extends HTMLElement {
   static readonly observedAttributes = ['href'];
 }
@@ -175,7 +173,6 @@ describe('link primitives & directive', () => {
       let emitted = false;
       component.preloading.subscribe(() => (emitted = true));
 
-      // Trigger hover
       linkElement.dispatchEvent(new MouseEvent('mouseenter'));
 
       expect(reqMock.startPreload).toHaveBeenCalledWith('/test', 'all');
@@ -198,8 +195,6 @@ describe('link primitives & directive', () => {
       linkElement.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
 
       expect(component.beforeNavigate).toHaveBeenCalled();
-      // RouterLink onClick won't be called on our mock because hostDirectives creates its own instance.
-      // So we just verify navigateByUrl is called if we want, or we can just verify beforeNavigate is called!
     });
 
     it('should ignore mousedown if useMouseDown = false', () => {
@@ -218,7 +213,6 @@ describe('link primitives & directive', () => {
       linkElement.dispatchEvent(new MouseEvent('click', { button: 0 }));
 
       expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
-      // navigation is RouterLink's own listener — delegating used to navigate TWICE
       expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
     });
 
@@ -233,7 +227,6 @@ describe('link primitives & directive', () => {
       const click = new MouseEvent('click', { button: 0, cancelable: true });
       linkElement.dispatchEvent(click);
 
-      // the press already navigated on mousedown — its click must not navigate again
       expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
       expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
       expect(click.defaultPrevented).toBe(true);
@@ -243,12 +236,10 @@ describe('link primitives & directive', () => {
       component.useMouseDown = true;
       fixture.detectChanges();
 
-      // no preceding mousedown — e.g. Enter on a focused link
       linkElement.dispatchEvent(
         new MouseEvent('click', { button: 0, cancelable: true }),
       );
 
-      // falls through to RouterLink's own click handling — exactly one navigation
       expect(component.beforeNavigate).toHaveBeenCalledTimes(1);
       expect(routerMock.navigateByUrl).toHaveBeenCalledTimes(1);
     });
@@ -262,7 +253,6 @@ describe('link primitives & directive', () => {
       );
       linkElement.dispatchEvent(new MouseEvent('click', { button: 1 }));
 
-      // browser-default navigations (new tab / middle click) skip the hook
       expect(component.beforeNavigate).not.toHaveBeenCalled();
     });
 
@@ -274,12 +264,10 @@ describe('link primitives & directive', () => {
         (de: any) => de.name === 'a',
       ).nativeElement;
 
-      // trigger intersection observer
       if (observerCallbacks.length > 0) {
         observerCallbacks[0]([{ target: linkNativeEl, isIntersecting: true }]);
       }
 
-      // Update the mock value and wait for effect
       fixture.detectChanges();
       TestBed.tick();
 
@@ -287,8 +275,6 @@ describe('link primitives & directive', () => {
     });
   });
 
-  // RouterLink (Angular 22+) treats `<a>`/`<area>` AND custom elements that observe `href`
-  // as anchors — applying modifier/target gating to all of them. mmLink must match.
   describe('anchor-detection parity (custom-element hosts)', () => {
     const ctrlClick = (el: Element) =>
       el.dispatchEvent(new MouseEvent('click', { button: 0, ctrlKey: true }));
@@ -301,11 +287,9 @@ describe('link primitives & directive', () => {
       const el = fixture.nativeElement.querySelector('mm-href-link');
 
       ctrlClick(el);
-      // ctrl+click on an anchor-like host is a browser-default nav → hook must NOT fire
       expect(fixture.componentInstance.bn).not.toHaveBeenCalled();
 
       plainClick(el);
-      // a bare click IS an SPA nav → hook fires
       expect(fixture.componentInstance.bn).toHaveBeenCalledTimes(1);
     });
 
@@ -315,7 +299,6 @@ describe('link primitives & directive', () => {
       const el = fixture.nativeElement.querySelector('mm-plain-link');
 
       ctrlClick(el);
-      // non-anchor host → RouterLink navigates on any click, so the hook fires even ctrl+click
       expect(fixture.componentInstance.bn).toHaveBeenCalledTimes(1);
     });
   });

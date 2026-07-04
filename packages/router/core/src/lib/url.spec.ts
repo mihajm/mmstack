@@ -55,6 +55,6 @@ describe('url', () => {
     expect(u()).toBe('/about');
 
     eventsSubject.next({ type: EventType.NavigationStart, url: '/other' });
-    expect(u()).toBe('/about'); // Should not update on other event types
+    expect(u()).toBe('/about');
   });
 });

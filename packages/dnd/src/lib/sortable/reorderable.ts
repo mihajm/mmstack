@@ -99,7 +99,11 @@ export function connectReorderableItem<T, K = unknown>(
         inner.set(
           parent.controller().engine === 'native'
             ? connectNativeItem<T, K>(() => parent.controller(), item, element)
-            : connectPointerItem<T, K>(() => parent.controller(), item, element),
+            : connectPointerItem<T, K>(
+                () => parent.controller(),
+                item,
+                element,
+              ),
         ),
       ),
     { injector },

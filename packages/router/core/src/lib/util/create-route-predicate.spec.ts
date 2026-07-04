@@ -26,7 +26,7 @@ describe('createRoutePredicate', () => {
       const predicateEmpty = createRoutePredicate('');
       expect(predicateEmpty('')).toBe(true);
       expect(predicateEmpty('/')).toBe(true);
-      expect(predicateEmpty('/a')).toBe(true); // Empty config acts as a prefix
+      expect(predicateEmpty('/a')).toBe(true);
 
       const predicateSlash = createRoutePredicate('/');
       expect(predicateSlash('')).toBe(true);
@@ -99,9 +99,9 @@ describe('createRoutePredicate', () => {
       });
 
       it('should handle valueless matrix parameters (parsed as true)', () => {
-        const predicate = createRoutePredicate('/a;active'); // Config expects 'active=true'
+        const predicate = createRoutePredicate('/a;active');
         expect(predicate('/a;active=true')).toBe(true);
-        expect(predicate('/a;active')).toBe(true); // Link also parsed as 'active=true'
+        expect(predicate('/a;active')).toBe(true);
       });
     });
   });
@@ -150,24 +150,23 @@ describe('createRoutePredicate', () => {
 
     it('** should not match if surrounding static segments do not match', () => {
       const predicate = createRoutePredicate('/a/**/b');
-      expect(predicate('/a/x/y/c')).toBe(false); // 'c' instead of 'b'
-      expect(predicate('/z/x/y/b')).toBe(false); // 'z' instead of 'a'
+      expect(predicate('/a/x/y/c')).toBe(false);
+      expect(predicate('/z/x/y/b')).toBe(false);
     });
 
     it('multiple ** segments: first ** is greedy', () => {
-      // The recursive implementation should make the first encountered '**' try to match greedily.
       const predicate = createRoutePredicate('/a/**/b/**/c');
-      expect(predicate('/a/x/y/b/z/w/c')).toBe(true); // First ** matches x/y, second ** matches z/w
-      expect(predicate('/a/b/z/w/c')).toBe(true); // First ** matches zero, second ** matches z/w
-      expect(predicate('/a/x/y/b/c')).toBe(true); // First ** matches x/y, second ** matches zero
-      expect(predicate('/a/b/c')).toBe(true); // Both ** match zero
+      expect(predicate('/a/x/y/b/z/w/c')).toBe(true);
+      expect(predicate('/a/b/z/w/c')).toBe(true);
+      expect(predicate('/a/x/y/b/c')).toBe(true);
+      expect(predicate('/a/b/c')).toBe(true);
     });
 
     describe('Wildcards with Matrix Parameters', () => {
       it('should match with matrix params on segments before/after **', () => {
         const predicate = createRoutePredicate('/a;p1=v1/**/b;p2=v2');
         expect(predicate('/a;p1=v1/x/y/b;p2=v2')).toBe(true);
-        expect(predicate('/a;p1=v1/b;p2=v2')).toBe(true); // ** matches zero
+        expect(predicate('/a;p1=v1/b;p2=v2')).toBe(true);
       });
 
       it('should not match if matrix params differ on segments before **', () => {
@@ -195,7 +194,7 @@ describe('createRoutePredicate', () => {
 
     it('wildcard should not satisfy impossible static segments', () => {
       const predicate = createRoutePredicate('/a/**/b');
-      expect(predicate('/a/c')).toBe(false); // 'c' isn't 'b' and no more segments for '**'
+      expect(predicate('/a/c')).toBe(false);
     });
   });
 });

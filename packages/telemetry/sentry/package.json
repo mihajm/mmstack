@@ -1,0 +1,24 @@
+{
+  "name": "@mmstack/telemetry-sentry",
+  "version": "21.0.0",
+  "keywords": [
+    "angular",
+    "signals",
+    "telemetry",
+    "sentry",
+    "error-tracking",
+    "observability"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/telemetry/sentry"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/telemetry/sentry",
+  "peerDependencies": {
+    "@angular/core": ">=21 <22",
+    "@mmstack/telemetry-core": ">=21 <22"
+  },
+  "sideEffects": false
+}

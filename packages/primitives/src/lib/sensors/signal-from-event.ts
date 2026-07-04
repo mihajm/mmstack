@@ -99,7 +99,6 @@ export function signalFromEvent<TEvent extends Event, U>(
 
   const {
     destroyRef: providedDestroyRef,
-    // strip non-listener keys so they don't leak into addEventListener options
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     injector: _injector,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -120,8 +119,7 @@ export function signalFromEvent<TEvent extends Event, U>(
       },
       { injector },
     );
-    // honor an explicit destroyRef for signal targets too — the effect would otherwise
-    // only follow the injector's lifetime, contradicting the documented option
+    // honor an explicit destroyRef for signal targets
     providedDestroyRef?.onDestroy(() => effectRef.destroy());
   } else {
     const resolved = unwrap(target);

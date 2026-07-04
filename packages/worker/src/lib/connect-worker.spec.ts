@@ -5,12 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerResource } from './worker-resource';
 
-/**
- * `connectWorker` (main side) talking to a real `createWorkerHost` over a `MessageChannel` — the
- * two runtimes that will carry every store replica. Async delivery, so we await round-trips.
- */
-// a hello->ready (or run) round-trip over a MessageChannel can take several event-loop turns;
-// one setTimeout races on a slow machine, so drain a handful
 const tick = async () => {
   for (let i = 0; i < 8; i++) await new Promise<void>((r) => setTimeout(r, 1));
 };

@@ -1,17 +1,3 @@
-/**
- * Navigation-aware resource stabilization. The behavior — freeze on NavigationStart, reveal on
- * success/skip, roll back on a genuine cancel/error (not redirect/superseded) — is modeled on
- * Angular's transactional router resource (angular/angular#69490). The implementation is an
- * independent, signals-only take: a scan over router events + linkedSignal, no effects.
- *
- * The reveal is SETTLE-AWARE: a navigation's refetch often starts strictly AFTER
- * `NavigationEnd` (route-data live params tick on NavigationEnd; the resource's loader runs on
- * the next effect flush), so revealing at the event would flash that load through. Instead the
- * post-navigation phase holds the last settled snapshot through the first load cycle and
- * reveals when it settles; once that cycle completes, loads pass through live again (so a
- * later `reload()`'s indicator stays visible) until the next navigation.
- */
-
 import {
   computed,
   effect,
@@ -34,21 +20,14 @@ type Mode = 'live' | 'frozen' | 'settling';
 
 type NavState<T> = {
   readonly mode: Mode;
-  /** Seed for a first read that happens mid-navigation (before any stable output exists). */
   readonly seed: ResourceSnapshot<T>;
-  /** Monotonic navigation id — a new navigation resets the settle-cycle tracking. */
   readonly nav: number;
 };
 
 /** The stabilized result: the read surface of a `Resource`, plus `reload()` delegated to the source. */
 export type HeldResource<T> = Resource<T> & { reload(): boolean };
 
-/**
- * The live resource state as a single signal — the freeze/reveal/rollback below all operate on
- * this one snapshot. The ONLY place that touches `Resource.snapshot` (Angular 22+): to backport
- * to v19–v21 (which have no `.snapshot`), swap this for a synthesized snapshot built from
- * `value()`/`status()`/`error()`. Everything else stays identical across versions.
- */
+// Sole `Resource.snapshot` touchpoint (Angular 22+); backport v19-21 by synthesizing from value/status/error.
 function liveSnapshot<T>(
   resource: ResourceRef<T>,
 ): Signal<ResourceSnapshot<T>> {
@@ -113,20 +92,18 @@ export function holdThroughNavigation<T>(
           switch ((e as { type: EventType }).type) {
             case EventType.NavigationStart:
               return state.mode === 'frozen'
-                ? state // already frozen (superseded) — same navigation intent, keep the hold
+                ? state
                 : { mode: 'frozen', seed: untracked(live), nav: state.nav + 1 };
             case EventType.NavigationEnd:
             case EventType.NavigationSkipped:
             case EventType.NavigationError:
-              // success reveals; error rolls back — both by settling: hold the last settled
-              // snapshot through any in-flight (or about-to-start) load, reveal when it lands
               return { mode: 'settling', seed: state.seed, nav: state.nav };
             case EventType.NavigationCancel: {
               const code = (e as { code: NavigationCancellationCode }).code;
               return code ===
                 NavigationCancellationCode.SupersededByNewNavigation ||
                 code === NavigationCancellationCode.Redirect
-                ? state // a new navigation is taking over — stay as-is
+                ? state // redirect/superseded: new navigation takes over, stay frozen
                 : { mode: 'settling', seed: state.seed, nav: state.nav };
             }
             default:
@@ -137,15 +114,13 @@ export function holdThroughNavigation<T>(
       { initialValue: initial },
     );
 
-    // `done` = this navigation's load cycle completed → later loads pass through live
-    // (a manual reload's indicator stays visible between navigations).
+    // `done` = this navigation's load cycle completed; later loads then pass through live.
     const stable = linkedSignal<
       { ns: NavState<T>; live: ResourceSnapshot<T> },
       { snap: ResourceSnapshot<T>; done: boolean }
     >({
       source: () => ({ ns: navState(), live: live() }),
       computation: ({ ns, live: liveSnap }, prev) => {
-        // the previously displayed snapshot — what a hold keeps showing
         const heldSnap = prev?.value.snap ?? ns.seed;
         if (ns.mode === 'frozen') return { snap: heldSnap, done: false };
         if (ns.mode === 'live') return { snap: liveSnap, done: false };
@@ -157,14 +132,12 @@ export function holdThroughNavigation<T>(
         if (sameSettle && prev.value.done) return { snap: liveSnap, done: true };
         if (isLoadingStatus(liveSnap.status))
           return { snap: heldSnap, done: false };
-        // settled — the cycle is complete if the previous settling frame was loading
         const completed =
           sameSettle && isLoadingStatus(prev.source.live.status);
         return { snap: liveSnap, done: completed };
       },
     });
 
-    // eager settledness: observe every frame so the machine advances with no readers
     if (options?.eager) effect(() => void stable());
 
     return buildHeldResource(

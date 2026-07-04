@@ -21,13 +21,11 @@ type StubBehavior = {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
-  /** Defer the response by this many (fake-timer) milliseconds. */
   delayMs?: number;
 };
 
 const STUB = new HttpContextToken<StubBehavior>(() => ({ status: 200 }));
 
-/** How many requests actually reached the backend (i.e. weren't served/deduped by the cache). */
 let backendCalls = 0;
 
 const stubInterceptor: HttpInterceptorFn = (req) => {
@@ -127,7 +125,6 @@ describe('createCacheInterceptor', () => {
   });
 
   it('refreshes cache freshness on 304 so subsequent reads do not revalidate again', async () => {
-    // 1. Populate the cache with a 200 response.
     await firstValueFrom(
       client.get('https://example.com/data', {
         observe: 'response',
@@ -140,12 +137,9 @@ describe('createCacheInterceptor', () => {
 
     expect(cache.getUntracked('k1')?.isStale).toBe(false);
 
-    // 2. Advance past staleTime — entry should now be stale.
     vi.advanceTimersByTime(6_000);
     expect(cache.getUntracked('k1')?.isStale).toBe(true);
 
-    // 3. A revalidation request returns 304. The cache should re-stamp the
-    //    entry so it is fresh again.
     await firstValueFrom(
       client.get('https://example.com/data', {
         observe: 'response',
@@ -159,12 +153,10 @@ describe('createCacheInterceptor', () => {
     const entry = cache.getUntracked('k1');
     expect(entry).not.toBeNull();
     expect(entry!.value.body).toEqual({ id: 1 });
-    // The previously-stale entry is now fresh thanks to 304 freshness refresh.
     expect(entry!.isStale).toBe(false);
   });
 
   it('substitutes the cached entry as the response on 304', async () => {
-    // 1. Populate.
     await firstValueFrom(
       client.get('https://example.com/data', {
         observe: 'response',
@@ -177,7 +169,6 @@ describe('createCacheInterceptor', () => {
 
     vi.advanceTimersByTime(6_000);
 
-    // 2. 304 → the response delivered to the consumer should be the cached body, not the 304 itself.
     const response = await firstValueFrom(
       client.get('https://example.com/data', {
         observe: 'response',
@@ -213,8 +204,6 @@ describe('createCacheInterceptor', () => {
 
       expect(cache.getUntracked('cc-1')!.isStale).toBe(false);
       vi.advanceTimersByTime(61_000);
-      // regression: the inverted mapping evicted the entry here instead of
-      // marking it revalidatable
       const after = cache.getUntracked('cc-1');
       expect(after).not.toBeNull();
       expect(after!.isStale).toBe(true);
@@ -223,18 +212,15 @@ describe('createCacheInterceptor', () => {
     it('stale-while-revalidate extends lifetime BEYOND max-age (RFC 5861)', async () => {
       await fetchWithHeader('cc-2', 'max-age=60, stale-while-revalidate=300');
 
-      // fresh for max-age
       vi.advanceTimersByTime(59_000);
       expect(cache.getUntracked('cc-2')!.isStale).toBe(false);
 
-      // then stale-but-revalidatable for the swr window
       vi.advanceTimersByTime(2_000);
       expect(cache.getUntracked('cc-2')!.isStale).toBe(true);
-      vi.advanceTimersByTime(290_000); // 351s total < 360s
+      vi.advanceTimersByTime(290_000);
       expect(cache.getUntracked('cc-2')).not.toBeNull();
 
-      // gone after max-age + swr
-      vi.advanceTimersByTime(10_000); // 361s total
+      vi.advanceTimersByTime(10_000);
       expect(cache.getUntracked('cc-2')).toBeNull();
     });
 
@@ -242,15 +228,13 @@ describe('createCacheInterceptor', () => {
       await fetchWithHeader('cc-3', 'max-age=60, s-maxage=120');
 
       vi.advanceTimersByTime(61_000);
-      // s-maxage=120 wins → still fresh past max-age
       expect(cache.getUntracked('cc-3')!.isStale).toBe(false);
     });
 
     it('immutable entries survive indefinitely (no timer self-destruct)', async () => {
       await fetchWithHeader('cc-4', 'immutable');
 
-      // regression: setTimeout(…, Infinity) used to invalidate on the next tick
-      vi.advanceTimersByTime(1000 * 60 * 60 * 24 * 30); // 30 days
+      vi.advanceTimersByTime(1000 * 60 * 60 * 24 * 30);
       const entry = cache.getUntracked('cc-4');
       expect(entry).not.toBeNull();
       expect(entry!.isStale).toBe(false);
@@ -273,14 +257,14 @@ describe('createCacheInterceptor', () => {
         }),
       );
 
-      expect(cache.getUntracked('cc-5')).not.toBeNull(); // cached in memory
+      expect(cache.getUntracked('cc-5')).not.toBeNull();
       expect(storeSpy).toHaveBeenCalledWith(
         'cc-5',
         expect.anything(),
-        60_000, // fresh window from max-age
-        undefined, // no swr / no configured ttl → cache default applies
-        false, // ...but never persisted
-        true, // broadcast (no skipTabSync)
+        60_000,
+        undefined,
+        false,
+        true,
       );
       storeSpy.mockRestore();
     });
@@ -312,13 +296,12 @@ describe('createCacheInterceptor', () => {
 
       expect(r1.body).toEqual({ id: 1 });
       expect(r2.body).toEqual({ id: 1 });
-      expect(backendCalls).toBe(1); // regression: used to be 2
+      expect(backendCalls).toBe(1);
     });
   });
 
   describe('invalidation racing a conditional request', () => {
     it('a 304 landing after invalidate() must not resurrect the entry', async () => {
-      // 1. populate + go stale
       await firstValueFrom(
         client.get('https://example.com/data', {
           observe: 'response',
@@ -330,7 +313,6 @@ describe('createCacheInterceptor', () => {
       );
       vi.advanceTimersByTime(6_000);
 
-      // 2. start the revalidation (response delayed), then invalidate mid-flight
       const pending = firstValueFrom(
         client.get('https://example.com/data', {
           observe: 'response',
@@ -341,12 +323,11 @@ describe('createCacheInterceptor', () => {
         }),
       );
 
-      cache.invalidate('race-1'); // e.g. a mutation completed
+      cache.invalidate('race-1');
 
       await vi.advanceTimersByTimeAsync(100);
       await pending;
 
-      // regression: the 304 re-store used to resurrect the invalidated entry
       expect(cache.getUntracked('race-1')).toBeNull();
     });
   });
@@ -399,7 +380,6 @@ describe('createCacheInterceptor (server platform)', () => {
 
     expect(response.body).toEqual({ id: 1 });
     expect(backendCalls).toBe(1);
-    // a server render must never share responses across requests via the cache
     expect(cache.getUntracked('ssr-1')).toBeNull();
   });
 });

@@ -18,7 +18,6 @@ describe('circuit-breaker', () => {
         expect(cb.isOpen()).toBe(false);
         expect(cb.status()).toBe('CLOSED');
 
-        // Calling fail should have no effect
         cb.fail(new Error('test'));
         expect(cb.isClosed()).toBe(true);
       });
@@ -55,7 +54,7 @@ describe('circuit-breaker', () => {
       cb.fail();
       expect(cb.status()).toBe('CLOSED');
 
-      cb.fail(); // 3rd failure = threshold
+      cb.fail();
       expect(cb.status()).toBe('OPEN');
       expect(cb.isClosed()).toBe(false);
       expect(cb.isOpen()).toBe(true);
@@ -68,7 +67,6 @@ describe('circuit-breaker', () => {
 
       expect(cb.status()).toBe('CLOSED');
 
-      // Should need 3 fresh failures to open again
       cb.fail();
       cb.fail();
       expect(cb.status()).toBe('CLOSED');
@@ -78,7 +76,6 @@ describe('circuit-breaker', () => {
     });
 
     it('should transition to HALF_OPEN after timeout', () => {
-      // Open the breaker
       cb.fail();
       cb.fail();
       cb.fail();
@@ -127,7 +124,7 @@ describe('circuit-breaker', () => {
 
         selective.fail(new Error('non-fatal'));
         selective.fail(new Error('non-fatal'));
-        expect(selective.status()).toBe('CLOSED'); // ignored
+        expect(selective.status()).toBe('CLOSED');
 
         selective.fail(new Error('fatal'));
         selective.fail(new Error('fatal'));
@@ -146,7 +143,6 @@ describe('circuit-breaker', () => {
         breaker.fail(new Error('permanent'));
         expect(breaker.status()).toBe('OPEN');
 
-        // timeout should NOT recover it
         TestBed.tick();
         vi.advanceTimersByTime(10000);
         expect(breaker.status()).toBe('OPEN');
@@ -199,7 +195,6 @@ describe('circuit-breaker', () => {
         cb.hardReset();
         expect(cb.status()).toBe('CLOSED');
 
-        // and the breaker is genuinely fresh — needs a full threshold to trip again
         cb.fail();
         expect(cb.status()).toBe('CLOSED');
         cb.fail();

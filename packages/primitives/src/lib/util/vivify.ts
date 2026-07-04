@@ -64,8 +64,6 @@ export type WithVivify<T> = {
  */
 export type VivifyFn<T> = (current: T, key: PropertyKey) => T;
 
-// Container resolvers used by createVivify: each returns the current value when present and
-// only creates a new container when it is null/undefined.
 function identity<T>(x: T): T {
   return x;
 }

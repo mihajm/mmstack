@@ -61,23 +61,6 @@ export type MutableSignal<T> = WritableSignal<T> & {
  * This is because a `.mutate()` call notifies its dependents that it has changed, but if the
  * reference to a derived object hasn't changed, the `computed` signal will not trigger its
  * own dependents by default.
- *
- * @example
- * ```ts
- * const state = mutable({ user: { name: 'John' }, lastUpdated: new Date() });
- *
- * // ✅ CORRECT: Deriving a primitive value works as expected.
- * const name = computed(() => state().user.name);
- *
- * // ❌ INCORRECT: This will not update reliably after the first change.
- * const userObject = computed(() => state().user);
- *
- * // ✅ CORRECT: For object derivations, `equal: false` is required.
- * const userObjectFixed = computed(() => state().user, { equal: false });
- *
- * // This mutation will now correctly trigger effects depending on `userObjectFixed`.
- * state.mutate(s => s.lastUpdated = new Date());
- * ```
  */
 export function mutable<T>(): MutableSignal<T | undefined>;
 export function mutable<T>(initial: T): MutableSignal<T>;

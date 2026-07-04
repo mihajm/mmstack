@@ -1,16 +1,11 @@
-import { computed, Injector } from '@angular/core';
+import { computed, Injector, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createStoreContext, store } from '@mmstack/primitives';
+import { createStoreContext, opLog, store } from '@mmstack/primitives';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
 
-/**
- * `workerStore` (read-only replica) mirroring a host-owned store over `connectWorker` ↔
- * `createWorkerHost` across a real `MessageChannel`.
- */
-// hydration is two round-trips (hello→ready, subscribe→snapshot); drain a few macrotasks
 const tick = async () => {
   for (let i = 0; i < 5; i++) await new Promise<void>((r) => setTimeout(r, 1));
 };
@@ -42,7 +37,7 @@ describe('workerStore — read-only replica', () => {
     expect(replica.status()).toBe('resolved');
     expect(replica.hasValue()).toBe(true);
     expect(replica.value()).toEqual(initial());
-    expect(replica.store.user.name()).toBe('ada'); // deep per-leaf read
+    expect(replica.store.user.name()).toBe('ada');
   });
 
   it('applies owner mutations to the replica', async () => {
@@ -67,9 +62,8 @@ describe('workerStore — read-only replica', () => {
       recomputes++;
       return `${replica.store.user.name()}:${replica.store.tags().length}`;
     });
-    expect(view()).toBe('ada:1'); // recomputes = 1
+    expect(view()).toBe('ada:1');
 
-    // two leaves change in one host tick → one batch → one replica set → one recompute
     owned.user.name.set('lin');
     owned.tags.set(['x', 'y']);
     await tick();
@@ -84,7 +78,6 @@ describe('workerStore — read-only replica', () => {
     owned.user.age.set(40);
     await tick();
     expect(replica.store.user.age()).toBe(40);
-    // replica only advances on strictly-newer versions — proven by the monotonic mirror above
     expect(replica.status()).toBe('resolved');
   });
 });
@@ -111,8 +104,8 @@ describe('workerStore — write() routed to the owner', () => {
     const { owned, replica } = wire();
     await tick();
     await replica.write((draft) => draft.user.name.set('zoe'));
-    expect(replica.store.user.name()).toBe('zoe'); // authoritative batch applied before resolve
-    expect(owned.user.name()).toBe('zoe'); // owner is the source of truth
+    expect(replica.store.user.name()).toBe('zoe');
+    expect(owned.user.name()).toBe('zoe');
   });
 
   it('resolves immediately for a no-op write', async () => {
@@ -125,13 +118,20 @@ describe('workerStore — write() routed to the owner', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('rejects a write issued before the replica has hydrated', async () => {
+    const { replica } = wire(); // deliberately NOT awaiting hydration
+    await expect(
+      replica.write((d) => d.user.name.set('x')),
+    ).rejects.toThrow('hydrated');
+  });
+
   it('a write from one client converges on every replica (echo-free single-sequencer)', async () => {
     const { a, b } = wire2();
     await tick();
     await a.write((draft) => draft.tags.set(['a', 'b', 'c']));
     await tick();
     expect(a.store.tags()).toEqual(['a', 'b', 'c']);
-    expect(b.store.tags()).toEqual(['a', 'b', 'c']); // the other replica converged
+    expect(b.store.tags()).toEqual(['a', 'b', 'c']);
   });
 
   it('interleaved writes from two clients converge to identical state', async () => {
@@ -145,6 +145,61 @@ describe('workerStore — write() routed to the owner', () => {
     const expected = { user: { name: 'A', age: 99 }, tags: ['x'] };
     expect(a.value()).toEqual(expected);
     expect(b.value()).toEqual(expected);
-    expect(owned()).toEqual(expected); // owner, both replicas — byte-identical
+    expect(owned()).toEqual(expected);
+  });
+});
+
+describe('workerStore — optimistic + composable (op-log endpoint)', () => {
+  it('applies a write optimistically — the local value reflects before the owner echoes', async () => {
+    const { owned, replica } = wire();
+    await tick();
+
+    const p = replica.write((d) => d.user.name.set('grace'));
+    expect(replica.store.user.name()).toBe('grace');
+
+    await p;
+    expect(replica.store.user.name()).toBe('grace');
+    expect(owned.user.name()).toBe('grace');
+  });
+
+  it('a no-op recipe resolves without shipping', async () => {
+    const { replica } = wire();
+    await tick();
+    await expect(
+      replica.write((d) => d.user.name.set('ada')),
+    ).resolves.toBeUndefined();
+  });
+
+  it('a composed opLog reader on the worker store sees local writes AND owner changes, no echo storm', async () => {
+    const { owned, replica } = wire();
+    await tick();
+
+    const emits: unknown[] = [];
+    let run = (): void => undefined;
+    const reader = opLog(replica.store as unknown as WritableSignal<Model>, {
+      driver: (r) => {
+        run = r;
+        return { destroy: () => undefined };
+      },
+    });
+    reader.subscribe((b) => emits.push(b));
+    run();
+
+    await replica.write((d) => d.user.name.set('grace'));
+    run();
+    const afterLocal = emits.length;
+    expect(afterLocal).toBeGreaterThan(0);
+
+    owned.tags.set(['a', 'b']);
+    await tick();
+    run();
+    expect(emits.length).toBeGreaterThan(afterLocal);
+    expect(replica.store.tags()).toEqual(['a', 'b']);
+
+    const settled = emits.length;
+    run();
+    expect(emits.length).toBe(settled);
+
+    reader.destroy();
   });
 });

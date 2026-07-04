@@ -1,4 +1,3 @@
-// shared wire types, re-exported so worker code imports only from '@mmstack/worker/host'
 export * from '@mmstack/worker/protocol';
 
 export {

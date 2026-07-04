@@ -1,0 +1,29 @@
+{
+  "name": "telemetry-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/telemetry/core/src",
+  "prefix": "mm",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/angular:package",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "project": "packages/telemetry/core/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "packages/telemetry/core/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "packages/telemetry/core/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
+    }
+  }
+}

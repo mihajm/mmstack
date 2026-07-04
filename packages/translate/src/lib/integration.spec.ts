@@ -1,16 +1,3 @@
-/**
- * Integration tests covering the full pipeline:
- *   register{Namespace,RemoteNamespace} → resolver → TranslationStore
- *   → dynamic-locale loader → t() / formatters / unsafe t.
- *
- * Each test sets up a real `provideRouter` + `provideIntlConfig`, registers
- * one or more namespaces, navigates to a route that triggers the resolver,
- * and asserts behavior observable to a consumer. Heavier than the unit
- * specs around each file, but the only place that catches bugs that live
- * across module seams (the dynamic-locale loader and the formatter
- * defaults regressions we caught both fall in this category).
- */
-
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter, type Routes } from '@angular/router';
@@ -40,10 +27,6 @@ import {
 @Component({ template: '' })
 class DummyComponent {}
 
-/**
- * Builds a single canonical namespace used across most tests so each test
- * doesn't repeat the structure.
- */
 function buildQuoteNamespace() {
   const ns = createNamespace('quote', {
     pageTitle: 'Famous Quotes',
@@ -90,11 +73,6 @@ function runInjected<T>(fn: () => T): T {
   return TestBed.runInInjectionContext(fn);
 }
 
-/**
- * Wait until the store's locale matches the expected value (with a hard
- * timeout) — the dynamic-locale loader uses Angular's `resource()` API,
- * which resolves over multiple microtasks and a CD flush.
- */
 async function waitForLocale(
   store: TranslationStore,
   expected: string,
@@ -253,8 +231,6 @@ describe('Integration: registerNamespace through the resolver', () => {
   });
 
   it('resolves a custom localeParamName from a nested parent route', async () => {
-    // Regression for the hardcoded `'locale'` bug in `resolver-locale.ts`:
-    // the parent-route walk must use the configured paramName, not 'locale'.
     const quote = buildQuoteNamespace();
     const r = registerNamespace(
       () => Promise.resolve(quote.enUS),
@@ -266,7 +242,7 @@ describe('Integration: registerNamespace through the resolver', () => {
         provideIntlConfig({
           defaultLocale: 'en-US',
           supportedLocales: ['en-US', 'sl-SI'],
-          localeParamName: 'lang', // <- not 'locale'
+          localeParamName: 'lang',
         }),
         provideRouter([
           {
@@ -299,11 +275,8 @@ describe('Integration: registerNamespace through the resolver', () => {
     });
     const slPartial = ns.createTranslation('sl-SI', {
       pageTitle: 'Znani Citati',
-      // intentionally missing in a real product this would be a type error,
-      // but createTranslation accepts the shape — we mutate after to drop a key.
       onlyInDefault: '',
     });
-    // Simulate a stale translation file where the key is absent on disk.
     delete (slPartial.flat as Record<string, string>)['onlyInDefault'];
 
     const r = registerNamespace(
@@ -317,7 +290,7 @@ describe('Integration: registerNamespace through the resolver', () => {
           defaultLocale: 'en-US',
           supportedLocales: ['en-US', 'sl-SI'],
           localeParamName: 'locale',
-          preloadDefaultLocale: true, // ensure default is around to fall back to
+          preloadDefaultLocale: true,
         }),
         provideRouter([
           {
@@ -383,8 +356,6 @@ describe('Integration: dynamic locale switching', () => {
   });
 
   it('switches a remote (untyped) namespace via injectDynamicLocale().set()', async () => {
-    // Regression for the bug where remote on-demand loaders were registered
-    // as raw fetchers but the dynamic loader expected CompiledTranslation.
     const r = registerRemoteNamespace(
       'remote',
       () => Promise.resolve({ hello: 'Hello', greet: 'Hi {name}' }),
@@ -477,7 +448,6 @@ describe('Integration: dynamic locale switching', () => {
 
   it('reports isLoading() true while a locale switch is in flight and false once settled', async () => {
     const quote = buildQuoteNamespace();
-    // Deliberately slow loader so we can observe isLoading()
     const r = registerNamespace(
       () => Promise.resolve(quote.enUS),
       {
@@ -512,7 +482,6 @@ describe('Integration: dynamic locale switching', () => {
 
     locale.set('sl-SI');
     TestBed.tick();
-    // After the set, the resource picks up the new params and starts loading.
     expect(locale.isLoading()).toBe(true);
     await waitForLocale(store, 'sl-SI');
     expect(locale.isLoading()).toBe(false);
@@ -548,10 +517,9 @@ describe('Integration: dynamic locale switching', () => {
     const locale = runInjected(() => injectDynamicLocale());
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    locale.set('fr-FR'); // not in supportedLocales
+    locale.set('fr-FR');
     TestBed.tick();
     expect(store.locale()).toBe('en-US');
-    // We can't reliably detect dev-mode vs prod-mode here, so just allow either.
     warnSpy.mockRestore();
   });
 });
@@ -599,7 +567,6 @@ describe('Integration: localeStorage persistence', () => {
     });
     resetGlobalLocale();
 
-    // Touching the store triggers `initLocale`, which reads from storage.
     const store = TestBed.inject(TranslationStore);
     expect(store.locale()).toBe('sl-SI');
   });
@@ -656,7 +623,7 @@ describe('Integration: localeStorage persistence', () => {
     resetGlobalLocale();
 
     const store = TestBed.inject(TranslationStore);
-    expect(store.locale()).toBe('en-US'); // falls back to default
+    expect(store.locale()).toBe('en-US');
   });
 
   it('swallows errors thrown by the storage adapter (does not crash the app)', () => {
@@ -682,7 +649,6 @@ describe('Integration: localeStorage persistence', () => {
     });
     resetGlobalLocale();
 
-    // Constructing the store invokes `read()`; should not throw.
     expect(() => TestBed.inject(TranslationStore)).not.toThrow();
     errSpy.mockRestore();
   });
@@ -723,7 +689,7 @@ describe('Integration: injectAddTranslations + injectUnsafeT', () => {
       providers: [
         provideIntlConfig({
           defaultLocale: 'en-US',
-          supportedLocales: ['en-US'], // sl-SI not supported
+          supportedLocales: ['en-US'],
         }),
       ],
     });
@@ -733,15 +699,13 @@ describe('Integration: injectAddTranslations + injectUnsafeT', () => {
       const add = injectAddTranslations();
       add('runtime', {
         'en-US': { hello: 'Hi' },
-        'sl-SI': { hello: 'Zdravo' }, // should be filtered
+        'sl-SI': { hello: 'Zdravo' },
       });
     });
 
     const t = runInjected(() => injectUnsafeT());
     expect(t('runtime.hello')).toBe('Hi');
-    // Switching to sl-SI doesn't surface the filtered translation.
     TestBed.inject(TranslationStore).locale.set('sl-SI');
-    // Falls back to default-locale message.
     expect(t('runtime.hello')).toBe('Hi');
     warnSpy.mockRestore();
   });
@@ -761,12 +725,10 @@ describe('Integration: formatter defaults wired through DI', () => {
     resetGlobalLocale();
 
     const fmt = runInjected(() => injectFormatDisplayName());
-    expect(fmt('US', 'region')).toBe('US'); // short style → 'US'
+    expect(fmt('US', 'region')).toBe('US');
   });
 
   it('merges provideFormatDisplayNameDefaults with per-call options', () => {
-    // Regression for the bug where injectFormatDisplayName spread the signal
-    // object instead of `defaults()` — user defaults were silently dropped.
     TestBed.configureTestingModule({
       providers: [
         provideIntlConfig({
@@ -779,8 +741,6 @@ describe('Integration: formatter defaults wired through DI', () => {
     resetGlobalLocale();
 
     const fmt = runInjected(() => injectFormatDisplayName());
-    // Per-call override should win, but library defaults must reach the
-    // underlying formatter — exercising the unwrap path.
     expect(fmt('US', 'region', { style: 'long', locale: 'en-US' })).toBe(
       'United States',
     );
@@ -800,7 +760,6 @@ describe('Integration: formatter defaults wired through DI', () => {
 
     const fmt = runInjected(() => injectFormatDate());
     const out = fmt(new Date('2026-03-15T00:00:00Z'));
-    // shortDate yields e.g. "3/15/26" — we just assert the year shows truncated.
     expect(out).toMatch(/3.*15.*26/);
   });
 
@@ -838,8 +797,6 @@ describe('Integration: formatter defaults wired through DI', () => {
     expect(fmt(1234.5)).toBe('1,234.5');
 
     TestBed.inject(TranslationStore).locale.set('de-DE');
-    // Re-reading the injected formatter should pick up the new locale via
-    // its internal defaults signal.
     expect(fmt(1234.5)).toMatch(/1.234,5/);
   });
 });

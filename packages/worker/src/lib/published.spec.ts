@@ -6,8 +6,6 @@ import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
 
-/** Rung 3: the worker PUBLISHES derived subtrees; the main thread mirrors them read-only, and an
- *  in-flight worker computation surfaces as pending on the replica. */
 const tick = async () => {
   for (let i = 0; i < 6; i++) await new Promise<void>((r) => setTimeout(r, 1));
 };
@@ -40,7 +38,7 @@ describe('published subtrees (rung 3)', () => {
     expect(worker.manifest()?.published).toEqual(['total']);
     expect(replica.value()).toEqual({ sum: 6, count: 3 });
 
-    data.items.set([1, 2, 3, 4]); // owner mutates → derivation recomputes → replica reflects
+    data.items.set([1, 2, 3, 4]);
     await tick();
     expect(replica.store.sum()).toBe(10);
     expect(replica.store.count()).toBe(4);
@@ -49,7 +47,6 @@ describe('published subtrees (rung 3)', () => {
   it('propagates a published computation status: pending holds the value', async () => {
     const backing = signal<{ n: number }>({ n: 1 });
     const st = signal<ResourceStatus>('resolved');
-    // a status-bearing derivation, shaped like a latest(): a signal with a `.status` signal
     const pub = Object.assign(computed(() => backing()), { status: st });
 
     const host = createWorkerHost({ published: { calc: pub } });
@@ -62,13 +59,13 @@ describe('published subtrees (rung 3)', () => {
     expect(replica.status()).toBe('resolved');
     expect(replica.value()).toEqual({ n: 1 });
 
-    st.set('reloading'); // the worker computation goes in-flight
+    st.set('reloading');
     await tick();
     expect(replica.status()).toBe('reloading');
-    expect(replica.value()).toEqual({ n: 1 }); // value held while pending
+    expect(replica.value()).toEqual({ n: 1 });
 
     backing.set({ n: 2 });
-    st.set('resolved'); // settles with the new value
+    st.set('resolved');
     await tick();
     expect(replica.value()).toEqual({ n: 2 });
     expect(replica.status()).toBe('resolved');
@@ -76,7 +73,7 @@ describe('published subtrees (rung 3)', () => {
 
   it('a replica subscribing MID-computation sees pending immediately (no missed transition)', async () => {
     const backing = signal<{ n: number }>({ n: 1 });
-    const st = signal<ResourceStatus>('reloading'); // already in flight when the client arrives
+    const st = signal<ResourceStatus>('reloading');
     const pub = Object.assign(computed(() => backing()), { status: st });
 
     const host = createWorkerHost({ published: { calc: pub } });
@@ -87,8 +84,8 @@ describe('published subtrees (rung 3)', () => {
     );
     await tick();
 
-    expect(replica.value()).toEqual({ n: 1 }); // hydrated with the held value
-    expect(replica.status()).toBe('reloading'); // and ALREADY pending, not waiting for a transition
+    expect(replica.value()).toEqual({ n: 1 });
+    expect(replica.status()).toBe('reloading');
 
     backing.set({ n: 2 });
     st.set('resolved');

@@ -189,7 +189,7 @@ describe('hashRequest', () => {
         body: make('a.txt', 'hello'),
       });
       expect(result).toContain('File:a.txt');
-      expect(result).toContain(':5'); // size
+      expect(result).toContain(':5');
     });
   });
 
@@ -346,7 +346,6 @@ describe('hashRequest', () => {
 
       expect(key).not.toContain(token);
       expect(key).not.toContain('super-secret-token-value');
-      // the digest segment is hex, fixed width
       expect(key).toMatch(
         new RegExp(`${D}vary\\(authorization=[0-9a-f]{16}\\)$`),
       );

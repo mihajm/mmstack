@@ -76,7 +76,7 @@ describe('PreloadStrategy', () => {
 
   it('should preload when requester emits matching path', async () => {
     const loadSpy = vi.fn().mockReturnValue(of(true));
-    const route = (routerMock.config as Route[])[0] as any as Route; // path: 'home'
+    const route = (routerMock.config as Route[])[0] as any as Route;
 
     const obs$ = strategy.preload(route, loadSpy);
 
@@ -95,7 +95,7 @@ describe('PreloadStrategy', () => {
     const loadSpy = vi.fn().mockReturnValue(of(true));
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const route = (routerMock.config as Route[])[1]
-      .children![0] as any as Route; // path: ':id'
+      .children![0] as any as Route;
 
     const obs$ = strategy.preload(route, loadSpy);
 
@@ -103,7 +103,6 @@ describe('PreloadStrategy', () => {
 
     expect(loadSpy).not.toHaveBeenCalled();
 
-    // Matches dynamic parameter pattern via predicate
     requester.startPreload('user/123');
 
     await req;
@@ -138,16 +137,13 @@ describe('PreloadStrategy', () => {
     const obs$ = strategy.preload(route, loadSpy);
     await firstValueFrom(obs$, { defaultValue: 'completed' });
 
-    expect(loadSpy).not.toHaveBeenCalled(); // Returns EMPTY because of loading.has('home')
+    expect(loadSpy).not.toHaveBeenCalled();
   });
 
   it('should complete the preload() observable immediately even when never requested', async () => {
     const loadSpy = vi.fn().mockReturnValue(of(true));
     const obs$ = strategy.preload({ path: 'home' } as any as Route, loadSpy);
 
-    // never call startPreload — must still complete: RouterPreloader concatMaps
-    // these per navigation, so a hanging observable would stall registration of
-    // every lazy route discovered after this one
     await expect(
       firstValueFrom(obs$, { defaultValue: 'completed' }),
     ).resolves.toBe('completed');
@@ -162,7 +158,6 @@ describe('PreloadStrategy', () => {
     requester.startPreload('home');
     expect(loadSpy).not.toHaveBeenCalled();
 
-    // connection recovered — the same registration can now load
     (globalThis as any).window.navigator.connection.effectiveType = '4g';
     requester.startPreload('home');
     expect(loadSpy).toHaveBeenCalledTimes(1);
@@ -186,13 +181,13 @@ describe('PreloadStrategy', () => {
     strategy.preload({ path: 'home' } as any as Route, loadSpy);
 
     requester.startPreload('home');
-    expect(loadSpy).toHaveBeenCalledTimes(1); // failed
+    expect(loadSpy).toHaveBeenCalledTimes(1);
 
     requester.startPreload('home');
-    expect(loadSpy).toHaveBeenCalledTimes(2); // retried, succeeded
+    expect(loadSpy).toHaveBeenCalledTimes(2);
 
     requester.startPreload('home');
-    expect(loadSpy).toHaveBeenCalledTimes(2); // done — no further loads
+    expect(loadSpy).toHaveBeenCalledTimes(2);
   });
 
   it('should delay the load by data.preloadDelay (hover intent)', () => {

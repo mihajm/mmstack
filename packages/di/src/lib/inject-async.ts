@@ -12,16 +12,14 @@ import {
   type Type,
 } from '@angular/core';
 
-interface DefaultExport<T> {
+type DefaultExport<T> = {
   /**
    * Default exports are bound under the name `"default"`, per the ES Module spec:
    * https://tc39.es/ecma262/#table-export-forms-mapping-to-exportentry-records
    */
   default: T;
-}
+};
 
-// Sentinel distinguishing "not provided anywhere" from a legitimately provided
-// null/undefined/falsy value during the resolution probe.
 const NOT_FOUND = Symbol('@mmstack/di/inject-async/not-found');
 
 /**
@@ -54,10 +52,10 @@ export type Prefetch = PrefetchTrigger | 'idle' | number;
  * and `optional` mirror Angular's `InjectOptions` and behave as they do for
  * `injectLazy`. `prefetch` and `providedWith` are mmstack additions.
  */
-export interface InjectAsyncOptions extends Pick<
+export type InjectAsyncOptions = Pick<
   InjectOptions,
   'optional' | 'self' | 'skipSelf' | 'host'
-> {
+> & {
   /**
    * Eagerly load (and resolve) the dependency ahead of the first explicit
    * access. Accepts `'idle'`, a millisecond deadline, or a custom
@@ -72,7 +70,7 @@ export interface InjectAsyncOptions extends Pick<
    * from the current context (the mechanism {@link provideLazy} builds on).
    */
   providedWith?: Injector | InjectionToken<Injector>;
-}
+};
 
 function maybeUnwrapDefaultExport<T>(value: T | DefaultExport<T>): T {
   return value && typeof value === 'object' && 'default' in value
@@ -163,9 +161,6 @@ export function injectAsync<T>(
       ? inject(DestroyRef)
       : (target.get(DestroyRef, null) ?? inject(DestroyRef));
 
-  // PLATFORM_ID's browser value is the stable string 'browser' (same check
-  // `isPlatformBrowser` performs) — compared directly to avoid an
-  // `@angular/common` dependency.
   const isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
 
   // host destroyed mid-import
@@ -181,10 +176,6 @@ export function injectAsync<T>(
   let promise: Promise<T | null> | null = null;
   const load = (): Promise<T | null> =>
     (promise ??= loader().then((loaded) => {
-      // Owner gone before the import settled (e.g. navigated away). A benign
-      // race, not a bug: surface it in dev, but in prod never settle rather than
-      // reject — `(await getter()).x` must not run downstream against a dead
-      // scope, and resolving null would only turn that into a null-deref.
       if (ownerDestroyed) {
         if (isDevMode())
           throw new Error(

@@ -1,14 +1,5 @@
 type UnknownObject = Record<PropertyKey, unknown>;
 
-/**
- * Returns `true` for any object-like value whose own enumerable keys should
- * be sorted for stable hashing. Excludes arrays (positional), `Date`
- * (handled by `toJSON`), `Map`/`Set` (handled explicitly), and binary types
- * (`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer`/typed arrays — these
- * should be branched on before reaching `hash()`, typically by `hashRequest`).
- *
- * Plain objects, class instances, and `Object.create(null)` all qualify.
- */
 function isHashableObject(value: unknown): value is UnknownObject {
   if (value === null || typeof value !== 'object') return false;
   if (Array.isArray(value)) return false;
@@ -36,21 +27,9 @@ function sortKeys(val: UnknownObject): UnknownObject {
     }, {} as UnknownObject);
 }
 
-/**
- * Internal helper to generate a stable JSON string from an array.
- * - Object-like values (plain, class instances, null-proto) get their own
- *   enumerable keys sorted alphabetically.
- * - `Map` → marker object with sorted entries (sorted by `JSON.stringify(key)`).
- * - `Set` → marker object with sorted values (sorted by `JSON.stringify(value)`).
- * - Arrays preserve order. `Date` serializes via `toJSON`.
- *
- * @internal
- */
 function hashKey(queryKey: unknown[]): string {
   return JSON.stringify(queryKey, (_, val) => {
     if (val instanceof Map) {
-      // Schwartzian: compute each entry's sort key (recursive hash of the
-      // Map key) once, then sort by the cheap string compare.
       const entries = [...val.entries()]
         .map((e) => [hash(e[0]), e] as const)
         .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))

@@ -73,7 +73,9 @@ export function workerResource<TInput, TResult>(
   options: WorkerResourceOptions<TResult>,
 ): WorkerResourceRef<TResult> {
   const injector = options.injector ?? inject(Injector);
-  return runInInjectionContext(injector, () => build<TInput, TResult>(params, options));
+  return runInInjectionContext(injector, () =>
+    build<TInput, TResult>(params, options),
+  );
 }
 
 function build<TInput, TResult>(
@@ -90,7 +92,8 @@ function build<TInput, TResult>(
 
   const value = signal<TResult | undefined>(options.defaultValue, {
     equal: userEqual
-      ? (a, b) => (a === undefined || b === undefined ? a === b : userEqual(a, b))
+      ? (a, b) =>
+          a === undefined || b === undefined ? a === b : userEqual(a, b)
       : undefined,
   });
   const status = signal<ResourceStatus>('idle');
@@ -119,14 +122,17 @@ function build<TInput, TResult>(
     runTask(input, ac.signal).then(
       (result) => {
         if (inFlight === ac) inFlight = null;
-        if (myEpoch !== epoch) return; // superseded — discard
+        if (myEpoch !== epoch) return;
         value.set(result);
         status.set('resolved');
       },
       (err) => {
         if (inFlight === ac) inFlight = null;
         if (myEpoch !== epoch) return;
-        if (err instanceof WorkerAbortError || (err as { name?: string })?.name === 'AbortError')
+        if (
+          err instanceof WorkerAbortError ||
+          (err as { name?: string })?.name === 'AbortError'
+        )
           return;
         error.set(err);
         status.set('error');
@@ -138,10 +144,10 @@ function build<TInput, TResult>(
 
   const ref = effect(() => {
     const i = input();
-    if (isServer || i === PAUSED) return; // server: never run · paused: hold
-    if (i === undefined) return; // disabled — keep current value/status
-    // dedup: a resume to the same input (e.g. after a pause) does not re-run
-    if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error') return;
+    if (isServer || i === PAUSED) return;
+    if (i === undefined) return;
+    if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error')
+      return;
     untracked(() => start(i as TInput));
   });
 
@@ -162,11 +168,11 @@ function build<TInput, TResult>(
       start(i as TInput);
     },
     abort: () => {
-      if (!inFlight) return; // nothing in flight (a scope's abortPending must not disturb a settled value)
+      if (!inFlight) return;
       epoch++;
       inFlight.abort();
       inFlight = null;
-      status.set('local'); // value kept
+      status.set('local');
     },
     destroy: () => {
       epoch++;
@@ -178,7 +184,18 @@ function build<TInput, TResult>(
   if (options.register) {
     const scope = injectTransitionScope();
     scope.add(self, { suspends: options.register === 'suspend' });
-    inject(DestroyRef).onDestroy(() => scope.remove(self));
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      scope.remove(self);
+    };
+    inject(DestroyRef).onDestroy(remove);
+    const destroy = self.destroy;
+    self.destroy = () => {
+      remove();
+      destroy();
+    };
   }
 
   return self;

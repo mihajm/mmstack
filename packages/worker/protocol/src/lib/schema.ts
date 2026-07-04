@@ -17,7 +17,6 @@ export type EmptyWorkerSchema = {
   readonly tasks: Record<string, never>;
 };
 
-// module-shared phantom key so a WorkerHost<M> and WorkerRef<M> carry M recoverably
 declare const WORKER_SCHEMA: unique symbol;
 
 /** Phantom-tags a type with its {@link WorkerSchema} `M` so `SchemaOf` can recover it. */

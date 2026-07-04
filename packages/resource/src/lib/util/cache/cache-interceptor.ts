@@ -116,10 +116,8 @@ function parseCacheControlHeader(
     }
   }
 
-  // s-maxage takes precedence over max-age
   if (sMaxAge !== null) directives.maxAge = sMaxAge;
 
-  // if no store nothing else is relevant
   if (directives.noStore)
     return {
       noStore: true,
@@ -131,7 +129,6 @@ function parseCacheControlHeader(
       staleWhileRevalidate: null,
     };
 
-  // max age does not apply to immutable resources
   if (directives.immutable)
     return {
       ...directives,
@@ -160,22 +157,15 @@ function resolveTimings(
     if (cacheControl.staleWhileRevalidate !== null) {
       ttl = staleTime + cacheControl.staleWhileRevalidate * 1000;
     } else if (ttl !== undefined) {
-      // a configured total lifetime must never undercut the server's fresh window
       ttl = Math.max(ttl, staleTime);
     }
-    // no swr + no configured ttl → leave undefined so the cache's default ttl applies
-    // (the entry stays resident past max-age for ETag revalidation)
   } else if (cacheControl.staleWhileRevalidate !== null) {
-    // swr without max-age: stale immediately, revalidatable for the window
     staleTime = 0;
     ttl = cacheControl.staleWhileRevalidate * 1000;
   }
 
-  // if no-cache is set, we must always revalidate (the entry stays usable for conditional requests until ttl)
   if (cacheControl.noCache || cacheControl.mustRevalidate) staleTime = 0;
 
-  // option-only path (no server freshness): a misconfigured ttl < staleTime clamps the
-  // fresh window down, mirroring the cache's own internal clamp
   if (
     cacheControl.maxAge === null &&
     ttl !== undefined &&
@@ -240,12 +230,9 @@ export function createCacheInterceptor(
     if (!opt.cache) return next(req);
 
     const key = opt.key ?? hashRequest(req);
-    const entry = cache.getUntracked(key); // null if expired or not found
+    const entry = cache.getUntracked(key);
 
-    // If the entry is not stale, return it
     if (entry && !entry.isStale) return of(entry.value);
-
-    // resource itself handles case of showing stale data...the request must process as this will "refresh said data"
 
     return sharePending(inFlight, key, () => {
       const eTag = entry?.value.headers.get('ETag');
@@ -271,12 +258,7 @@ export function createCacheInterceptor(
         map((event) => {
           if (!(event instanceof HttpResponse)) return event;
 
-          // 304 → server confirmed our cached entry is still valid. Re-stamp the
-          // existing entry so subsequent reads within the new freshness window
-          // don't trigger another revalidation round-trip, then serve it.
           if (event.status === 304 && entry) {
-            // ...unless the key was invalidated while this conditional request was in
-            // flight (e.g. by a mutation) — re-storing would resurrect deleted data
             if (cache.getUntracked(key)) {
               const cacheControl = parseCacheControlHeader(event);
               const { staleTime, ttl } = opt.ignoreCacheControl

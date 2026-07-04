@@ -1,0 +1,25 @@
+{
+  "name": "@mmstack/telemetry-posthog",
+  "version": "21.0.0",
+  "keywords": [
+    "angular",
+    "signals",
+    "telemetry",
+    "posthog",
+    "analytics",
+    "session-replay",
+    "observability"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/telemetry/posthog"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/telemetry/posthog",
+  "peerDependencies": {
+    "@angular/core": ">=21 <22",
+    "@mmstack/telemetry-core": ">=21 <22"
+  },
+  "sideEffects": false
+}

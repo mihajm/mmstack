@@ -39,7 +39,9 @@ export type SubmitChangesOptions<T, TResult> = {
    *
    * On error neither runs — dirty state is left alone, ready to retry.
    */
-  readonly onSuccess?: [TResult] extends [T] ? 'commit' | 'reconcile' : 'commit';
+  readonly onSuccess?: [TResult] extends [T]
+    ? 'commit' | 'reconcile'
+    : 'commit';
   /**
    * Map a mutation failure into form errors (Angular's server-error channel — returned errors
    * attach to their fields until the next submit). Without it the failure rethrows out of the
@@ -93,8 +95,6 @@ export function submitChanges<T, TResult>(
     submit(tree, {
       ignoreValidators: options?.ignoreValidators,
       action: async () => {
-        // Snapshot at request time: the payload AND the unit paths it consists of, so success
-        // can re-baseline exactly what was sent, at the sent values — never a mid-flight edit.
         const snapshot =
           payloadMode === 'full'
             ? {
@@ -103,7 +103,6 @@ export function submitChanges<T, TResult>(
               }
             : collectChanged(tree);
 
-        // nothing changed — a successful no-op, not a request
         if (!snapshot) return;
 
         let result: TResult;
@@ -114,7 +113,6 @@ export function submitChanges<T, TResult>(
           throw err; // Angular's submit() resets `submitting` in a finally — safe to propagate
         }
 
-        // "What was sent is saved": each submitted unit's baseline becomes its sent value.
         untracked(() => {
           for (const path of snapshot.paths) {
             const state = stateAt(tree as FieldTree<unknown>, path);

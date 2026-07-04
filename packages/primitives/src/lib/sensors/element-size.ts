@@ -15,10 +15,10 @@ import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 /**
  * Represents the size of an element.
  */
-export interface ElementSize {
+export type ElementSize = {
   width: number;
   height: number;
-}
+};
 
 /**
  * Options for configuring the `elementSize` sensor.
@@ -57,8 +57,7 @@ export function elementSize(
   opt?: ElementSizeOptions,
 ): ElementSizeSignal {
   return runInSensorContext(opt?.injector, () =>
-    // the host-element default must resolve INSIDE the sensor context, not as a
-    // parameter default (which would run before the injector wrapper)
+    // the host-element default must resolve INSIDE the sensor context
     createElementSize(target ?? inject(ElementRef), opt),
   );
 }

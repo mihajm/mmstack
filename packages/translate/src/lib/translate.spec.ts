@@ -62,7 +62,6 @@ describe('Translate Directive', () => {
     TestBed.tick();
 
     const el = fixture.nativeElement as HTMLElement;
-    // Our mock translator doesn't run Intl ICU compilation
     expect(el.querySelector('#var-test')?.textContent).toBe('Hello {name}');
   });
 
@@ -77,8 +76,6 @@ describe('Translate Directive', () => {
     fixture.detectChanges();
     TestBed.tick();
 
-    // The text content should update, though currently the mock just returns the raw string,
-    // it triggers the effect successfully. In actual execution formatMessage handles it.
     expect(el.querySelector('#var-test')?.textContent).toBe('Hello {name}');
   });
 

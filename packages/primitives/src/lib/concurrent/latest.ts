@@ -112,8 +112,6 @@ export function use<T>(res: UseSource<T>): T {
     frame.seen.add(res);
     frame.deps.push(res);
   }
-  // status() is read tracked even on the short-circuit paths, so the owning computed
-  // re-evaluates when the load settles / the error clears.
   if (res.status() === 'error') {
     frame.errors.push(res.error?.());
     throw BLOCKED;
@@ -177,17 +175,13 @@ export function latest<T>(
 
   const equal = opt?.equal ?? Object.is;
 
-  // The stale-while-revalidate atom: holds the last successful result through blocked /
-  // errored rounds. `equal` gates notification, so an in-flight cycle that lands on an
-  // equal value never ripples to consumers — while `pending` (independent) still cycles.
   const held = linkedSignal<Evaluation<T>, Held<T>>({
     source: evaluation,
     computation: (ev, prev) =>
       ev.kind === 'value'
         ? { has: true, v: ev.value }
         : (prev?.value ?? { has: false, v: undefined }),
-    equal: (a, b) =>
-      a.has === b.has && (!a.has || equal(a.v as T, b.v as T)),
+    equal: (a, b) => a.has === b.has && (!a.has || equal(a.v as T, b.v as T)),
   });
 
   const value = computed(

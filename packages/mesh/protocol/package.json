@@ -1,0 +1,36 @@
+{
+  "name": "@mmstack/mesh-protocol",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "*.js",
+    "*.d.ts",
+    "*.map"
+  ],
+  "keywords": [
+    "mmstack",
+    "mesh",
+    "sync",
+    "multiplayer",
+    "relay",
+    "op-log",
+    "local-first"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/mesh/protocol"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/mesh/protocol",
+  "sideEffects": false
+}

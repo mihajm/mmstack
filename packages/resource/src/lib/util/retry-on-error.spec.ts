@@ -16,29 +16,25 @@ describe('retryOnError', () => {
       const mock = createMockResource('data', { status: 'idle' });
       retryOnError(mock, 3);
 
-      // 1st error
       mock._status.set('error');
       TestBed.tick();
-      vi.advanceTimersByTime(1000); // 1000 * 2^0
+      vi.advanceTimersByTime(1000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
 
-      // 2nd error (need to transition status to trigger effect again)
       mock._status.set('loading');
       TestBed.tick();
       mock._status.set('error');
       TestBed.tick();
-      vi.advanceTimersByTime(2000); // 1000 * 2^1
+      vi.advanceTimersByTime(2000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(2);
 
-      // 3rd error
       mock._status.set('loading');
       TestBed.tick();
       mock._status.set('error');
       TestBed.tick();
-      vi.advanceTimersByTime(4000); // 1000 * 2^2
+      vi.advanceTimersByTime(4000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(3);
 
-      // 4th error - should NOT retry
       mock._status.set('loading');
       TestBed.tick();
       mock._status.set('error');
@@ -58,13 +54,11 @@ describe('retryOnError', () => {
       vi.advanceTimersByTime(1000);
       expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
 
-      // Success resets counter
       mock._status.set('loading');
       TestBed.tick();
       mock._status.set('resolved');
       TestBed.tick();
 
-      // New error should retry from 0
       mock._status.set('error');
       TestBed.tick();
       vi.advanceTimersByTime(1000);
@@ -127,7 +121,6 @@ describe('retryOnError', () => {
       TestBed.tick();
       mock._status.set('error');
       TestBed.tick();
-      // 3rd attempt (retryCount=2) is the final one — isFinal flips to true
       expect(onError).toHaveBeenLastCalledWith(err3, 2, true);
 
       expect(onError).toHaveBeenCalledTimes(3);

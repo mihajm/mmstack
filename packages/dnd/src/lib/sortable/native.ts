@@ -101,8 +101,6 @@ export function connectNativeContainer<T, K = unknown>(
   const targets = injectDndTargets();
 
   // Centers cached per drag — stable, so an indicator move can't feed back into hit-testing.
-  // Re-measured post-layout on ANY source change (a same-length reorder mid-drag — e.g. a
-  // concurrent keyboard move — shifts the rects just like an insert/removal does).
   const centers = signal<readonly number[]>([]);
   afterRenderEffect({
     earlyRead: () => {
@@ -260,7 +258,7 @@ export function connectNativeItem<T, K = unknown>(
     inject(Injector),
   );
 
-  // FLIP-on-commit: glide from old box to new after a reorder (items don't move DURING a native drag).
+  // FLIP-on-commit
   const anim = controller().animation;
   if (anim) {
     const active = injectDndActive();

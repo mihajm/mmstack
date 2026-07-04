@@ -4,7 +4,6 @@ import { provideMockTranslations } from './testing/provide-mock-translations';
 import { injectDynamicLocale, TranslationStore } from './translation-store';
 import { Translator } from './translator';
 
-// Mock compilation shape
 type MockLocale = any;
 
 @Pipe({
@@ -84,7 +83,6 @@ describe('Translator Pipe (locale switching)', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [LocaleSwitchComponent],
-      // No mock — use the real TranslationStore
     }).compileComponents();
 
     const store = TestBed.inject(TranslationStore);
@@ -102,13 +100,10 @@ describe('Translator Pipe (locale switching)', () => {
 
     const store = TestBed.inject(TranslationStore);
 
-    // Register a new locale's translations
     store.register('myNs', { 'sl-SI': { hello: 'Pozdravljen svet' } });
 
-    // Change the locale
     store.locale.set('sl-SI');
 
-    // Flush effects and re-render
     await fixture.whenStable();
     fixture.detectChanges();
 

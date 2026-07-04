@@ -78,7 +78,6 @@ const testInterceptor = (req: HttpRequest<any>) => {
   return delayMs ? res$.pipe(delay(delayMs)) : res$;
 };
 
-/** Default-serializer envelope, as a previous session would have stashed it. */
 const stashed = (mutation: unknown, ictx?: unknown) => ({
   mutation,
   ctx: ictx,
@@ -94,8 +93,6 @@ describe('mutation persistence', () => {
         { provide: PLATFORM_ID, useValue: 'browser' },
         provideQueryCache(),
         provideMockMutationPersistence(seed),
-        // deterministic single-tab env: no ambient channel (Node ships a global
-        // BroadcastChannel); the cross-tab suite wires explicit fakes instead
         { provide: MUTATION_SYNC, useValue: null },
         { provide: ResourceSensors, useValue: { networkStatus: online } },
         provideHttpClient(
@@ -108,8 +105,8 @@ describe('mutation persistence', () => {
 
   const hydrate = async () => {
     await TestBed.inject(MutationPersistence).whenHydrated;
-    await Promise.resolve(); // let the post-hydration replay microtask run
-    TestBed.tick(); // ...and any queue/network effects it scheduled
+    await Promise.resolve();
+    TestBed.tick();
   };
 
   describe('registry surface', () => {
@@ -134,13 +131,13 @@ describe('mutation persistence', () => {
       configure({
         rows: [
           { key: 'k', raw: stashed({ n: 1 }) },
-          { key: 'k', raw: stashed({ n: 0 }), created: eightDaysAgo }, // past ttl
+          { key: 'k', raw: stashed({ n: 0 }), created: eightDaysAgo },
         ],
       });
       const persistence = TestBed.inject(MutationPersistence);
       await persistence.whenHydrated;
 
-      expect(persistence.rowsFor('k').length).toBe(1); // the expired stash never surfaces
+      expect(persistence.rowsFor('k').length).toBe(1);
     });
 
     it('entries for keys with no live resource are visible but inert', async () => {
@@ -150,8 +147,8 @@ describe('mutation persistence', () => {
       );
       await hydrate();
 
-      expect(pending.count()).toBe(1); // visible…
-      pending.flush(); // …but nothing claims the key, so this is a safe no-op
+      expect(pending.count()).toBe(1);
+      pending.flush();
       await hydrate();
       expect(pending.count()).toBe(1);
     });
@@ -180,9 +177,9 @@ describe('mutation persistence', () => {
         ),
       ).mutate({ n: 1 });
 
-      expect(pending.count()).toBe(1); // stashed synchronously at accept time
+      expect(pending.count()).toBe(1);
       await settled.promise;
-      expect(pending.count()).toBe(0); // settled — stash removed
+      expect(pending.count()).toBe(0);
     });
 
     it('clears the stash on error and reports replayed: false', async () => {
@@ -211,7 +208,7 @@ describe('mutation persistence', () => {
 
       await settled.promise;
       expect(metas).toEqual([false]);
-      expect(pending.count()).toBe(0); // an error is settled — no boot-loop retries
+      expect(pending.count()).toBe(0);
     });
 
     it('a superseded mutation loses its stash; the superseding one keeps its own', async () => {
@@ -236,11 +233,11 @@ describe('mutation persistence', () => {
 
       res.mutate({ n: 1 });
       const firstId = persistence.rowsFor('update')[0]?.id;
-      res.mutate({ n: 2 }); // latest-wins supersede
+      res.mutate({ n: 2 });
 
       const rows = persistence.rowsFor('update');
       expect(rows.length).toBe(1);
-      expect(rows[0].id).not.toBe(firstId); // n:1's stash went with it
+      expect(rows[0].id).not.toBe(firstId);
 
       await settled.promise;
     });
@@ -255,7 +252,7 @@ describe('mutation persistence', () => {
             url: 'https://x.test/m',
             method: 'POST',
             body,
-            context: ctx(() => undefined, { ok: true }, false, 5000), // never settles in-test
+            context: ctx(() => undefined, { ok: true }, false, 5000),
           }),
           { persist: { key: 'update' } },
         ),
@@ -265,9 +262,8 @@ describe('mutation persistence', () => {
       expect(persistence.rowsFor('update').length).toBe(1);
 
       res.destroy();
-      expect(persistence.rowsFor('update').length).toBe(1); // survives for next session
+      expect(persistence.rowsFor('update').length).toBe(1);
 
-      // the claim was released: a new resource can claim + replay the surviving stash
       const settled = Promise.withResolvers<void>();
       const bodies: unknown[] = [];
       TestBed.runInInjectionContext(() =>
@@ -306,13 +302,13 @@ describe('mutation persistence', () => {
         ),
       );
 
-      res.mutate({ n: 1 }); // becomes in-flight after the queue effect runs
-      res.mutate({ n: 2 }); // stays pending
-      res.mutate({ n: 3 }); // stays pending
+      res.mutate({ n: 1 });
+      res.mutate({ n: 2 });
+      res.mutate({ n: 3 });
       TestBed.tick();
       expect(persistence.rowsFor('update').length).toBe(3);
 
-      res.clearQueue(); // drops the two pending; in-flight n:1 unaffected
+      res.clearQueue();
       expect(persistence.rowsFor('update').length).toBe(1);
     });
   });
@@ -348,8 +344,6 @@ describe('mutation persistence', () => {
       await settled.promise;
 
       expect(bodies).toEqual([{ n: 7 }]);
-      // lexical hooks fired, with the deserialized initial ctx — the reason replay
-      // activates at instantiation
       expect(hooks).toEqual(['onMutate:7:ictx', 'onSuccess:ctx']);
       expect(TestBed.inject(MutationPersistence).rowsFor('update')).toEqual([]);
     });
@@ -403,11 +397,11 @@ describe('mutation persistence', () => {
       );
 
       await hydrate();
-      expect(bodies).toEqual([]); // offline — stash stays put
+      expect(bodies).toEqual([]);
       expect(TestBed.inject(MutationPersistence).rowsFor('update').length).toBe(1);
 
       online.set(true);
-      TestBed.tick(); // regain effect
+      TestBed.tick();
       await settled.promise;
       expect(bodies).toEqual([{ n: 7 }]);
     });
@@ -497,12 +491,12 @@ describe('mutation persistence', () => {
         ),
       );
 
-      res.mutate({ n: 99 }); // issued before hydration finishes — it is the newest intent
+      res.mutate({ n: 99 });
       await hydrate();
       await settled.promise;
 
-      expect(bodies).toEqual([{ n: 99 }]); // the stash never fired…
-      expect(TestBed.inject(MutationPersistence).rowsFor('update')).toEqual([]); // …and was dropped
+      expect(bodies).toEqual([{ n: 99 }]);
+      expect(TestBed.inject(MutationPersistence).rowsFor('update')).toEqual([]);
     });
 
     it('a second resource on the same key warns and does not double-replay', async () => {
@@ -531,7 +525,7 @@ describe('mutation persistence', () => {
 
       await hydrate();
       await settled.promise;
-      expect(bodies).toEqual([{ n: 7 }]); // exactly one replay
+      expect(bodies).toEqual([{ n: 7 }]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("persist under key 'update'"),
       );
@@ -543,7 +537,6 @@ describe('mutation persistence', () => {
       const persistence = TestBed.inject(MutationPersistence);
       const firstSettled = Promise.withResolvers<void>();
 
-      // session 1: stash with a custom encoding, "close the app" before it settles
       const first = TestBed.runInInjectionContext(() =>
         mutationResource(
           (body: { when: Date }) => ({
@@ -569,7 +562,6 @@ describe('mutation persistence', () => {
       });
       first.destroy();
 
-      // session 2: the replayed mutation is a real Date again
       const bodies: unknown[] = [];
       TestBed.runInInjectionContext(() =>
         mutationResource(
@@ -619,7 +611,7 @@ describe('mutation persistence', () => {
       );
 
       await hydrate();
-      expect(persistence.rowsFor('update')).toEqual([]); // settled-by-abort, not retried
+      expect(persistence.rowsFor('update')).toEqual([]);
       err.mockRestore();
     });
 
@@ -635,7 +627,7 @@ describe('mutation persistence', () => {
             url: 'https://x.test/m',
             method: 'POST',
             body,
-            context: ctx(() => undefined, null, true), // always fails
+            context: ctx(() => undefined, null, true),
           }),
           {
             persist: { key: 'update', keepOnError: true },
@@ -647,16 +639,16 @@ describe('mutation persistence', () => {
 
       await settled.promise;
       expect(attempts).toEqual([false]);
-      expect(persistence.rowsFor('update').length).toBe(1); // survived the failure
+      expect(persistence.rowsFor('update').length).toBe(1);
 
       settled = Promise.withResolvers<void>();
       online.set(false);
-      TestBed.tick(); // let the regain effect observe the offline state…
+      TestBed.tick();
       online.set(true);
-      TestBed.tick(); // …so this transition counts as a regain → replays the kept stash
+      TestBed.tick();
       await settled.promise;
-      expect(attempts).toEqual([false, true]); // the retry ran as a replay
-      expect(persistence.rowsFor('update').length).toBe(1); // still failing → still kept
+      expect(attempts).toEqual([false, true]);
+      expect(persistence.rowsFor('update').length).toBe(1);
     });
 
     it('keepOnError predicate decides per error (drop when it returns false)', async () => {
@@ -678,7 +670,7 @@ describe('mutation persistence', () => {
               key: 'update',
               keepOnError: (err) => {
                 seen.push(err);
-                return false; // "permanent failure" — drop it
+                return false;
               },
             },
             onSettled: () => settled.resolve(),
@@ -688,7 +680,7 @@ describe('mutation persistence', () => {
 
       await settled.promise;
       expect(seen.length).toBe(1);
-      expect(persistence.rowsFor('update')).toEqual([]); // predicate said drop
+      expect(persistence.rowsFor('update')).toEqual([]);
     });
 
     it('flush() forces a replay attempt for a claimed key', async () => {
@@ -716,10 +708,10 @@ describe('mutation persistence', () => {
       );
       await hydrate();
 
-      pending.flush('update'); // offline — replayer refuses
+      pending.flush('update');
       expect(bodies).toEqual([]);
 
-      online.set(true); // regain is enough on its own, but exercise the manual path:
+      online.set(true);
       pending.flush('update');
       await settled.promise;
       expect(bodies).toEqual([{ n: 7 }]);
@@ -727,14 +719,6 @@ describe('mutation persistence', () => {
   });
 
   describe('cross-tab replay claim (Web Locks)', () => {
-    /**
-     * A faithful in-memory Web Lock manager: exclusive/shared modes, `ifAvailable`,
-     * FIFO grants, abortable pending requests, release on callback settle — the
-     * semantics the replay claim, session probes, and death-watches rely on. Real
-     * `navigator.locks` (incl. release-on-tab-close) is covered by the playground
-     * e2e; two "tabs" here are two MutationPersistence instances in sibling
-     * injectors sharing one DB, one lock manager, and one broadcast hub.
-     */
     function createFakeLocks(): LockManager {
       type Mode = 'exclusive' | 'shared';
       type Waiter = { mode: Mode; grant: () => void; aborted: boolean };
@@ -762,10 +746,9 @@ describe('mutation persistence', () => {
           }
           if (!compatible(name, next.mode)) break;
           queue.shift();
-          next.grant(); // acquires synchronously — no double-grant window
+          next.grant();
         }
       };
-      /** Take the lock NOW (caller checked compatibility); returns the releaser. */
       const acquire = (name: string, mode: Mode) => {
         const holder = { mode };
         holdersOf(name).push(holder);
@@ -818,7 +801,6 @@ describe('mutation persistence', () => {
       return { request } as unknown as LockManager;
     }
 
-    /** In-memory BroadcastChannel hub: every connected channel hears the others. */
     function createFakeChannelHub() {
       const channels = new Set<MutationSyncChannel>();
       return {
@@ -852,7 +834,6 @@ describe('mutation persistence', () => {
       persistence: MutationPersistence;
     };
 
-    /** Root TestBed carries the shared infra (http, cache); each tab shadows the rest. */
     function configureShared(
       seed?: Parameters<typeof provideMockMutationPersistence>[0],
       opts?: { sync?: boolean },
@@ -870,7 +851,7 @@ describe('mutation persistence', () => {
       const injector = createEnvironmentInjector(
         [
           MutationPersistence,
-          shared.db, // the SAME provider instance → the same underlying store
+          shared.db,
           { provide: MUTATION_REPLAY_LOCKS, useValue: shared.locks },
           { provide: MUTATION_SYNC, useValue: shared.hub?.connect() ?? null },
           { provide: ResourceSensors, useValue: { networkStatus: tabOnline } },
@@ -905,7 +886,6 @@ describe('mutation persistence', () => {
         ),
       );
 
-    /** Drain the grant → refresh → replay microtask chains + any scheduled effects. */
     const settle = async () => {
       for (let round = 0; round < 3; round++) {
         for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -926,9 +906,9 @@ describe('mutation persistence', () => {
       makeResource(tabB, bodies, { onSettled: () => settled.resolve() });
 
       await settled.promise;
-      await settle(); // give tab B every chance to (wrongly) replay too
+      await settle();
 
-      expect(bodies).toEqual([{ n: 7 }]); // exactly one send, from the holder
+      expect(bodies).toEqual([{ n: 7 }]);
       expect(tabA.persistence.holdsReplayLock('update')).toBe(true);
       expect(tabB.persistence.holdsReplayLock('update')).toBe(false);
       expect(tabA.persistence.rowsFor('update')).toEqual([]);
@@ -941,16 +921,16 @@ describe('mutation persistence', () => {
       const bodies: unknown[] = [];
 
       const tabA = makeTab(shared);
-      tabA.online.set(false); // holds the lock, replays nothing — the row stays put
+      tabA.online.set(false);
       makeResource(tabA, bodies);
       const tabB = makeTab(shared);
       makeResource(tabB, bodies);
       await settle();
 
-      tabB.persistence.flush('update'); // online, has a live resource — but no lock
+      tabB.persistence.flush('update');
       await settle();
       expect(bodies).toEqual([]);
-      expect(tabB.persistence.rowsFor('update').length).toBe(1); // untouched
+      expect(tabB.persistence.rowsFor('update').length).toBe(1);
     });
 
     it('a closing holder hands over: the next tab re-syncs and replays leftovers', async () => {
@@ -961,24 +941,22 @@ describe('mutation persistence', () => {
       const settled = Promise.withResolvers<void>();
 
       const tabA = makeTab(shared);
-      tabA.online.set(false); // grabs the lock but can't replay — the row survives it
+      tabA.online.set(false);
       makeResource(tabA, bodies);
       const tabB = makeTab(shared);
       makeResource(tabB, bodies, { onSettled: () => settled.resolve() });
       await settle();
-      expect(bodies).toEqual([]); // A offline, B gated — nothing moved
+      expect(bodies).toEqual([]);
 
-      tabA.injector.destroy(); // "the tab closed": DestroyRef releases the claim + lock
+      tabA.injector.destroy();
 
       await settled.promise;
-      expect(bodies).toEqual([{ n: 7 }]); // B took over and replayed the leftover row
+      expect(bodies).toEqual([{ n: 7 }]);
       expect(tabB.persistence.holdsReplayLock('update')).toBe(true);
       expect(tabB.persistence.rowsFor('update')).toEqual([]);
     });
 
     it('takeover does not resurrect rows the previous holder already settled', async () => {
-      // sync disabled: the takeover re-sync ALONE must prevent resurrection (the
-      // broadcast remove would otherwise clear B's mirror first and mask a refresh bug)
       const shared = configureShared(
         {
           rows: [
@@ -991,7 +969,6 @@ describe('mutation persistence', () => {
       const bodies: unknown[] = [];
       const bothSettled = Promise.withResolvers<void>();
 
-      // A holds the lock but is offline; B hydrates the same rows into its mirror
       const tabA = makeTab(shared);
       tabA.online.set(false);
       makeResource(tabA, bodies, {
@@ -1003,24 +980,23 @@ describe('mutation persistence', () => {
       const tabB = makeTab(shared);
       makeResource(tabB, bodies, { queue: true });
       await settle();
-      expect(tabB.persistence.rowsFor('update').length).toBe(2); // B sees them…
+      expect(tabB.persistence.rowsFor('update').length).toBe(2);
 
-      tabA.online.set(true); // regain → the holder replays and settles both
+      tabA.online.set(true);
       await settle();
       await bothSettled.promise;
       expect(bodies).toEqual([{ n: 1 }, { n: 2 }]);
 
-      tabA.injector.destroy(); // …but takeover re-syncs from the DB: they're gone
+      tabA.injector.destroy();
       await settle();
 
-      expect(bodies).toEqual([{ n: 1 }, { n: 2 }]); // nothing re-sent
+      expect(bodies).toEqual([{ n: 1 }, { n: 2 }]);
       expect(tabB.persistence.holdsReplayLock('update')).toBe(true);
-      expect(tabB.persistence.rowsFor('update')).toEqual([]); // mirror re-synced
+      expect(tabB.persistence.rowsFor('update')).toEqual([]);
     });
 
     it('a re-sync never drops rows this session stashed (IDB write still in flight)', async () => {
       configure();
-      // a DB whose writes can be held back — the asynchronous IDB write window, for real
       const store = new Map<string, any>();
       let holdWrites = false;
       const heldWrites: (() => void)[] = [];
@@ -1050,7 +1026,7 @@ describe('mutation persistence', () => {
 
       const bodies: unknown[] = [];
       const tabA = makeTab(shared);
-      tabA.online.set(false); // inert holder
+      tabA.online.set(false);
       makeResource(tabA, bodies);
 
       const tabB = makeTab(shared);
@@ -1059,13 +1035,12 @@ describe('mutation persistence', () => {
       await settle();
 
       holdWrites = true;
-      resB.mutate({ n: 42 }); // stashed in B's mirror; the disk write hangs
+      resB.mutate({ n: 42 });
       expect(tabB.persistence.rowsFor('update').length).toBe(1);
 
-      tabA.injector.destroy(); // B takes over → refresh reads a disk WITHOUT the row
+      tabA.injector.destroy();
       await settle();
 
-      // the local row survived the re-sync — it is not "settled elsewhere", just unwritten
       expect(tabB.persistence.rowsFor('update').length).toBe(1);
       for (const write of heldWrites.splice(0)) write();
     });
@@ -1075,7 +1050,7 @@ describe('mutation persistence', () => {
       const bodies: unknown[] = [];
       const settled = Promise.withResolvers<void>();
 
-      const tabA = makeTab(shared); // first in → key-lock holder
+      const tabA = makeTab(shared);
       makeResource(tabA, bodies);
       const pendingA = runInInjectionContext(tabA.injector, () =>
         injectPendingMutations(),
@@ -1088,21 +1063,19 @@ describe('mutation persistence', () => {
       });
       await settle();
 
-      resB.mutate({ n: 5 }); // stashed in B → announced to A
-      expect(pendingA.count()).toBe(1); // THE staleness fix: A's badge is live
+      resB.mutate({ n: 5 });
+      expect(pendingA.count()).toBe(1);
 
-      // A holds the key lock and is online — but the row's owner is alive, so a
-      // forced replay attempt in A must not touch it (B sends it itself)
       pendingA.flush('update');
       await settle();
       expect(bodies).toEqual([]);
-      expect(tabA.persistence.rowsFor('update')).toEqual([]); // not in A's replay feed
+      expect(tabA.persistence.rowsFor('update')).toEqual([]);
 
-      tabB.online.set(true); // B's own in-session queue delivers it…
+      tabB.online.set(true);
       await settle();
       await settled.promise;
-      expect(bodies).toEqual([{ n: 5 }]); // …exactly once
-      expect(pendingA.count()).toBe(0); // …and A's badge cleared live
+      expect(bodies).toEqual([{ n: 5 }]);
+      expect(pendingA.count()).toBe(0);
     });
 
     it("a dying sibling's announced rows replay here the moment it dies (death-watch)", async () => {
@@ -1110,7 +1083,7 @@ describe('mutation persistence', () => {
       const bodies: unknown[] = [];
       const settled = Promise.withResolvers<void>();
 
-      const tabA = makeTab(shared); // holder, online
+      const tabA = makeTab(shared);
       makeResource(tabA, bodies, { onSettled: () => settled.resolve() });
       const pendingA = runInInjectionContext(tabA.injector, () =>
         injectPendingMutations(),
@@ -1120,20 +1093,19 @@ describe('mutation persistence', () => {
       const resB = makeResource(tabB, bodies, { queue: true });
       await settle();
 
-      resB.mutate({ n: 9 }); // B's row: visible in A, held back while B lives
+      resB.mutate({ n: 9 });
       await settle();
       expect(bodies).toEqual([]);
       expect(pendingA.count()).toBe(1);
 
-      tabB.injector.destroy(); // B dies with the row unsent — its session lock releases
+      tabB.injector.destroy();
 
       await settled.promise;
-      expect(bodies).toEqual([{ n: 9 }]); // A's death-watch upgraded + replayed it
+      expect(bodies).toEqual([{ n: 9 }]);
       expect(pendingA.count()).toBe(0);
     });
 
     it('hydrated disk rows written by a still-living tab are held back until it dies', async () => {
-      // the owner is "alive elsewhere": its session lock is held externally
       const shared = configureShared({
         rows: [{ key: 'update', raw: stashed({ n: 3 }), session: 's-live' }],
       });
@@ -1153,11 +1125,11 @@ describe('mutation persistence', () => {
       );
       await settle();
 
-      expect(pendingA.count()).toBe(1); // visible…
-      expect(tabA.persistence.rowsFor('update')).toEqual([]); // …but not replayable
+      expect(pendingA.count()).toBe(1);
+      expect(tabA.persistence.rowsFor('update')).toEqual([]);
       expect(bodies).toEqual([]);
 
-      releaseOwner(); // the owner dies → A's death-watch fires
+      releaseOwner();
       await settled.promise;
       expect(bodies).toEqual([{ n: 3 }]);
       expect(pendingA.count()).toBe(0);

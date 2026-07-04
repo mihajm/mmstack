@@ -102,7 +102,6 @@ export class PreloadStrategy implements PreloadingStrategy {
   private readonly req = inject(PreloadRequester);
 
   constructor() {
-    // code loads for every scope — 'code' vs 'all' only gates DATA warming
     this.req.preloadRequested$
       .pipe(takeUntilDestroyed())
       .subscribe(({ path }) => this.trigger(path));
@@ -111,10 +110,7 @@ export class PreloadStrategy implements PreloadingStrategy {
   preload(route: Route, load: () => Observable<any>): Observable<any> {
     if (!noPreload(route)) {
       const fp = findPath(this.router.config, route);
-      // (re-)register the loader; actual loading happens on demand in trigger().
-      // Returning EMPTY (completing immediately) is load-bearing: RouterPreloader
-      // concatMaps these per navigation — a never-completing observable here would
-      // stall registration of every lazy route discovered after this one.
+      // EMPTY (complete immediately) is load-bearing: RouterPreloader concatMaps these.
       if (!this.loading.has(fp)) {
         this.loaders.set(fp, {
           predicate: createRoutePredicate(fp),
@@ -142,11 +138,8 @@ export class PreloadStrategy implements PreloadingStrategy {
           : loader.load();
 
       load$.subscribe({
-        // loaded — drop the loader; `loading` keeps the path marked done so a
-        // re-registration before Angular flags the route as loaded can't re-fire
         complete: () => this.loaders.delete(fp),
-        // failed (e.g. chunk fetch error) — allow a retry on the next request
-        error: () => this.loading.delete(fp),
+        error: () => this.loading.delete(fp), // allow retry on next request
       });
     }
   }

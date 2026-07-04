@@ -20,14 +20,14 @@ export function extractRouteParams(
 
   const params: Record<string, string> = {};
   for (let i = 0; i < configSegs.length; i++) {
-    const configSeg = configSegs[i].split(';')[0]; // strip matrix params
+    const configSeg = configSegs[i].split(';')[0];
     const linkSeg = linkSegs[i].split(';')[0];
     if (configSeg.startsWith(':')) {
       params[configSeg.slice(1)] = safeDecode(linkSeg);
     } else if (configSeg !== '**' && configSeg !== linkSeg) {
       return null;
     } else if (configSeg === '**') {
-      break; // wildcard swallows the rest
+      break;
     }
   }
 

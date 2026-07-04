@@ -241,8 +241,6 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
         } else {
           denied = false;
           if (!source) return;
-          // abort → targets get leave (not drop); the source's onDrop still fires
-          // with an empty stack, matching pragmatic's native Escape semantics
           let targets: readonly DropTargetHit[] = [];
           if (g.cancelled) eng.cancel();
           else targets = eng.end();

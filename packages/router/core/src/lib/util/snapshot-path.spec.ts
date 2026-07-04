@@ -25,7 +25,7 @@ describe('injectSnapshotPathResolver', () => {
           { routeConfig: { path: '' } },
           { routeConfig: undefined },
           { routeConfig: { path: 'user' } },
-          { routeConfig: { path: '' } }, // filter(Boolean) removes ''
+          { routeConfig: { path: '' } },
           { routeConfig: { path: ':id' } },
         ],
       } as unknown as ActivatedRouteSnapshot;

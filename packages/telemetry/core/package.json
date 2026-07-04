@@ -1,0 +1,27 @@
+{
+  "name": "@mmstack/telemetry-core",
+  "version": "21.0.0",
+  "keywords": [
+    "angular",
+    "signals",
+    "telemetry",
+    "tracing",
+    "observability",
+    "spans",
+    "zoneless",
+    "analytics"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/telemetry/core"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/telemetry/core",
+  "peerDependencies": {
+    "@angular/core": ">=21 <22",
+    "@angular/common": ">=21 <22",
+    "rxjs": "~7.8.2"
+  },
+  "sideEffects": false
+}

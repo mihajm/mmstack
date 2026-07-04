@@ -85,7 +85,7 @@ describe('Optimistic Updates Integration', () => {
 
             query.update((items) => [
               ...(items ?? []),
-              { id: -1, name: newItem.name }, // temporary ID
+              { id: -1, name: newItem.name },
             ]);
 
             return { previousItems };
@@ -116,13 +116,13 @@ describe('Optimistic Updates Integration', () => {
       const optimisticValue = query.value();
       expect(optimisticValue?.length).toBe(2);
       expect(optimisticValue?.[1].name).toBe('Optimistic Item');
-      expect(optimisticValue?.[1].id).toBe(-1); // Temp ID
+      expect(optimisticValue?.[1].id).toBe(-1);
 
       await promise;
 
       const finalValue = query.value();
       expect(finalValue?.length).toBe(2);
-      expect(finalValue?.[1].id).toBe(2); // Updated with REAL id from server
+      expect(finalValue?.[1].id).toBe(2);
       expect(finalValue?.[1].name).toBe('Optimistic Item');
     });
   });
@@ -154,7 +154,7 @@ describe('Optimistic Updates Integration', () => {
 
             query.update((items) => [
               ...(items ?? []),
-              { id: -1, name: newItem.name }, // temporary ID
+              { id: -1, name: newItem.name },
             ]);
 
             return { previousItems };

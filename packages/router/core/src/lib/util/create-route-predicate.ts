@@ -9,7 +9,7 @@ function parsePathSegment(segmentString: string): ParsedSegment {
   const matrixParams: Record<string, string> = {};
   for (let i = 1; i < parts.length; i++) {
     const part = parts[i];
-    // split ONCE — matrix values may themselves contain '=' (e.g. base64 payloads)
+    // split once — matrix values may contain '='
     const eq = part.indexOf('=');
     const key = eq === -1 ? part : part.slice(0, eq);
     if (key) {
@@ -23,7 +23,6 @@ function singleSegmentMatches(
   configSegment: ParsedSegment,
   linkSegment: ParsedSegment,
 ): boolean {
-  // ':id' style params match any path part — but matrix params (below) still apply
   if (
     !configSegment.pathPart.startsWith(':') &&
     configSegment.pathPart !== linkSegment.pathPart
@@ -58,7 +57,6 @@ function createBasePredicate(path: string): (path: string) => boolean {
     const parts = linkPathOnly.split('/').filter((part) => !!part.trim());
     if (parts.length < configSegments.length) return false;
 
-    // prefix match: every config segment must match; extra link segments are fine
     return configSegments.every((configSegment, idx) =>
       singleSegmentMatches(configSegment, parsePathSegment(parts[idx])),
     );
@@ -70,12 +68,9 @@ function matchSegmentsRecursive(
   linkSegments: ParsedSegment[],
   configIdx: number,
   linkIdx: number,
-  // memo over (configIdx, linkIdx) — without it, paths with several '**' segments
-  // backtrack exponentially
+  // memo prevents exponential backtracking with multiple '**' segments
   memo: Map<number, boolean>,
 ): boolean {
-  // prefix match: config exhausted → matched, regardless of remaining link segments
-  // (same semantics as the non-wildcard predicate)
   if (configIdx === configSegments.length) {
     return true;
   }
@@ -87,12 +82,10 @@ function matchSegmentsRecursive(
   let result: boolean;
 
   if (linkIdx === linkSegments.length) {
-    // link exhausted — only matches if all remaining config segments are '**'
     result = configSegments
       .slice(configIdx)
       .every((s) => s.pathPart === '**');
   } else if (configSegments[configIdx].pathPart === '**') {
-    // '**' matches zero segments (advance config) or one-or-more (advance link)
     result =
       matchSegmentsRecursive(
         configSegments,

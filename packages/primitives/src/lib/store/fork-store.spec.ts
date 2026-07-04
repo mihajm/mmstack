@@ -444,3 +444,46 @@ describe('fork', () => {
     });
   });
 });
+
+// ───────────────────── fork ↔ op-protocol bridges (branching rungs) ─────────────────────
+import { isConflicted, policyStrategy, preserve, type Conflicted } from './op-sync';
+
+describe('fork ops() + policyStrategy', () => {
+  it('ops() exposes the staged delta vs the current base as structural ops', () => {
+    inInjectionContext(() => {
+      const base = store({ title: 'base', n: { x: 1 } });
+      const fork = forkStore(base);
+
+      expect(fork.ops()).toEqual([]);
+
+      set(fork.store.title, 'draft');
+      set(fork.store.n.x, 2);
+
+      expect(fork.ops()).toEqual([
+        { kind: 'set', path: ['title'], next: 'draft', prev: 'base' },
+        { kind: 'set', path: ['n', 'x'], next: 2, prev: 1 },
+      ]);
+
+      fork.commit();
+      expect(fork.ops()).toEqual([]); // re-linked, no delta
+    });
+  });
+
+  it('a policyStrategy fork preserves a live-base conflict as data instead of clobbering', () => {
+    inInjectionContext(() => {
+      const base = store({ title: 'base', body: 'b' });
+      const fork = forkStore(base, {
+        strategy: policyStrategy([{ path: 'title', merge: preserve }]),
+      });
+
+      set(fork.store.title, 'draft-title');
+      set(base.title, 'base-title-2'); // the base moves underneath the fork
+
+      const title = fork.store.title() as unknown as Conflicted<string>;
+      expect(isConflicted(title)).toBe(true);
+      expect(title.mine).toBe('draft-title');
+      expect(title.theirs).toBe('base-title-2');
+      expect(fork.store.body()).toBe('b'); // untouched path reads through
+    });
+  });
+});

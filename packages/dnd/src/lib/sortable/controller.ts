@@ -4,8 +4,8 @@ import {
   Injector,
   isDevMode,
   signal,
-  untracked,
   type Signal,
+  untracked,
   type WritableSignal,
 } from '@angular/core';
 
@@ -43,7 +43,9 @@ const DEFAULT_ANIMATION = {
 function defaultJumpModifier(e: KeyboardEvent): boolean {
   const mac =
     typeof navigator !== 'undefined' &&
-    /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+    /Mac|iPhone|iPad|iPod/.test(
+      navigator.platform || navigator.userAgent || '',
+    );
   return mac ? e.metaKey : e.ctrlKey;
 }
 
@@ -115,13 +117,11 @@ export function reorderable<T, K>(
   const pointerMain = signal(0);
   const startCross = signal(0); // off-axis, for 2D follow when dragging cross-list
   const pointerCross = signal(0);
-  // Main-axis scroll since drag start: compensates collision + dragged item WITHOUT re-measuring cached centers.
   const scrollDelta = signal(0);
 
   const active = computed(() => activeKey() !== null);
   const session = sortableSession({
     geometry,
-    // Centers are frozen at drag start; container scrolls Δ shifts items -Δ, so shift pointer +Δ to match.
     pointer: computed(() => pointerMain() + scrollDelta()),
     active,
     deadband,
@@ -258,8 +258,6 @@ export function reorderable<T, K>(
         : null;
 
     if (crossTarget && groupApi) {
-      // Ended over a foreign list: transfer, or no-op if the transfer is invalid —
-      // never fall back to a same-list move computed from a pointer outside this list.
       const from = untracked(session.source);
       const to = untracked(groupApi.activeInsertIndex);
       const item = from >= 0 ? untracked(source)[from] : undefined;
@@ -307,7 +305,7 @@ export function reorderable<T, K>(
               groupApi.activeSourceIndex(),
               groupApi.activeFootprint(),
             );
-          return 0; // list not involved in this drag
+          return 0;
         }
       }
       const insert = session.insertIndex();

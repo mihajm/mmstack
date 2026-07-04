@@ -33,14 +33,14 @@ describe('findPath', () => {
     const childEmpty: Route = { path: '' };
     const parentA: Route = { path: 'a', children: [childEmpty] };
     const config: Route[] = [parentA];
-    expect(findPath(config, childEmpty)).toBe('/a'); // /a/ resolves to /a
+    expect(findPath(config, childEmpty)).toBe('/a');
   });
 
   it('should handle empty path segment for a parent route', () => {
     const childB: Route = { path: 'b' };
     const parentEmpty: Route = { path: '', children: [childB] };
     const config: Route[] = [parentEmpty, { path: 'c' }];
-    expect(findPath(config, childB)).toBe('/b'); // /b (//b becomes /b)
+    expect(findPath(config, childB)).toBe('/b');
   });
 
   it('should handle empty path segment for a parent route that is also a target', () => {
@@ -56,7 +56,7 @@ describe('findPath', () => {
     const parentA: Route = {
       path: 'a',
       _loadedRoutes: lazyModuleRoutes,
-    } as any; // Cast to any for _loadedRoutes
+    } as any;
     const config: Route[] = [parentA];
     expect(findPath(config, lazyChildB)).toBe('/a/b');
   });
@@ -87,9 +87,7 @@ describe('findPath', () => {
   });
 
   it('should find path for a nested route where an ancestor has a named outlet', () => {
-    // This tests that primary children of an outletted route are handled correctly.
-    // The typical scenario is that the component loaded in the outlet has its own <router-outlet> for its children.
-    const grandChildC: Route = { path: 'c' }; // Primary child of 'b'
+    const grandChildC: Route = { path: 'c' };
     const childBInPopup: Route = {
       path: 'b',
       outlet: 'popup',
@@ -105,13 +103,11 @@ describe('findPath', () => {
     const intermediateEmpty: Route = { path: '', children: [childB] };
     const parentA: Route = { path: 'a', children: [intermediateEmpty] };
     const config: Route[] = [parentA];
-    // Path before normalization would be /a//b
     expect(findPath(config, childB)).toBe('/a/b');
 
     const routeC: Route = { path: 'c' };
     const rootEmptyChildEmpty: Route = { path: '', children: [routeC] };
     const config2: Route[] = [rootEmptyChildEmpty];
-    // Path before normalization //c
     expect(findPath(config2, routeC)).toBe('/c');
   });
 
@@ -157,7 +153,7 @@ describe('findPath', () => {
 
   it('should correctly find path when target route is a direct child of a _loadedRoutes parent', () => {
     const target: Route = { path: 'targetInLazy' };
-    const lazyParent: Route = { path: 'lazyParentPath', children: [target] }; // This route itself is part of a lazy loaded module
+    const lazyParent: Route = { path: 'lazyParentPath', children: [target] };
     const rootLevelLazyTrigger: Route = {
       path: 'trigger',
       _loadedRoutes: [lazyParent],

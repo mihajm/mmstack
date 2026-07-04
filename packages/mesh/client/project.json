@@ -1,0 +1,29 @@
+{
+  "name": "mesh",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/mesh/client/src",
+  "prefix": "mm",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/angular:package",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "project": "packages/mesh/client/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "packages/mesh/client/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "packages/mesh/client/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "test": {
+      "executor": "@nx/angular:unit-test"
+    }
+  }
+}

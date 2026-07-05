@@ -17,13 +17,18 @@ import {
   centerAlong,
   clampInsert,
   closeDisplacement,
+  closeSlotOf,
   displacement,
-  insertIndexFromCenters,
+  insertIndexForMeasure,
+  type MemberMeasure,
   moveWithin,
   openDisplacement,
+  openSlotOf,
+  type Point,
   type RectLike,
   sizeAlong,
   startAlong,
+  wrapVirtualSlot,
 } from './geometry';
 import { getGroupInternals, type SortableGroupMember } from './group';
 import { type DragGeometry, sortableSession } from './session';
@@ -52,6 +57,12 @@ function defaultJumpModifier(e: KeyboardEvent): boolean {
 /** Default auto-scroll: px from a scroll edge where it engages + max speed (px/frame). */
 const DEFAULT_AUTOSCROLL = { edge: 48, speed: 16 } as const;
 
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 export function reorderable<T, K>(
   source: WritableSignal<T[]>,
   opts: ReorderableOptions<T, K>,
@@ -63,6 +74,9 @@ export function reorderable<T, K>(
     raw.injector ? injectReorderableDefaults(raw.injector) : null,
   );
   const axis = options.axis ?? 'y';
+  const wrap = axis === 'wrap';
+  // wrap collision reads main = y, cross = x (row-major flow)
+  const collisionAxis: Axis = axis === 'x' ? 'x' : 'y';
   const deadband = options.deadband ?? 4;
   const engine: DragEngine = options.engine ?? 'native';
   const activationThreshold = options.activationThreshold ?? 5;
@@ -76,6 +90,11 @@ export function reorderable<T, K>(
     if (engine === 'native' && options.activationThreshold !== undefined) {
       console.warn(
         '[@mmstack/dnd] reorderable: `activationThreshold` is a pointer-engine option and is ignored under engine "native" (was the engine flipped by a DI default?).',
+      );
+    }
+    if (engine === 'native' && wrap) {
+      console.warn(
+        "[@mmstack/dnd] reorderable: `axis: 'wrap'` is a pointer-engine layout — the native indicator engine has no 2D indicator placement and falls back to vertical behaviour. Use `engine: 'pointer'`.",
       );
     }
   }
@@ -123,6 +142,7 @@ export function reorderable<T, K>(
   const session = sortableSession({
     geometry,
     pointer: computed(() => pointerMain() + scrollDelta()),
+    pointerCross,
     active,
     deadband,
   });
@@ -134,10 +154,12 @@ export function reorderable<T, K>(
     return map;
   });
 
-  const projMain = (p: { x: number; y: number }) => (axis === 'y' ? p.y : p.x);
-  const projCross = (p: { x: number; y: number }) => (axis === 'y' ? p.x : p.y);
+  const projMain = (p: { x: number; y: number }) =>
+    collisionAxis === 'y' ? p.y : p.x;
+  const projCross = (p: { x: number; y: number }) =>
+    collisionAxis === 'y' ? p.x : p.y;
   const oneAxis = (v: number) =>
-    axis === 'y' ? `translateY(${v}px)` : `translateX(${v}px)`;
+    collisionAxis === 'y' ? `translateY(${v}px)` : `translateX(${v}px)`;
 
   const spliceInto = (arr: readonly T[], index: number, item: T): T[] => {
     const next = arr.slice();
@@ -147,10 +169,7 @@ export function reorderable<T, K>(
 
   let container: HTMLElement | null = null;
   let boundsCache: RectLike | null = null;
-  let measureCache = new Map<
-    SortableGroupMember<T>,
-    { centers: readonly number[]; axis: Axis }
-  >();
+  let measureCache = new Map<SortableGroupMember<T>, MemberMeasure>();
 
   const ensureMeasured = (m: SortableGroupMember<T>) => {
     let r = measureCache.get(m);
@@ -159,6 +178,45 @@ export function reorderable<T, K>(
       measureCache.set(m, r);
     }
     return r;
+  };
+
+  /**
+   * Wrap layout snapshot: 2D centers in source order plus the median column/row
+   * pitch (same-row x steps vs row-break y jumps, split by half the first
+   * item's height). Pitch falls back to the source item's own size for
+   * degenerate layouts (single item / single row / single column).
+   */
+  const measureWrap = (): {
+    centers: Point[];
+    colPitch: number;
+    rowPitch: number;
+  } | null => {
+    const centers: Point[] = [];
+    let firstH = 0;
+    let firstW = 0;
+    for (const it of untracked(source)) {
+      const node = byKey.get(key(it));
+      if (!node) return null; // rendered set ≠ source() (e.g. filtered) → bail vs. misalign
+      const r = node.getBoundingClientRect();
+      if (!centers.length) {
+        firstH = r.height;
+        firstW = r.width;
+      }
+      centers.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    }
+    const rowTol = firstH / 2 || 1;
+    const colDeltas: number[] = [];
+    const rowDeltas: number[] = [];
+    for (let i = 1; i < centers.length; i++) {
+      const dy = centers[i].y - centers[i - 1].y;
+      if (Math.abs(dy) < rowTol) colDeltas.push(centers[i].x - centers[i - 1].x);
+      else rowDeltas.push(dy);
+    }
+    return {
+      centers,
+      colPitch: median(colDeltas) || firstW,
+      rowPitch: median(rowDeltas) || firstH,
+    };
   };
 
   const begin = (k: K, geom: DragGeometry, start: number) => {
@@ -170,6 +228,23 @@ export function reorderable<T, K>(
   };
 
   const beginGesture = (k: K, start: { x: number; y: number }) => {
+    if (wrap) {
+      const m = measureWrap();
+      const sourceIdx = untracked(indexMap).get(k) ?? -1;
+      if (!m || sourceIdx < 0) return;
+      startCross.set(projCross(start));
+      pointerCross.set(projCross(start));
+      begin(
+        k,
+        { kind: 'wrap', source: sourceIdx, ...m },
+        projMain(start),
+      );
+      if (group) {
+        measureCache = new Map();
+        for (const gm of group.members()) gm.refreshBounds();
+      }
+      return;
+    }
     const centers: number[] = [];
     const starts: number[] = [];
     const sizes: number[] = [];
@@ -178,9 +253,9 @@ export function reorderable<T, K>(
       const node = byKey.get(key(it));
       if (!node) return;
       const r = node.getBoundingClientRect();
-      centers.push(centerAlong(r, axis));
-      starts.push(startAlong(r, axis));
-      sizes.push(sizeAlong(r, axis));
+      centers.push(centerAlong(r, collisionAxis));
+      starts.push(startAlong(r, collisionAxis));
+      sizes.push(sizeAlong(r, collisionAxis));
     }
     const sourceIdx = untracked(indexMap).get(k) ?? -1;
     // Footprint = source slot + adjacent gap (after it, else before), not a fixed gap, for variable gaps.
@@ -193,26 +268,44 @@ export function reorderable<T, K>(
     const footprint = sourceIdx >= 0 ? sizes[sourceIdx] + gap : 0;
     startCross.set(projCross(start));
     pointerCross.set(projCross(start));
-    begin(k, { source: sourceIdx, centers, footprint, axis }, projMain(start));
+    begin(
+      k,
+      { source: sourceIdx, centers, footprint, axis: collisionAxis },
+      projMain(start),
+    );
     if (group) {
       measureCache = new Map();
       for (const m of group.members()) m.refreshBounds();
     }
   };
 
+  /** The gap a target list should open for OUR dragged item, in ITS flow axis. */
+  const outgoingFootprint = (tg: MemberMeasure): number => {
+    const geom = untracked(geometry);
+    if (!geom) return 0;
+    if (geom.kind !== 'wrap') return geom.footprint;
+    return tg.kind !== 'wrap' && tg.axis === 'x'
+      ? geom.colPitch
+      : geom.rowPitch;
+  };
+
   const move = (p: { x: number; y: number }) => {
     pointerMain.set(projMain(p));
+    if (wrap || group) pointerCross.set(projCross(p));
     if (!group || !groupApi) return;
-    pointerCross.set(projCross(p));
     const srcIdx = untracked(session.source);
     const dragged = srcIdx >= 0 ? untracked(source)[srcIdx] : undefined;
-    const target = group.targetAt(
-      p.x,
-      p.y,
-      (m) =>
-        m === self ||
-        dragged === undefined ||
-        m.canReceive?.(dragged) !== false,
+    // untracked: targetAt reads the members signal; move() runs inside the
+    // gesture effect, which must not re-fire on register/unregister
+    const target = untracked(() =>
+      group.targetAt(
+        p.x,
+        p.y,
+        (m) =>
+          m === self ||
+          dragged === undefined ||
+          m.canReceive?.(dragged) !== false,
+      ),
     );
     // Sticky: outside every list keeps the last resolved target — no snap-back / flip-flop.
     if (!target) return;
@@ -220,18 +313,16 @@ export function reorderable<T, K>(
       if (untracked(groupApi.activeSource) === self) groupApi.clearActive();
       return;
     }
-    // over a foreign list → compute the insert in ITS coordinate space
+    // over a foreign container → compute the insert in ITS coordinate space
     const tg = ensureMeasured(target);
-    const insert = insertIndexFromCenters(
-      tg.centers,
-      tg.axis === 'y' ? p.y : p.x,
-    );
+    const insert = insertIndexForMeasure(tg, p.x, p.y);
     groupApi.setActive({
       source: self,
       target,
       sourceIndex: untracked(session.source),
       insertIndex: insert,
-      footprint: untracked(geometry)?.footprint ?? 0,
+      footprint: outgoingFootprint(tg),
+      targetMeasure: tg,
     });
   };
 
@@ -261,9 +352,22 @@ export function reorderable<T, K>(
       const from = untracked(session.source);
       const to = untracked(groupApi.activeInsertIndex);
       const item = from >= 0 ? untracked(source)[from] : undefined;
-      if (item !== undefined && to >= 0) {
-        crossTarget.insertAt(item, to);
-        self.takeOut(item, to);
+      if (item !== undefined) {
+        const px =
+          collisionAxis === 'y'
+            ? untracked(pointerCross)
+            : untracked(pointerMain);
+        const py =
+          collisionAxis === 'y'
+            ? untracked(pointerMain)
+            : untracked(pointerCross);
+        // a refused drop (both paths false) is a NO-OP: the item stays home
+        const taken = crossTarget.insertAtPoint?.(item, px, py)
+          ? true
+          : to >= 0
+            ? crossTarget.insertAt(item, to)
+            : false;
+        if (taken) self.takeOut(item, to);
       }
     } else {
       const to = untracked(session.insertIndex);
@@ -285,6 +389,7 @@ export function reorderable<T, K>(
     const itemKey = computed(() => key(item()));
     const index = computed(() => indexMap().get(itemKey()) ?? -1);
     const isSource = computed(() => activeKey() === itemKey());
+    const sameListSlot = wrap ? session.slotFor(index) : null;
 
     const transform = computed(() => {
       // +scrollDelta keeps the dragged item under the finger as the list scrolls
@@ -293,11 +398,12 @@ export function reorderable<T, K>(
         const src = groupApi.activeSource();
         const tgt = groupApi.activeTarget();
         if (src && src !== tgt) {
+          if (wrap) return 0; // wrap lists move by slot vectors, not scalars
           if (tgt === self)
             return openDisplacement(
               index(),
               groupApi.activeInsertIndex(),
-              groupApi.activeFootprint(),
+              options.insertSize ?? groupApi.activeFootprint(),
             );
           if (src === self)
             return closeDisplacement(
@@ -310,8 +416,69 @@ export function reorderable<T, K>(
       }
       const insert = session.insertIndex();
       const geom = geometry();
-      if (insert < 0 || !geom) return 0;
+      if (insert < 0 || !geom || geom.kind === 'wrap') return 0;
       return displacement(index(), geom.source, insert, geom.footprint);
+    });
+
+    /**
+     * Wrap displacement, decomposed: which SLOT this item currently renders at
+     * (`-1` = at rest). An integer leaf — only items whose slot actually
+     * changes renotify; the x/y lookups below are pure math off the static
+     * drag-start centers.
+     */
+    const wrapSlot = computed(() => {
+      if (!wrap || isSource()) return -1;
+      const i = index();
+      if (i < 0) return -1;
+      if (groupApi) {
+        const src = groupApi.activeSource();
+        const tgt = groupApi.activeTarget();
+        if (src && src !== tgt) {
+          if (tgt === self) return openSlotOf(i, groupApi.activeInsertIndex());
+          if (src === self)
+            return closeSlotOf(i, groupApi.activeSourceIndex());
+          return -1;
+        }
+      }
+      const geom = geometry();
+      if (!geom || geom.kind !== 'wrap') return -1;
+      const ins = session.insertIndex();
+      if (ins < 0) return -1;
+      return sameListSlot ? sameListSlot() : -1;
+    });
+
+    /** The wrap centers this item displaces within (own drag or incoming-target). */
+    const wrapCenters = ():
+      | { centers: readonly Point[]; colPitch: number; rowPitch: number }
+      | null => {
+      const geom = geometry();
+      if (geom?.kind === 'wrap') return geom;
+      const tm = groupApi?.activeTargetMeasure();
+      if (tm?.kind === 'wrap' && groupApi?.activeTarget() === self) return tm;
+      return null;
+    };
+
+    const wrapDeltaAlong = (pick: (p: Point) => number): number => {
+      const slot = wrapSlot();
+      if (slot < 0) return 0;
+      const i = index();
+      if (slot === i) return 0;
+      const m = wrapCenters();
+      if (!m || i >= m.centers.length) return 0;
+      const target =
+        slot < m.centers.length
+          ? m.centers[slot]
+          : wrapVirtualSlot(m.centers, m.colPitch, m.rowPitch);
+      return pick(target) - pick(m.centers[i]);
+    };
+
+    const transformX = computed(() => {
+      if (wrap) return wrapDeltaAlong((p) => p.x);
+      return collisionAxis === 'x' ? transform() : 0;
+    });
+    const transformY = computed(() => {
+      if (wrap) return wrapDeltaAlong((p) => p.y);
+      return collisionAxis === 'y' ? transform() : 0;
     });
 
     const involved = computed(() => {
@@ -326,13 +493,19 @@ export function reorderable<T, K>(
     const transformCss = computed(() => {
       if (isSource()) {
         const main = pointerMain() - startMain() + scrollDelta();
-        // single list: axis-locked follow (deliberate). grouped: free 2D so dragging OUT doesn't feel sticky.
-        if (!group) return main ? oneAxis(main) : '';
+        // single linear list: axis-locked follow (deliberate). grouped or wrap:
+        // free 2D — the axis is a collision concern, not a leash.
+        if (!group && !wrap) return main ? oneAxis(main) : '';
         const cross = pointerCross() - startCross();
         if (!main && !cross) return '';
-        const dx = axis === 'y' ? cross : main;
-        const dy = axis === 'y' ? main : cross;
+        const dx = collisionAxis === 'y' ? cross : main;
+        const dy = collisionAxis === 'y' ? main : cross;
         return `translate(${dx}px, ${dy}px)`;
+      }
+      if (wrap) {
+        const dx = transformX();
+        const dy = transformY();
+        return dx || dy ? `translate(${dx}px, ${dy}px)` : '';
       }
       const t = transform();
       return t ? oneAxis(t) : '';
@@ -343,6 +516,8 @@ export function reorderable<T, K>(
       index,
       isSource,
       transform,
+      transformX,
+      transformY,
       transformCss,
       transitionCss: computed(() =>
         isSource() ? 'none' : involved() ? glide : 'none',
@@ -368,15 +543,17 @@ export function reorderable<T, K>(
       groupApi.activeSource() !== self &&
       // EMPTY target has no items to shift (min-height is the slot) → reserving footprint doubles the gap.
       source().length > 0
-        ? groupApi.activeFootprint()
+        ? (options.insertSize ?? groupApi.activeFootprint())
         : 0,
     ),
+    insertSize: options.insertSize,
     keyboard,
     jumpModifier,
     onKeyboardKeydown: options.onKeyboardKeydown,
     announceMove,
     moveItem: (from, to) => {
       if (from < 0 || to < 0 || from === to) return;
+      if (from >= untracked(source).length) return;
       source.update((arr) => moveWithin(arr, from, to));
       options.onReorder?.({ from, to, items: untracked(source) });
     },
@@ -408,6 +585,7 @@ export function reorderable<T, K>(
       if (byEl.get(el) === k) byEl.delete(el);
     },
     keyForElement: (el) => byEl.get(el),
+    elementFor: (k) => byKey.get(k),
     setContainer: (el) => {
       container = el;
     },
@@ -419,6 +597,10 @@ export function reorderable<T, K>(
     dispose: () => {
       // destroyed mid-drag → tear down so sibling lists aren't left driven by a dead source.
       if (untracked(activeKey) !== null) resetDragState();
+      // destroyed while the hovered TARGET → the source's end() must not commit into us
+      if (groupApi && untracked(groupApi.activeTarget) === self) {
+        groupApi.clearActive();
+      }
       group?.unregister(self);
     },
     bounds: () => boundsCache,
@@ -426,16 +608,25 @@ export function reorderable<T, K>(
       boundsCache = container ? container.getBoundingClientRect() : null;
     },
     measure: () => {
+      if (wrap) {
+        const m = measureWrap();
+        return m
+          ? { kind: 'wrap' as const, ...m }
+          : { kind: 'wrap' as const, centers: [], colPitch: 0, rowPitch: 0 };
+      }
       const centers: number[] = [];
       for (const it of untracked(source)) {
         const node = byKey.get(key(it));
-        if (node) centers.push(centerAlong(node.getBoundingClientRect(), axis));
+        // rendered set ≠ source() → misaligned indices; empty is the safe bail
+        if (!node) return { centers: [], axis: collisionAxis };
+        centers.push(centerAlong(node.getBoundingClientRect(), collisionAxis));
       }
-      return { centers, axis };
+      return { centers, axis: collisionAxis };
     },
     insertAt: (item, index) => {
       source.update((arr) => spliceInto(arr, index, item));
       options.onItemArrived?.({ item, index });
+      return true;
     },
     // untracked: a consumer predicate may read tree signals — don't subscribe move()'s effect to them.
     canReceive: options.canReceive

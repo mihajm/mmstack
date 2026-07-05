@@ -10,7 +10,7 @@ const member = (bounds: RectLike | null): SortableGroupMember => ({
   bounds: () => bounds,
   refreshBounds: () => undefined,
   measure: () => ({ centers: [], axis: 'y' }),
-  insertAt: () => undefined,
+  insertAt: () => true,
 });
 
 describe('sortableGroup', () => {

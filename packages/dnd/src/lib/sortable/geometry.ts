@@ -155,6 +155,190 @@ export function clampInsert(index: number, length: number): number {
   return index < 0 ? 0 : index > length ? length : index;
 }
 
+/** A 2D point/center — the wrap-mode analogue of a main-axis scalar. */
+export type Point = {
+  readonly x: number;
+  readonly y: number;
+};
+
+/**
+ * Slot occupied by the item at `index` while the source is headed for `insert`
+ * — the wrap-mode displacement model. The N drag-start centers ARE the slots;
+ * they never move during a drag, only this item→slot assignment changes:
+ * the source renders at the insert slot, items between the source's old slot
+ * and the insert slot shift one slot toward the vacancy, everything else stays.
+ *
+ * `slotOf` is a permutation of `0..N-1` for any (source, insert) pair, which is
+ * what makes the wrap model conserve layout: every slot is occupied by exactly
+ * one item. Exact for uniform-size items (each slot fits any item); documented
+ * approximation for variable sizes (dnd-kit `rectSortingStrategy` parity).
+ */
+export function slotOf(index: number, source: number, insert: number): number {
+  if (index === source) return insert;
+  if (index > source && index <= insert) return index - 1;
+  if (index >= insert && index < source) return index + 1;
+  return index;
+}
+
+/**
+ * Wrap-mode collision: the slot whose center is nearest the pointer, with a
+ * 2D Schmitt deadband — a challenger slot must beat the held slot's distance
+ * by more than `deadband` px to take over, so sub-pixel jitter on a Voronoi
+ * boundary can't twitch the order.
+ *
+ * Unlike {@link insertIndexTransformAware} there is no displaced-center
+ * feedback here: slots are STATIC drag-start centers, so a held pointer is a
+ * fixed point by construction (nearest-of-static-points needs no settling).
+ *
+ * Returns a slot index in `[0, centers.length - 1]` (a reorder, never an
+ * append). Seed `prevInsert` with the source index on the first frame.
+ */
+export function insertIndexFromSlots(
+  centers: readonly Point[],
+  x: number,
+  y: number,
+  prevInsert: number,
+  deadband = 0,
+): number {
+  if (centers.length === 0) return 0;
+  let best = 0;
+  let bestD2 = Infinity;
+  for (let i = 0; i < centers.length; i++) {
+    const dx = x - centers[i].x;
+    const dy = y - centers[i].y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = i;
+    }
+  }
+  if (prevInsert < 0 || prevInsert >= centers.length || prevInsert === best) {
+    return best;
+  }
+  const held = centers[prevInsert];
+  const heldD = Math.hypot(x - held.x, y - held.y);
+  return Math.sqrt(bestD2) + deadband < heldD ? best : prevInsert;
+}
+
+/**
+ * The virtual slot `N` of a wrap grid — where an appended item would sit.
+ * Extrapolates one column pitch past the last center, wrapping to the next
+ * row (the row's min x, one row pitch down) when that would overflow the
+ * widest occupied column — so a single-column grid (minX === maxX) appends
+ * below, like the vertical list it visually is. Used for foreign-entry
+ * collision and the target's opening gap, where the last item shifts into a
+ * slot that doesn't exist yet.
+ */
+export function wrapVirtualSlot(
+  centers: readonly Point[],
+  colPitch: number,
+  rowPitch: number,
+): Point {
+  const last = centers[centers.length - 1];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const c of centers) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+  }
+  const x = last.x + colPitch;
+  // half a pitch of tolerance: centers within a column can waver a little
+  return x > maxX + colPitch / 2
+    ? { x: minX, y: last.y + rowPitch }
+    : { x, y: last.y };
+}
+
+/**
+ * Foreign-entry collision for a wrap grid: the insert position in `[0, N]`
+ * whose slot center (the N real centers plus the virtual append slot) is
+ * nearest the pointer. Point-based and stateless — the cross-list path has no
+ * held index to defend, stickiness lives at the target-resolution level.
+ */
+export function wrapInsertAtPoint(
+  centers: readonly Point[],
+  colPitch: number,
+  rowPitch: number,
+  x: number,
+  y: number,
+): number {
+  if (centers.length === 0) return 0;
+  const v = wrapVirtualSlot(centers, colPitch, rowPitch);
+  let best = 0;
+  let bestD2 = Infinity;
+  for (let i = 0; i <= centers.length; i++) {
+    const c = i < centers.length ? centers[i] : v;
+    const dx = x - c.x;
+    const dy = y - c.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * Wrap-mode cross-list slot for the **source** list once the dragged item has
+ * LEFT it: items after the vacated index close ranks by one slot. The leaving
+ * item itself keeps its slot (it follows the pointer; the binding handles it).
+ */
+export function closeSlotOf(index: number, source: number): number {
+  return index > source ? index - 1 : index;
+}
+
+/**
+ * Wrap-mode cross-list slot for the **target** list while an item is ENTERING
+ * at `insert`: items at/after the insert open a slot by shifting one forward.
+ * The last item's destination is the virtual slot `N` ({@link wrapVirtualSlot}).
+ */
+export function openSlotOf(index: number, insert: number): number {
+  return index >= insert ? index + 1 : index;
+}
+
+/**
+ * What a group member reports about its inner layout when a cross-container
+ * drag needs an insert index in its space — measured once per drag, cached by
+ * the source controller. Linear members project onto one axis; wrap members
+ * report 2D centers plus their column/row pitch (for the virtual append slot).
+ * A missing `kind` means linear, so pre-union member implementations keep
+ * working unchanged.
+ */
+export type MemberMeasure =
+  | {
+      readonly kind?: 'linear';
+      readonly centers: readonly number[];
+      readonly axis: Axis;
+    }
+  | {
+      readonly kind: 'wrap';
+      readonly centers: readonly Point[];
+      readonly colPitch: number;
+      readonly rowPitch: number;
+    };
+
+/**
+ * Cross-container insert dispatch: resolves a viewport point to an insert
+ * position `[0, N]` in the measured member's own coordinate space, whatever
+ * its layout kind.
+ */
+export function insertIndexForMeasure(
+  measure: MemberMeasure,
+  x: number,
+  y: number,
+): number {
+  if (measure.kind === 'wrap') {
+    return wrapInsertAtPoint(
+      measure.centers,
+      measure.colPitch,
+      measure.rowPitch,
+      x,
+      y,
+    );
+  }
+  return insertIndexFromCenters(measure.centers, measure.axis === 'y' ? y : x);
+}
+
 /** Whether a viewport point lies within a rect — used to resolve which list a cross-list drag is over. */
 export function containsPoint(rect: RectLike, x: number, y: number): boolean {
   return (
@@ -189,8 +373,9 @@ export function transfer<T>(
 
 /**
  * Pure: move the item at `from` to final index `to`, returning a new array.
- * `to` is clamped to a valid position. A no-op move (the item already sits at
- * `to`) returns a copy with identical order — length and key set are always
+ * `to` is clamped to a valid position; an out-of-range `from` is a no-op copy
+ * (never splices `undefined` in). A no-op move (the item already sits at `to`)
+ * returns a copy with identical order — length and key set are always
  * preserved.
  */
 export function moveWithin<T>(
@@ -199,6 +384,7 @@ export function moveWithin<T>(
   to: number,
 ): T[] {
   const next = arr.slice();
+  if (from < 0 || from >= arr.length) return next;
   const [moved] = next.splice(from, 1);
   next.splice(clampInsert(to, next.length), 0, moved);
   return next;

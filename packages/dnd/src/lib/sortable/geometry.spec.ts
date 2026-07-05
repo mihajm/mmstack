@@ -2,15 +2,23 @@ import {
   centerAlong,
   clampInsert,
   closeDisplacement,
+  closeSlotOf,
   containsPoint,
   displacement,
-  openDisplacement,
+  insertIndexForMeasure,
   insertIndexFromCenters,
+  insertIndexFromSlots,
   insertIndexTransformAware,
   moveWithin,
+  openDisplacement,
+  openSlotOf,
   sizeAlong,
+  slotOf,
   startAlong,
   transfer,
+  wrapInsertAtPoint,
+  wrapVirtualSlot,
+  type Point,
   type RectLike,
 } from './geometry';
 
@@ -333,6 +341,257 @@ describe('geometry — transfer (cross-list move)', () => {
   });
 });
 
+// A 3×2 wrap grid in reading order (3 columns, 2 rows), pitch 20 both ways:
+//   0(10,10)  1(30,10)  2(50,10)
+//   3(10,30)  4(30,30)  5(50,30)
+const GRID: Point[] = [
+  { x: 10, y: 10 },
+  { x: 30, y: 10 },
+  { x: 50, y: 10 },
+  { x: 10, y: 30 },
+  { x: 30, y: 30 },
+  { x: 50, y: 30 },
+];
+const COL = 20;
+const ROW = 20;
+const N = GRID.length;
+
+describe('geometry — slotOf (wrap displacement model)', () => {
+  it('the source renders at the insert slot', () => {
+    expect(slotOf(1, 1, 4)).toBe(4);
+    expect(slotOf(4, 4, 0)).toBe(0);
+    expect(slotOf(2, 2, 2)).toBe(2);
+  });
+
+  it('items between source and insert shift one slot toward the vacancy', () => {
+    // source 1 → insert 4: items 2,3,4 close ranks down a slot
+    expect(slotOf(2, 1, 4)).toBe(1);
+    expect(slotOf(3, 1, 4)).toBe(2);
+    expect(slotOf(4, 1, 4)).toBe(3);
+    // source 4 → insert 1: items 1,2,3 open a slot upward
+    expect(slotOf(1, 4, 1)).toBe(2);
+    expect(slotOf(2, 4, 1)).toBe(3);
+    expect(slotOf(3, 4, 1)).toBe(4);
+  });
+
+  it('items outside the moved band keep their slot', () => {
+    expect(slotOf(0, 1, 4)).toBe(0);
+    expect(slotOf(5, 1, 4)).toBe(5);
+    expect(slotOf(0, 4, 1)).toBe(0);
+    expect(slotOf(5, 4, 1)).toBe(5);
+  });
+
+  it('is a permutation of 0..N-1 for every (source, insert) pair — layout conservation', () => {
+    for (let source = 0; source < N; source++) {
+      for (let insert = 0; insert < N; insert++) {
+        const slots = new Set<number>();
+        for (let i = 0; i < N; i++) slots.add(slotOf(i, source, insert));
+        expect(slots.size).toBe(N);
+        for (let s = 0; s < N; s++) expect(slots.has(s)).toBe(true);
+      }
+    }
+  });
+
+  it('agrees with moveWithin: the item at slot s after the move is the item slotOf assigned there', () => {
+    const labels = ['a', 'b', 'c', 'd', 'e', 'f'];
+    for (let source = 0; source < N; source++) {
+      for (let insert = 0; insert < N; insert++) {
+        const committed = moveWithin(labels, source, insert);
+        for (let i = 0; i < N; i++) {
+          expect(committed[slotOf(i, source, insert)]).toBe(labels[i]);
+        }
+      }
+    }
+  });
+});
+
+describe('geometry — insertIndexFromSlots (wrap collision)', () => {
+  it('returns the nearest slot with no deadband', () => {
+    expect(insertIndexFromSlots(GRID, 10, 10, 0)).toBe(0);
+    expect(insertIndexFromSlots(GRID, 31, 11, 0)).toBe(1);
+    expect(insertIndexFromSlots(GRID, 49, 29, 0)).toBe(5);
+    expect(insertIndexFromSlots(GRID, -100, -100, 0)).toBe(0);
+    expect(insertIndexFromSlots(GRID, 1000, 1000, 0)).toBe(N - 1);
+  });
+
+  it('stays within [0, N-1] — a reorder, never an append', () => {
+    for (let x = -20; x <= 90; x += 7) {
+      for (let y = -20; y <= 60; y += 7) {
+        for (let prev = 0; prev < N; prev++) {
+          const k = insertIndexFromSlots(GRID, x, y, prev, 4);
+          expect(k).toBeGreaterThanOrEqual(0);
+          expect(k).toBeLessThanOrEqual(N - 1);
+        }
+      }
+    }
+  });
+
+  it('a held pointer is a fixed point by construction (static slots, no settling)', () => {
+    for (const deadband of [0, 4]) {
+      for (let x = -10; x <= 70; x += 3) {
+        for (let y = -10; y <= 50; y += 3) {
+          for (let seed = 0; seed < N; seed++) {
+            const once = insertIndexFromSlots(GRID, x, y, seed, deadband);
+            const twice = insertIndexFromSlots(GRID, x, y, once, deadband);
+            expect(twice).toBe(once);
+          }
+        }
+      }
+    }
+  });
+
+  it('a reading-order sweep yields a non-decreasing slot index (row crossing included)', () => {
+    // walk the reading order: across row 0, then across row 1
+    let prev = 0;
+    let last = -1;
+    const walk: Array<{ x: number; y: number }> = [];
+    for (let x = 0; x <= 60; x += 2) walk.push({ x, y: 10 });
+    for (let x = 0; x <= 60; x += 2) walk.push({ x, y: 30 });
+    for (const p of walk) {
+      prev = insertIndexFromSlots(GRID, p.x, p.y, prev, 4);
+      expect(prev).toBeGreaterThanOrEqual(last);
+      last = prev;
+    }
+    expect(last).toBe(N - 1);
+  });
+
+  it('the deadband creates a hysteresis band of exactly `deadband` px between two slots', () => {
+    // Walking the segment between slot 0 (10,10) and slot 1 (30,10): the
+    // challenger must beat the held slot's distance by more than deadband,
+    // so each direction's flip point moves deadband/2 past the midpoint and
+    // the two flip points are deadband apart.
+    const flipForward = (d: number) => {
+      for (let x = 10; x <= 30; x++) {
+        if (insertIndexFromSlots(GRID, x, 10, 0, d) === 1) return x;
+      }
+      return Infinity;
+    };
+    const flipBackward = (d: number) => {
+      for (let x = 30; x >= 10; x--) {
+        if (insertIndexFromSlots(GRID, x, 10, 1, d) === 0) return x;
+      }
+      return -Infinity;
+    };
+    expect(flipForward(0)).toBe(21); // just past the midpoint (ties hold)
+    expect(flipBackward(0)).toBe(19);
+    expect(flipForward(8) - flipForward(0)).toBe(4); // deadband/2 each way
+    expect(flipBackward(0) - flipBackward(8)).toBe(4);
+    const band = (d: number) => flipForward(d) - flipBackward(d);
+    expect(band(8) - band(0)).toBe(8); // the band widens by exactly deadband
+  });
+
+  it('an out-of-range held index falls back to plain nearest', () => {
+    expect(insertIndexFromSlots(GRID, 31, 11, -1, 100)).toBe(1);
+    expect(insertIndexFromSlots(GRID, 31, 11, 99, 100)).toBe(1);
+  });
+
+  it('handles empty and single-slot lists', () => {
+    expect(insertIndexFromSlots([], 5, 5, 0)).toBe(0);
+    expect(insertIndexFromSlots([{ x: 10, y: 10 }], 500, 500, 0)).toBe(0);
+  });
+});
+
+describe('geometry — wrapVirtualSlot & wrapInsertAtPoint (foreign entry)', () => {
+  it('extrapolates one column pitch past the last center', () => {
+    // last row not full: 0(10,10) 1(30,10) 2(50,10) 3(10,30) 4(30,30)
+    const partial = GRID.slice(0, 5);
+    expect(wrapVirtualSlot(partial, COL, ROW)).toEqual({ x: 50, y: 30 });
+  });
+
+  it('wraps to the next row when the last row is full', () => {
+    expect(wrapVirtualSlot(GRID, COL, ROW)).toEqual({ x: 10, y: 50 });
+  });
+
+  it('a single-item grid reads as one column and appends below', () => {
+    // minX === maxX → the occupied width is one column, so the next slot wraps
+    expect(wrapVirtualSlot([{ x: 10, y: 10 }], COL, ROW)).toEqual({
+      x: 10,
+      y: 30,
+    });
+  });
+
+  it('resolves the nearest real slot for points over the grid', () => {
+    expect(wrapInsertAtPoint(GRID, COL, ROW, 11, 9)).toBe(0);
+    expect(wrapInsertAtPoint(GRID, COL, ROW, 29, 31)).toBe(4);
+  });
+
+  it('resolves the virtual append slot past the end', () => {
+    // virtual slot for the full 3×2 grid is (10,50)
+    expect(wrapInsertAtPoint(GRID, COL, ROW, 12, 48)).toBe(N);
+    expect(wrapInsertAtPoint(GRID, COL, ROW, 5, 55)).toBe(N);
+    // nearest-point semantics: a far diagonal point is closer to the last REAL
+    // slot than to the virtual one — it resolves 5, not append. Deliberate.
+    expect(wrapInsertAtPoint(GRID, COL, ROW, 1000, 1000)).toBe(N - 1);
+  });
+
+  it('returns 0 for an empty target', () => {
+    expect(wrapInsertAtPoint([], COL, ROW, 50, 50)).toBe(0);
+  });
+
+  it('stays within [0, N]', () => {
+    for (let x = -20; x <= 90; x += 5) {
+      for (let y = -20; y <= 70; y += 5) {
+        const k = wrapInsertAtPoint(GRID, COL, ROW, x, y);
+        expect(k).toBeGreaterThanOrEqual(0);
+        expect(k).toBeLessThanOrEqual(N);
+      }
+    }
+  });
+});
+
+describe('geometry — close/openSlotOf (wrap cross-list asymmetry)', () => {
+  it('closeSlotOf: items after the vacated index close ranks by one slot', () => {
+    expect(closeSlotOf(0, 2)).toBe(0);
+    expect(closeSlotOf(2, 2)).toBe(2); // the leaving item (pointer-driven)
+    expect(closeSlotOf(3, 2)).toBe(2);
+    expect(closeSlotOf(5, 2)).toBe(4);
+  });
+
+  it('openSlotOf: items at/after the insert shift one slot forward', () => {
+    expect(openSlotOf(0, 2)).toBe(0);
+    expect(openSlotOf(1, 2)).toBe(1);
+    expect(openSlotOf(2, 2)).toBe(3);
+    expect(openSlotOf(5, 2)).toBe(6); // the last item heads for the virtual slot
+  });
+
+  it('closing covers 0..N-2 and opening covers {0..N} minus the insert — both injective', () => {
+    const insert = 2;
+    const source = 3;
+    const closed = new Set<number>();
+    const opened = new Set<number>();
+    for (let i = 0; i < N; i++) {
+      if (i !== source) closed.add(closeSlotOf(i, source));
+      opened.add(openSlotOf(i, insert));
+    }
+    expect(closed.size).toBe(N - 1); // injective
+    for (let s = 0; s < N - 1; s++) expect(closed.has(s)).toBe(true);
+    expect(opened.size).toBe(N); // injective
+    expect(opened.has(insert)).toBe(false); // the gap
+    expect(opened.has(N)).toBe(true); // virtual slot in use
+  });
+});
+
+describe('geometry — insertIndexForMeasure (cross-container dispatch)', () => {
+  it('projects onto the axis for linear measures (kind omitted or explicit)', () => {
+    const centers = [10, 30, 50];
+    expect(insertIndexForMeasure({ centers, axis: 'y' }, 999, 40)).toBe(2);
+    expect(
+      insertIndexForMeasure({ kind: 'linear', centers, axis: 'x' }, 40, 999),
+    ).toBe(2);
+  });
+
+  it('resolves point-based for wrap measures, virtual append included', () => {
+    const wrap = {
+      kind: 'wrap',
+      centers: GRID,
+      colPitch: COL,
+      rowPitch: ROW,
+    } as const;
+    expect(insertIndexForMeasure(wrap, 31, 11)).toBe(1);
+    expect(insertIndexForMeasure(wrap, 12, 48)).toBe(N);
+  });
+});
+
 describe('geometry — moveWithin & clampInsert', () => {
   const base = ['a', 'b', 'c', 'd'];
 
@@ -349,6 +608,12 @@ describe('geometry — moveWithin & clampInsert', () => {
 
   it('is a no-op when the item already sits at the target', () => {
     expect(moveWithin(base, 1, 1)).toEqual(base);
+  });
+
+  it('an out-of-range `from` is a no-op copy — never splices undefined in', () => {
+    expect(moveWithin(base, 9, 0)).toEqual(base);
+    expect(moveWithin(base, -1, 2)).toEqual(base);
+    expect(moveWithin(base, 9, 0)).toHaveLength(base.length);
   });
 
   it('does not mutate the source array', () => {

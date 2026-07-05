@@ -107,7 +107,9 @@ export function connectNativeContainer<T, K = unknown>(
       if (!active()) return null;
       const c = controller();
       void c.items();
-      return c.measure().centers;
+      const m = c.measure();
+      // native + wrap is unsupported (dev-warned at creation) → degrade to empty
+      return m.kind === 'wrap' ? [] : m.centers;
     },
     write: (measured) => {
       const m = measured();
@@ -128,7 +130,7 @@ export function connectNativeContainer<T, K = unknown>(
         if (!plugin) return;
         stopScroll = plugin({
           element,
-          axis: c.axis,
+          axis: c.axis === 'x' ? 'x' : 'y',
           pointer: () => pointer(),
           edge: cfg.edge,
           speed: cfg.speed,
@@ -150,7 +152,8 @@ export function connectNativeContainer<T, K = unknown>(
   const activeInsert = computed<number | null>(() => {
     if (!isOwner()) return null;
     const p = pointer();
-    const main = (controller().axis === 'y' ? p.y : p.x) + scrollDelta();
+    const main =
+      (controller().axis === 'x' ? p.x : p.y) + scrollDelta();
     return insertIndexFromCenters(centers(), main);
   });
   controller().setNativeInsert(activeInsert);
@@ -233,7 +236,7 @@ export function connectNativeItem<T, K = unknown>(
       controller().nativeInsert(),
       index(),
       controller().items().length - 1,
-      controller().axis,
+      controller().axis === 'x' ? 'x' : 'y',
     ),
   );
 
@@ -291,11 +294,14 @@ export function connectNativeItem<T, K = unknown>(
     });
   }
 
+  const zero = computed(() => 0);
   return {
     itemKey,
     index,
     isSource: dragRef.dragging,
-    transform: computed(() => 0),
+    transform: zero,
+    transformX: zero,
+    transformY: zero,
     transformCss: computed(() => ''),
     transitionCss: computed(() => ''),
     tabIndex,

@@ -6,6 +6,15 @@ import type { DragGeometry } from './session';
 import type { SortableGroup, SortableGroupMember } from './group';
 
 /**
+ * A list's layout for collision purposes: a single flow axis, or `'wrap'` for
+ * a wrapping flow (flex-wrap / CSS grid auto-flow) where items fill rows and
+ * reordering is 2D. Wrap collision uses the slot model (drag-start centers are
+ * static slots) and is exact for uniform-size items; variable sizes are
+ * approximated the way dnd-kit's rectSortingStrategy does.
+ */
+export type ReorderableAxis = Axis | 'wrap';
+
+/**
  * The during-drag reflow glide — how siblings ease as they move aside to open
  * the gap. NOT a drop animation: on drop the commit is instant. Non-overshoot on
  * purpose — an overshoot spring wobbles when the insert re-targets on a fast drag.
@@ -29,8 +38,8 @@ export type ReorderKeyboardApi<T> = {
   readonly index: number;
   /** The list length. */
   readonly total: number;
-  /** The list main axis. */
-  readonly axis: Axis;
+  /** The list layout (`'x'`/`'y'`/`'wrap'`). */
+  readonly axis: ReorderableAxis;
   /** Whether the jump-to-start/end modifier is held (see {@link ReorderableOptions.jumpModifier}). */
   readonly jump: boolean;
   /**
@@ -50,8 +59,8 @@ type ReorderableSharedOptions<T, K> = {
    * only when one is present.
    */
   readonly injector?: Injector;
-  /** List main axis. @default 'y' */
-  readonly axis?: Axis;
+  /** List layout: main axis, or `'wrap'` for 2D wrapping flow. @default 'y' */
+  readonly axis?: ReorderableAxis;
   /** Px a center must be cleared by before the insert index flips. @default 4 */
   readonly deadband?: number;
   /** During-drag reflow glide, or `false` for instant reflow. @default decisive 200ms */
@@ -116,6 +125,14 @@ type ReorderableSharedOptions<T, K> = {
    * @default always accepts
    */
   readonly canReceive?: (item: T) => boolean;
+  /**
+   * Main-axis px an item arriving from ANOTHER group member will occupy in
+   * THIS list — the gap it opens while hovering and the space reserved for it.
+   * Defaults to the incoming item's own measured footprint, which is right for
+   * same-kind lists; set it when arriving items are re-rendered smaller here
+   * (a large grid widget becoming a compact tray row).
+   */
+  readonly insertSize?: number;
   /** Called on the SOURCE list after an item is dragged out into another list. */
   readonly onItemLeft?: (event: { item: T; from: number; to: number }) => void;
   /** Called on the TARGET list after an item arrives from another list. */
@@ -171,7 +188,11 @@ export type ReorderableItemState<K = unknown> = {
   readonly itemKey: Signal<K>;
   readonly index: Signal<number>;
   readonly isSource: Signal<boolean>;
+  /** Main-axis displacement px (linear layouts; `0` under `axis: 'wrap'`). */
   readonly transform: Signal<number>;
+  /** Displacement as a 2D vector — populated for every layout (linear maps its scalar). */
+  readonly transformX: Signal<number>;
+  readonly transformY: Signal<number>;
   readonly transformCss: Signal<string>;
   readonly transitionCss: Signal<string>;
 };
@@ -204,7 +225,7 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly key: (item: T) => K;
   /** Reactive key→index map for O(1) index lookups (recomputed once per source change). */
   readonly indexMap: Signal<ReadonlyMap<K, number>>;
-  readonly axis: Axis;
+  readonly axis: ReorderableAxis;
   /** Which engine drives this list — `'pointer'` (FLIP) or `'native'` (indicator). */
   readonly engine: DragEngine;
   /** The shared cross-list group, if any (same object ⇒ items can move between lists). */
@@ -221,6 +242,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly insertIndex: Signal<number>;
   /** Trailing space (px) to reserve while this list is the cross-list target opening a gap (so it doesn't overflow). */
   readonly reservedSpace: Signal<number>;
+  /** Target-side override for the foreign-entry gap (see the `insertSize` option). */
+  readonly insertSize?: number;
   /** Whether focus + arrow-key reordering is enabled. */
   readonly keyboard: boolean;
   /** Whether a key event is the jump-to-end/start modifier. */
@@ -264,6 +287,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   /** @internal */
   unregister(key: K, el: HTMLElement): void;
   keyForElement(el: HTMLElement): K | undefined;
+  /** @internal reverse registry lookup (keyboard row navigation). */
+  elementFor(key: K): HTMLElement | undefined;
   /** @internal the container element, for cross-list bounds. */
   setContainer(el: HTMLElement | null): void;
   /** Pure drag-start from a measured geometry. Unit-testable without DOM. */

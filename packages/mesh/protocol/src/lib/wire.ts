@@ -1,10 +1,3 @@
-/**
- * Canonical wire types of the mmstack op protocol (op-protocol RFC §3/§6). Structurally
- * identical to the L0 types in `@mmstack/primitives` — deliberately NOT imported from there,
- * so this package stays zero-dependency and never drags Angular peers onto a server. The
- * client package asserts mutual assignability at compile time.
- */
-
 export type Key = string | number;
 
 export type StoreOp =
@@ -46,7 +39,11 @@ export type HelloMsg = {
   readonly seq?: number;
 };
 
-export type ClientEnvMsg = { readonly t: 'env'; readonly room: string; readonly env: OpEnvelope };
+export type ClientEnvMsg = {
+  readonly t: 'env';
+  readonly room: string;
+  readonly env: OpEnvelope;
+};
 
 export type ClientPresenceMsg = {
   readonly t: 'presence';
@@ -62,7 +59,11 @@ export type ClientSignalMsg = {
   readonly data: unknown;
 };
 
-export type ClientMsg = HelloMsg | ClientEnvMsg | ClientPresenceMsg | ClientSignalMsg;
+export type ClientMsg =
+  | HelloMsg
+  | ClientEnvMsg
+  | ClientPresenceMsg
+  | ClientSignalMsg;
 
 /** The tri-state join answer (RFC §6), plus the current presence roster. */
 export type WelcomeMsg = {
@@ -81,7 +82,11 @@ export type WelcomeMsg = {
   | { readonly mode: 'snapshot'; readonly root: unknown }
 );
 
-export type ServerEnvMsg = { readonly t: 'env'; readonly room: string; readonly env: SeqEnvelope };
+export type ServerEnvMsg = {
+  readonly t: 'env';
+  readonly room: string;
+  readonly env: SeqEnvelope;
+};
 
 export type ServerPresenceMsg = {
   readonly t: 'presence';

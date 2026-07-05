@@ -113,6 +113,8 @@ export function connectReorderableItem<T, K = unknown>(
     index: computed(() => inner()?.index() ?? -1),
     isSource: computed(() => inner()?.isSource() ?? false),
     transform: computed(() => inner()?.transform() ?? 0),
+    transformX: computed(() => inner()?.transformX() ?? 0),
+    transformY: computed(() => inner()?.transformY() ?? 0),
     transformCss: computed(() => inner()?.transformCss() ?? ''),
     transitionCss: computed(() => inner()?.transitionCss() ?? 'none'),
     tabIndex: computed(() => inner()?.tabIndex() ?? null),
@@ -183,6 +185,7 @@ export {
 } from './defaults';
 export type {
   ReorderableAnimation,
+  ReorderableAxis,
   ReorderableContainerBinding,
   ReorderableController,
   ReorderableItemBinding,

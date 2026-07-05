@@ -35,6 +35,33 @@ export type RelayOptions = {
   readonly journalLimit?: number;
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
+  /**
+   * The persistence egress: fired after an envelope is sequenced, folded into the room
+   * snapshot, and broadcast. The envelope is the persistence record (append it to a journal);
+   * `state` carries the folded root for throttled checkpoints. Called synchronously and never
+   * awaited: batch, debounce, and store at the adapter layer. Pair with {@link Relay.hydrate}.
+   */
+  readonly onCommit?: (room: string, env: SeqEnvelope, state: RoomState) => void;
+};
+
+/** The room's durable state at a commit: what a checkpoint needs to capture. */
+export type RoomState = {
+  readonly seq: number;
+  readonly epoch: string;
+  readonly root: unknown;
+};
+
+/** A persisted room to restore via {@link Relay.hydrate}. */
+export type RoomSnapshot = {
+  readonly seq: number;
+  readonly root: unknown;
+  /**
+   * Restore the persisted epoch so clients reconnecting across the restart keep their seq
+   * watermark and get a `delta` answer; omit to mint a fresh one (they re-snapshot instead).
+   */
+  readonly epoch?: string;
+  /** Journal tail (ascending seq, entries at or below `seq`) enabling those delta answers. */
+  readonly journal?: readonly SeqEnvelope[];
 };
 
 export type RelayConnection = {
@@ -52,6 +79,12 @@ export type Relay = {
   /** Attach an authenticated connection. `ctx.writer` is the trusted principal. */
   connect(socket: RelaySocket, ctx: PrincipalCtx): RelayConnection;
   room(name: string): RoomInfo | undefined;
+  /**
+   * Restore a persisted room before clients join (relay boot, Durable Object wake). Refused
+   * (`false`) once the room has state or members: hydrating a live seq space would corrupt
+   * it. Load asynchronously at the adapter layer, then hydrate synchronously.
+   */
+  hydrate(name: string, snapshot: RoomSnapshot): boolean;
 };
 
 type Member = {
@@ -161,6 +194,20 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       return room
         ? { seq: room.seq, members: room.members.size, journal: room.journal.length }
         : undefined;
+    },
+    hydrate: (name, snapshot) => {
+      const room = roomOf(name);
+      if (room.seq !== 0 || room.members.size > 0 || room.journal.length > 0) return false;
+      room.seq = snapshot.seq;
+      room.root = snapshot.root;
+      if (snapshot.epoch !== undefined) room.epoch = snapshot.epoch;
+      if (snapshot.journal) {
+        room.journal = snapshot.journal
+          .filter((e) => e.seq <= snapshot.seq)
+          .sort((a, b) => a.seq - b.seq)
+          .slice(-journalLimit);
+      }
+      return true;
     },
     connect: (socket, ctx) => {
       const joined = new Map<string, Member>();
@@ -295,6 +342,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           room.root = applyWireOps(room.root, env.ops);
           if (room.journal.length > journalLimit) room.journal.shift();
           broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
+          opt.onCommit?.(msg.room, seqEnv, {
+            seq: room.seq,
+            epoch: room.epoch,
+            root: room.root,
+          });
         },
       };
     },

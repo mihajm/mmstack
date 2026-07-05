@@ -49,6 +49,23 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="policy" lang="ts" />
       </docs-section>
 
+      <docs-section title="Persistence" id="persistence">
+        <p>
+          Rooms live in memory, and the relay exposes a seam rather than a
+          storage engine. <code>onCommit</code> fires after every envelope is
+          sequenced and folded, with the envelope and the room's current
+          <code>{{ '{' }} seq, epoch, root {{ '}' }}</code>. The envelope is the
+          persistence record: append it to a journal and checkpoint the root as
+          often as you like. <code>relay.hydrate</code> restores a persisted
+          room before clients join and refuses once the room has state or
+          members. Restoring the persisted <code>epoch</code> lets returning
+          clients keep their sequence watermark and catch up with a delta
+          answer; omitting it falls back to a full snapshot, which is always
+          safe.
+        </p>
+        <docs-code [code]="persistence" lang="ts" />
+      </docs-section>
+
       <docs-section title="Adapters" id="adapters">
         <p>
           The relay is pure over injected sockets, so an adapter is a few lines
@@ -80,6 +97,22 @@ const policy = pathPrefixAcl([
   { prefix: ['notes'], allow: () => true },
   { prefix: ['cases', '*', 'plan'], allow: (ctx) => ctx.kind !== 'agent' },
 ]);`;
+
+  protected readonly persistence = `const relay = createRelay({
+  onCommit: (room, env, state) => {
+    journal.append(room, env); // your DB, KV, or DO storage
+    if (state.seq % 100 === 0) checkpoints.put(room, state);
+  },
+});
+
+// on boot, or inside a Durable Object's blockConcurrencyWhile
+const saved = await checkpoints.get(roomName);
+if (saved) {
+  relay.hydrate(roomName, {
+    ...saved, // seq, epoch, root
+    journal: await journal.tail(roomName, saved.seq),
+  });
+}`;
 
   protected readonly adapter = `export class MeshRoom {
   relay = createRelay();

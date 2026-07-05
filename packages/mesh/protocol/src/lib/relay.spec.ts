@@ -3,6 +3,7 @@ import { createRelay, type RelaySocket } from './relay';
 import {
   MESH_PROTO_VERSION,
   type OpEnvelope,
+  type SeqEnvelope,
   type ServerMsg,
   type StoreOp,
 } from './wire';
@@ -301,6 +302,132 @@ describe('createRelay: reconnection edges', () => {
     const c = client(other, 'wc', 'oc');
     c.hello();
     expect(welcomeEpoch(c.sock)).not.toBe(epochA);
+  });
+});
+
+describe('createRelay: persistence seam', () => {
+  it('onCommit fires per sequenced envelope with the folded room state', () => {
+    const commits: { env: { seq: number }; state: { seq: number; root: unknown } }[] = [];
+    const relay = createRelay({
+      onCommit: (_room, env, state) => commits.push({ env, state }),
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set([], { v: 0 })]);
+    a.env([set(['v'], 1)]);
+
+    expect(commits.map((c) => c.env.seq)).toEqual([1, 2]);
+    expect(commits[1].state).toMatchObject({ seq: 2, root: { v: 1 } });
+  });
+
+  it('onCommit does not fire for a rejected envelope', () => {
+    const commits: unknown[] = [];
+    const relay = createRelay({
+      policy: { canWrite: (_ctx, path) => path[0] !== 'admin' },
+      onCommit: (_room, env) => commits.push(env),
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['admin'], 1)]);
+
+    expect(commits).toEqual([]);
+    expect(a.sock.closed).toBe(true);
+  });
+
+  it('round-trips a room through onCommit capture and hydrate on a fresh relay', () => {
+    let saved: { seq: number; epoch: string; root: unknown; journal: SeqEnvelope[] } = {
+      seq: 0,
+      epoch: '',
+      root: undefined,
+      journal: [],
+    };
+    const relay = createRelay({
+      onCommit: (_room, env, state) => {
+        saved = { ...state, journal: [...saved.journal, env] };
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set([], { v: 0 })]);
+    a.env([set(['v'], 1)]);
+    a.env([set(['v'], 2)]);
+
+    // the relay dies; a new instance restores the persisted room
+    const revived = createRelay();
+    expect(revived.hydrate('r', saved)).toBe(true);
+    expect(revived.room('r')).toMatchObject({ seq: 3, journal: 3 });
+
+    // reconnecting client kept its watermark: restored epoch means delta, not snapshot
+    const back = client(revived, 'wa', 'oa');
+    back.hello(2);
+    const welcome = last(back.sock);
+    expect(welcome).toMatchObject({ t: 'welcome', mode: 'delta', seq: 3, epoch: saved.epoch });
+    expect((welcome as { envs: { seq: number }[] }).envs.map((e) => e.seq)).toEqual([3]);
+
+    // a fresh joiner gets the restored snapshot
+    const fresh = client(revived, 'wf', 'of');
+    fresh.hello();
+    expect(last(fresh.sock)).toMatchObject({
+      t: 'welcome',
+      mode: 'snapshot',
+      seq: 3,
+      root: { v: 2 },
+    });
+
+    // and writes continue the restored seq space
+    back.env([set(['v'], 3)]);
+    const envs = fresh.sock.sent.filter((m) => m.t === 'env').map((m) => m.env.seq);
+    expect(envs).toEqual([4]);
+  });
+
+  it('hydrate without a journal answers snapshot to stale watermarks; without an epoch it mints fresh', () => {
+    const relay = createRelay();
+    expect(relay.hydrate('r', { seq: 5, root: { v: 5 } })).toBe(true);
+
+    const a = client(relay, 'wa', 'oa');
+    a.hello(3);
+    const welcome = last(a.sock) as { mode: string; epoch: string; root?: unknown };
+    expect(welcome).toMatchObject({ mode: 'snapshot', seq: 5, root: { v: 5 } });
+    expect(welcome.epoch.length).toBeGreaterThan(0);
+  });
+
+  it('refuses to hydrate a touched room', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    // members but no state yet: still refused (they were told seq 0)
+    expect(relay.hydrate('r', { seq: 5, root: {} })).toBe(false);
+
+    a.env([set([], { v: 0 })]);
+    expect(relay.hydrate('r', { seq: 5, root: {} })).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 1 });
+  });
+
+  it('hydrate drops journal entries above seq and caps to journalLimit', () => {
+    const mkEnv = (seq: number) => ({
+      proto: MESH_PROTO_VERSION,
+      origin: 'o',
+      writer: 'w',
+      version: seq,
+      hlc: { p: seq, l: 0 },
+      policyVersion: 0,
+      ops: [set(['v'], seq)],
+      seq,
+    });
+    const relay = createRelay({ journalLimit: 2 });
+    relay.hydrate('r', {
+      seq: 4,
+      root: { v: 4 },
+      journal: [mkEnv(2), mkEnv(4), mkEnv(3), mkEnv(9)],
+    });
+    expect(relay.room('r')).toMatchObject({ seq: 4, journal: 2 });
+
+    // the kept tail is [3, 4]: a watermark of 2 is covered, delta answers [3, 4]
+    const a = client(relay, 'wa', 'oa');
+    a.hello(2);
+    const welcome = last(a.sock);
+    expect(welcome).toMatchObject({ mode: 'delta' });
+    expect((welcome as { envs: { seq: number }[] }).envs.map((e) => e.seq)).toEqual([3, 4]);
   });
 });
 

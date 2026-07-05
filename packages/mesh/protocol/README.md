@@ -139,8 +139,46 @@ export class MeshRoom {
 }
 ```
 
-Durable storage (journal persistence across restarts) rides the same seam and lands with a
-later release. In-memory rooms cover dev and single-process deployments today.
+## Persistence
+
+Rooms live in memory. That covers dev and single-process deployments, and when the relay
+restarts, the first client to rejoin seeds the room from its own local state, so nothing is
+lost as long as somebody was online. For durability beyond that, the relay exposes a seam
+rather than a storage engine, because the envelope already is the persistence record: an
+event-sourced journal is just `snapshot + envelopes`, compacted by re-snapshotting.
+
+`onCommit` fires after every envelope is sequenced and folded, with the envelope and the
+room's current `{ seq, epoch, root }`. Append the envelope to your journal, and checkpoint the
+root as often as you like. The relay never awaits it, so batching and backpressure belong to
+your adapter:
+
+```ts
+const relay = createRelay({
+  onCommit: (room, env, state) => {
+    journal.append(room, env); // your DB, KV, or DO storage
+    if (state.seq % 100 === 0) checkpoints.put(room, state);
+  },
+});
+```
+
+`relay.hydrate(room, snapshot)` restores a persisted room before clients join (relay boot, or
+inside a Durable Object's `blockConcurrencyWhile`). It refuses once the room has state or
+members, so your load can race a fast client without corrupting a live sequence space:
+
+```ts
+const saved = await checkpoints.get(roomName);
+if (saved) {
+  relay.hydrate(roomName, {
+    ...saved, // seq, epoch, root
+    journal: await journal.tail(roomName, saved.seq),
+  });
+}
+```
+
+Restoring the persisted `epoch` is what lets clients that were connected before the restart
+keep their sequence watermark and catch up with a cheap `delta` answer. Omit it and they fall
+back to a full snapshot, which is always safe. The optional journal tail is only there to make
+those delta answers possible; the room is complete without it.
 
 ## WebRTC signaling
 

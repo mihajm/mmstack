@@ -441,11 +441,13 @@ describe('pathPrefixAcl', () => {
     const human: PrincipalCtx = { writer: 'h', kind: 'human' };
     const agent: PrincipalCtx = { writer: 'a', kind: 'agent' };
 
-    expect(acl.canWrite!(human, ['notes', 3, 'text'])).toBe(true);
-    expect(acl.canWrite!(human, ['cases', 'c1', 'plan', 'step'])).toBe(true);
-    expect(acl.canWrite!(agent, ['cases', 'c1', 'plan', 'step'])).toBe(false);
-    expect(acl.canWrite!(agent, ['notes', 0])).toBe(true);
-    expect(acl.canWrite!(human, ['admin'])).toBe(false);
+    const canWrite = acl.canWrite;
+    if (!canWrite) throw new Error('pathPrefixAcl must define canWrite');
+    expect(canWrite(human, ['notes', 3, 'text'])).toBe(true);
+    expect(canWrite(human, ['cases', 'c1', 'plan', 'step'])).toBe(true);
+    expect(canWrite(agent, ['cases', 'c1', 'plan', 'step'])).toBe(false);
+    expect(canWrite(agent, ['notes', 0])).toBe(true);
+    expect(canWrite(human, ['admin'])).toBe(false);
   });
 
   it('isolates rooms on one relay: envelopes and sequencing do not leak across rooms', () => {

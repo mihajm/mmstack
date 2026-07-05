@@ -97,6 +97,13 @@ matches a path. For richer rules, write your own `OpPolicy` with `canWrite` and 
 Schema-aware validation (deriving a policy from your data model) composes on top and stays in
 your codebase, not here.
 
+Two boundaries to be clear about. Policy gates writes, not reads: every member of a room sees
+the whole root, so the room is the confidentiality boundary, and data with different audiences
+belongs in different rooms. And because the relay folds envelopes into snapshots, it reads
+plaintext; end-to-end encryption where the server sees only ciphertext is incompatible with
+server-side compaction as designed. Encrypt the transport and the stored data, but treat the
+relay as inside the trust boundary.
+
 ## Adapter recipes
 
 The relay is pure over injected sockets, so an adapter is a few lines of glue.

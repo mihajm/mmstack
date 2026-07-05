@@ -16,6 +16,9 @@ export type PrincipalCtx = {
  * apply: honest peers never emit invalid ops, so any violation observed on the wire is a
  * buggy or malicious writer — tripwire semantics eject it deterministically. Never skip an
  * op mid-log.
+ *
+ * This is a WRITE ACL, not a read ACL: every room member sees the whole root, so the room is
+ * the confidentiality boundary. Data with different audiences belongs in different rooms.
  */
 export type OpPolicy = {
   canWrite?(ctx: PrincipalCtx, path: readonly Key[]): boolean;

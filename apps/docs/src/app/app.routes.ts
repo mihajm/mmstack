@@ -80,6 +80,8 @@ export const appRoutes: Route[] = [
               { label: 'Overview', link: 'dnd' },
               { label: 'Draggables & drop targets', link: 'dnd/elements' },
               { label: 'Sortable lists', link: 'dnd/reorderable' },
+              { label: 'Grids', link: 'dnd/grids' },
+              { label: 'Canvas', link: 'dnd/canvas' },
               { label: 'Advanced', link: 'dnd/advanced' },
             ],
           },
@@ -417,6 +419,18 @@ export const appRoutes: Route[] = [
         title: createTitle('Sortable lists'),
         loadComponent: () =>
           import('./pages/docs/dnd/reorderable').then((m) => m.ReorderableDoc),
+      },
+      {
+        path: 'dnd/grids',
+        title: createTitle('Grids'),
+        loadComponent: () =>
+          import('./pages/docs/dnd/grids').then((m) => m.DndGridsDoc),
+      },
+      {
+        path: 'dnd/canvas',
+        title: createTitle('Canvas'),
+        loadComponent: () =>
+          import('./pages/docs/dnd/canvas').then((m) => m.DndCanvasDoc),
       },
       {
         path: 'dnd/advanced',

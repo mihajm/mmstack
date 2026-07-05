@@ -1,7 +1,9 @@
+export * from './lib/canvas-board-demo';
 export * from './lib/deferred-value-demo';
 export * from './lib/drag-drop-demo';
 export * from './lib/keep-alive-demo';
 export * from './lib/latest-demo';
+export * from './lib/placement-grid-demo';
 export * from './lib/sensors-demo';
 export * from './lib/sortable-board-demo';
 export * from './lib/sortable-horizontal-demo';
@@ -9,3 +11,4 @@ export * from './lib/sortable-list-demo';
 export * from './lib/sortable-nested-demo';
 export * from './lib/store-demo';
 export * from './lib/transition-tabs-demo';
+export * from './lib/wrap-grid-demo';

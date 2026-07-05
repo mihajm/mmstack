@@ -104,7 +104,8 @@ test.describe('pointer sortable — single vertical list', () => {
     expect(ta).toBe('none');
   });
 
-  test('reorders via a real touch drag (pointerType: touch)', async ({ page }) => {
+  test('reorders via a real touch drag (pointerType: touch)', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'CDP touch dispatch is Chromium-only');
     const client = await page.context().newCDPSession(page);
     const start = await resolvePoint(rows(page).first());
     const box = await rows(page).last().boundingBox();

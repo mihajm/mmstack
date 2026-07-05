@@ -34,7 +34,7 @@ import { Meta } from '@angular/platform-browser';
         }
         @if (experimental()) {
           <p class="experimental-note">
-            This package is experimental: the API may still change and it is not
+            This API surface is experimental: it may still change and is not
             yet battle-tested in production. Pin a version and expect some churn.
           </p>
         }

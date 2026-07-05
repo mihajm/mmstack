@@ -49,15 +49,48 @@ export const appRoutes: Route[] = [
       ),
   },
   {
-    path: 'canvas',
+    path: 'wrap-grid',
     loadComponent: () =>
-      import('./examples/canvas-example').then((m) => m.CanvasExample),
+      import('./examples/wrap-grid-example').then((m) => m.WrapGridExample),
   },
   {
-    path: 'grid',
+    path: 'placement-grid',
     loadComponent: () =>
-      import('./examples/grid-example').then((m) => m.GridExample),
+      import('./examples/placement-grid-example').then(
+        (m) => m.PlacementGridExample,
+      ),
   },
+  {
+    path: 'canvas-controller',
+    loadComponent: () =>
+      import('./examples/canvas-controller-example').then(
+        (m) => m.CanvasControllerExample,
+      ),
+  },
+  {
+    path: 'canvas-store',
+    loadComponent: () =>
+      import('./examples/canvas-store-example').then(
+        (m) => m.CanvasStoreExample,
+      ),
+  },
+  {
+    path: 'canvas-containers',
+    loadComponent: () =>
+      import('./examples/canvas-containers-example').then(
+        (m) => m.CanvasContainersExample,
+      ),
+  },
+  {
+    path: 'vflow-store',
+    loadComponent: () =>
+      import('./examples/vflow-store-example').then(
+        (m) => m.VflowStoreExample,
+      ),
+  },
+  // the app-internal canvas engine graduated into @mmstack/dnd — old routes forward
+  { path: 'canvas', redirectTo: 'canvas-controller' },
+  { path: 'grid', redirectTo: 'placement-grid' },
   {
     path: 'features',
     loadComponent: () =>

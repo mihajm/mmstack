@@ -59,11 +59,20 @@ import { DocSection } from '../../../layout/doc-section';
           <code>sortableGroup</code> for cross-list moves. Use it for ordered
           lists, including nested and cross-list cases.
         </p>
+        <p>
+          On top of those sit two preview layers: grids (a wrapping 2D
+          sortable and a spanning dashboard grid) and a free-form canvas with
+          move, resize, rotate, marquee and snaplines. Both write your state
+          signal once per gesture, which is what op-log stores, undo history
+          and realtime sync want.
+        </p>
         <ul>
           <li>
             <a mmLink="/docs/dnd/elements">Draggables and drop targets</a>
           </li>
           <li><a mmLink="/docs/dnd/reorderable">Sortable lists</a></li>
+          <li><a mmLink="/docs/dnd/grids">Grids</a></li>
+          <li><a mmLink="/docs/dnd/canvas">Canvas</a></li>
         </ul>
       </docs-section>
     </docs-page>

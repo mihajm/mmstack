@@ -23,10 +23,13 @@ test.describe('features — drag handle, conditional drop', () => {
   test('canDrop: accepts the allowed chip, rejects the blocked one', async ({ page }) => {
     const zone = page.locator('section', { hasText: 'Conditional drop' }).locator('.zone');
 
-    await page.locator('.chip.no').dragTo(zone);
-    await expect(zone).toHaveText(/accepted: —/);
-
+    // allowed first: a rejected native drop wedges webkit's drag driver for the
+    // NEXT dragTo, and asserting the text survives the blocked drag is the
+    // stronger rejection check anyway (the initial text was already "—").
     await page.locator('.chip.ok').dragTo(zone);
+    await expect(zone).toHaveText(/accepted: allowed/);
+
+    await page.locator('.chip.no').dragTo(zone);
     await expect(zone).toHaveText(/accepted: allowed/);
   });
 });

@@ -309,6 +309,54 @@ describe('persistedStore', () => {
       expect(reopened.store().ok).toBe(true);
     }
   });
+
+  it('an encrypting AsyncStore decorator round-trips, stores only ciphertext, and keeps versioning', async () => {
+    const inner = memoryBackend();
+    // stand-in for an async WebCrypto cipher: base64 over JSON, awaited like subtle.encrypt
+    const encrypt = async (v: unknown) => btoa(JSON.stringify(v));
+    const decrypt = async (raw: unknown) => JSON.parse(atob(raw as string));
+    const encrypted: AsyncStore = {
+      get: async (k) => {
+        const raw = await inner.get(k);
+        return raw === undefined ? undefined : decrypt(raw);
+      },
+      set: async (k, v) => inner.set(k, await encrypt(v)),
+      del: (k) => inner.del(k),
+    };
+
+    const p = TestBed.runInInjectionContext(() =>
+      persistedStore(
+        { secret: 'a' },
+        { key: 'e', store: encrypted, version: 1, writeDebounceMs: 1 },
+      ),
+    );
+    await tick();
+    p.store.secret.set('b');
+    await p.flush();
+
+    // at rest: an opaque string, no plaintext and no readable version envelope
+    const atRest = inner.map.get('e');
+    expect(typeof atRest).toBe('string');
+    expect(String(atRest)).not.toContain('secret');
+    expect(String(atRest)).not.toContain('__mmstack_pv');
+
+    // the version envelope is inspected AFTER decryption: migrate still runs
+    const reopened = TestBed.runInInjectionContext(() =>
+      persistedStore(
+        { secret: '' },
+        {
+          key: 'e',
+          store: encrypted,
+          version: 2,
+          migrate: (data) => ({
+            secret: `${(data as { secret: string }).secret}!`,
+          }),
+        },
+      ),
+    );
+    await tick();
+    expect(reopened.store().secret).toBe('b!');
+  });
 });
 
 describe('persist (composable reader on an existing store)', () => {

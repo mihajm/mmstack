@@ -32,6 +32,23 @@ type MaybePromise<T> = T | Promise<T>;
  *   del: (k) => table.delete(k),
  * };
  * ```
+ *
+ * The backend is also the seam for cross-cutting storage concerns like encryption: wrap any
+ * backend in a decorator (get/set may be async, so WebCrypto fits here — `serialize` is sync
+ * by design and is for shape, not for the storage medium). Versioning and migration still work
+ * because the version envelope is inspected on what the backend RETURNS, i.e. after decryption:
+ *
+ * ```ts
+ * const encrypted = (inner: AsyncStore, cipher: MyCipher): AsyncStore => ({
+ *   get: async (k) => {
+ *     const raw = await inner.get(k);
+ *     return raw === undefined ? undefined : cipher.decrypt(raw);
+ *   },
+ *   set: async (k, v) => inner.set(k, await cipher.encrypt(v)),
+ *   del: (k) => inner.del(k),
+ * });
+ * providePersistedStoreOptions({ store: encrypted(idbKeyval, cipher) });
+ * ```
  */
 export type AsyncStore = {
   get(key: string): MaybePromise<unknown>;

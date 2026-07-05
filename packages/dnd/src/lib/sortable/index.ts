@@ -1,23 +1,33 @@
 export {
   type Axis,
+  type MemberMeasure,
   type RectLike,
   centerAlong,
   clampInsert,
   closeDisplacement,
+  closeSlotOf,
   containsPoint,
   displacement,
+  insertIndexForMeasure,
   insertIndexFromCenters,
+  insertIndexFromSlots,
   insertIndexTransformAware,
   moveWithin,
   openDisplacement,
+  openSlotOf,
   sizeAlong,
+  slotOf,
   startAlong,
   transfer,
+  wrapInsertAtPoint,
+  wrapVirtualSlot,
 } from './geometry';
 export {
   type DragGeometry,
+  type LinearDragGeometry,
   type SortableSession,
   type SortableSessionInput,
+  type WrapDragGeometry,
   sortableSession,
 } from './session';
 export {

@@ -16,6 +16,7 @@ Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atla
 - **Zero required plugins.** Edge detection and auto-scroll are opt-in — use the first-party **zero-dependency** plugins from the secondary entry point `@mmstack/dnd/plugins`, or plug in pragmatic's sub-libraries. Missing a plugin degrades gracefully (dev warning + no-op), never a throw.
 - **Typed everywhere.** `accepts` narrows payloads with no casting; a symbol-keyed `meta` channel never collides with your data; engine-only options are compile-time-guarded per engine.
 - **Composable or declarative.** Every primitive is a plain function; every directive is a thin wrapper over it. And every option is DI-defaultable.
+- **Grids and canvases (preview).** A wrapping 2D sortable (`axis: 'wrap'`), a controlled spanning grid (`placementGrid`, the dashboard / form-builder model) and a free-form canvas (`canvas`: move, resize, rotate, marquee, snaplines, pan/zoom, containment). All of them write your state signal exactly once per gesture, which makes them a natural fit for op-log stores and undo history; grid and canvas moves commit as per-property ops, the collaboration-friendly shape.
 
 ## Installation
 
@@ -353,7 +354,166 @@ reorderable(this.items, {
 
 ### Options
 
-`key` (required identity), `engine`, `axis` (`'y'` \| `'x'`), `deadband` (px a center must be cleared before the insert flips), `activationThreshold` (px before a drag activates — pointer engine), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
+`key` (required identity), `engine`, `axis` (`'y'` \| `'x'` \| `'wrap'`), `deadband` (px a center must be cleared before the insert flips), `activationThreshold` (px before a drag activates — pointer engine), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insertSize` (px an arriving foreign item's gap should occupy here, when this list renders arrivals smaller than they were at home), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
+
+### Wrap grids (`axis: 'wrap'`)
+
+A gallery or tag cloud is still an ordered list, it just wraps. `axis: 'wrap'` switches the pointer engine to a 2D collision model: item centers measured at drag start become static slots, the dragged tile resolves to the nearest slot, and displaced siblings glide to their new slot even across row boundaries. Same API, same directives:
+
+```ts
+protected readonly gallery = reorderable(this.tiles, {
+  key: (t) => t.id,
+  engine: 'pointer',
+  axis: 'wrap',
+});
+```
+
+Keyboard follows the geometry: Left/Right step the reading order, Up/Down move to the nearest tile in the adjacent row. Wrap lists join `sortableGroup` like any other list, so you can drag rows from a vertical tray into a grid and back; an incoming item lands at the nearest slot, appending included.
+
+The slot model is exact for uniform tiles and a good approximation for variable sizes, the same trade-off dnd-kit's rect sorting strategy makes. The native indicator engine has no 2D indicator placement, so wrap is pointer-engine territory (a dev warning fires if you combine them).
+
+## Placement grid (`placementGrid`) — preview
+
+The dashboard model you know from [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout) and Retool: items own a cell rect (`x`, `y`, `w`, `h` in grid cells, the `GridPlacement` shape) on a fixed-column grid. Dragging projects the pointer to a cell and previews the whole reflow as pure derivation; your `WritableSignal<T[]>` is written exactly once, at drop.
+
+```ts
+import { PlacementGrid, PlacementGridItem, PlacementGridResizeHandle, placementGrid, type GridPlacement } from '@mmstack/dnd';
+
+type Widget = GridPlacement & { id: string; label: string };
+
+@Component({
+  imports: [PlacementGrid, PlacementGridItem, PlacementGridResizeHandle],
+  template: `
+    <div [mmPlacementGrid]="grid">
+      @for (w of grid.items(); track w.id) {
+        <div class="widget" [mmPlacementGridItem]="w">
+          {{ w.label }}
+          <i class="grip" mmPlacementGridResizeHandle="se"></i>
+        </div>
+      }
+    </div>
+  `,
+})
+export class Dashboard {
+  private readonly widgets = signal<Widget[]>([
+    { id: 'chart', label: 'Chart', x: 0, y: 0, w: 6, h: 2 },
+    { id: 'kpis', label: 'KPIs', x: 6, y: 0, w: 3, h: 2 },
+  ]);
+  protected readonly grid = placementGrid(this.widgets, {
+    key: (w) => w.id,
+    cols: 12,
+    gap: 8,
+    rowHeight: 56,
+  });
+}
+```
+
+Two compaction modes cover the two grid personalities:
+
+- `compact: 'vertical'` (default): colliding items push down and gravity pulls everything up, the classic dashboard reflow.
+- `compact: 'none'`: nothing moves. A cell is either free or the move is rejected (the projection sticks to the last valid cell). `grid.targetMask()` exposes the validity mask during a drag (`mask[y * cols + x]`), so you can render drop-cell affordances; a `canPlace` predicate layers your own rules on top. This is the mode for form builders with fixed slots.
+
+The details that keep it honest: the projection only fires when the pointer crosses a cell, untouched items keep reference identity through both preview and commit (so a keyed `@for` and an op-log diff see minimal change), resize grips (`'e' | 's' | 'se'`) preview spans the same way, arrows move the focused widget one cell and Shift+arrows resize it, and edge auto-scroll works on both axes. `injectPlacementGrid` + `providePlacementGridDefaults` follow the usual DI-defaults pattern.
+
+Grids are `SortableGroupMember`s too. Put a `placementGrid` in the same `sortableGroup` as your palette list and dragged items drop at the pointed cell (`insertAtPoint`); items dragged out of the grid into a list behave like any cross-list move.
+
+## Free-form canvas (`canvas`) — preview
+
+Figma-style spatial editing over your own items signal: move (single or multi-select), resize from eight handles, rotate, marquee select, alignment snaplines, grid snap, keyboard nudge, pan/zoom, and CMMN-style containment. One delegated gesture per surface decides what a press means by the element it lands on, so items, handles and chrome never race each other.
+
+```ts
+import { Canvas, CanvasItem, CanvasResizeHandle, injectCanvas, panZoom, type CanvasFrame } from '@mmstack/dnd';
+
+type Widget = { id: string; frame: CanvasFrame };
+
+@Component({
+  imports: [Canvas, CanvasItem, CanvasResizeHandle],
+  template: `
+    <div class="viewport" #viewport [mmCanvas]="ctrl">
+      <div class="space" [style.transform]="spaceCss()">
+        @for (w of ctrl.items(); track w.id) {
+          <div class="widget" [mmCanvasItem]="w">
+            @if (ctrl.selection.has(w.id)) {
+              <i class="handle se" mmCanvasResizeHandle="se"></i>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  `,
+})
+export class Board {
+  private readonly widgets = signal<readonly Widget[]>([...]);
+  private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
+  protected readonly zoom = panZoom(this.viewport);
+  protected readonly ctrl = injectCanvas(this.widgets, {
+    key: (w) => w.id,
+    frame: (w) => w.frame,
+    patch: (w, frame) => ({ ...w, frame }),
+    grid: { size: 8 },
+    space: this.zoom,
+  });
+  protected readonly spaceCss = computed(() => {
+    const t = this.zoom.transform();
+    return `translate(${t.x}px, ${t.y}px) scale(${t.scale})`;
+  });
+}
+```
+
+The state seam is a pair of pure lenses: `frame` reads an item's `CanvasFrame` (`x`, `y`, `width`, `height`, optional `rotation`), `patch` writes one back immutably. Mid-gesture nothing touches your signal; the live position is a transient overlay derived from a drag-start snapshot, and moves are transform-only (the browser composites, it does not lay out). On release the controller maps `patch` over the touched items in ONE write, preserving the identity of everything untouched.
+
+Interaction defaults match the tools people know: Shift locks a move to the dominant axis and holds the aspect ratio on resize, Alt resizes from the center, Ctrl bypasses snapping, a drag of an unselected item selects it, Shift-click toggles selection, empty-surface presses marquee (or click to clear), Escape cancels. Arrows nudge the selection by the grid step (Shift for 10 steps), Cmd/Ctrl+arrows resize. `ctrl.session` exposes the pure derivation core (`guides`, `marqueeRect`, `hoverContainer`, live deltas) so your chrome renders from signals; the demo's SVG snaplines are a dozen lines of template.
+
+`panZoom()` owns the space transform (wheel zoom around the cursor, middle-button pan) and doubles as the `space` option, so every gesture projects through the live transform. You can zoom mid-drag and the grabbed point stays under the cursor.
+
+### Containment (stages, frames, sections)
+
+For editors where some items contain others (CMMN stages, page sections, Figma frames), the `containers` option resolves the innermost accepting container under the pointer while you drag:
+
+```ts
+injectCanvas(this.nodes, {
+  // ...lenses
+  containers: {
+    isContainer: (n) => n.kind === 'stage',
+    containerOf: (n) => n.parent, // enables reparenting
+    canContain: (stage, item) => item.kind === 'task', // cycle guards live here
+  },
+  onReparent: ({ patches, container }) => {
+    // one write: new parent + frames rebased into its space
+    this.nodes.update((arr) =>
+      arr.map((n) => {
+        const frame = patches.get(n.id);
+        return frame ? { ...n, frame, parent: container } : n;
+      }),
+    );
+  },
+});
+```
+
+A move that stays in its container commits normally (the hover container is reported on the commit event). A drop over a different container becomes a reparent: the controller hands you frames already rebased into the target's coordinate space and does NOT write, so your tree restructuring and the frame updates land in a single update.
+
+### One gesture, one op batch (stores, undo, multiplayer)
+
+Because every grid and canvas gesture commits as one identity-preserving write, an op-log store sees exactly the ops that changed:
+
+```ts
+import { opLog, store, storeHistory } from '@mmstack/primitives';
+
+const doc = store<{ widgets: Widget[] }>({ widgets: [...] });
+const history = storeHistory(doc);
+const ctrl = injectCanvas(doc.widgets, { key, frame, patch });
+
+// a whole drag emits ONE batch: [widgets, 3, 'frame', 'x'], [widgets, 3, 'frame', 'y']
+opLog(doc, { origin: clientId }).subscribe(sendToPeers);
+```
+
+That gives you gesture-grained undo (`history.undo()` restores the whole drag), per-property ops for mesh sync (two peers moving different widgets never conflict, Figma-style last-write-wins per property), and a presence channel for free: `ctrl.liveFrames()` is the participants' in-flight frames, throttle it into your presence transport and feed peers' frames back through the `remoteOverlays` option to render their drags as ghosts. `lockedKeys` rejects local gestures on peer-held items.
+
+One schema note for collaborative apps: array insert/remove diffs coarsely (a length change emits one whole-array op). The canvas itself never changes the array's length, but your create/delete layer does, and so do grid-in-a-group transfers (a palette drop into a `placementGrid` or a widget dragged out both change the array). Moves and resizes stay per-property either way; if concurrent creation or transfer matters, keep the authoritative document record-keyed (`Record<Id, Widget>`) and derive the arrays for rendering.
+
+### Diagram editors: bring ngx-vflow
+
+If you are building a node-and-edge editor (BPMN, CMMN, data flows), you do not need to hand-roll edges, connection dragging and minimaps on top of `canvas`. [ngx-vflow](https://www.ngx-vflow.org/) is an excellent signal-native diagram shell, and it composes with the same store seam: keep the document in your store, mint vflow nodes from it, and commit drag ends in one write (`nodesChanges.position` marks dirty nodes, `nodeDragEnd` commits, `connect` appends edges). The playground's `/vflow-store` route is a complete working recipe, including undo. Note that ngx-vflow is browser-only, so render its route with `RenderMode.Client` under SSR.
 
 ## Plugins
 
@@ -546,6 +706,8 @@ All composables short-circuit on the server and return inert signals (`dragging`
 ## Credits
 
 `@mmstack/dnd` is an unofficial, signals-first Angular DnD library. Its **native** engine builds on [pragmatic-drag-and-drop](https://github.com/atlassian/pragmatic-drag-and-drop) by Atlassian (Apache-2.0) — required as a peer dependency — which does the underlying HTML5 drag-and-drop work and provides the shared global monitor. This project is not affiliated with or endorsed by Atlassian. The optional `@atlaskit/*` packages (hitbox, auto-scroll, flourish, live-region) plug in through `provideDnd` and remain the property of their authors; the pointer engine, sortable/FLIP, keyboard a11y, and the first-party `@mmstack/dnd/plugins` are original work.
+
+The wrap-grid slot model takes after [dnd-kit](https://dndkit.com/)'s rect sorting strategy, the placement grid after [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout)'s reflow, and the canvas interaction defaults after Figma. All three are first-party implementations; credit to those projects for showing what good feels like.
 
 ## License
 

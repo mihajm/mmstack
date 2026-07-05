@@ -1,7 +1,6 @@
 import { createDefaultsToken, injectDndDefaults } from '../provide';
 import type { DragEngine } from '../session';
-import type { Axis } from './geometry';
-import type { ReorderableAnimation } from './types';
+import type { ReorderableAnimation, ReorderableAxis } from './types';
 
 /**
  * DI-settable `reorderable` defaults — the cross-cutting, non-identity options
@@ -11,8 +10,8 @@ import type { ReorderableAnimation } from './types';
 export type ReorderableDefaults = {
   /** Default drag engine for lists. */
   engine?: DragEngine;
-  /** Default list main axis. */
-  axis?: Axis;
+  /** Default list layout (`'x'`/`'y'`/`'wrap'`). */
+  axis?: ReorderableAxis;
   /** Default px a center must be cleared by before the insert index flips. */
   deadband?: number;
   /** Default activation distance in px (pointer engine only). */

@@ -42,7 +42,7 @@ export type PointerDragState = {
   /**
    * The element the gesture started on: the `handleSelector` match when one is
    * set (so a single delegated listener can tell which child started the drag),
-   * otherwise the listener's element. `null` when idle.
+   * otherwise the pressed element itself (`event.target`). `null` when idle.
    */
   origin: HTMLElement | null;
   /**
@@ -268,7 +268,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     if (!buttons.includes(e.button)) return;
     const matched = handleSelector
       ? ((e.target as Element)?.closest?.(handleSelector) as HTMLElement | null)
-      : el;
+      : ((e.target as HTMLElement | null) ?? el); // no selector: the pressed element itself
     if (!matched) return; // handleSelector set but pointerdown landed outside a handle
     if (stopPropagation) e.stopPropagation(); // claim it: an outer sensor won't also start
     activePointerId = e.pointerId;

@@ -10,9 +10,57 @@ import { injectAnnounce } from '../a11y/a11y';
 import type { ReorderableController } from './types';
 
 /**
+ * Wrap-layout row navigation: the index of the geometrically nearest item in
+ * the adjacent row (`dir` +1 = below, -1 = above), or `from` when there is no
+ * such row. Measures live rects — keyboard moves run at rest.
+ */
+function wrapRowTarget<T, K>(
+  c: ReorderableController<T, K>,
+  from: number,
+  dir: 1 | -1,
+): number {
+  const items = c.items();
+  const myEl = c.elementFor(c.key(items[from]));
+  if (!myEl) return from;
+  const my = myEl.getBoundingClientRect();
+  const myCx = my.left + my.width / 2;
+  const myCy = my.top + my.height / 2;
+  const tol = my.height / 2 || 1;
+
+  const candidates: { i: number; cx: number; cy: number }[] = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i === from) continue;
+    const r = c.elementFor(c.key(items[i]))?.getBoundingClientRect();
+    if (!r) continue;
+    const cy = r.top + r.height / 2;
+    if (dir > 0 ? cy > myCy + tol : cy < myCy - tol) {
+      candidates.push({ i, cx: r.left + r.width / 2, cy });
+    }
+  }
+  if (!candidates.length) return from;
+
+  let rowCy = candidates[0].cy;
+  for (const cand of candidates) {
+    if (dir > 0 ? cand.cy < rowCy : cand.cy > rowCy) rowCy = cand.cy;
+  }
+  let best = from;
+  let bestDx = Infinity;
+  for (const cand of candidates) {
+    if (Math.abs(cand.cy - rowCy) > tol) continue;
+    const dx = Math.abs(cand.cx - myCx);
+    if (dx < bestDx) {
+      bestDx = dx;
+      best = cand.i;
+    }
+  }
+  return best;
+}
+
+/**
  * The keyboard-reorder behaviour shared by both engines: focus an item, arrow
- * keys move it one step (axis-aware), jump-modifier + arrow moves it to the
- * start/end. Each move commits via `moveItem`, is announced, and keeps focus.
+ * keys move it one step (axis-aware; `'wrap'` adds row-wise Up/Down), jump-
+ * modifier + arrow moves it to the start/end. Each move commits via
+ * `moveItem`, is announced, and keeps focus.
  *
  * A list may replace the built-in arrow/jump logic with its own
  * {@link ReorderableController.onKeyboardKeydown} — that handler receives the
@@ -76,6 +124,34 @@ export function keyboardReorder<T, K>(
         jump: c.jumpModifier(event),
         move: (to) => applyMove(index(), to),
       });
+      return;
+    }
+
+    if (c.axis === 'wrap') {
+      let to: number;
+      switch (event.key) {
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          const dir = event.key === 'ArrowRight' ? 1 : -1;
+          to = c.jumpModifier(event) ? (dir > 0 ? total - 1 : 0) : from + dir;
+          break;
+        }
+        case 'ArrowUp':
+        case 'ArrowDown': {
+          const dir = event.key === 'ArrowDown' ? 1 : -1;
+          to = c.jumpModifier(event)
+            ? dir > 0
+              ? total - 1
+              : 0
+            : wrapRowTarget(c, from, dir);
+          break;
+        }
+        default:
+          return;
+      }
+      if (Math.min(Math.max(to, 0), total - 1) === from) return;
+      event.preventDefault();
+      applyMove(from, to);
       return;
     }
 

@@ -93,3 +93,11 @@ export { injectAnnounce, type Politeness } from './lib/a11y/a11y';
 // pointer-based sortable (preview) — built on the pointerDrag sensor, not the
 // pragmatic native core; see ./lib/sortable.
 export * from './lib/sortable';
+
+// spanning placement grid (preview) — the controlled dashboard/form-builder
+// grid: cells + spans, preview-derivation drag, one source write per gesture.
+export * from './lib/grid';
+
+// free-form canvas (preview) — Figma-style move/resize/rotate/marquee over a
+// consumer-owned items signal, with pan/zoom space and containment seams.
+export * from './lib/canvas';

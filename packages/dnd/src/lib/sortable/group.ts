@@ -1,6 +1,8 @@
 import { computed, type Signal, signal, untracked } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
-import { type Axis, containsPoint, type RectLike } from './geometry';
+import { containsPoint, type MemberMeasure, type RectLike } from './geometry';
+
+export type { MemberMeasure } from './geometry';
 
 const GROUP_INTERNALS = Symbol('@mmstack/dnd:sortable-group-internals');
 
@@ -17,10 +19,26 @@ export type SortableGroupMember<T = unknown> = {
   bounds(): RectLike | null;
   /** Snapshot the container rect into the cache (once at drag start, so `bounds()` reads stay DOM-free). */
   refreshBounds(): void;
-  /** This list's item centers (at rest) + axis — for computing the insert when it's the cross-list target. */
-  measure(): { centers: readonly number[]; axis: Axis };
-  /** Insert an item arriving from another list, and fire this list's own arrival callback. */
-  insertAt(item: T, index: number): void;
+  /**
+   * This container's inner layout (at rest) — for computing the insert when
+   * it's the cross-list target. A missing `kind` means linear, so pre-union
+   * member implementations keep working unchanged.
+   */
+  measure(): MemberMeasure;
+  /**
+   * Insert an item arriving from another list, and fire this list's own
+   * arrival callback. Return `false` to REFUSE the drop (no valid placement)
+   * — the source then keeps the item, so a rejected drop is a no-op instead
+   * of data loss.
+   */
+  insertAt(item: T, index: number): boolean;
+  /**
+   * Point-based insertion for members whose drop position isn't an index
+   * (a placement grid). When implemented, a source controller PREFERS this
+   * over `measure()` + `insertAt()`: return `true` to consume the drop,
+   * `false` to fall through to the index path.
+   */
+  insertAtPoint?(item: T, x: number, y: number): boolean;
   /**
    * May an item dragged from another member be dropped here? Used to reject
    * invalid targets — e.g. a tree node dropped into its own subtree (a cycle).
@@ -36,6 +54,13 @@ export type SortableActive<T = unknown> = {
   sourceIndex: number;
   insertIndex: number;
   footprint: number;
+  /**
+   * The target's drag-start measure — pushed by the source (which caches it)
+   * so the TARGET's items can derive their own opening-gap vectors (a wrap
+   * target needs its 2D centers; the target controller itself isn't dragging
+   * and has no geometry of its own).
+   */
+  targetMeasure?: MemberMeasure;
 };
 
 /**
@@ -72,6 +97,8 @@ export type SortableGroup<T = unknown> = {
     readonly activeSourceIndex: Signal<number>;
     readonly activeInsertIndex: Signal<number>;
     readonly activeFootprint: Signal<number>;
+    /** The active target's drag-start measure (changes per TARGET, not per frame). */
+    readonly activeTargetMeasure: Signal<MemberMeasure | null>;
     setActive(active: SortableActive<T>): void;
     clearActive(): void;
   };
@@ -103,6 +130,7 @@ export function sortableGroup<T = unknown>(
   const activeSourceIndex = signal(-1);
   const activeInsertIndex = signal(-1);
   const activeFootprint = signal(0);
+  const activeTargetMeasure = signal<MemberMeasure | null>(null);
 
   return {
     register: (member) => {
@@ -149,12 +177,14 @@ export function sortableGroup<T = unknown>(
       activeSourceIndex,
       activeInsertIndex,
       activeFootprint,
+      activeTargetMeasure,
       setActive: (a) => {
         activeSource.set(a.source);
         activeTarget.set(a.target);
         activeSourceIndex.set(a.sourceIndex);
         activeInsertIndex.set(a.insertIndex);
         activeFootprint.set(a.footprint);
+        activeTargetMeasure.set(a.targetMeasure ?? null);
       },
       clearActive: () => {
         activeSource.set(null);
@@ -162,6 +192,7 @@ export function sortableGroup<T = unknown>(
         activeSourceIndex.set(-1);
         activeInsertIndex.set(-1);
         activeFootprint.set(0);
+        activeTargetMeasure.set(null);
       },
     },
   };

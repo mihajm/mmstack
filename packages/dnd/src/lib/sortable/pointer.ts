@@ -5,8 +5,9 @@ import {
   Injector,
   untracked,
 } from '@angular/core';
-import { nestedEffect, pointerDrag } from '@mmstack/primitives';
+import { nestedEffect } from '@mmstack/primitives';
 
+import { driveGesture } from '../internal/gesture';
 import { resolveAutoScroll } from '../provide';
 import { HANDLE_SELECTOR, ITEM_SELECTOR } from './dom';
 import { keyboardReorder } from './keyboard';
@@ -21,17 +22,8 @@ export function connectPointerContainer<T, K = unknown>(
   controller: () => ReorderableController<T, K>,
   element: HTMLElement,
 ): void {
-  const drag = pointerDrag({
-    target: element,
-    handleSelector: HANDLE_SELECTOR,
-    activationThreshold: untracked(controller).activationThreshold,
-    // nested list claims the pointerdown so the outer one doesn't also start a drag (innermost wins).
-    stopPropagation: true,
-  });
-
-  // Resolved once; the live `pointer` object below is what the plugin chases each frame.
+  // Resolved once; the driver's live `pointer` is what the plugin chases each frame.
   const getAutoScroll = resolveAutoScroll(inject(Injector));
-  const pointer = { x: 0, y: 0 };
   let stopScroll: (() => void) | null = null;
 
   const startAutoScroll = (): void => {
@@ -41,8 +33,8 @@ export function connectPointerContainer<T, K = unknown>(
     if (!plugin) return;
     stopScroll = plugin({
       element,
-      axis: c.axis,
-      pointer: () => pointer,
+      axis: c.axis === 'x' ? 'x' : 'y',
+      pointer: () => driver.pointer,
       edge: c.autoScroll.edge,
       speed: c.autoScroll.speed,
       edgeProportion: c.autoScroll.edgeProportion,
@@ -62,31 +54,32 @@ export function connectPointerContainer<T, K = unknown>(
     untracked(controller).dispose?.();
   });
 
-  let dragging = false;
-  nestedEffect(() => {
-    const g = drag.unthrottled();
-    const c = controller();
-    if (g.active && g.pointerId !== null) {
-      pointer.x = g.current.x;
-      pointer.y = g.current.y;
-      if (!dragging && g.origin && untracked(c.activeKey) === null) {
-        const itemEl = g.origin.closest(ITEM_SELECTOR) as HTMLElement | null;
+  const driver = driveGesture(
+    element,
+    {
+      begin: (origin, start) => {
+        const c = untracked(controller);
+        if (!origin || untracked(c.activeKey) !== null) return false;
+        const itemEl = origin.closest(ITEM_SELECTOR) as HTMLElement | null;
         const k = itemEl ? c.keyForElement(itemEl) : undefined;
-        if (k !== undefined) {
-          c.beginGesture(k, g.start);
-          dragging = true;
-          startAutoScroll();
-        }
-      }
-      if (dragging) c.move(g.current);
-    } else if (dragging) {
+        if (k === undefined) return false;
+        c.beginGesture(k, start);
+        return true;
+      },
+      move: (p) => untracked(controller).move(p),
       // Escape / pointercancel / teardown abort the drag; only a real release commits.
-      if (g.cancelled) c.cancel();
-      else c.end();
-      dragging = false;
-      stopAutoScroll();
-    }
-  });
+      end: () => untracked(controller).end(),
+      cancel: () => untracked(controller).cancel(),
+      onDragStart: startAutoScroll,
+      onDragEnd: stopAutoScroll,
+    },
+    {
+      handleSelector: HANDLE_SELECTOR,
+      activationThreshold: untracked(controller).activationThreshold,
+      // nested list claims the pointerdown so the outer one doesn't also start a drag (innermost wins).
+      stopPropagation: true,
+    },
+  );
 }
 
 /** Pointer-engine item wiring: registration + FLIP itemState + keyboard reorder. */
@@ -118,6 +111,8 @@ export function connectPointerItem<T, K = unknown>(
     index: computed(() => get().index()),
     isSource: computed(() => get().isSource()),
     transform: computed(() => get().transform()),
+    transformX: computed(() => get().transformX()),
+    transformY: computed(() => get().transformY()),
     transformCss: computed(() => get().transformCss()),
     transitionCss: computed(() => get().transitionCss()),
     tabIndex,

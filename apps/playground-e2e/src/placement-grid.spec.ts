@@ -96,12 +96,15 @@ test.describe('placement grid — spanning dashboard', () => {
     const g = await grid.boundingBox();
     if (!g) throw new Error('no grid box');
 
+    // hovering already previews the incoming drop rect
     await drag(
       page,
       tray.first(),
       { x: g.x + g.width * 0.4, y: g.y + g.height * 0.7 },
-      { settle: 80 },
+      { settle: 80, release: false },
     );
+    await expect(grid.locator('.target-cell')).toBeVisible();
+    await page.mouse.up();
 
     await expect(tray).toHaveCount(1);
     await expect(widget(page, 'Notes')).toBeVisible();

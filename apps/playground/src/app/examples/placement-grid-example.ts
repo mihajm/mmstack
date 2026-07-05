@@ -295,8 +295,10 @@ export class PlacementGridExample {
     compact: 'none',
   });
 
-  /** The active drag's projected drop rect (cells), or null. */
+  /** The projected drop rect (cells): a local drag OR an incoming arrival. */
   targetCell(grid: PlacementGridController<Widget, string>): CellRect | null {
+    const incoming = grid.incomingCell();
+    if (incoming) return incoming;
     const key = grid.activeKey();
     if (key === null || grid.crossTarget()) return null;
     const cell = grid.projectedCell();

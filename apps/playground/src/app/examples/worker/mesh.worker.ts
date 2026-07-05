@@ -18,7 +18,7 @@ const derived = computed<Derived>(() => {
   return { titleLen: t.length, upper: t.toUpperCase() };
 });
 
-const host = createWorkerHost({
+export const host = createWorkerHost({
   stores: { doc },
   published: { derived },
 });

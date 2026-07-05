@@ -33,7 +33,7 @@ const fib = (n: number): number => {
   return a;
 };
 
-const host = createWorkerHost({
+export const host = createWorkerHost({
   stores: { counter },
   published: { stats },
   tasks: { fib },

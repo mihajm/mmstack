@@ -3,6 +3,7 @@ import {
   computed,
   ElementRef,
   inject,
+  linkedSignal,
   PLATFORM_ID,
   type Signal,
 } from '@angular/core';
@@ -55,12 +56,24 @@ export function marquee<T>(
 
   const selecting = computed(() => drag.unthrottled().active);
 
+  // the host origin, measured ONCE per gesture (keyed on the pointer id) —
+  // no layout read per pointer frame
+  const origin = linkedSignal<number | null, { left: number; top: number }>({
+    source: () => drag.unthrottled().pointerId,
+    computation: (id, prev) => {
+      if (id === null) return { left: 0, top: 0 };
+      if (prev && prev.source === id) return prev.value;
+      const r = host.getBoundingClientRect();
+      return { left: r.left, top: r.top };
+    },
+  });
+
   const rect = computed<Box | null>(() => {
     const d = drag.unthrottled();
     if (!d.active) return null;
-    const origin = host.getBoundingClientRect();
-    const a = { x: d.start.x - origin.left, y: d.start.y - origin.top };
-    const b = { x: d.current.x - origin.left, y: d.current.y - origin.top };
+    const o = origin();
+    const a = { x: d.start.x - o.left, y: d.start.y - o.top };
+    const b = { x: d.current.x - o.left, y: d.current.y - o.top };
     return normalizeRect(a, b);
   });
 

@@ -69,6 +69,7 @@ export function rotatable(
   );
 
   let center: Point | null = null;
+  let pressIgnored = false;
   let baseAngle = 0;
   let startPointer = 0;
 
@@ -76,7 +77,11 @@ export function rotatable(
     const d = drag.unthrottled();
     const isDisabled = untracked(() => disabled?.() ?? false);
 
-    if (d.pointerId !== null && center === null && !isDisabled) {
+    if (d.pointerId !== null && center === null && !pressIgnored) {
+      if (isDisabled) {
+        pressIgnored = true;
+        return;
+      }
       center = untracked(() => centerSig());
       baseAngle = untracked(angle);
       startPointer = angleOf(d.start, center);
@@ -92,6 +97,7 @@ export function rotatable(
       opts.onRotate?.({ angle: next });
     }
 
+    if (d.pointerId === null) pressIgnored = false;
     if (d.pointerId === null && center !== null) {
       center = null;
       opts.onRotateEnd?.({ angle: untracked(angle) });

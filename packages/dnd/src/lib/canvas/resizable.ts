@@ -95,13 +95,18 @@ export function resizeHandle(
 
   let base: Box | null = null;
   let baseTargets: readonly Box[] | undefined;
+  let pressIgnored = false;
 
   // Options read UNTRACKED — this effect depends only on the gesture.
   effect(() => {
     const d = drag.unthrottled();
     const isDisabled = untracked(() => disabled?.() ?? false);
 
-    if (d.pointerId !== null && base === null && !isDisabled) {
+    if (d.pointerId !== null && base === null && !pressIgnored) {
+      if (isDisabled) {
+        pressIgnored = true;
+        return;
+      }
       base = untracked(box);
       baseTargets = untracked(() => snapTargets?.());
       opts.onResizeStart?.({ box: base });
@@ -129,6 +134,7 @@ export function resizeHandle(
       opts.onResize?.({ box: resolved.box });
     }
 
+    if (d.pointerId === null) pressIgnored = false;
     if (d.pointerId === null && base !== null) {
       base = null;
       baseTargets = undefined;

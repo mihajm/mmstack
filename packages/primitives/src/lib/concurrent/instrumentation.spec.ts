@@ -78,7 +78,8 @@ describe('concurrency instrumentation seam', () => {
     const res = fakeResource(() => 'loading');
     TestBed.runInInjectionContext(() => register(res));
 
-    const scope = getTransitionScope(TestBed.inject(Injector))!;
+    const scope = getTransitionScope(TestBed.inject(Injector));
+    if (!scope) throw new Error('expected a transition scope');
     const aborted = scope.abortPending();
 
     expect(aborted).toBe(1);

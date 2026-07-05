@@ -218,6 +218,8 @@ export function connectCanvasItem<T, K = unknown>(
 /**
  * The canvas surface: `<div [mmCanvas]="ctrl">`. Owns the single delegated
  * gesture; render items (and your selection chrome / guides SVG) inside it.
+ * The controller input settles on first render; swap controllers by
+ * recreating the element, not by rebinding.
  */
 @Directive({
   selector: '[mmCanvas]',

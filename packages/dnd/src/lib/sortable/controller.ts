@@ -323,6 +323,9 @@ export function reorderable<T, K>(
       insertIndex: insert,
       footprint: outgoingFootprint(tg),
       targetMeasure: tg,
+      item: dragged,
+      x: p.x,
+      y: p.y,
     });
   };
 

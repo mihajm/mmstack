@@ -87,13 +87,19 @@ export function panZoom(
   );
 
   let baseT: { x: number; y: number } | null = null;
+  let pressIgnored = false;
   effect(() => {
     const d = pan.unthrottled();
-    if (disabled?.()) return;
-    if (d.pointerId !== null && baseT === null) {
+    if (d.pointerId === null) pressIgnored = false;
+    if (d.pointerId !== null && baseT === null && !pressIgnored) {
+      if (untracked(() => disabled?.() ?? false)) {
+        pressIgnored = true;
+        return;
+      }
       const t = untracked(transform);
       baseT = { x: t.x, y: t.y };
     }
+    if (pressIgnored || (disabled?.() ?? false)) return;
     if (d.active && baseT) {
       const b = baseT;
       transform.update((t) => ({

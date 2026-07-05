@@ -165,6 +165,7 @@ export function movable(
   let baseScroll: Point | null = null;
   let baseTargets: readonly Box[] | undefined;
   let groupBases: Map<WritableSignal<Point>, Point> | null = null;
+  let pressIgnored = false; // disabled at press → the whole gesture stays inert
   let raf = 0;
 
   const computeNext = (d: PointerDragState): Point => {
@@ -260,7 +261,11 @@ export function movable(
     const d = drag.unthrottled();
     const isDisabled = untracked(() => disabled?.() ?? false);
 
-    if (d.pointerId !== null && base === null && !isDisabled) {
+    if (d.pointerId !== null && base === null && !pressIgnored) {
+      if (isDisabled) {
+        pressIgnored = true;
+        return;
+      }
       base = opts.from ? untracked(opts.from) : untracked(position);
       const sc = untracked(scrollEl);
       baseScroll = sc ? { x: sc.scrollLeft, y: sc.scrollTop } : null;
@@ -273,6 +278,7 @@ export function movable(
 
     if (d.active && base && !isDisabled) apply(d);
 
+    if (d.pointerId === null) pressIgnored = false;
     if (d.pointerId === null && base !== null) {
       base = null;
       baseScroll = null;

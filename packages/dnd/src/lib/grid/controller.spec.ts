@@ -1,7 +1,11 @@
 import { effect, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { sortableGroup, type SortableGroupMember } from '../sortable/group';
+import {
+  getGroupInternals,
+  sortableGroup,
+  type SortableGroupMember,
+} from '../sortable/group';
 import {
   placementGrid,
   type PlacementDragSnapshot,
@@ -328,6 +332,95 @@ describe('placementGrid', () => {
       grid.refreshBounds();
       expect(grid.insertAtPoint?.(w_('x', 0, 0, 2, 2), 125, 25)).toBe(false); // over b
       expect(source().some((i) => i.id === 'x')).toBe(false);
+    });
+
+    it('previews an incoming foreign hover as its projected drop rect', () => {
+      const group = sortableGroup<Widget>();
+      const listStub: SortableGroupMember<Widget> = {
+        bounds: () => ({ top: 0, left: 400, width: 100, height: 300 }),
+        refreshBounds: () => undefined,
+        measure: () => ({ centers: [50], axis: 'y' }),
+        insertAt: () => true,
+      };
+      group.register(listStub);
+      const { grid } = setup({ group });
+      grid.setContainer({
+        getBoundingClientRect: () => bounds,
+      } as unknown as HTMLElement);
+      grid.refreshBounds();
+
+      expect(grid.incomingCell()).toBeNull();
+
+      // a source (the stub) hovers the grid with a 2×2 item over the free corner
+      const api = getGroupInternals(group);
+      api.setActive({
+        source: listStub,
+        target: grid,
+        sourceIndex: 0,
+        insertIndex: 0,
+        footprint: 40,
+        item: w_('x', 0, 0, 2, 2),
+        x: 235,
+        y: 30,
+      });
+      expect(grid.incomingCell()).toMatchObject({ x: 4, y: 0, w: 2, h: 2 });
+
+      // over an occupied cell (b at 2,0) the preview declines to lie
+      api.setActive({
+        source: listStub,
+        target: grid,
+        sourceIndex: 0,
+        insertIndex: 0,
+        footprint: 40,
+        item: w_('x', 0, 0, 2, 2),
+        x: 125,
+        y: 25,
+      });
+      // vertical compaction accepts anywhere (push reflow), so still shown...
+      expect(grid.incomingCell()).toMatchObject({ x: 2, y: 0 });
+      api.clearActive();
+      expect(grid.incomingCell()).toBeNull();
+    });
+
+    it('an incoming hover on a compact:none grid hides the preview over invalid cells', () => {
+      const group = sortableGroup<Widget>();
+      const listStub: SortableGroupMember<Widget> = {
+        bounds: () => ({ top: 0, left: 400, width: 100, height: 300 }),
+        refreshBounds: () => undefined,
+        measure: () => ({ centers: [50], axis: 'y' }),
+        insertAt: () => true,
+      };
+      group.register(listStub);
+      const { grid } = setup({ group, compact: 'none' });
+      grid.setContainer({
+        getBoundingClientRect: () => bounds,
+      } as unknown as HTMLElement);
+      grid.refreshBounds();
+
+      const api = getGroupInternals(group);
+      const hover = (x: number, y: number) =>
+        api.setActive({
+          source: listStub,
+          target: grid,
+          sourceIndex: 0,
+          insertIndex: 0,
+          footprint: 40,
+          item: w_('x', 0, 0, 2, 2),
+          x,
+          y,
+        });
+      hover(125, 25); // over b → invalid, no preview
+      expect(grid.incomingCell()).toBeNull();
+      hover(235, 30); // free corner → shown
+      expect(grid.incomingCell()).toMatchObject({ x: 4, y: 0 });
+    });
+
+    it('an EMPTY grid keeps one row of height so it stays a drop target', () => {
+      const source = signal<Widget[]>([]);
+      const grid = placementGrid(source, { key, cols: 6 });
+      expect(grid.rows()).toBe(1);
+      source.set([w_('a', 0, 0)]);
+      expect(grid.rows()).toBe(2);
     });
 
     it('a REFUSED cross-drop is a no-op: the item stays in the source grid', () => {

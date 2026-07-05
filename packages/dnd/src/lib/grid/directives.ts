@@ -307,7 +307,9 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
 /**
  * The grid container. Bind a {@link PlacementGridController}:
  * `<div [mmPlacementGrid]="grid">` — it owns the delegated gesture, sizes
- * itself to the (preview) rows, and exposes the cell units to items.
+ * itself to the (preview) rows, and exposes the cell units to items. The
+ * controller input settles on first render; swap controllers by recreating
+ * the element (`@if`/key), not by rebinding.
  */
 @Directive({
   selector: '[mmPlacementGrid]',

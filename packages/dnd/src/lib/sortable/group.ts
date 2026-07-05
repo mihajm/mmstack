@@ -61,6 +61,11 @@ export type SortableActive<T = unknown> = {
    * and has no geometry of its own).
    */
   targetMeasure?: MemberMeasure;
+  /** The dragged item — lets the target preview the arrival (spans, labels). */
+  item?: T;
+  /** Live pointer, viewport px — lets a point-based target project a drop cell. */
+  x?: number;
+  y?: number;
 };
 
 /**
@@ -99,6 +104,11 @@ export type SortableGroup<T = unknown> = {
     readonly activeFootprint: Signal<number>;
     /** The active target's drag-start measure (changes per TARGET, not per frame). */
     readonly activeTargetMeasure: Signal<MemberMeasure | null>;
+    /** The dragged item (constant per drag; targets read it to preview arrivals). */
+    readonly activeItem: Signal<T | null>;
+    /** Live pointer scalars, viewport px (equality-swallowed per-frame writes). */
+    readonly activeX: Signal<number>;
+    readonly activeY: Signal<number>;
     setActive(active: SortableActive<T>): void;
     clearActive(): void;
   };
@@ -131,6 +141,9 @@ export function sortableGroup<T = unknown>(
   const activeInsertIndex = signal(-1);
   const activeFootprint = signal(0);
   const activeTargetMeasure = signal<MemberMeasure | null>(null);
+  const activeItem = signal<T | null>(null);
+  const activeX = signal(0);
+  const activeY = signal(0);
 
   return {
     register: (member) => {
@@ -178,6 +191,9 @@ export function sortableGroup<T = unknown>(
       activeInsertIndex,
       activeFootprint,
       activeTargetMeasure,
+      activeItem,
+      activeX,
+      activeY,
       setActive: (a) => {
         activeSource.set(a.source);
         activeTarget.set(a.target);
@@ -185,6 +201,9 @@ export function sortableGroup<T = unknown>(
         activeInsertIndex.set(a.insertIndex);
         activeFootprint.set(a.footprint);
         activeTargetMeasure.set(a.targetMeasure ?? null);
+        activeItem.set(a.item ?? null);
+        activeX.set(a.x ?? 0);
+        activeY.set(a.y ?? 0);
       },
       clearActive: () => {
         activeSource.set(null);
@@ -193,6 +212,9 @@ export function sortableGroup<T = unknown>(
         activeInsertIndex.set(-1);
         activeFootprint.set(0);
         activeTargetMeasure.set(null);
+        activeItem.set(null);
+        activeX.set(0);
+        activeY.set(0);
       },
     },
   };

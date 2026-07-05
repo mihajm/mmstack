@@ -1,6 +1,5 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { Hlc } from './hlc';
 import { applyOps, type StoreOp } from './op-log';
 import {
   createConvergingApply,
@@ -458,7 +457,8 @@ describe('opSync', () => {
 
     a.update((s) => ({ ...s, v: 'x' }));
     syncA.flush();
-    syncA.receive(captured!);
+    if (!captured) throw new Error('expected a captured frame');
+    syncA.receive(captured);
 
     expect(a().v).toBe('x');
   });

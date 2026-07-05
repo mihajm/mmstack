@@ -80,7 +80,11 @@ export type PlacementGridItemState<K = unknown> = {
 export type PlacementGridOptions<T extends GridPlacement, K> = {
   /** Stable identity for an item. */
   readonly key: (item: T) => K;
-  /** Column count (reactive via getter). */
+  /**
+   * Column count (reactive via getter). Commits and new drags read the live
+   * value; a change DURING a drag keeps the gesture's cell metrics until it
+   * ends — cancel in-flight drags when reflowing columns.
+   */
   readonly cols: number | (() => number);
   /** Row height px; defaults to the cell width (square cells). */
   readonly rowHeight?: number | (() => number);
@@ -166,6 +170,13 @@ export type PlacementGridController<
   readonly crossTarget: Signal<boolean>;
   /** The active gesture's projected cell, or `null` (never-valid / idle). */
   readonly projectedCell: Signal<{ x: number; y: number } | null>;
+  /**
+   * A foreign group drag hovering THIS grid, projected to the rect it would
+   * occupy on drop — `null` when idle, not hovered, or the drop would be
+   * rejected. Render it like the local drop-target highlight so arrivals
+   * preview before they land.
+   */
+  readonly incomingCell: Signal<(GridPlacement & { key: K }) | null>;
   /** The live preview layout (the source array when idle). */
   readonly previewLayout: Signal<readonly T[]>;
   /**
@@ -391,9 +402,75 @@ export function placementGrid<T extends GridPlacement, K>(
     return gridRows(dragStartItems) + dragStartItem.h;
   });
 
-  const rows = computed(() =>
-    Math.max(gridRows(previewLayout()), dragRows()),
+  /** Point → cell for an arriving item (span-centered on the pointed cell). */
+  const cellFromPoint = (
+    item: T,
+    x: number,
+    y: number,
+  ): { x: number; y: number } | null => {
+    const b = boundsCache ?? (container ? container.getBoundingClientRect() : null);
+    if (!b) return null;
+    const g = gap();
+    const c = cols();
+    const cellW = (b.width - g * (c - 1)) / c;
+    const cellH = rowHeight ? rowHeight() : cellW;
+    if (cellW <= 0) return null;
+    const cx = Math.floor((x - b.left) / (cellW + g)) - Math.floor((item.w - 1) / 2);
+    const cy = Math.floor((y - b.top) / (cellH + g)) - Math.floor((item.h - 1) / 2);
+    return {
+      x: Math.max(0, Math.min(cx, c - item.w)),
+      y: Math.max(0, cy),
+    };
+  };
+
+  /**
+   * A foreign group drag hovering THIS grid, projected to its drop rect —
+   * the arrival counterpart of {@link projectedCell}, and only present when
+   * the drop would be accepted (invalid cells show nothing, pairing with the
+   * validity mask instead of lying).
+   */
+  const incomingCell = computed<(GridPlacement & { key: K }) | null>(
+    () => {
+      if (!groupApi) return null;
+      if (groupApi.activeTarget() !== self || groupApi.activeSource() === self) {
+        return null;
+      }
+      const item = groupApi.activeItem() as T | null;
+      if (!item) return null;
+      const cell = cellFromPoint(item, groupApi.activeX(), groupApi.activeY());
+      if (!cell) return null;
+      if (!placeGate({ ...item, ...cell }, cell.x, cell.y, source())) {
+        return null;
+      }
+      return { ...cell, w: item.w, h: item.h, key: key(item) };
+    },
+    {
+      // recomputes per pointer frame; renotifies only on an actual cell change
+      equal: (a, b) =>
+        a === b ||
+        (a !== null &&
+          b !== null &&
+          a.x === b.x &&
+          a.y === b.y &&
+          a.w === b.w &&
+          a.h === b.h &&
+          a.key === b.key),
+    },
   );
+
+  const rows = computed(() => {
+    // an empty grid keeps one row of height so it stays a visible, hittable
+    // drop target (the grid counterpart of the empty-list min-height contract)
+    const floor = source().length === 0 ? 1 : 0;
+    // and an incoming hover can extend below the last occupied row
+    const inc = incomingCell();
+    return Math.max(
+      gridRows(previewLayout()),
+      dragRows(),
+      floor,
+      inc ? inc.y + inc.h : 0,
+    );
+  });
 
   const targetMask = computed<Uint8Array | null>(() => {
     const k = activeKey();
@@ -511,6 +588,9 @@ export function placementGrid<T extends GridPlacement, K>(
           ? (dragged?.w ?? 1) * stepX()
           : (dragged?.h ?? 1) * stepY(),
       targetMeasure: tg,
+      item: dragged,
+      x: p.x,
+      y: p.y,
     });
   };
 
@@ -687,6 +767,7 @@ export function placementGrid<T extends GridPlacement, K>(
     projectedCell: computed(() =>
       snap?.kind === 'resize' ? null : projected(),
     ),
+    incomingCell,
     previewLayout,
     targetMask,
     keyboard,
@@ -786,17 +867,9 @@ export function placementGrid<T extends GridPlacement, K>(
       return receive(item, spot.x, spot.y);
     },
     insertAtPoint: (item, x, y) => {
-      const b = boundsCache ?? (container ? container.getBoundingClientRect() : null);
-      if (!b) return false;
-      const g = gap();
-      const c = cols();
-      const cellW = (b.width - g * (c - 1)) / c;
-      const cellH = rowHeight ? rowHeight() : cellW;
-      if (cellW <= 0) return false;
-      // center the incoming item's span on the pointed cell
-      const cx = Math.floor((x - b.left) / (cellW + g)) - Math.floor((item.w - 1) / 2);
-      const cy = Math.floor((y - b.top) / (cellH + g)) - Math.floor((item.h - 1) / 2);
-      return receive(item, cx, cy);
+      const cell = cellFromPoint(item, x, y);
+      if (!cell) return false;
+      return receive(item, cell.x, cell.y);
     },
     canReceive: options.canReceive
       ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion

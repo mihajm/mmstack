@@ -310,7 +310,7 @@ export function tabSync<T extends WritableSignal<any>>(
 
   const NONE = Symbol();
   let received: unknown = NONE;
-
+  let last: unknown = untracked(sig);
   const { unsub, post } = bus.subscribe(id, (next) => {
     const before = untracked(sig);
     received = next;
@@ -318,15 +318,12 @@ export function tabSync<T extends WritableSignal<any>>(
     if (untracked(sig) === before) received = NONE;
   });
 
-  let firstDone = false;
-
   const effectRef = effect(
     () => {
       const val = sig();
-      if (!firstDone) {
-        firstDone = true;
-        return;
-      }
+      if (val === last) return; // unchanged since last seen → nothing to post
+      last = val;
+      // came from bus → don't echo
       if (val === received) {
         received = NONE;
         return;

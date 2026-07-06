@@ -30,6 +30,15 @@ export type PointerDropEntry = {
     source: PointerDragSource,
     targets: readonly DropTargetHit[],
   ) => void;
+  /**
+   * Stamp a closest-edge token onto this target's data for the live pointer, when
+   * edge detection is on. Applied during hit-testing so the token rides on the
+   * session's `targets` and an edge flip re-notifies edge readers.
+   */
+  attachEdge?: (
+    data: Record<string | symbol, unknown>,
+    point: { x: number; y: number },
+  ) => Record<string | symbol, unknown>;
 };
 
 /**
@@ -42,6 +51,7 @@ export function resolveHits(
   stack: readonly Element[],
   entries: ReadonlyMap<Element, PointerDropEntry>,
   source: PointerDragSource,
+  point?: { x: number; y: number },
 ): DropTargetHit[] {
   const hits: DropTargetHit[] = [];
   for (const el of stack) {
@@ -49,7 +59,9 @@ export function resolveHits(
     if (!entry) continue;
     if (!entry.accepts(source.data)) continue;
     if (entry.canDrop && !entry.canDrop(source.data)) continue;
-    hits.push({ element: el, data: entry.getData ? entry.getData() : {} });
+    let data = entry.getData ? entry.getData() : {};
+    if (point && entry.attachEdge) data = entry.attachEdge(data, point);
+    hits.push({ element: el, data });
   }
   return hits;
 }
@@ -104,7 +116,10 @@ export class DndPointerEngine {
 
   private update(x: number, y: number): void {
     const source = this.source as PointerDragSource;
-    const hits = resolveHits(this.elementsAt(x, y), this.entries, source);
+    const hits = resolveHits(this.elementsAt(x, y), this.entries, source, {
+      x,
+      y,
+    });
     const next = hits.map((h) => h.element);
     for (const el of this.over)
       if (!next.includes(el)) this.entries.get(el)?.onDragLeave?.(source);

@@ -11,9 +11,17 @@ import { boxData, unboxData } from '../internal/payload';
 import { provideDnd, ɵclearWarnedPlugins, type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession, type DropTargetHit } from '../session';
 import { dropTarget } from './drop-target';
+import { DndPointerEngine } from './pointer-engine';
 import type { DropEvent, DropTargetEvent } from '../internal/types';
 
 type DropTargetConfig = Parameters<typeof PDDropTarget>[0];
+
+class StubPointerEngine extends DndPointerEngine {
+  stack: Element[] = [];
+  protected override elementsAt(): readonly Element[] {
+    return this.stack;
+  }
+}
 
 const dropTargetMock = vi.fn();
 
@@ -419,5 +427,92 @@ describe('dropTarget — pointer engine', () => {
     expect(ref.isDragOver()).toBe(true);
     expect(ref.isInnermost()).toBe(true);
     expect(ref.dragOverData()).toEqual({ id: 'c' });
+  });
+
+  const yHitbox: HitboxPlugin = {
+    attachClosestEdge: (data, { input }) => ({
+      ...data,
+      __edge: input.clientY < 50 ? 'top' : 'bottom',
+    }),
+    extractClosestEdge: (data) => (data as { __edge?: Edge }).__edge ?? null,
+  };
+
+  const pointerSource = () => ({
+    el: document.createElement('div'),
+    data: boxData<Card>({ id: 'c' }),
+    kind: 'transfer' as const,
+  });
+
+  function setupPointerEdges(
+    onDrop?: (e: DropEvent<Card>) => void,
+  ): { ref: ReturnType<typeof dropTarget<Card>>; engine: StubPointerEngine } {
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ElementRef, useValue: new ElementRef(element) },
+        { provide: DndPointerEngine, useClass: StubPointerEngine },
+        provideDnd({ plugins: { hitbox: yHitbox } }),
+      ],
+    });
+    return TestBed.runInInjectionContext(() => {
+      const engine = TestBed.inject(DndPointerEngine) as StubPointerEngine;
+      const ref = dropTarget<Card>({
+        accepts: isCard,
+        edges: ['top', 'bottom'] as Edge[],
+        engine: 'pointer',
+        onDrop,
+      });
+      engine.stack = [element];
+      return { ref, engine };
+    });
+  }
+
+  it('resolves closestEdge from the live pointer in pointer mode (no pragmatic input)', () => {
+    const { ref, engine } = setupPointerEdges();
+    expect(ref.closestEdge()).toBeNull(); // idle
+
+    engine.begin(pointerSource(), 0, 10); // upper half → top
+    expect(ref.isDragOver()).toBe(true);
+    expect(ref.closestEdge()).toBe('top');
+
+    engine.move(pointerSource(), 0, 90); // lower half → bottom
+    expect(ref.closestEdge()).toBe('bottom');
+
+    engine.cancel();
+    expect(ref.closestEdge()).toBeNull(); // cleared with the session
+  });
+
+  it('drop carries the resolved closest edge in pointer mode', () => {
+    const drops: (Edge | null)[] = [];
+    const { engine } = setupPointerEdges((e) => drops.push(e.edge));
+
+    engine.begin(pointerSource(), 0, 90); // bottom
+    engine.end();
+    expect(drops).toEqual(['bottom']);
+  });
+
+  it('an edge flip refreshes closestEdge without churning membership; same edge does not recompute', () => {
+    const { ref, engine } = setupPointerEdges();
+    const overRuns = trackRuns(() => ref.isDragOver());
+    const edgeRuns = trackRuns(() => ref.closestEdge());
+    TestBed.tick();
+
+    engine.begin(pointerSource(), 0, 10); // top
+    TestBed.tick();
+    const [over0, edge0] = [overRuns(), edgeRuns()];
+
+    engine.move(pointerSource(), 0, 90); // top → bottom
+    TestBed.tick();
+    expect(edgeRuns()).toBe(edge0 + 1);
+    expect(overRuns()).toBe(over0); // membership stable across the flip
+
+    const edge1 = edgeRuns();
+    engine.move(pointerSource(), 0, 95); // bottom → bottom (same edge)
+    TestBed.tick();
+    expect(edgeRuns()).toBe(edge1); // token unchanged → no recompute
+    expect(overRuns()).toBe(over0);
+
+    engine.cancel();
   });
 });

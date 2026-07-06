@@ -15,6 +15,7 @@ import {
   type Signal,
 } from '@angular/core';
 import { dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 
 import { deriveHit } from '../internal/hit';
 import {
@@ -62,17 +63,10 @@ type DropTargetSharedOptions<TAccept, TSelf, TMeta extends DragMeta> = {
   onDrop?: (event: DropEvent<TAccept, TMeta>) => void;
 };
 
-/**
- * Native-engine-only drop-target options — HTML5/pragmatic features the pointer
- * engine has no equivalent for yet. Forbidden (typed `never`) when `engine: 'pointer'`.
- */
-type DropTargetNativeOptions = {
+/** Edge-detection options — supported on both engines (the hitbox math is pure geometry). */
+type DropTargetEdgeOptions = {
   /** Edges to detect for `closestEdge` (needs the hitbox plugin); omit for whole-element drops. */
   edges?: Resolvable<Edge[] | undefined>;
-  /** Stay the active drop target after the pointer leaves (pragmatic stickiness). */
-  sticky?: Resolvable<boolean>;
-  /** Native drop effect / cursor hint. @default 'move' */
-  dropEffect?: Resolvable<'copy' | 'link' | 'move'>;
   /**
    * Override the registered hitbox plugin (needed for `edges`/`closestEdge`). A value,
    * or a getter (resolved lazily) — hitbox is an object plugin, so a function is
@@ -82,9 +76,21 @@ type DropTargetNativeOptions = {
 };
 
 /**
+ * Native-engine-only drop-target options — HTML5/pragmatic features the pointer
+ * engine has no equivalent for. Forbidden (typed `never`) when `engine: 'pointer'`.
+ */
+type DropTargetNativeOptions = {
+  /** Stay the active drop target after the pointer leaves (pragmatic stickiness). */
+  sticky?: Resolvable<boolean>;
+  /** Native drop effect / cursor hint. @default 'move' */
+  dropEffect?: Resolvable<'copy' | 'link' | 'move'>;
+};
+
+/**
  * Drop-target options, discriminated by `engine`. Omit `engine` (or `'native'`) for
- * native HTML5 DnD + its extras (`edges`/`hitbox`/`sticky`/`dropEffect`); `'pointer'`
- * accepts pointer-engine drops and *forbids* those native-only options at compile time.
+ * native HTML5 DnD plus its `sticky`/`dropEffect` extras; `'pointer'` accepts
+ * pointer-engine drops and *forbids* those native-only options at compile time.
+ * Edge detection (`edges`/`hitbox`) works on either engine.
  */
 export type CreateDropTargetOptions<
   TAccept,
@@ -92,10 +98,12 @@ export type CreateDropTargetOptions<
   TMeta extends DragMeta = DragMeta,
 > =
   | (DropTargetSharedOptions<TAccept, TSelf, TMeta> &
+      DropTargetEdgeOptions &
       DropTargetNativeOptions & { engine?: 'native' })
-  | (DropTargetSharedOptions<TAccept, TSelf, TMeta> & {
-      engine: 'pointer';
-    } & { [K in keyof DropTargetNativeOptions]?: never });
+  | (DropTargetSharedOptions<TAccept, TSelf, TMeta> &
+      DropTargetEdgeOptions & {
+        engine: 'pointer';
+      } & { [K in keyof DropTargetNativeOptions]?: never });
 
 /** @internal Flat view (all fields) for the implementation to read without narrowing. */
 type DropTargetOptionsAll<
@@ -103,6 +111,7 @@ type DropTargetOptionsAll<
   TSelf,
   TMeta extends DragMeta,
 > = DropTargetSharedOptions<TAccept, TSelf, TMeta> &
+  DropTargetEdgeOptions &
   DropTargetNativeOptions & { engine?: DragEngine };
 
 export type DropTargetRef<TAccept> = {
@@ -147,9 +156,29 @@ export const provideDropTargetDefaults = dropTargetDefaults.provide;
 export const injectDropTargetDefaults = dropTargetDefaults.inject;
 
 /**
+ * A pragmatic `Input` for a pointer-engine position: hitbox plugins read
+ * `clientX`/`clientY`, the rest are filled for shape compatibility.
+ */
+function pointerInput(clientX: number, clientY: number): Input {
+  return {
+    clientX,
+    clientY,
+    pageX: clientX + window.scrollX,
+    pageY: clientY + window.scrollY,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    button: 0,
+    buttons: 1,
+  };
+}
+
+/**
  * Makes the host element a drop target. `accepts` narrows the payload type;
  * `isDragOver`/`isInnermost`/`dragOverData`/`closestEdge` are all *derived* from
- * the ambient session. `edges`/`closestEdge` need the hitbox plugin.
+ * the ambient session. `edges`/`closestEdge` need the hitbox plugin, and work on
+ * either engine.
  *
  * @example
  * ```ts
@@ -251,6 +280,18 @@ export function dropTarget<
           selfData
             ? boxData(untracked(selfData))
             : ({} as Record<string | symbol, unknown>),
+        attachEdge: (data, p) =>
+          untracked(() => {
+            const edges = readEdges();
+            if (!edges?.length) return data;
+            const hb = getHitbox();
+            if (!hb) return data;
+            return hb.attachClosestEdge(data, {
+              element,
+              input: pointerInput(p.x, p.y),
+              allowedEdges: edges,
+            });
+          }),
         canDrop: (data) => {
           if (disabled && untracked(disabled)) return false;
           const a = accept(data);
@@ -275,10 +316,16 @@ export function dropTarget<
         onDrop: (src, targets) => {
           const a = accept(src.data);
           if (!a) return;
+          const self = targets.find((t) => t.element === element);
+          const hb = self ? untracked(getHitbox) : null;
+          const edge =
+            self && hb && readEdges()?.length
+              ? hb.extractClosestEdge(self.data)
+              : null;
           opts.onDrop?.({
             data: a.data,
             meta: a.meta,
-            edge: null, // pointer mode has no hitbox geometry yet
+            edge,
             location: { current: mapDropTargets(targets), previous: [] },
           });
         },

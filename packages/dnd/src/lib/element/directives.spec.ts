@@ -3,12 +3,12 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
-import { Draggable } from './draggable';
-import { DropTarget } from './drop-target';
 import { boxData } from '../internal/payload';
-import { makeDragSession } from '../testing/drag-session';
 import { type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession, type DropTargetHit } from '../session';
+import { makeDragSession } from '../testing/drag-session';
+import { Draggable } from './draggable';
+import { DropTarget } from './drop-target';
 
 type DraggableConfig = Parameters<typeof PDDraggable>[0];
 
@@ -174,9 +174,26 @@ describe('DropTarget directive — forwards sticky / dropEffect / hitbox (#13)',
   it('forwards sticky → getIsSticky and dropEffect → getDropEffect', () => {
     const fixture = TestBed.createComponent(DropCfgHost);
     fixture.detectChanges();
-    const cfg = dropTargetMock.mock.calls.at(-1)?.[0];
-    expect(cfg.getIsSticky?.({})).toBe(true);
-    expect(cfg.getDropEffect?.({})).toBe('copy');
+    const el = fixture.debugElement.query(
+      By.directive(DropTarget),
+    ).nativeElement;
+    // find THIS host's registration, not the global last call
+    const cfg = dropTargetMock.mock.calls
+      .map(
+        (c) =>
+          c[0] as {
+            element?: Element;
+            getIsSticky?: (a: unknown) => boolean;
+            getDropEffect?: (a: unknown) => string;
+          },
+      )
+      .find((c) => c.element === el);
+    expect(
+      cfg,
+      'native dropTarget was not registered for the host',
+    ).toBeDefined();
+    expect(cfg?.getIsSticky?.({})).toBe(true);
+    expect(cfg?.getDropEffect?.({})).toBe('copy');
   });
 
   it('derives closestEdge from the directive-provided hitbox', () => {
@@ -187,7 +204,9 @@ describe('DropTarget directive — forwards sticky / dropEffect / hitbox (#13)',
     const el = de.nativeElement as HTMLElement;
     const session = TestBed.inject(DndSession).session;
 
-    session.set(makeSession([{ element: el, data: { __edge: 'top' } }], { id: 1 }));
+    session.set(
+      makeSession([{ element: el, data: { __edge: 'top' } }], { id: 1 }),
+    );
     expect(dt.closestEdge()).toBe('top');
   });
 });

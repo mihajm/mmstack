@@ -17,6 +17,7 @@ Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atla
 - **Typed everywhere.** `accepts` narrows payloads with no casting; a symbol-keyed `meta` channel never collides with your data; engine-only options are compile-time-guarded per engine.
 - **Composable or declarative.** Every primitive is a plain function; every directive is a thin wrapper over it. And every option is DI-defaultable.
 - **Grids and canvases (preview).** A wrapping 2D sortable (`axis: 'wrap'`), a controlled spanning grid (`placementGrid`, the dashboard / form-builder model) and a free-form canvas (`canvas`: move, resize, rotate, marquee, snaplines, pan/zoom, containment). All of them write your state signal exactly once per gesture, which makes them a natural fit for op-log stores and undo history; grid and canvas moves commit as per-property ops, the collaboration-friendly shape.
+- **Open core.** When a shipped primitive doesn't fit, you don't fall back to writing drag-and-drop from scratch. The barrel also exposes the pieces the primitives are built from: the gesture chassis (`driveGesture`), the geometry hit-testing helpers, & more, so you can assemble a bespoke interaction on the same reactive session. These stay out of the docs to keep the surface small, but they are typed and discoverable from the barrel.
 
 ## Installation
 
@@ -223,7 +224,7 @@ protected readonly zone = dropTarget<Card>({
 
 `closestEdge` and `edges` need the hitbox plugin (see [Plugins](#plugins)); without it, drops still work — you just get no edge (`closestEdge()` stays `null`), plus a one-time dev warning. `dropTarget` also supports `sticky` (stay the active target after the pointer leaves) and `dropEffect` (`'move' | 'copy' | 'link'`), both pragmatic element-adapter features.
 
-Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. `edges` / `sticky` / `dropEffect` are native-only and are compile-time-forbidden when `engine: 'pointer'`; conversely `activationThreshold` (px before the drag activates, default 5) is pointer-only.
+Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. Edge detection (`edges` / `hitbox`) works on either engine, since the hitbox is pure geometry over the pointer position; `sticky` / `dropEffect` are native-only and compile-time-forbidden when `engine: 'pointer'`, and conversely `activationThreshold` (px before the drag activates, default 5) is pointer-only.
 
 ## fileDropTarget (external / files)
 
@@ -377,7 +378,13 @@ The slot model is exact for uniform tiles and a good approximation for variable 
 The dashboard model you know from [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout) and Retool: items own a cell rect (`x`, `y`, `w`, `h` in grid cells, the `GridPlacement` shape) on a fixed-column grid. Dragging projects the pointer to a cell and previews the whole reflow as pure derivation; your `WritableSignal<T[]>` is written exactly once, at drop.
 
 ```ts
-import { PlacementGrid, PlacementGridItem, PlacementGridResizeHandle, placementGrid, type GridPlacement } from '@mmstack/dnd';
+import {
+  PlacementGrid,
+  PlacementGridItem,
+  PlacementGridResizeHandle,
+  placementGrid,
+  type GridPlacement,
+} from '@mmstack/dnd';
 
 type Widget = GridPlacement & { id: string; label: string };
 

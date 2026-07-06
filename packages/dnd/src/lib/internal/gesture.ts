@@ -1,7 +1,7 @@
 import { nestedEffect, pointerDrag } from '@mmstack/primitives';
 
 /**
- * @internal The engine-agnostic delegated-gesture chassis: ONE `pointerDrag`
+ * The engine-agnostic delegated-gesture chassis: ONE `pointerDrag`
  * on a container element, an adapter that claims (or declines) each press and
  * receives move/end/cancel, and a live pointer ref for auto-scroll plugins to
  * chase. Shared by the pointer sortable, the placement grid and the canvas

@@ -67,6 +67,40 @@ describe('resolveHits', () => {
     resolveHits([a], entries, src({ id: 42 }));
     expect(seen).toEqual({ id: 42 });
   });
+
+  it('applies attachEdge with the point, so the hit data carries the live edge token', () => {
+    const a = document.createElement('div');
+    const entries = new Map<Element, PointerDropEntry>([
+      [
+        a,
+        entry({
+          getData: () => ({ slot: 'a' }),
+          attachEdge: (d, p) => ({ ...d, edge: p.y < 50 ? 'top' : 'bottom' }),
+        }),
+      ],
+    ]);
+    expect(resolveHits([a], entries, src(), { x: 0, y: 10 })[0].data).toEqual({
+      slot: 'a',
+      edge: 'top',
+    });
+    expect(resolveHits([a], entries, src(), { x: 0, y: 90 })[0].data).toEqual({
+      slot: 'a',
+      edge: 'bottom',
+    });
+  });
+
+  it('leaves attachEdge untouched when no point is passed (edge detection off)', () => {
+    const a = document.createElement('div');
+    const attachEdge = vi.fn((d: Record<string | symbol, unknown>) => ({
+      ...d,
+      edge: 'top',
+    }));
+    const entries = new Map<Element, PointerDropEntry>([
+      [a, entry({ getData: () => ({ slot: 'a' }), attachEdge })],
+    ]);
+    expect(resolveHits([a], entries, src())[0].data).toEqual({ slot: 'a' });
+    expect(attachEdge).not.toHaveBeenCalled();
+  });
 });
 
 class StubEngine extends DndPointerEngine {
@@ -129,6 +163,24 @@ describe('DndPointerEngine', () => {
     const { engine, session } = setup();
     engine.move(src(), 5, 5);
     expect(session()).toBeNull();
+  });
+
+  it('feeds the live pointer to attachEdge, so session targets carry a fresh edge token per frame', () => {
+    const { engine, session } = setup();
+    const target = document.createElement('div');
+    engine.registerDropTarget(
+      target,
+      entry({
+        getData: () => ({}),
+        attachEdge: (d, p) => ({ ...d, edge: p.y < 50 ? 'top' : 'bottom' }),
+      }),
+    );
+    engine.stack = [target];
+    engine.begin(src(), 0, 10);
+    expect(session()?.targets[0].data).toEqual({ edge: 'top' });
+    engine.move(src(), 0, 90);
+    expect(session()?.targets[0].data).toEqual({ edge: 'bottom' });
+    engine.cancel();
   });
 
   it('cancel mid-drag clears source + over so a later move is inert (destroy-mid-drag teardown)', () => {

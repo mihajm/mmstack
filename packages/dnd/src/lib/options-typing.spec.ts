@@ -19,7 +19,7 @@ const hitbox: HitboxPlugin = {
 };
 
 describe('engine-discriminated options (compile-time safety)', () => {
-  it('dropTarget: native-only options forbidden with engine:"pointer"', () => {
+  it('dropTarget: sticky/dropEffect forbidden with engine:"pointer"; edges/hitbox allowed on both', () => {
     // valid — native default keeps the native-only options
     const nativeDT: CreateDropTargetOptions<Card> = {
       accepts: isCard,
@@ -28,35 +28,23 @@ describe('engine-discriminated options (compile-time safety)', () => {
       dropEffect: 'copy',
       hitbox,
     };
-    // valid — pointer with only shared options
+    // valid — edge detection works on the pointer engine too
     const pointerDT: CreateDropTargetOptions<Card> = {
       accepts: isCard,
       engine: 'pointer',
       canDrop: () => true,
+      edges,
+      hitbox,
     };
     expect(typeof nativeDT.accepts).toBe('function');
     expect(pointerDT.engine).toBe('pointer');
 
-    // @ts-expect-error `edges` is native-only
-    const badEdges: CreateDropTargetOptions<Card> = {
-      accepts: isCard,
-      engine: 'pointer',
-      edges,
-    };
-    // @ts-expect-error `hitbox` is native-only
-    const badHitbox: CreateDropTargetOptions<Card> = {
-      accepts: isCard,
-      engine: 'pointer',
-      hitbox,
-    };
     // @ts-expect-error `sticky` is native-only
     const badSticky: CreateDropTargetOptions<Card> = {
       accepts: isCard,
       engine: 'pointer',
       sticky: true,
     };
-    void badEdges;
-    void badHitbox;
     void badSticky;
   });
 

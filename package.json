@@ -18,6 +18,9 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master",
   "packageManager": "pnpm@11.5.2",
   "private": true,
+  "scripts": {
+    "idea:backup": "git add -f idea/ && git update-ref refs/heads/idea-vault $(git commit-tree $(git write-tree) $(git rev-parse -q --verify idea-vault >/dev/null 2>&1 && printf -- '-p idea-vault') -m \"backup: refresh idea $(date +%F)\") && git restore --staged idea/"
+  },
   "dependencies": {
     "@angular/cdk": "^22.0.2",
     "@angular/common": "^22.0.2",

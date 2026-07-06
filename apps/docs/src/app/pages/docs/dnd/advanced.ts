@@ -16,10 +16,10 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="When to reach here" id="when">
         <p>
           The
-          <a mmLink="/docs/dnd/elements">draggables and drop targets</a> page and
-          the <a mmLink="/docs/dnd/reorderable">sortable lists</a> page cover the
-          common cases: carry a typed payload, narrow it on a target, splice an
-          array on drop. This page is for the rest.
+          <a mmLink="/docs/dnd/elements">draggables and drop targets</a> page
+          and the <a mmLink="/docs/dnd/reorderable">sortable lists</a> page
+          cover the common cases: carry a typed payload, narrow it on a target,
+          splice an array on drop. This page is for the rest.
         </p>
         <p>
           Reach for it to react to a drag from an element that is neither the
@@ -35,8 +35,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>monitor()</code> observes the ambient drag session without the
           host being a draggable or a drop target. It returns
           <code>isDragging()</code> and <code>source()</code>, both derived from
-          the session, so there is no subscription unless you ask for one. Use it
-          for a drag-aware cursor, a "drop somewhere" hint, or a bit of
+          the session, so there is no subscription unless you ask for one. Use
+          it for a drag-aware cursor, a "drop somewhere" hint, or a bit of
           analytics.
         </p>
         <docs-code [code]="monitorEx" lang="ts" />
@@ -44,9 +44,9 @@ import { DocSection } from '../../../layout/doc-section';
           Pass an <code>accepts</code> type guard to report only the drags you
           care about, and <code>source()</code> is narrowed to that type while a
           matching drag is in flight. If you also need a side effect at the
-          edges, pass <code>onDragStart</code> or <code>onDrop</code>; those (and
-          only those) attach a thin subscription. For a lower-level view of the
-          same session there are <code>injectDndActive()</code>,
+          edges, pass <code>onDragStart</code> or <code>onDrop</code>; those
+          (and only those) attach a thin subscription. For a lower-level view of
+          the same session there are <code>injectDndActive()</code>,
           <code>injectDndPointer()</code>, <code>injectDndTargets()</code>, and
           the writable <code>injectDndSession()</code>.
         </p>
@@ -72,9 +72,9 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="monitorExternalEx" lang="ts" />
         <p>
           This is a native-engine capability: files, cross-window drags, and the
-          browser's own drag image all run through HTML5 drag-and-drop, which the
-          native engine wraps. An element can be both a normal drop target and a
-          file target at once. Apply both composables to the same host.
+          browser's own drag image all run through HTML5 drag-and-drop, which
+          the native engine wraps. An element can be both a normal drop target
+          and a file target at once. Apply both composables to the same host.
         </p>
       </docs-section>
 
@@ -88,9 +88,9 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="handleEx" label="template" lang="html" />
         <p>
-          This is the element-layer counterpart to the reorderable handle you saw
-          on the <a mmLink="/docs/dnd/reorderable">sortable lists</a> page. The
-          directive is the <code>DragHandle</code> class;
+          This is the element-layer counterpart to the reorderable handle you
+          saw on the <a mmLink="/docs/dnd/reorderable">sortable lists</a> page.
+          The directive is the <code>DragHandle</code> class;
           <code>mmDragHandle</code> scopes any <code>mmDraggable</code>, and the
           reorderable version does the same for a list row.
         </p>
@@ -100,18 +100,19 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           The <code>preview</code> option on a draggable controls what follows
           the pointer. A <code>PreviewConfig</code> is one of three shapes: a
-          component (<code>{{ '{' }} component, bindings? {{ '}' }}</code>), a
-          template (<code>{{ '{' }} template, context? {{ '}' }}</code>), or a
-          raw <code>render</code> callback for full control. Each takes an
-          optional <code>offset</code>.
+          component (<code>{{ '{' }} component, bindings? {{ '}' }}</code
+          >), a template (<code>{{ '{' }} template, context? {{ '}' }}</code
+          >), or a raw <code>render</code> callback for full control. Each takes
+          an optional <code>offset</code>.
         </p>
         <docs-code [code]="previewEx" lang="ts" />
         <p>
-          <code>PreviewOffset</code> is either <code>'pointer-outside'</code> (sit
-          just off the cursor) or a fixed <code>{{ '{' }} x, y {{ '}' }}</code>.
-          On the native engine this renders into the browser's custom drag image;
-          on the pointer engine there is no native image, so the same config
-          renders a floating follower the library positions itself. The
+          <code>PreviewOffset</code> is either
+          <code>'pointer-outside'</code> (sit just off the cursor) or a fixed
+          <code>{{ '{' }} x, y {{ '}' }}</code
+          >. On the native engine this renders into the browser's custom drag
+          image; on the pointer engine there is no native image, so the same
+          config renders a floating follower the library positions itself. The
           <code>bindings</code> array uses <code>inputBinding</code>,
           <code>outputBinding</code>, and <code>twoWayBinding</code> from
           <code>&#64;angular/core</code>, so inputs stay reactive.
@@ -121,21 +122,22 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Accessibility" id="a11y">
         <p>
           Keyboard reordering and screen-reader announcements are on by default
-          for reorderable lists. Focus a row, arrow keys move it one step, and the
-          move is narrated through a shared ARIA live region. You do not opt in.
+          for reorderable lists. Focus a row, arrow keys move it one step, and
+          the move is narrated through a shared ARIA live region. You do not opt
+          in.
         </p>
         <p>
           To narrate your own operations (a delete, a cross-list move, a custom
           command), call <code>injectAnnounce()</code>. It returns the active
           announcer: a plugin you registered through <code>provideDnd</code>, or
           the built-in zero-dependency one otherwise. The message defaults to
-          <code>'polite'</code>; pass <code>'assertive'</code>
-          (a <code>Politeness</code> value) for something that should interrupt.
+          <code>'polite'</code>; pass <code>'assertive'</code> (a
+          <code>Politeness</code> value) for something that should interrupt.
         </p>
         <docs-code [code]="announceEx" lang="ts" />
         <p>
-          To opt out on a list, set <code>keyboard: false</code> (no tabindex, no
-          handler) or <code>announceMove: false</code> (no live region). To
+          To opt out on a list, set <code>keyboard: false</code> (no tabindex,
+          no handler) or <code>announceMove: false</code> (no live region). To
           replace the announcer app-wide, register an <code>announce</code>
           plugin (for example Atlassian's live-region package) through
           <code>provideDnd</code>, and every <code>injectAnnounce()</code> call
@@ -147,11 +149,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Auto-scroll" id="auto-scroll">
         <p>
           When a drop area is taller than its viewport, you want it to scroll as
-          the pointer nears an edge. The <code>mmAutoScroll</code> directive turns
-          that on for a scrollable host, and <code>autoScroll()</code> is its
-          composable form for a component that owns the element. It needs an
-          auto-scroll plugin registered (see App-wide defaults below); without one
-          it warns once in dev and no-ops.
+          the pointer nears an edge. The <code>mmAutoScroll</code> directive
+          turns that on for a scrollable host, and <code>autoScroll()</code> is
+          its composable form for a component that owns the element. It needs an
+          auto-scroll plugin registered (see App-wide defaults below); without
+          one it warns once in dev and no-ops.
         </p>
         <docs-code [code]="autoScrollEx" label="template" lang="html" />
         <p>
@@ -159,8 +161,9 @@ import { DocSection } from '../../../layout/doc-section';
           <code>element</code>, override the resolved plugin, or pass an
           <code>injector</code> to run outside an injection context. Any extra
           keys pass through to the plugin. This is the element-layer scroll: a
-          reorderable list has its own <code>autoScroll</code> option that drives
-          the same plugin, so you rarely need this directive on a sortable.
+          reorderable list has its own <code>autoScroll</code> option that
+          drives the same plugin, so you rarely need this directive on a
+          sortable.
         </p>
       </docs-section>
 
@@ -179,20 +182,20 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           It positions itself with encapsulated styles (no global stylesheet),
           and reads the edge reactively, so binding
-          <code>[edge]="dt.closestEdge()"</code> is all it takes. Color comes from
-          the <code>--mm-drop-indicator-color</code> custom property.
+          <code>[edge]="dt.closestEdge()"</code> is all it takes. Color comes
+          from the <code>--mm-drop-indicator-color</code> custom property.
         </p>
       </docs-section>
 
       <docs-section title="Scoped sessions" id="scoped-session">
         <p>
           The drag session lives in the root injector, so the library works with
-          no setup and a drag on one part of the page is visible everywhere. When
-          a subtree needs its own coordinate space, one that does not see or
-          interfere with drags elsewhere, add <code>provideDndSession()</code> to
-          that component's <code>providers</code>. The
-          <code>injectDnd*</code> helpers inside it then resolve to the scoped
-          session instead of the root one.
+          no setup and a drag on one part of the page is visible everywhere.
+          When a subtree needs its own coordinate space, one that does not see
+          or interfere with drags elsewhere, add
+          <code>provideDndSession()</code> to that component's
+          <code>providers</code>. The <code>injectDnd*</code> helpers inside it
+          then resolve to the scoped session instead of the root one.
         </p>
         <docs-code [code]="sessionEx" lang="ts" />
       </docs-section>
@@ -202,44 +205,64 @@ import { DocSection } from '../../../layout/doc-section';
           Two provider families let a team set conventions once. Use
           <code>provideDnd()</code> to register the optional plugins (edge
           detection, auto-scroll, post-move flash, a replacement announcer) and
-          to scope a session. Use the defaults providers to fill option values so
-          you stop repeating them at every call.
+          to scope a session. Use the defaults providers to fill option values
+          so you stop repeating them at every call.
         </p>
         <docs-code [code]="provideDndEx" lang="ts" />
         <p>
           <code>provideDndDefaults()</code> holds the cross-primitive defaults
-          (currently <code>engine</code>), so one line flips your whole app to the
-          pointer engine. Each primitive also has its own provider for options
-          only it understands, and it inherits the common defaults unless it sets
-          that key itself.
+          (currently <code>engine</code>), so one line flips your whole app to
+          the pointer engine. Each primitive also has its own provider for
+          options only it understands, and it inherits the common defaults
+          unless it sets that key itself.
         </p>
         <docs-code [code]="defaultsEx" lang="ts" />
         <p>
           Resolution runs most-specific first: per-call option, then the
           per-primitive default, then <code>provideDndDefaults</code>, then the
           built-in. Each provider takes a value or a factory, and each has a
-          matching reader (<code>injectDndDefaults</code> and friends) that returns
-          the resolved defaults or <code>null</code>. Pass an
+          matching reader (<code>injectDndDefaults</code> and friends) that
+          returns the resolved defaults or <code>null</code>. Pass an
           <code>Injector</code> to read outside an injection context.
         </p>
       </docs-section>
 
       <docs-section title="Testing" id="testing">
         <p>
-          Because per-element state is derived from the one ambient session, most
-          behaviour is unit-testable with no drag simulation: set the session and
-          assert the derived signals. <code>injectDndSession()</code> returns the
-          writable session, and <code>boxData</code> builds a source payload the
-          way the library boxes it internally (under a private symbol), so a
-          target's <code>accepts</code> and the derived
-          <code>isDragOver()</code> see the real shape.
+          Because per-element state is derived from the one ambient session,
+          most behaviour is unit-testable with no drag simulation: set the
+          session and assert the derived signals.
+          <code>injectDndSession()</code> returns the writable session, and
+          <code>boxData</code> builds a source payload the way the library boxes
+          it internally (under a private symbol), so a target's
+          <code>accepts</code> and the derived <code>isDragOver()</code> see the
+          real shape.
         </p>
         <docs-code [code]="testingEx" lang="ts" />
         <p>
-          The reorderable controller is testable the same way, and without a DOM.
+          The reorderable controller is testable the same way, and without a
+          DOM.
           <code>reorderable(signal, opts)</code> is a pure controller: drive its
           <code>begin</code> / <code>move</code> / <code>end</code> and read the
           per-item state signals directly.
+        </p>
+      </docs-section>
+
+      <docs-section title="Open core" id="open-core">
+        <p>
+          The primitives on these pages cover the common shapes, but
+          drag-and-drop has a long tail. When a shipped primitive does not fit,
+          you do not have to rebuild the plumbing. The barrel also exports the
+          pieces the library is built from: the gesture chassis
+          (<code>driveGesture</code>) and the geometry and hit-testing helpers
+          behind the sortable, grid, and canvas, that way you can assemble a
+          bespoke interaction on the same reactive session everything else reads.
+        </p>
+        <p>
+          These helpers are not documented symbol by symbol, on purpose: keeping
+          them out of the reference keeps the surface you learn small. They are
+          typed and discoverable straight from the barrel, so an editor
+          autocomplete on <code>&#64;mmstack/dnd</code> is the map.
         </p>
       </docs-section>
     </docs-page>

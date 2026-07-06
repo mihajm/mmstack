@@ -40,3 +40,34 @@ test('highlights the hovered drop zone while dragging', async ({ page }) => {
   });
   await expect.poll(chipsIn(page, 'a')).toContain('Three');
 });
+
+const edgeAttr = (page: Page) => () =>
+  page.locator('[data-zone="edge"]').getAttribute('data-edge');
+
+test('resolves the live closest edge from the pointer over an edge zone', async ({
+  page,
+}) => {
+  const one = page.locator('[data-zone="a"] .chip', { hasText: 'One' });
+  const zone = page.locator('[data-zone="edge"]');
+  const box = (await zone.boundingBox())!;
+  const upper = { x: box.x + box.width / 2, y: box.y + box.height * 0.15 };
+  const lower = { x: box.x + box.width / 2, y: box.y + box.height * 0.85 };
+
+  await drag(page, one, [upper, lower, upper], {
+    steps: 12,
+    settle: 40,
+    release: false,
+    onWaypoint: async (i) => {
+      // upper half → top, lower half → bottom, back to upper → top
+      if (i === 0) await expect.poll(edgeAttr(page)).toBe('top');
+      if (i === 1) await expect.poll(edgeAttr(page)).toBe('bottom');
+      if (i === 2) await expect.poll(edgeAttr(page)).toBe('top');
+    },
+  });
+  await page.mouse.up();
+
+  // drop resolves the edge on the way out too
+  await expect(page.getByTestId('edge-log')).toHaveText('One:top');
+  // edge clears once the drag ends (no stale token)
+  await expect.poll(edgeAttr(page)).toBeNull();
+});

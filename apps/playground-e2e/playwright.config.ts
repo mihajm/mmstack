@@ -62,6 +62,7 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] },
       testIgnore: [
         '**/pointer-sortable-perf.spec.ts',
+        '**/pointer-edge-perf.spec.ts',
         '**/webrtc.spec.ts',
         '**/mesh-agent.spec.ts',
         '**/worker-mesh.spec.ts',

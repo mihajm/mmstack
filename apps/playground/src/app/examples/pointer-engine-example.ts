@@ -1,5 +1,5 @@
 import { Component, Directive, input, output, signal } from '@angular/core';
-import { draggable, dropTarget } from '@mmstack/dnd';
+import { draggable, dropTarget, type Edge } from '@mmstack/dnd';
 
 type Chip = { id: number; label: string };
 
@@ -42,10 +42,33 @@ export class PointerDropZone {
   });
 }
 
+/**
+ * Edge-aware pointer drop target: closest-edge detection on the pointer engine
+ * (the hitbox plugin is registered app-wide in `app.config`). `data-edge`
+ * mirrors the live edge for the e2e; the drop reports the resolved edge.
+ */
+@Directive({
+  // eslint-disable-next-line @angular-eslint/directive-selector
+  selector: '[appEdgeZone]',
+  host: {
+    '[class.over]': 'zone.isDragOver()',
+    '[attr.data-edge]': 'zone.closestEdge()',
+  },
+})
+export class PointerEdgeZone {
+  readonly droppedEdge = output<{ chip: Chip; edge: Edge | null }>();
+  protected readonly zone = dropTarget<Chip>({
+    accepts: isChip,
+    engine: 'pointer',
+    edges: ['top', 'bottom'],
+    onDrop: (e) => this.droppedEdge.emit({ chip: e.data, edge: e.edge }),
+  });
+}
+
 @Component({
   // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-pointer-engine-example',
-  imports: [PointerDrag, PointerDropZone],
+  imports: [PointerDrag, PointerDropZone, PointerEdgeZone],
   template: `
     <main>
       <h1>Pointer engine — draggable / dropTarget</h1>
@@ -68,6 +91,20 @@ export class PointerDropZone {
             }
           </div>
         }
+      </div>
+
+      <p class="hint">
+        Closest-edge detection works on the pointer engine too. Hover a chip over
+        the upper or lower half of the panel below.
+      </p>
+      <div
+        class="edgezone"
+        appEdgeZone
+        data-zone="edge"
+        (droppedEdge)="onEdgeDrop($event)"
+      >
+        <span>Edge zone</span>
+        <span class="edgelog" data-testid="edge-log">{{ lastEdge() }}</span>
       </div>
     </main>
   `,
@@ -114,6 +151,33 @@ export class PointerDropZone {
       border-color: #c7d2fe;
       opacity: 0.95;
     }
+    .edgezone {
+      margin-top: 8px;
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-radius: 10px;
+      background: #f9fafb;
+      border: 2px solid transparent;
+      color: #6b7280;
+    }
+    .edgezone.over {
+      border-color: #6366f1;
+      background: #eef2ff;
+    }
+    .edgezone[data-edge='top'] {
+      border-top-color: #4338ca;
+    }
+    .edgezone[data-edge='bottom'] {
+      border-bottom-color: #4338ca;
+    }
+    .edgelog {
+      font-variant-numeric: tabular-nums;
+      color: #111827;
+    }
   `,
 })
 export class PointerEngineExample {
@@ -127,6 +191,12 @@ export class PointerEngineExample {
     },
     { id: 'b', chips: [{ id: 3, label: 'Three' }] },
   ]);
+
+  protected readonly lastEdge = signal('none');
+
+  protected onEdgeDrop(e: { chip: Chip; edge: Edge | null }): void {
+    this.lastEdge.set(`${e.chip.label}:${e.edge ?? 'none'}`);
+  }
 
   protected move(chip: Chip, to: string): void {
     this.buckets.update((bs) =>

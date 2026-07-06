@@ -6,6 +6,7 @@ import {
   createConvergingApply,
   isConflicted,
   keyedArray,
+  lww,
   mergeThree,
   OP_PROTO_VERSION,
   opSync,
@@ -13,6 +14,7 @@ import {
   policyStrategy,
   rebaseOps,
   type Conflicted,
+  type MergeFn,
   type OpEnvelope,
   type OpSync,
 } from './op-sync';
@@ -233,6 +235,101 @@ describe('createConvergingApply', () => {
         expect(results[i]).toEqual(results[0]);
       }
     }
+  });
+});
+
+describe('createConvergingApply — policy convergence under 3+ CONCURRENT same-path writes', () => {
+  // The existing PROPERTY test only covers default lww. resolveConcurrent merges a policy PAIRWISE in
+  // the single-winner register, so 3+ concurrent writers need the merge to be associative/commutative
+  // or the register diverges by arrival order (the ranking Condorcet-cycle lesson). Genuinely
+  // concurrent = every write branches from the SAME ancestor (prev = ancestor), distinct stamps.
+  const mulberry32 = (seed: number) => () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffle = (arr: OpEnvelope[], seed: number) => {
+    const r = mulberry32(seed);
+    const c = [...arr];
+    for (let i = c.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [c[i], c[j]] = [c[j], c[i]];
+    }
+    return c;
+  };
+  const converges = (
+    policy: MergeFn,
+    path: string,
+    initial: unknown,
+    envs: OpEnvelope[],
+  ): boolean => {
+    const results: string[] = [];
+    for (let s = 1; s <= 20; s++) {
+      const conv = createConvergingApply({ policies: [{ path, merge: policy }] });
+      let root: unknown = initial;
+      for (const e of shuffle(envs, s * 131)) root = applyOps(root, conv.ingest(e));
+      results.push(JSON.stringify(root));
+    }
+    return results.every((r) => r === results[0]);
+  };
+
+  const leafEnvs = ['a', 'b', 'c', 'd'].map((v, i) =>
+    env([set(['v'], v, 'base')], { p: i + 1, writer: 'w' + i }),
+  );
+
+  it('lww: 4 concurrent leaf writes converge (control)', () => {
+    expect(converges(lww, 'v', { v: 'base' }, leafEnvs)).toBe(true);
+  });
+
+  it('preserve: 4 concurrent leaf writes DIVERGE (known limitation, found 2026-07-06)', () => {
+    // preserve keeps a BINARY Conflicted, so a 3rd concurrent writer nests Conflicted-in-Conflicted
+    // order-dependently → the single-winner register diverges. Same class as the ranking Condorcet
+    // trap. The fix is an MV-register (retain all concurrent siblings, resolve at read); this
+    // expectation FLIPS to converge when that lands. Two concurrent writers are fine (see the 2-way
+    // preserve tests above).
+    expect(converges(preserve, 'v', { v: 'base' }, leafEnvs)).toBe(false);
+  });
+
+  it('mergeThree: 3 concurrent object edits converge', () => {
+    const base = { x: 0, y: 0, z: 0 };
+    const envs = [
+      env([set(['o'], { x: 1, y: 0, z: 0 }, base)], { p: 1, writer: 'w1' }),
+      env([set(['o'], { x: 0, y: 2, z: 0 }, base)], { p: 2, writer: 'w2' }),
+      env([set(['o'], { x: 1, y: 2, z: 3 }, base)], { p: 3, writer: 'w3' }),
+    ];
+    expect(converges(mergeThree, 'o', { o: base }, envs)).toBe(true);
+  });
+
+  it('keyedArray: 3 concurrent array edits DIVERGE (known limitation, found 2026-07-06)', () => {
+    // Pairwise item-merge in the single-winner register is not associative/commutative for 3+
+    // concurrent whole-array writes (item order + theirs-only additions depend on which side is
+    // "mine" at each pairwise step) → diverges by arrival order. Same MV-register fix as preserve;
+    // this expectation FLIPS to converge when that lands. Two concurrent writers are fine.
+    const byId = keyedArray((t) => (t as { id: number }).id);
+    const anc = [
+      { id: 1, v: 0 },
+      { id: 2, v: 0 },
+    ];
+    const envs = [
+      env([set(['list'], [{ id: 1, v: 1 }, anc[1]], anc)], { p: 1, writer: 'w1' }),
+      env([set(['list'], [anc[0], { id: 2, v: 2 }], anc)], { p: 2, writer: 'w2' }),
+      env([set(['list'], [...anc, { id: 3, v: 3 }], anc)], { p: 3, writer: 'w3' }),
+    ];
+    expect(converges(byId, 'list', { list: anc }, envs)).toBe(false);
+  });
+
+  it('mergeThree: 3 concurrent writers to the SAME field + a nested object converge', () => {
+    // harder case — 'a' changed by ALL three to distinct values, nested fields overlap. mergeThree
+    // degrades to lww on a leaf conflict (which IS associative), so it should still converge.
+    const base = { a: 0, nested: { p: 0, q: 0 } };
+    const envs = [
+      env([set(['o'], { a: 1, nested: { p: 1, q: 0 } }, base)], { p: 1, writer: 'w1' }),
+      env([set(['o'], { a: 2, nested: { p: 0, q: 2 } }, base)], { p: 2, writer: 'w2' }),
+      env([set(['o'], { a: 3, nested: { p: 3, q: 3 } }, base)], { p: 3, writer: 'w3' }),
+    ];
+    expect(converges(mergeThree, 'o', { o: base }, envs)).toBe(true);
   });
 });
 

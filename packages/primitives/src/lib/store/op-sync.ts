@@ -1,7 +1,9 @@
 import {
+  effect,
   inject,
   Injector,
   isDevMode,
+  signal,
   untracked,
   type WritableSignal,
 } from '@angular/core';
@@ -21,7 +23,7 @@ export const OP_PROTO_VERSION = 1;
 type Key = string | number;
 
 /**
- * The wire/journal record (op-protocol RFC §3). `writer` is an opaque principal pseudonym —
+ * The wire/journal recor. `writer` is an opaque principal pseudonym —
  * natural identity never enters the envelope; `origin` identifies the emitting log instance.
  */
 export type OpEnvelope = {
@@ -47,7 +49,9 @@ export type Conflicted<T = unknown> = {
   readonly ancestor?: T;
 };
 
-export function isConflicted<T = unknown>(value: unknown): value is Conflicted<T> {
+export function isConflicted<T = unknown>(
+  value: unknown,
+): value is Conflicted<T> {
   return typeof value === 'object' && value !== null && CONFLICT_BRAND in value;
 }
 
@@ -81,7 +85,7 @@ export const preserve: MergeFn = (ancestor, mine, theirs) =>
   ({ [CONFLICT_BRAND]: true, mine, theirs, ancestor }) satisfies Conflicted;
 
 /**
- * Identity-aware array merge (op-protocol RFC §12 v0): reconciles two concurrent versions of
+ * Identity-aware array merge: reconciles two concurrent versions of
  * an array item-wise by a user-provided identity, instead of last-writer-wins on the whole
  * array. Items are matched by key; per-item fields merge via `merge3` against the ancestor
  * item; items added on either side survive; an item removed on either side and unedited on
@@ -116,9 +120,7 @@ export function keyedArray(
       const base = ancMap.get(key);
       if (theirsMap.has(key)) {
         out.push(
-          structuralEq(item, other)
-            ? item
-            : mergeItem(base, item, other, ctx),
+          structuralEq(item, other) ? item : mergeItem(base, item, other, ctx),
         );
       } else if (!ancMap.has(key) || !structuralEq(item, base)) {
         out.push(item); // added by mine, or edited by mine while theirs removed it → keep
@@ -197,7 +199,11 @@ function structuralEq(a: unknown, b: unknown): boolean {
   return true;
 }
 
-type Stamp = { readonly hlc: Hlc; readonly writer: string; readonly origin: string };
+type Stamp = {
+  readonly hlc: Hlc;
+  readonly writer: string;
+  readonly origin: string;
+};
 
 type Register = { hlc: Hlc; writer: string; origin: string; op: StoreOp };
 
@@ -223,7 +229,7 @@ export type ConvergingApply = {
 };
 
 /**
- * The unsequenced-topology convergence core (op-protocol RFC §4): a per-path last-writer-wins
+ * The unsequenced-topology convergence core: a per-path last-writer-wins
  * register map over the total order (hlc, writer), with subtree dominance. Order-independent:
  * any arrival order of the same envelope set yields the same state.
  */
@@ -247,18 +253,20 @@ export function createConvergingApply(opt?: {
     return { kind: 'set', path, next: resolved, prev: winner.next };
   };
 
-  // a sequential edit carries the value it overwrote; a mismatch means neither saw the other.
-  // Structural, not referential: identity never survives the wire, so a peer that built on
-  // the replicated copy of a value must still count as sequential.
   const concurrentWith = (incoming: StoreOp, registered: StoreOp): boolean => {
-    if (incoming.kind === 'delete' || registered.kind === 'delete') return false;
+    if (incoming.kind === 'delete' || registered.kind === 'delete')
+      return false;
     if (!Object.hasOwn(incoming, 'prev')) return true;
     return !structuralEq(incoming.prev, registered.next);
   };
 
   return {
     ingest: (env, o) => {
-      const stamp: Stamp = { hlc: env.hlc, writer: env.writer, origin: env.origin };
+      const stamp: Stamp = {
+        hlc: env.hlc,
+        writer: env.writer,
+        origin: env.origin,
+      };
       const out: StoreOp[] = [];
 
       for (const op of env.ops) {
@@ -305,7 +313,12 @@ export function createConvergingApply(opt?: {
         }
         replays.sort(compareStamp);
 
-        registers.set(key, { hlc: env.hlc, writer: env.writer, origin: env.origin, op: accepted });
+        registers.set(key, {
+          hlc: env.hlc,
+          writer: env.writer,
+          origin: env.origin,
+          op: accepted,
+        });
         if (!o?.local) {
           out.push(accepted);
           for (const r of replays) out.push(r.op);
@@ -334,7 +347,7 @@ export type RebaseResult<T = unknown> = {
 };
 
 /**
- * The shared rebase routine (op-protocol RFC §5): invert pending, apply remote, re-apply
+ * The shared rebase routine: invert pending, apply remote, re-apply
  * pending through the merge policies. Pure — branching's `rebase()` and the sequenced relay
  * client both call this.
  */
@@ -387,11 +400,16 @@ export function policyStrategy<T>(
   policies: readonly MergePolicyEntry[],
 ): (ancestor: T, mine: T, theirs: T) => T {
   return (ancestor, mine, theirs) =>
-    rebaseOps(mine, [diffOps(ancestor, mine)], diffOps(ancestor, theirs), policies).root;
+    rebaseOps(
+      mine,
+      [diffOps(ancestor, mine)],
+      diffOps(ancestor, theirs),
+      policies,
+    ).root;
 }
 
 export type OpSyncOptions = {
-  /** Opaque principal pseudonym — provided by the app, never minted here (RFC §3). */
+  /** Opaque principal pseudonym — provided by the app, never minted here. */
   readonly writer: string;
   readonly origin?: string;
   readonly policyVersion?: number;
@@ -426,6 +444,16 @@ export type OpSync<T = unknown> = {
    * top, so writes made before hydration are never silently lost.
    */
   hydrate(root: T, wm?: Record<string, number>): void;
+  /**
+   * Re-inject this origin's persisted local envelopes on boot (a durable outbox), WITHOUT minting
+   * new versions: each is applied to the store (echo-free), registered as a local winner, and handed
+   * to subscribers so a transport can resend the unacknowledged tail. `highWater` is the highest
+   * version this origin ever emitted (>= every `env.version`); the next mint continues past it, so a
+   * version acked before the reboot but dropped from a debounced outbox never collides. Call on a
+   * FRESH instance, before any `receive`/`hydrate` — restoring onto already-ingested remote winners
+   * would wrongly let a stale local op override them.
+   */
+  restore(envs: readonly OpEnvelope[], highWater?: number): void;
   destroy(): void;
 };
 
@@ -449,35 +477,83 @@ export function opSync<T extends object>(
   const clock = opt.clock ?? createHlcClock();
   const conv = createConvergingApply({ policies: opt.policies });
   const subscribers = new Set<(env: OpEnvelope) => void>();
+  // per-origin high-watermark; `versions.get(origin)` IS the local emit counter, so a hydrate/restore
+  // that raises our own watermark also advances the next mint — no separate counter to drift out of
+  // sync and collide with a version acked before a reboot but dropped from a debounced outbox.
   const versions = new Map<string, number>();
   const recentLocal: OpEnvelope[] = [];
-  let version = 0;
+
+  const resolvedInjector = opt.driver
+    ? null
+    : (opt.injector ?? inject(Injector));
 
   const log = opLog(
     source,
     opt.driver
       ? { origin, driver: opt.driver }
-      : { origin, injector: opt.injector ?? inject(Injector) },
+      : { origin, injector: resolvedInjector as Injector },
   );
 
+  // Local envelopes stamped + registered but not yet handed to the transport. A `receive` freezes
+  // this peer's pending writes here so it can ingest the remote WITHOUT emitting mid-receive — the
+  // synchronous re-entrant emission that used to scramble the relay's commit order. The outbox
+  // drains on a LATER tick, so emission always lands outside any receive callstack. Writes made
+  // while a drain is still owed queue here too, keeping wire order == version order (else a receiver
+  // would dedup the older, still-frozen envelope).
+  //
+  // Deferral rides an Angular effect, so it arms only on the injector path — the transport
+  // topologies (`tabSync`, `meshSync`) that actually re-enter through a relay. A custom `driver`
+  // (worker mirror, pure sim, multi-reader) owns its own scheduling and has no such re-entrancy, so
+  // it emits synchronously; the freeze-before-observe STAMPING fix below is identical either way.
+  const canDefer = !opt.driver;
+  const outbox: OpEnvelope[] = [];
+  let receiving = false;
+
+  // a signal the drain reaction tracks; bumping it schedules an outbox drain for the next tick
+  const drainTick = signal(0);
+  const scheduleDrain = (): void => drainTick.update((v) => v + 1);
+
+  const notify = (env: OpEnvelope): void => {
+    for (const cb of [...subscribers]) cb(env);
+  };
+  const drainOutbox = (): void => {
+    for (const env of outbox.splice(0)) notify(env);
+  };
+
   const emitLocal = (ops: readonly StoreOp[]): void => {
+    const nextVersion = (versions.get(origin) ?? 0) + 1;
     const env: OpEnvelope = {
       proto: OP_PROTO_VERSION,
       origin,
       writer: opt.writer,
-      version: ++version,
+      version: nextVersion,
       hlc: clock.next(),
       policyVersion: opt.policyVersion ?? 0,
       ops,
     };
-    versions.set(origin, env.version);
+    versions.set(origin, nextVersion);
     conv.ingest(env, { local: true });
     recentLocal.push(env);
     if (recentLocal.length > RECENT_LOCAL_CAP) recentLocal.shift();
-    for (const cb of [...subscribers]) cb(env);
+    // mid-receive, or a drain still owed → queue (frozen stamp verbatim) instead of emitting now
+    if (canDefer && (receiving || outbox.length)) {
+      outbox.push(env);
+      scheduleDrain();
+      return;
+    }
+    notify(env);
   };
 
   const unsub = log.subscribe((batch) => emitLocal(batch.ops));
+
+  // fires on the tick after `scheduleDrain`: emits frozen local envelopes outside any receive frame
+  const drainRun = (): void => {
+    drainTick();
+    untracked(drainOutbox);
+  };
+  const drainRef = canDefer
+    ? effect(drainRun, { injector: resolvedInjector as Injector })
+    : null;
 
   return {
     origin,
@@ -495,18 +571,31 @@ export function opSync<T extends object>(
         }
         return;
       }
-      clock.observe(env.hlc);
       const known = versions.get(env.origin);
       if (known !== undefined && env.version <= known) return; // duplicate/covered — idempotent
       if (known !== undefined && env.version !== known + 1) {
         opt.onGap?.(env.origin, known + 1, env.version);
       }
       versions.set(env.origin, env.version);
-      log.flush();
-      const ops = conv.ingest(env);
-      if (ops.length) log.apply(ops);
+      receiving = true;
+      try {
+        // Freeze pending local FIRST — stamped by a clock that has NOT yet observed this remote, so
+        // the local write keeps its causally-independent (original) stamp rather than being lifted
+        // above the remote and always winning. Emission is deferred to a tick via the outbox; this
+        // only registers + stamps.
+        log.flush();
+        clock.observe(env.hlc);
+        const ops = conv.ingest(env);
+        // apply the converged result — a local write that LOST its path rolls back visibly here
+        if (ops.length) log.apply(ops);
+      } finally {
+        receiving = false;
+      }
     },
-    flush: () => log.flush(),
+    flush: () => {
+      drainOutbox();
+      log.flush();
+    },
     watermark: () => Object.fromEntries(versions),
     snapshot: () => {
       log.flush();
@@ -529,9 +618,25 @@ export function opSync<T extends object>(
       }
       for (const e of pending) conv.ingest(e, { local: true });
     },
+    restore: (envs, highWater) => {
+      let maxV = versions.get(origin) ?? 0;
+      for (const env of envs) {
+        if (env.origin !== origin) continue; // only this origin's own durable outbox
+        clock.observe(env.hlc); // keep the clock ≥ restored stamps before any future mint
+        log.apply(env.ops); // reflect the offline edit in the store, echo-free
+        conv.ingest(env, { local: true }); // register as a local winner (survives a reconnect merge)
+        recentLocal.push(env);
+        if (recentLocal.length > RECENT_LOCAL_CAP) recentLocal.shift();
+        maxV = Math.max(maxV, env.version);
+        notify(env); // hand to the transport to resend the unacknowledged tail
+      }
+      versions.set(origin, Math.max(maxV, highWater ?? 0));
+    },
     destroy: () => {
+      drainOutbox(); // don't silently drop frozen-but-unsent local writes
       unsub();
       subscribers.clear();
+      drainRef?.destroy();
       log.destroy();
     },
   };

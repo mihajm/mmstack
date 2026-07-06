@@ -183,6 +183,8 @@ The fork is a full store (`draft.store.user.name(...)`, `extendStore`, deep read
 
 > The fork inherits the base's `vivify` / `noUnionLeaves` and its injector-scoped proxy cache automatically, so its write semantics match the base. Pass them explicitly only to override (advanced).
 
+When the base is a synced store from `@mmstack/mesh`, a fork is also how an agent proposes a change for review. The agent writes to the fork, `ops()` is the staged change to render for a person, and `commit()` merges the approved change into the synced store. See the `@mmstack/mesh` README for the pattern.
+
 ### `toWritable`
 
 Turn any read-only `Signal<T>` into a `WritableSignal<T>` by providing custom `set` / `update` implementations. Powers `derived` internally; use it directly when you have a `computed` you want to expose as writable.

@@ -127,6 +127,11 @@ export const appRoutes: Route[] = [
       import('./examples/mesh-agent-example').then((m) => m.MeshAgentExample),
   },
   {
+    path: 'mesh-outbox',
+    loadComponent: () =>
+      import('./examples/mesh-outbox-example').then((m) => m.MeshOutboxExample),
+  },
+  {
     path: 'worker-mesh',
     loadComponent: () =>
       import('./examples/worker-mesh-example').then(

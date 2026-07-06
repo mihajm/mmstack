@@ -125,6 +125,7 @@ export const appRoutes: Route[] = [
             children: [
               { label: 'Overview', link: 'mesh' },
               { label: 'The client', link: 'mesh/client' },
+              { label: 'Agents', link: 'mesh/agents' },
               { label: 'The relay', link: 'mesh/relay' },
             ],
           },
@@ -555,6 +556,12 @@ export const appRoutes: Route[] = [
         title: createTitle('Mesh client'),
         loadComponent: () =>
           import('./pages/docs/mesh/client').then((m) => m.MeshClient),
+      },
+      {
+        path: 'mesh/agents',
+        title: createTitle('Mesh agents'),
+        loadComponent: () =>
+          import('./pages/docs/mesh/agents').then((m) => m.MeshAgents),
       },
       {
         path: 'mesh/relay',

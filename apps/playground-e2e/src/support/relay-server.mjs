@@ -14,7 +14,7 @@ import {
 
 const PORT = Number(process.env.RELAY_PORT ?? 4301);
 
-// An agent is a user (RFC §0), just a narrower one: humans write the whole store, an agent
+// An agent is a user, just a narrower one: humans write the whole store, an agent
 // is scoped to the `agent/*` subtree. Writing outside it trips the relay and ejects the agent.
 const policy = pathPrefixAcl([
   { prefix: [], allow: (ctx) => ctx.kind !== 'agent' },

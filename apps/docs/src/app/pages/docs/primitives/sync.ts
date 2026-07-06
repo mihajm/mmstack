@@ -66,6 +66,10 @@ import { DocSection } from '../../../layout/doc-section';
             just a later write.
           </li>
         </ul>
+        <p>
+          Last-writer-wins drops one side of a true clash on the same field. Set
+          <code>preserve</code> on the paths where losing a write matters.
+        </p>
         <docs-code [code]="policies" lang="ts" />
       </docs-section>
 

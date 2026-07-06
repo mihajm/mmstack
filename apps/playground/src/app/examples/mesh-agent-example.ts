@@ -12,7 +12,7 @@ import { store, type WritableSignalStore } from '@mmstack/primitives';
 type Doc = { title: string; agent: { note: string } };
 
 /**
- * E2E surface for "an agent is a user" (RFC §0): a human and an agent share a room over the
+ * E2E surface for "an agent is a user": a human and an agent share a room over the
  * relay, which runs a path ACL (humans write the whole store, an agent is scoped to the
  * `agent/*` subtree). One peer per page (writer + kind from the query string).
  *
@@ -30,7 +30,10 @@ type Doc = { title: string; agent: { note: string } };
     }
     <p data-testid="title">{{ store.title() }}</p>
     <p data-testid="note">{{ store.agent.note() }}</p>
-    <button data-testid="write-title" (click)="store.title.set('title-by-' + writer)">
+    <button
+      data-testid="write-title"
+      (click)="store.title.set('title-by-' + writer)"
+    >
       write title (human-only path)
     </button>
     <button

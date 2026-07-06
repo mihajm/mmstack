@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// "An agent is a user, just a narrower one" (RFC §0), proven end to end: a human and an agent
+// "An agent is a user, just a narrower one", proven end to end: a human and an agent
 // share a room over the real relay, which enforces a path ACL. The agent's in-scope write
 // replicates; its out-of-scope write trips the relay and ejects it, and the human never sees it.
 

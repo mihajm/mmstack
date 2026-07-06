@@ -11,7 +11,12 @@ export * from './lib/pooled';
 export * from './lib/sensors';
 export * from './lib/store/public_api';
 export * from './lib/stored';
-export { tabSync, type StoreTabSyncOptions, type SyncSignalOptions } from './lib/tab-sync';
+export {
+  tabSync,
+  type StoreTabSyncOptions,
+  type SyncSignalOptions,
+  type TabSyncBus,
+} from './lib/tab-sync';
 export * from './lib/throttled';
 export * from './lib/to-writable';
 export * from './lib/until';

@@ -8,7 +8,6 @@ import {
   isDevMode,
   PLATFORM_ID,
   untracked,
-  type OnDestroy,
   type WritableSignal,
 } from '@angular/core';
 import { STORE_KIND, type StoreKind } from './store/internals';
@@ -24,11 +23,11 @@ type TabMsg =
   | { t: 'state'; to: string; root: unknown; wm: Record<string, number> }
   | { t: 'uptodate'; to: string };
 
-/** Op-mode sync for a writable store: hello exchange, then live envelopes (RFC §6 tab flavor). */
+/** Op-mode sync for a writable store: hello exchange, then live envelopes. */
 function storeTabSync(
   sig: WritableSignal<object>,
   opt: StoreTabSyncOptions & { id: string },
-  bus: MessageBus,
+  bus: TabSyncBus,
   injector: Injector,
 ): void {
   const sync = opSync(sig, {
@@ -108,15 +107,35 @@ function storeTabSync(
   });
 }
 
+/**
+ * The cross-tab transport `tabSync` rides. The default is {@link MessageBus} (a `BroadcastChannel`);
+ * pass a custom one through `tabSync`'s `bus` option to route over a different channel, or to drive
+ * tabs deterministically in a test. `subscribe` returns an unsubscribe handle plus a `post` that
+ * fans the value to every OTHER tab on the same `id`.
+ */
+export type TabSyncBus = {
+  subscribe<T>(
+    id: string,
+    listener: (data: T) => void,
+  ): { unsub: () => void; post: (value: T) => void };
+};
+
 @Injectable({
   providedIn: 'root',
 })
-export class MessageBus implements OnDestroy {
+export class MessageBus implements TabSyncBus {
   private readonly channel = new BroadcastChannel('mmstack-tab-sync-bus');
   private readonly listeners = new Map<
     string,
     Set<(ev: MessageEvent) => void>
   >();
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.channel.close();
+      this.listeners.clear();
+    });
+  }
 
   subscribe<T>(id: string, listener: (data: T) => void) {
     const wrapped = (ev: MessageEvent) => {
@@ -144,11 +163,6 @@ export class MessageBus implements OnDestroy {
       },
       post: (value: T) => this.channel.postMessage({ id, value }),
     };
-  }
-
-  ngOnDestroy(): void {
-    this.channel.close();
-    this.listeners.clear();
   }
 }
 
@@ -201,12 +215,14 @@ export type SyncSignalOptions = {
    * it — a cross-tab consistency gap not worth the negligible saving. The channel stays live.
    */
   injector?: Injector;
+  /** Cross-tab transport. Defaults to the injected {@link MessageBus} (a `BroadcastChannel`). */
+  bus?: TabSyncBus;
 };
 
 /**
  * Store mode (`tabSync(store, …)`): syncs structural OPS instead of whole values — concurrent
  * edits to different leaves merge instead of clobbering, and a joining tab hydrates from a
- * peer via the hello exchange (up-to-date / snapshot; op-protocol RFC §6).
+ * peer via the hello exchange.
  */
 export type StoreTabSyncOptions = SyncSignalOptions & {
   /** Principal pseudonym on emitted envelopes. Tabs share one user, so a default is fine. */
@@ -282,7 +298,7 @@ export function tabSync<T extends WritableSignal<any>>(
   const id =
     typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());
 
-  const bus = injector.get(MessageBus);
+  const bus = optObj?.bus ?? injector.get(MessageBus);
 
   const storeKind = (sig as { [STORE_KIND]?: StoreKind })[STORE_KIND];
   if (storeKind === 'writable') {

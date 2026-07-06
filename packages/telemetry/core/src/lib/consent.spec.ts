@@ -29,7 +29,7 @@ function setup(consent?: TelemetryConfig['consent']) {
   return { sink, telemetry: TestBed.inject(TELEMETRY) };
 }
 
-describe('consent (RFC §7)', () => {
+describe('consent', () => {
   it('without consent config, categories are inert and signals stay empty', () => {
     const { sink, telemetry } = setup();
     telemetry.event('e', { a: 1 }, { category: 'anything' });
@@ -76,7 +76,9 @@ describe('consent (RFC §7)', () => {
     });
 
     it('drops (and dev-warns once for) categories with no declared requirement', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       try {
         const { sink, telemetry } = setup({ requirements: [PERF] });
         telemetry.event('a', undefined, { category: 'undeclared' });
@@ -99,11 +101,17 @@ describe('consent (RFC §7)', () => {
 
       telemetry.event('undecided', undefined, { category: 'perf' });
       telemetry.event('undeclared', undefined, { category: 'other' });
-      expect(sink.events.map((e) => e.name)).toEqual(['undecided', 'undeclared']);
+      expect(sink.events.map((e) => e.name)).toEqual([
+        'undecided',
+        'undeclared',
+      ]);
 
       telemetry.decide('perf', false);
       telemetry.event('denied', undefined, { category: 'perf' });
-      expect(sink.events.map((e) => e.name)).toEqual(['undecided', 'undeclared']);
+      expect(sink.events.map((e) => e.name)).toEqual([
+        'undecided',
+        'undeclared',
+      ]);
     });
   });
 
@@ -120,7 +128,10 @@ describe('consent (RFC §7)', () => {
 
       telemetry.decide('analytics', false);
       expect(telemetry.pending()).toEqual([]);
-      expect(telemetry.consent()).toEqual({ perf: 'granted', analytics: 'denied' });
+      expect(telemetry.consent()).toEqual({
+        perf: 'granted',
+        analytics: 'denied',
+      });
     });
 
     it('signal-backed requirements grow reactively: pending() is the new delta (SDUI re-consent)', () => {
@@ -152,8 +163,18 @@ describe('consent (RFC §7)', () => {
             sinks: [a, b],
             consent: {
               requirements: [
-                { id: 'analytics-a', category: 'analytics', sink: 'a', purpose: 'x' },
-                { id: 'analytics-b', category: 'analytics', sink: 'b', purpose: 'x' },
+                {
+                  id: 'analytics-a',
+                  category: 'analytics',
+                  sink: 'a',
+                  purpose: 'x',
+                },
+                {
+                  id: 'analytics-b',
+                  category: 'analytics',
+                  sink: 'b',
+                  purpose: 'x',
+                },
               ],
             },
           }),
@@ -186,7 +207,10 @@ describe('consent (RFC §7)', () => {
 
       expect(sink.spans).toEqual([]); // span itself gated out
       expect(sink.events.length).toBe(1);
-      expect(sink.events[0].attrs).toMatchObject({ a: 1, trace_id: expect.any(String) });
+      expect(sink.events[0].attrs).toMatchObject({
+        a: 1,
+        trace_id: expect.any(String),
+      });
     });
   });
 
@@ -224,7 +248,9 @@ describe('consent (RFC §7)', () => {
     });
 
     it('a throwing store breaks neither construction nor decide()', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       try {
         const broken: ConsentStore = {
           get: () => {
@@ -234,7 +260,10 @@ describe('consent (RFC §7)', () => {
             throw new Error('set failed');
           },
         };
-        const { sink, telemetry } = setup({ requirements: [PERF], store: broken });
+        const { sink, telemetry } = setup({
+          requirements: [PERF],
+          store: broken,
+        });
 
         expect(() => telemetry.decide('perf', true)).not.toThrow();
         telemetry.event('e', undefined, { category: 'perf' });
@@ -247,10 +276,12 @@ describe('consent (RFC §7)', () => {
 
   describe('async hydration', () => {
     function deferredStore() {
-      let resolve!: (v: Readonly<Record<string, ConsentDecision>> | null) => void;
-      const stored = new Promise<Readonly<Record<string, ConsentDecision>> | null>(
-        (r) => (resolve = r),
-      );
+      let resolve!: (
+        v: Readonly<Record<string, ConsentDecision>> | null,
+      ) => void;
+      const stored = new Promise<Readonly<
+        Record<string, ConsentDecision>
+      > | null>((r) => (resolve = r));
       const sets: Readonly<Record<string, ConsentDecision>>[] = [];
       const store: ConsentStore = {
         get: () => stored,

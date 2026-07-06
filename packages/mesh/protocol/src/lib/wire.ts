@@ -17,6 +17,12 @@ export type OpEnvelope = {
   readonly hlc: Hlc;
   readonly policyVersion: number;
   readonly ops: readonly StoreOp[];
+  /**
+   * Present only on a MIGRATION envelope: the new `schemaVersion` this envelope
+   * establishes. The relay bumps the room's schema + epoch when it sequences one; normal writes
+   * omit it.
+   */
+  readonly schemaVersion?: number;
 };
 
 /** An envelope the relay has ordered: `seq` is the room-scoped total order. */
@@ -37,6 +43,8 @@ export type HelloMsg = {
   readonly policyVersion: number;
   /** Last room seq this client has applied — enables the delta answer on reconnect. */
   readonly seq?: number;
+  /** The data shape this client speaks, older-than-room is rejected `schema`. */
+  readonly schemaVersion?: number;
 };
 
 export type ClientEnvMsg = {
@@ -65,7 +73,7 @@ export type ClientMsg =
   | ClientPresenceMsg
   | ClientSignalMsg;
 
-/** The tri-state join answer (RFC §6), plus the current presence roster. */
+/** The tri-state join answer, plus the current presence roster. */
 export type WelcomeMsg = {
   readonly t: 'welcome';
   readonly room: string;
@@ -73,6 +81,8 @@ export type WelcomeMsg = {
   /** Room-instance nonce: changes when a room is recreated (relay restart, DO eviction),
    *  so clients know their seq watermark belongs to a dead seq space. */
   readonly epoch: string;
+  /** The room's current data shape. */
+  readonly schemaVersion: number;
   readonly peers: readonly PresenceState[];
   /** Origins currently in the room (membership ≠ presence) — the P2P bootstrap roster. */
   readonly members: readonly string[];
@@ -98,7 +108,7 @@ export type ServerPresenceMsg = {
 export type RejectMsg = {
   readonly t: 'reject';
   readonly room: string;
-  readonly reason: 'proto' | 'policy-version' | 'unauthorized';
+  readonly reason: 'proto' | 'policy-version' | 'unauthorized' | 'schema';
   readonly expected?: number;
 };
 

@@ -1,5 +1,5 @@
 // Attributes are plain key/values the consumer passes — the core sends what you
-// give it (privacy is a consumer policy, applied via AttributePolicy; see RFC §6).
+// give it (privacy is a consumer policy, applied via AttributePolicy).
 
 export type AttrValue = string | number | boolean | null | undefined;
 export type Attrs = Record<string, AttrValue>;

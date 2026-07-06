@@ -64,7 +64,8 @@ const set = (path: (string | number)[], next: unknown): StoreOp => ({
   next,
 });
 
-const last = (sock: ReturnType<typeof socket>) => sock.sent[sock.sent.length - 1];
+const last = (sock: ReturnType<typeof socket>) =>
+  sock.sent[sock.sent.length - 1];
 
 describe('createRelay', () => {
   it('answers up-to-date on a fresh room; a later joiner gets the seeded snapshot', () => {
@@ -72,7 +73,11 @@ describe('createRelay', () => {
     const a = client(relay, 'wa', 'oa');
 
     a.hello();
-    expect(last(a.sock)).toMatchObject({ t: 'welcome', mode: 'up-to-date', seq: 0 });
+    expect(last(a.sock)).toMatchObject({
+      t: 'welcome',
+      mode: 'up-to-date',
+      seq: 0,
+    });
 
     a.env([set([], { todos: ['x'] })]);
     a.env([set(['title'], 'hi')]);
@@ -97,8 +102,12 @@ describe('createRelay', () => {
     a.env([set(['x'], 1)]);
     a.env([set(['x'], 2)]);
 
-    const seqsAtA = a.sock.sent.filter((m) => m.t === 'env').map((m) => m.env.seq);
-    const seqsAtB = b.sock.sent.filter((m) => m.t === 'env').map((m) => m.env.seq);
+    const seqsAtA = a.sock.sent
+      .filter((m) => m.t === 'env')
+      .map((m) => m.env.seq);
+    const seqsAtB = b.sock.sent
+      .filter((m) => m.t === 'env')
+      .map((m) => m.env.seq);
     expect(seqsAtA).toEqual([1, 2]);
     expect(seqsAtB).toEqual([1, 2]);
   });
@@ -116,7 +125,9 @@ describe('createRelay', () => {
     const welcome = last(b.sock);
     expect(welcome).toMatchObject({ t: 'welcome', mode: 'delta', seq: 3 });
     expect(
-      (welcome as { envs: { seq: number }[] }).envs.map((e) => e.seq),
+      (welcome as unknown as { envs: { seq: number }[] }).envs.map(
+        (e) => e.seq,
+      ),
     ).toEqual([2, 3]);
   });
 
@@ -144,11 +155,31 @@ describe('createRelay', () => {
     const sock = socket();
     const conn = relay.connect(sock, { writer: 'w' });
 
-    conn.receive({ t: 'hello', room: 'r', origin: 'o', proto: 99, policyVersion: 3 });
-    expect(last(sock)).toMatchObject({ t: 'reject', reason: 'proto', expected: MESH_PROTO_VERSION });
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: 99,
+      policyVersion: 3,
+    });
+    expect(last(sock)).toMatchObject({
+      t: 'reject',
+      reason: 'proto',
+      expected: MESH_PROTO_VERSION,
+    });
 
-    conn.receive({ t: 'hello', room: 'r', origin: 'o', proto: MESH_PROTO_VERSION, policyVersion: 0 });
-    expect(last(sock)).toMatchObject({ t: 'reject', reason: 'policy-version', expected: 3 });
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
+    expect(last(sock)).toMatchObject({
+      t: 'reject',
+      reason: 'policy-version',
+      expected: 3,
+    });
   });
 
   it('tripwire: a policy violation ejects the writer, closes it, blacklists rejoin', () => {
@@ -167,7 +198,9 @@ describe('createRelay', () => {
     expect(violations).toEqual([
       { writer: 'wb', reason: 'can-write', path: ['admin', 'x'] },
     ]);
-    expect(good.sock.sent.some((m) => m.t === 'eject' && m.writer === 'wb')).toBe(true);
+    expect(
+      good.sock.sent.some((m) => m.t === 'eject' && m.writer === 'wb'),
+    ).toBe(true);
     expect(bad.sock.closed).toBe(true);
 
     bad.env([set(['ok'], 1)]);
@@ -175,7 +208,10 @@ describe('createRelay', () => {
 
     const again = client(relay, 'wb', 'ob2');
     again.hello();
-    expect(last(again.sock)).toMatchObject({ t: 'reject', reason: 'unauthorized' });
+    expect(last(again.sock)).toMatchObject({
+      t: 'reject',
+      reason: 'unauthorized',
+    });
   });
 
   it('tripwire: an envelope claiming a foreign writer is a writer-mismatch ejection', () => {
@@ -232,7 +268,9 @@ describe('createRelay', () => {
 
     a.conn.disconnect();
     expect(
-      b.sock.sent.some((m) => m.t === 'presence' && m.gone && m.peer.origin === 'oa'),
+      b.sock.sent.some(
+        (m) => m.t === 'presence' && m.gone && m.peer.origin === 'oa',
+      ),
     ).toBe(true);
   });
 });
@@ -251,17 +289,23 @@ describe('createRelay: reconnection edges', () => {
     expect(old.sock.closed).toBe(true);
 
     fresh.conn.receive({ t: 'presence', room: 'r', data: { here: true } });
-    const gonesBefore = observer.sock.sent.filter((m) => m.t === 'presence' && m.gone).length;
+    const gonesBefore = observer.sock.sent.filter(
+      (m) => m.t === 'presence' && m.gone,
+    ).length;
 
     old.conn.disconnect();
 
-    const gonesAfter = observer.sock.sent.filter((m) => m.t === 'presence' && m.gone).length;
+    const gonesAfter = observer.sock.sent.filter(
+      (m) => m.t === 'presence' && m.gone,
+    ).length;
     expect(gonesAfter).toBe(gonesBefore);
 
     const roster = client(relay, 'wr', 'or');
     roster.hello();
     expect(
-      (last(roster.sock) as { peers: readonly { origin: string }[] }).peers.map((p) => p.origin),
+      (last(roster.sock) as { peers: readonly { origin: string }[] }).peers.map(
+        (p) => p.origin,
+      ),
     ).toEqual(['oa']);
   });
 
@@ -272,8 +316,12 @@ describe('createRelay: reconnection edges', () => {
     const b = client(relay, 'wb', 'ob');
     b.hello();
 
-    expect(a.sock.sent.some((m) => m.t === 'member' && m.origin === 'ob')).toBe(true);
-    expect((last(b.sock) as { members: string[] }).members).toEqual(['oa']);
+    expect(a.sock.sent.some((m) => m.t === 'member' && m.origin === 'ob')).toBe(
+      true,
+    );
+    expect((last(b.sock) as unknown as { members: string[] }).members).toEqual([
+      'oa',
+    ]);
 
     a.conn.receive({ t: 'signal', room: 'r', to: 'ob', data: { offer: 1 } });
     const sig = b.sock.sent.find((m) => m.t === 'signal');
@@ -281,7 +329,9 @@ describe('createRelay: reconnection edges', () => {
     expect(a.sock.sent.some((m) => m.t === 'signal')).toBe(false);
 
     a.conn.disconnect();
-    expect(b.sock.sent.some((m) => m.t === 'member' && m.gone && m.origin === 'oa')).toBe(true);
+    expect(
+      b.sock.sent.some((m) => m.t === 'member' && m.gone && m.origin === 'oa'),
+    ).toBe(true);
   });
 
   it('welcome carries a stable epoch per room instance', () => {
@@ -307,7 +357,10 @@ describe('createRelay: reconnection edges', () => {
 
 describe('createRelay: persistence seam', () => {
   it('onCommit fires per sequenced envelope with the folded room state', () => {
-    const commits: { env: { seq: number }; state: { seq: number; root: unknown } }[] = [];
+    const commits: {
+      env: { seq: number };
+      state: { seq: number; root: unknown };
+    }[] = [];
     const relay = createRelay({
       onCommit: (_room, env, state) => commits.push({ env, state }),
     });
@@ -335,7 +388,12 @@ describe('createRelay: persistence seam', () => {
   });
 
   it('round-trips a room through onCommit capture and hydrate on a fresh relay', () => {
-    let saved: { seq: number; epoch: string; root: unknown; journal: SeqEnvelope[] } = {
+    let saved: {
+      seq: number;
+      epoch: string;
+      root: unknown;
+      journal: SeqEnvelope[];
+    } = {
       seq: 0,
       epoch: '',
       root: undefined,
@@ -361,8 +419,17 @@ describe('createRelay: persistence seam', () => {
     const back = client(revived, 'wa', 'oa');
     back.hello(2);
     const welcome = last(back.sock);
-    expect(welcome).toMatchObject({ t: 'welcome', mode: 'delta', seq: 3, epoch: saved.epoch });
-    expect((welcome as { envs: { seq: number }[] }).envs.map((e) => e.seq)).toEqual([3]);
+    expect(welcome).toMatchObject({
+      t: 'welcome',
+      mode: 'delta',
+      seq: 3,
+      epoch: saved.epoch,
+    });
+    expect(
+      (welcome as unknown as { envs: { seq: number }[] }).envs.map(
+        (e) => e.seq,
+      ),
+    ).toEqual([3]);
 
     // a fresh joiner gets the restored snapshot
     const fresh = client(revived, 'wf', 'of');
@@ -376,7 +443,9 @@ describe('createRelay: persistence seam', () => {
 
     // and writes continue the restored seq space
     back.env([set(['v'], 3)]);
-    const envs = fresh.sock.sent.filter((m) => m.t === 'env').map((m) => m.env.seq);
+    const envs = fresh.sock.sent
+      .filter((m) => m.t === 'env')
+      .map((m) => m.env.seq);
     expect(envs).toEqual([4]);
   });
 
@@ -386,7 +455,11 @@ describe('createRelay: persistence seam', () => {
 
     const a = client(relay, 'wa', 'oa');
     a.hello(3);
-    const welcome = last(a.sock) as { mode: string; epoch: string; root?: unknown };
+    const welcome = last(a.sock) as {
+      mode: string;
+      epoch: string;
+      root?: unknown;
+    };
     expect(welcome).toMatchObject({ mode: 'snapshot', seq: 5, root: { v: 5 } });
     expect(welcome.epoch.length).toBeGreaterThan(0);
   });
@@ -427,7 +500,11 @@ describe('createRelay: persistence seam', () => {
     a.hello(2);
     const welcome = last(a.sock);
     expect(welcome).toMatchObject({ mode: 'delta' });
-    expect((welcome as { envs: { seq: number }[] }).envs.map((e) => e.seq)).toEqual([3, 4]);
+    expect(
+      (welcome as unknown as { envs: { seq: number }[] }).envs.map(
+        (e) => e.seq,
+      ),
+    ).toEqual([3, 4]);
   });
 });
 
@@ -485,7 +562,7 @@ describe('pathPrefixAcl', () => {
         },
       });
     const envsAt = (c: ReturnType<typeof mk>) =>
-      c.sock.sent.filter((m) => m.t === 'env') as {
+      c.sock.sent.filter((m) => m.t === 'env') as unknown as {
         t: 'env';
         env: { seq: number; ops: StoreOp[] };
       }[];
@@ -505,5 +582,115 @@ describe('pathPrefixAcl', () => {
     writeTo(c, 'r2', [set(['y'], 2)], 1);
     expect(envsAt(a).some((e) => e.env.ops[0].path[0] === 'y')).toBe(false);
     expect(envsAt(b)[0].env.seq).toBe(envsAt(c)[0].env.seq);
+  });
+});
+
+describe('createRelay — schemaVersion + migration', () => {
+  const welcomeOf = (sock: ReturnType<typeof socket>) =>
+    sock.sent.find((m) => m.t === 'welcome') as
+      | Extract<ServerMsg, { t: 'welcome' }>
+      | undefined;
+
+  const migrate = (
+    relay: ReturnType<typeof createRelay>,
+    room: string,
+    origin: string,
+    schemaVersion: number,
+    root: unknown,
+  ) => {
+    const c = client(relay, 'migrator', origin);
+    // a migrator declares the new schema (newer than the room → allowed in) and emits the bump
+    c.conn.receive({
+      t: 'hello',
+      room,
+      origin,
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+      schemaVersion,
+    });
+    c.env([set([], root)], { schemaVersion });
+    return c;
+  };
+
+  it('a migration envelope bumps the room schemaVersion (seen in a later welcome)', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['title'], 'v0')]);
+
+    migrate(relay, 'r', 'omig', 1, { title: 'v1', extra: true });
+
+    const late = client(relay, 'wl', 'ol');
+    late.hello();
+    expect(welcomeOf(late.sock)?.schemaVersion).toBe(1);
+    expect((welcomeOf(late.sock) as { mode: string }).mode).toBe('snapshot');
+  });
+
+  it('the migration bumps the epoch — the watermark-death signal clients reset on', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['title'], 'v0')]);
+    const epochBefore = welcomeOf(a.sock)?.epoch;
+
+    migrate(relay, 'r', 'omig', 1, { title: 'v1' });
+
+    const back = client(relay, 'wb', 'ob');
+    back.hello();
+    const w = welcomeOf(back.sock);
+    expect(w?.epoch).not.toBe(epochBefore); // epoch changed → clients discard their old watermark
+    expect(w?.schemaVersion).toBe(1);
+    // the migration envelope rode the log, so it is in the room's history for any resumer
+    expect(relay.room('r')?.journal ?? 0).toBeGreaterThan(0);
+  });
+
+  it('rejects a client older than the room schema with reason "schema"', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    migrate(relay, 'r', 'omig', 2, { title: 'v2' });
+
+    const old = client(relay, 'wo', 'oo');
+    old.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'oo',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+      schemaVersion: 1, // older than the room's 2
+    });
+    const rej = old.sock.sent.find((m) => m.t === 'reject') as
+      | Extract<ServerMsg, { t: 'reject' }>
+      | undefined;
+    expect(rej?.reason).toBe('schema');
+    expect(rej?.expected).toBe(2);
+  });
+
+  it('lets an equal-or-newer client in', () => {
+    const relay = createRelay();
+    migrate(relay, 'r', 'omig', 1, { title: 'v1' });
+    const c = client(relay, 'wc', 'oc');
+    c.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'oc',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+      schemaVersion: 1,
+    });
+    expect(welcomeOf(c.sock)).toBeDefined();
+    expect(c.sock.sent.some((m) => m.t === 'reject')).toBe(false);
+  });
+
+  it('hydrate restores the schemaVersion', () => {
+    const relay = createRelay();
+    relay.hydrate('r', {
+      seq: 5,
+      root: { title: 'restored' },
+      schemaVersion: 3,
+    });
+    const c = client(relay, 'wc', 'oc');
+    c.hello();
+    expect(welcomeOf(c.sock)?.schemaVersion).toBe(3);
   });
 });

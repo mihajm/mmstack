@@ -1,8 +1,7 @@
 import type { Key, OpEnvelope, StoreOp } from './wire';
 
 /**
- * The principal behind a connection, as authenticated by the adapter (the relay never mints
- * identity — RFC §3). `kind` distinguishes non-human peers: an agent is a user (§0), just one
+ * The principal behind a connection, as authenticated by the adapter. `kind` distinguishes non-human peers: an agent is a user, just one
  * whose policy is usually narrower.
  */
 export type PrincipalCtx = {
@@ -12,7 +11,7 @@ export type PrincipalCtx = {
 };
 
 /**
- * Pure, deterministic, versioned validation (RFC §7). Run symmetrically on emit and on
+ * Pure, deterministic, versioned validation. Run symmetrically on emit and on
  * apply: honest peers never emit invalid ops, so any violation observed on the wire is a
  * buggy or malicious writer — tripwire semantics eject it deterministically. Never skip an
  * op mid-log.
@@ -27,7 +26,13 @@ export type OpPolicy = {
 
 export type PolicyViolation = {
   readonly writer: string;
-  readonly reason: 'can-write' | 'validate' | 'writer-mismatch' | 'proto' | 'ops-limit' | 'rate';
+  readonly reason:
+    | 'can-write'
+    | 'validate'
+    | 'writer-mismatch'
+    | 'proto'
+    | 'ops-limit'
+    | 'rate';
   readonly path?: readonly Key[];
 };
 
@@ -68,7 +73,10 @@ export function pathPrefixAcl(rules: readonly PathAclRule[]): OpPolicy {
       rules.some((rule) => {
         if (rule.prefix.length > path.length) return false;
         for (let i = 0; i < rule.prefix.length; i++) {
-          if (rule.prefix[i] !== '*' && String(rule.prefix[i]) !== String(path[i])) {
+          if (
+            rule.prefix[i] !== '*' &&
+            String(rule.prefix[i]) !== String(path[i])
+          ) {
             return false;
           }
         }

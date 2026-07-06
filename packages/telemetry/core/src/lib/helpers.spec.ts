@@ -1,12 +1,12 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { memorySink } from './memory-sink';
-import { provideTelemetry } from './provide';
-import { TELEMETRY } from './telemetry';
 import { TelemetryHandles } from './handles';
 import { traced, tracedCallback } from './helpers';
-import { tracedSignal } from './traced-signal';
+import { memorySink } from './memory-sink';
+import { provideTelemetry } from './provide';
 import { type SpanHandle } from './sink';
+import { TELEMETRY } from './telemetry';
+import { tracedSignal } from './traced-signal';
 
 describe('telemetry-core hook-ins', () => {
   function setup() {
@@ -20,9 +20,7 @@ describe('telemetry-core hook-ins', () => {
   describe('correlation (auto trace-id injection)', () => {
     it('injects trace_id/span_id into an event emitted inside a span', () => {
       const { sink, telemetry } = setup();
-      telemetry.span('op', () =>
-        telemetry.event('clicked', { btn: 'go' }),
-      );
+      telemetry.span('op', () => telemetry.event('clicked', { btn: 'go' }));
 
       const ev = sink.events.find((e) => e.name === 'clicked')!;
       const sp = sink.spans.find((s) => s.name === 'op')!;
@@ -133,7 +131,7 @@ describe('telemetry-core hook-ins', () => {
       expect(sig.causedBy()).toBeUndefined(); // cleared, not sticky
     });
 
-    it('does NOT attribute a post-await write: capture is synchronous-only (§8.2)', async () => {
+    it('does NOT attribute a post-await write: capture is synchronous-only', async () => {
       const { telemetry } = setup();
       const sig = TestBed.runInInjectionContext(() => tracedSignal(0));
 

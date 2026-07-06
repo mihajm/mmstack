@@ -1,7 +1,8 @@
 import { computed, signal, untracked } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { forkStore } from './fork-store';
-import { invertBatch, opLog, type OpBatch, type StoreOp } from './op-log';
+import { applyOps, diffOps, invertBatch, opLog, type OpBatch, type StoreOp } from './op-log';
+import { opaque } from './opaque';
 import { mutableStore, store } from './store';
 
 type Model = {
@@ -371,5 +372,205 @@ describe('opLog', () => {
       TestBed.tick();
       expect(fromB.length).toBe(1); // b's own writes still emit
     });
+  });
+});
+
+describe('applyOps (pure application)', () => {
+  it('replaces the whole root on a path-[] set', () => {
+    expect(applyOps({ a: 1 }, [{ kind: 'set', path: [], next: { b: 2 } }])).toEqual({ b: 2 });
+  });
+
+  it('ignores a path-[] delete (a root delete is meaningless)', () => {
+    const root = { a: 1 };
+    expect(applyOps(root, [{ kind: 'delete', path: [], prev: root }])).toEqual({ a: 1 });
+  });
+
+  it('returns the same root reference for an empty op list', () => {
+    const root = { a: 1 };
+    expect(applyOps(root, [])).toBe(root);
+  });
+
+  it('vivifies a missing object for a string key and an array for a numeric index', () => {
+    expect(applyOps({}, [{ kind: 'set', path: ['deep', 'list', 0, 'title'], next: 'hi' }])).toEqual({
+      deep: { list: [{ title: 'hi' }] },
+    });
+  });
+
+  it('accepts both a bare op list and an OpBatch', () => {
+    const ops: StoreOp[] = [{ kind: 'set', path: ['a'], next: 2 }];
+    const batch: OpBatch = { origin: 'x', version: 1, ops };
+    expect(applyOps({ a: 1 }, ops)).toEqual({ a: 2 });
+    expect(applyOps({ a: 1 }, batch)).toEqual({ a: 2 });
+  });
+
+  it('applies ops in order — the last write on a path wins', () => {
+    expect(
+      applyOps({}, [
+        { kind: 'set', path: ['a'], next: 1 },
+        { kind: 'set', path: ['a'], next: 2 },
+      ]),
+    ).toEqual({ a: 2 });
+  });
+
+  it('deletes a nested key, leaving it absent (not undefined)', () => {
+    const out = applyOps({ a: { b: 1, c: 2 } }, [{ kind: 'delete', path: ['a', 'b'], prev: 1 }]);
+    expect('b' in (out as { a: object }).a).toBe(false);
+    expect(out).toEqual({ a: { c: 2 } });
+  });
+});
+
+describe('diffOps (pure diff)', () => {
+  const roundTrips = (prev: unknown, next: unknown) =>
+    expect(applyOps(prev, diffOps(prev, next))).toEqual(next);
+
+  it('is empty for equal roots (same ref, and fresh-ref equal values)', () => {
+    const shared = { a: 1 };
+    expect(diffOps(shared, shared)).toEqual([]);
+    expect(diffOps({ a: { b: 1 } }, { a: { b: 1 } })).toEqual([]); // structural equal → no ops
+  });
+
+  it('emits a whole-unit set for a container type change', () => {
+    expect(diffOps({ v: { d: 1 } }, { v: [1, 2] })).toEqual([
+      { kind: 'set', path: ['v'], prev: { d: 1 }, next: [1, 2] },
+    ]);
+    expect(diffOps({ v: [1] }, { v: { d: 1 } })).toEqual([
+      { kind: 'set', path: ['v'], prev: [1], next: { d: 1 } },
+    ]);
+    expect(diffOps({ v: 5 }, { v: { d: 1 } })).toEqual([
+      { kind: 'set', path: ['v'], prev: 5, next: { d: 1 } },
+    ]);
+  });
+
+  it('treats null transitions as leaf sets', () => {
+    expect(diffOps({ v: null }, { v: { a: 1 } })).toEqual([
+      { kind: 'set', path: ['v'], prev: null, next: { a: 1 } },
+    ]);
+    expect(diffOps({ v: { a: 1 } }, { v: null })).toEqual([
+      { kind: 'set', path: ['v'], prev: { a: 1 }, next: null },
+    ]);
+  });
+
+  it('treats an opaque value as an indivisible leaf (no descent)', () => {
+    const before = opaque({ theme: 'dark', nested: { a: 1 } });
+    const after = opaque({ theme: 'light', nested: { a: 1 } });
+    const ops = diffOps({ cfg: before }, { cfg: after });
+    expect(ops).toEqual([{ kind: 'set', path: ['cfg'], prev: before, next: after }]);
+  });
+
+  it('same-length array reorder emits per-index value ops (identity-blind)', () => {
+    const ops = diffOps({ arr: ['a', 'b'] }, { arr: ['b', 'a'] });
+    expect(ops).toEqual([
+      { kind: 'set', path: ['arr', 0], prev: 'a', next: 'b' },
+      { kind: 'set', path: ['arr', 1], prev: 'b', next: 'a' },
+    ]);
+  });
+
+  it('an array length change is one whole-array set (grow and shrink)', () => {
+    expect(diffOps({ a: [1, 2] }, { a: [1, 2, 3] })).toEqual([
+      { kind: 'set', path: ['a'], prev: [1, 2], next: [1, 2, 3] },
+    ]);
+    expect(diffOps({ a: [1, 2, 3] }, { a: [1] })).toEqual([
+      { kind: 'set', path: ['a'], prev: [1, 2, 3], next: [1] },
+    ]);
+  });
+
+  it('PROPERTY: applyOps(prev, diffOps(prev, next)) reconstructs next', () => {
+    const cases: [unknown, unknown][] = [
+      [{ a: 1 }, { a: 2, b: 3 }],
+      [{ a: 1, b: 2 }, { a: 1 }],
+      [{ n: { x: { y: 1 } } }, { n: { x: { y: 2 }, z: 9 } }],
+      [{ arr: [{ t: 'a' }, { t: 'b' }] }, { arr: [{ t: 'a' }, { t: 'B' }] }],
+      [{ arr: [1, 2] }, { arr: [1, 2, 3] }],
+      [{ v: { d: 1 } }, { v: 5 }],
+      [{ v: null }, { v: { a: 1 } }],
+    ];
+    for (const [prev, next] of cases) roundTrips(prev, next);
+  });
+});
+
+describe('invertBatch (deeper)', () => {
+  it('inverts a mixed batch (add + set + delete) in reverse order', () => {
+    const forward: StoreOp[] = [
+      { kind: 'set', path: ['added'], next: 'new' }, // an add (no prev)
+      { kind: 'set', path: ['edited'], next: 'B', prev: 'A' }, // a change
+      { kind: 'delete', path: ['removed'], prev: 'gone' }, // a delete
+    ];
+    expect(invertBatch(forward)).toEqual([
+      { kind: 'set', path: ['removed'], next: 'gone', prev: undefined }, // delete → restore, first (reversed)
+      { kind: 'set', path: ['edited'], next: 'A', prev: 'B' }, // change → swap
+      { kind: 'delete', path: ['added'], prev: 'new' }, // add → delete
+    ]);
+  });
+
+  it('apply → invert → invert returns to the applied state (undo of undo = redo)', () => {
+    const s = TestBed.runInInjectionContext(() => store<{ a: number }>({ a: 1 }));
+    const log = TestBed.runInInjectionContext(() => opLog(s));
+    const batch: StoreOp[] = [{ kind: 'set', path: ['a'], next: 5, prev: 1 }];
+
+    log.apply(batch);
+    expect(untracked(s).a).toBe(5);
+    log.apply(invertBatch(batch)); // undo
+    expect(untracked(s).a).toBe(1);
+    log.apply(invertBatch(invertBatch(batch))); // redo
+    expect(untracked(s).a).toBe(5);
+  });
+});
+
+describe('opLog — edge cases', () => {
+  it('flush() with nothing pending is a no-op (no batch, no version consumed)', () => {
+    const { s, log, batches } = setup();
+    log.flush();
+    log.flush();
+    expect(batches).toEqual([]);
+    s.user.age.set(31);
+    log.flush();
+    expect(batches.length).toBe(1);
+    expect(batches[0].version).toBe(1); // the earlier empty flushes never consumed a version
+  });
+
+  it('tolerates a spurious write: a fresh-ref but deep-equal root emits nothing', () => {
+    const { s, batches } = setup();
+    // deep-clone-and-set: new references, identical values → the diff finds no leaf change
+    s.set(structuredClone(untracked(s)));
+    TestBed.tick();
+    expect(batches).toEqual([]);
+  });
+
+  it('an applied batch consumes no emission version', () => {
+    const { s, log, batches } = setup();
+    log.apply([{ kind: 'set', path: ['user', 'age'], next: 99, prev: 30 }]);
+    TestBed.tick();
+    s.user.name.set('after'); // the first REAL emission
+    TestBed.tick();
+    expect(batches.length).toBe(1);
+    expect(batches[0].version).toBe(1); // apply did not burn version 1
+  });
+
+  it('emits one whole-unit op for an opaque leaf change', () => {
+    const before = opaque({ k: 1 });
+    const s = TestBed.runInInjectionContext(() => store<{ cfg: typeof before }>({ cfg: before }));
+    const batches: OpBatch[] = [];
+    TestBed.runInInjectionContext(() => opLog(s).subscribe((b) => batches.push(b)));
+
+    const after = opaque({ k: 2 });
+    s.cfg.set(after);
+    TestBed.tick();
+    expect(batches[0].ops).toEqual([{ kind: 'set', path: ['cfg'], prev: before, next: after }]);
+  });
+
+  it('a pending local write is never swallowed by a concurrent apply (survives + emits)', () => {
+    const { s, log, batches } = setup();
+    s.user.name.set('local'); // pending in this tick
+    log.apply([{ kind: 'set', path: ['user', 'age'], next: 99, prev: 30 }]); // remote lands first
+    TestBed.tick();
+
+    // durable invariant (independent of WHEN the local flush happens): the local write
+    // is present in state AND was emitted; the applied op never echoed
+    expect(untracked(s.user.name)).toBe('local');
+    expect(untracked(s.user.age)).toBe(99);
+    const localOps = batches.flatMap((b) => b.ops).filter((o) => o.path.join('.') === 'user.name');
+    expect(localOps).toEqual([{ kind: 'set', path: ['user', 'name'], prev: 'ann', next: 'local' }]);
+    const ageEmitted = batches.flatMap((b) => b.ops).some((o) => o.path.join('.') === 'user.age');
+    expect(ageEmitted).toBe(false); // the applied (remote) op produced no echo
   });
 });

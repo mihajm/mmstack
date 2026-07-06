@@ -10,7 +10,7 @@ export type CausalSignal<T> = WritableSignal<T> & {
 /**
  * A writable signal that records the **active span at each write**, so a
  * downstream reactive consumer (e.g. a connector refetch) can attribute itself
- * to the interaction that caused it (see RFC §8.2). Call in an injection context.
+ * to the interaction that caused it. Call in an injection context.
  *
  * Capture is **synchronous-only** and last-writer-wins: the cause is the span
  * active during the `set`/`update` call. A write after an `await` inside a

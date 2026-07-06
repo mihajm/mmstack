@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { createHlcClock } from './hlc';
 import { applyOps, type StoreOp } from './op-log';
 import {
   createConvergingApply,
@@ -544,5 +545,284 @@ describe('opSync', () => {
     const wm = syncA.watermark();
     expect(wm[syncA.origin]).toBe(1);
     expect(wm['r']).toBe(4);
+  });
+});
+
+const del = (path: (string | number)[], prev: unknown): StoreOp => ({ kind: 'delete', path, prev });
+
+describe('createConvergingApply — deletes, reset, multi-op', () => {
+  it('a newer delete removes the key; an older delete arriving later is dropped', () => {
+    const conv = createConvergingApply();
+    let root: unknown = { a: 1 };
+    root = applyOps(root, conv.ingest(env([set(['a'], 5)], { p: 1, writer: 'x' })));
+    root = applyOps(root, conv.ingest(env([del(['a'], 5)], { p: 2, writer: 'y' })));
+    expect('a' in (root as object)).toBe(false); // newer delete wins
+
+    const conv2 = createConvergingApply();
+    let r2: unknown = { a: 1 };
+    r2 = applyOps(r2, conv2.ingest(env([set(['a'], 9)], { p: 5, writer: 'x' })));
+    r2 = applyOps(r2, conv2.ingest(env([del(['a'], 1)], { p: 2, writer: 'y' })));
+    expect(r2).toEqual({ a: 9 }); // older delete dropped
+  });
+
+  it('a set and a concurrent newer delete converge in BOTH arrival orders', () => {
+    const setE = env([set(['a'], 'v')], { p: 1, writer: 'x' });
+    const delE = env([del(['a'], 'orig')], { p: 2, writer: 'y' });
+    const run = (order: OpEnvelope[]) => {
+      const c = createConvergingApply();
+      let r: unknown = { a: 'orig' };
+      for (const e of order) r = applyOps(r, c.ingest(e));
+      return r;
+    };
+    expect(run([setE, delE])).toEqual(run([delE, setE]));
+    expect('a' in (run([setE, delE]) as object)).toBe(false);
+  });
+
+  it('reset() clears registers so a previously-dominated older op applies again', () => {
+    const conv = createConvergingApply();
+    conv.ingest(env([set(['a'], 2)], { p: 5, writer: 'x' })); // register a newer winner
+    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual([]); // dominated
+
+    conv.reset();
+    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual([set(['a'], 1)]);
+  });
+
+  it('applies multiple ops in one envelope', () => {
+    const conv = createConvergingApply();
+    expect(conv.ingest(env([set(['a'], 1), set(['b'], 2)], { p: 1, writer: 'x' }))).toEqual([
+      set(['a'], 1),
+      set(['b'], 2),
+    ]);
+  });
+});
+
+describe('rebaseOps — multi-batch, empty edges, deletes', () => {
+  it('rebases MULTIPLE pending batches in order onto the remote', () => {
+    const base = { a: 0, b: 0, c: 0 };
+    const p1 = [set(['a'], 1, 0)];
+    const p2 = [set(['b'], 2, 0)];
+    const local = applyOps(applyOps(base, p1), p2);
+    const out = rebaseOps(local, [p1, p2], [set(['c'], 9, 0)]);
+    expect(out.root).toEqual({ a: 1, b: 2, c: 9 });
+  });
+
+  it('empty pending → root becomes base + remote', () => {
+    expect(rebaseOps({ a: 0 }, [], [set(['a'], 5, 0)]).root).toEqual({ a: 5 });
+  });
+
+  it('empty remote → pending re-applied unchanged', () => {
+    expect(rebaseOps({ a: 1 }, [[set(['a'], 1, 0)]], []).root).toEqual({ a: 1 });
+  });
+
+  it('a pending delete composes with a disjoint remote edit', () => {
+    const base = { a: 1, b: 2 };
+    const pending = [del(['a'], 1)];
+    const local = applyOps(base, pending);
+    const out = rebaseOps(local, [pending], [set(['b'], 20, 2)]);
+    expect(out.root).toEqual({ b: 20 }); // a deleted (pending), b updated (remote)
+  });
+});
+
+describe('opSync — hydrate / seed / snapshot (boot & reconnect seam)', () => {
+  it('hydrate adopts the remote root and re-applies uncovered local pending on top', () => {
+    const out = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; keep: string }>({ v: 'init', keep: 'base' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      s.set({ v: 'offline', keep: 'base' }); // offline edit to v
+      sync.flush(); // recentLocal now holds version 1
+      sync.hydrate({ v: 'init', keep: 'from-room' }, {}); // remote changed a different field
+      return s();
+    });
+    expect(out).toEqual({ v: 'offline', keep: 'from-room' }); // both preserved (merge, not clobber)
+  });
+
+  it('hydrate drops pending the incoming watermark already covers (acked, not duplicated)', () => {
+    const out = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string }>({ v: 'init' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      s.set({ v: 'offline' });
+      sync.flush(); // version 1
+      sync.hydrate({ v: 'from-room' }, { o1: 1 }); // watermark says my v1 is already applied
+      return s();
+    });
+    expect(out.v).toBe('from-room'); // offline write not re-applied — the room already has it
+  });
+
+  it('hydrate folds the incoming watermark (max per origin)', () => {
+    const wm = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: number }>({ v: 0 });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      sync.hydrate({ v: 0 }, { r1: 5, r2: 3 });
+      return sync.watermark();
+    });
+    expect(wm['r1']).toBe(5);
+    expect(wm['r2']).toBe(3);
+  });
+
+  it('seed emits a whole-root set of the current value', () => {
+    const emitted = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; n: number }>({ v: 'x', n: 1 });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const out: OpEnvelope[] = [];
+      sync.subscribe((e) => out.push(e));
+      sync.seed();
+      return out;
+    });
+    expect(emitted.length).toBe(1);
+    expect(emitted[0].ops).toEqual([{ kind: 'set', path: [], next: { v: 'x', n: 1 } }]);
+  });
+
+  it('snapshot returns the current root and per-origin watermark', () => {
+    const snap = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; x?: number }>({ v: 'init' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      s.set({ v: 'edited' });
+      sync.flush();
+      sync.receive(env([set(['x'], 1)], { p: 9, writer: 'r', origin: 'r', version: 3 }));
+      return sync.snapshot();
+    });
+    expect(snap.root).toMatchObject({ v: 'edited' });
+    expect(snap.wm['o1']).toBe(1);
+    expect(snap.wm['r']).toBe(3);
+  });
+});
+
+describe('opSync — durability & watermark invariants (locked before the branch refactor)', () => {
+  it('a pending local write survives a remote that arrives first — never swallowed', () => {
+    const { emitted, final } = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; other: string }>({ v: 'init', other: 'base' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const emitted: OpEnvelope[] = [];
+      sync.subscribe((e) => emitted.push(e));
+      s.set({ v: 'init', other: 'local' }); // pending local (a different field)
+      sync.receive(env([set(['v'], 'remote', 'init')], { p: 5, writer: 'r', origin: 'r', version: 1 }));
+      sync.flush();
+      return { emitted, final: s() };
+    });
+    // durable invariant, framed to survive the local-pending-as-branch refactor:
+    expect(final.other).toBe('local'); // the local write is in state
+    expect(final.v).toBe('remote'); // the remote applied
+    expect(emitted.some((e) => e.ops.some((o) => o.path[0] === 'other'))).toBe(true); // and it emitted
+  });
+
+  it('version dedup: an older or duplicate envelope for a known origin is ignored (invariant 4)', () => {
+    const out = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: number }>({ v: 0 });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      sync.receive(env([set(['v'], 3)], { p: 3, writer: 'r', origin: 'r', version: 3 }));
+      const afterV3 = s().v;
+      sync.receive(env([set(['v'], 99)], { p: 4, writer: 'r', origin: 'r', version: 3 })); // duplicate version
+      sync.receive(env([set(['v'], 88)], { p: 5, writer: 'r', origin: 'r', version: 1 })); // older version
+      return { afterV3, finalV: s().v, wm: sync.watermark() };
+    });
+    expect(out.afterV3).toBe(3);
+    expect(out.finalV).toBe(3); // both the duplicate and the older envelope were ignored
+    expect(out.wm['r']).toBe(3); // the watermark never regressed
+  });
+
+  it('local-pending-as-branch: a pending write keeps its ORIGINAL (pre-observe) stamp, so a same-path conflict resolves by honest physical clocks', () => {
+    const run = (localNow: number, remoteP: number) =>
+      TestBed.runInInjectionContext(() => {
+        const s = signal<{ v: string }>({ v: 'init' });
+        const sync = opSync(s, { writer: 'wl', origin: 'o1', clock: createHlcClock(() => localNow) });
+        s.set({ v: 'local' }); // pending, SAME path as the remote
+        sync.receive(env([set(['v'], 'remote', 'init')], { p: remoteP, writer: 'wr', origin: 'r', version: 1 }));
+        sync.flush();
+        return s().v;
+      });
+    // `receive` now freezes the pending local write's stamp BEFORE observing the remote clock, so the
+    // write keeps its original stamp and the higher physical clock wins the same-path conflict —
+    // identically at every replica (no self-favouring re-stamp). This is the flip from the old
+    // flush-then-apply behaviour where the local write always won.
+    expect(run(1, 100)).toBe('remote'); // remote clock ahead → remote wins; local rolls back visibly
+    expect(run(100, 1)).toBe('local'); // local clock ahead → local wins
+  });
+
+  it('hydrate replays MULTIPLE uncovered offline writes on top of the remote root', () => {
+    const out = TestBed.runInInjectionContext(() => {
+      const s = signal<{ a: string; b: string; keep: string }>({ a: '0', b: '0', keep: 'base' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      s.set({ a: '1', b: '0', keep: 'base' });
+      sync.flush(); // offline write 1
+      s.set({ a: '1', b: '2', keep: 'base' });
+      sync.flush(); // offline write 2
+      sync.hydrate({ a: '0', b: '0', keep: 'from-room' }, {}); // both uncovered
+      return s();
+    });
+    expect(out).toEqual({ a: '1', b: '2', keep: 'from-room' });
+  });
+
+  it('destroy stops emission', () => {
+    const emitted = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: number }>({ v: 0 });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const out: OpEnvelope[] = [];
+      sync.subscribe((e) => out.push(e));
+      sync.destroy();
+      s.set({ v: 1 });
+      sync.flush();
+      return out;
+    });
+    expect(emitted).toEqual([]);
+  });
+});
+
+describe('opSync — restore (durable outbox boot seam)', () => {
+  it('re-injects persisted offline envelopes: applies them and re-emits for resend, versions verbatim', () => {
+    const { emitted, final, wm } = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; n: number }>({ v: 'init', n: 0 });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const emitted: OpEnvelope[] = [];
+      sync.subscribe((e) => emitted.push(e));
+      const persisted: OpEnvelope[] = [
+        env([set(['v'], 'offline', 'init')], { p: 10, writer: 'w', origin: 'o1', version: 1 }),
+        env([set(['n'], 5, 0)], { p: 11, writer: 'w', origin: 'o1', version: 2 }),
+      ];
+      sync.restore(persisted, 2);
+      return { emitted, final: s(), wm: sync.watermark() };
+    });
+    expect(final).toEqual({ v: 'offline', n: 5 }); // offline edits applied to the store
+    expect(emitted.map((e) => e.version)).toEqual([1, 2]); // re-emitted verbatim (no new versions)
+    expect(wm['o1']).toBe(2); // watermark at the restored high-water
+  });
+
+  it('bumps the emit counter to highWater so a later write skips a version acked-but-dropped from the outbox', () => {
+    const firstNew = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string }>({ v: 'init' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const emitted: OpEnvelope[] = [];
+      sync.subscribe((e) => emitted.push(e));
+      // only v3 is still unacked, but v1..v5 were emitted before the reboot (highWater 5)
+      sync.restore([env([set(['v'], 'x', 'init')], { p: 1, writer: 'w', origin: 'o1', version: 3 })], 5);
+      s.set({ v: 'y' });
+      sync.flush();
+      return emitted.find((e) => e.ops.some((o) => o.kind === 'set' && o.next === 'y'));
+    });
+    expect(firstNew?.version).toBe(6); // continues past highWater(5), never re-mints 4
+  });
+
+  it('restored offline pending survives a reconnect hydrate and merges with room changes', () => {
+    const out = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string; keep: string }>({ v: 'init', keep: 'base' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      sync.restore([env([set(['v'], 'offline', 'init')], { p: 10, writer: 'w', origin: 'o1', version: 1 })], 1);
+      sync.hydrate({ v: 'init', keep: 'from-room' }, {}); // reconnect: room changed a different field
+      return s();
+    });
+    expect(out).toEqual({ v: 'offline', keep: 'from-room' }); // offline edit + room edit both survive
+  });
+
+  it('a hydrate that raises our own watermark advances the next mint above it (structural: no version regression)', () => {
+    const emitted = TestBed.runInInjectionContext(() => {
+      const s = signal<{ v: string }>({ v: 'init' });
+      const sync = opSync(s, { writer: 'w', origin: 'o1' });
+      const out: OpEnvelope[] = [];
+      sync.subscribe((e) => out.push(e));
+      sync.hydrate({ v: 'from-room' }, { o1: 7 }); // the room already saw our writes through v7
+      s.set({ v: 'after' });
+      sync.flush();
+      return out;
+    });
+    expect(emitted[0]?.version).toBe(8); // next mint continues past the hydrated watermark, not 1
   });
 });

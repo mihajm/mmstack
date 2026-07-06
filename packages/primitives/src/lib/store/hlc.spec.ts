@@ -51,4 +51,21 @@ describe('hlc', () => {
       warn.mockRestore();
     }
   });
+
+  it('compareHlc orders by physical time first, then the logical counter', () => {
+    expect(compareHlc({ p: 1, l: 9 }, { p: 2, l: 0 })).toBeLessThan(0); // p dominates
+    expect(compareHlc({ p: 5, l: 1 }, { p: 5, l: 2 })).toBeLessThan(0); // same p → l breaks it
+    expect(compareHlc({ p: 5, l: 2 }, { p: 5, l: 1 })).toBeGreaterThan(0);
+    expect(compareHlc({ p: 3, l: 3 }, { p: 3, l: 3 })).toBe(0);
+  });
+
+  it('observe at the same physical time advances the logical counter past the remote', () => {
+    const clock = createHlcClock(() => 1_000);
+    clock.observe({ p: 1_000, l: 5 }); // remote shares the wall clock, logical is ahead
+
+    const next = clock.next();
+    expect(next.p).toBe(1_000);
+    expect(next.l).toBeGreaterThan(5); // stepped past the observed logical counter
+    expect(compareHlc({ p: 1_000, l: 5 }, next)).toBeLessThan(0);
+  });
 });

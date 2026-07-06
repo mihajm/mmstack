@@ -81,6 +81,16 @@ describe('merge3', () => {
       const out = merge3<{ k?: number }>({ k: 1 }, { k: 1 }, {});
       expect(out.k).toBeUndefined();
     });
+
+    it('both sides delete the same key → it stays absent (converges, not resurrected)', () => {
+      const out = merge3<{ a: number; b?: number }>({ a: 1, b: 2 }, { a: 1 }, { a: 1 });
+      expect('b' in out).toBe(false);
+      expect(out).toEqual({ a: 1 });
+    });
+
+    it('a concurrent add of the SAME key on both sides resolves to the fork (conflict → mine)', () => {
+      expect(merge3<Record<string, string>>({}, { k: 'A' }, { k: 'B' })).toEqual({ k: 'A' });
+    });
   });
 
   describe('type / shape changes (honoring the structural-sharing contract)', () => {

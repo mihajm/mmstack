@@ -35,6 +35,41 @@ export type RelayOptions = {
   readonly journalLimit?: number;
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
+  /**
+   * The persistence egress: fired after an envelope is sequenced, folded into the room
+   * snapshot, and broadcast. The envelope is the persistence record (append it to a journal);
+   * `state` carries the folded root for throttled checkpoints. Called synchronously and never
+   * awaited: batch, debounce, and store at the adapter layer. Pair with {@link Relay.hydrate}.
+   */
+  readonly onCommit?: (
+    room: string,
+    env: SeqEnvelope,
+    state: RoomState,
+  ) => void;
+};
+
+/** The room's durable state at a commit: what a checkpoint needs to capture. */
+export type RoomState = {
+  readonly seq: number;
+  readonly epoch: string;
+  readonly root: unknown;
+  /** The room's data shape; restored via {@link Relay.hydrate}. */
+  readonly schemaVersion: number;
+};
+
+/** A persisted room to restore via {@link Relay.hydrate}. */
+export type RoomSnapshot = {
+  readonly seq: number;
+  readonly root: unknown;
+  /**
+   * Restore the persisted epoch so clients reconnecting across the restart keep their seq
+   * watermark and get a `delta` answer; omit to mint a fresh one (they re-snapshot instead).
+   */
+  readonly epoch?: string;
+  /** Restore the persisted schema version (a compacted snapshot is post-migration). */
+  readonly schemaVersion?: number;
+  /** Journal tail (ascending seq, entries at or below `seq`) enabling those delta answers. */
+  readonly journal?: readonly SeqEnvelope[];
 };
 
 export type RelayConnection = {
@@ -52,6 +87,12 @@ export type Relay = {
   /** Attach an authenticated connection. `ctx.writer` is the trusted principal. */
   connect(socket: RelaySocket, ctx: PrincipalCtx): RelayConnection;
   room(name: string): RoomInfo | undefined;
+  /**
+   * Restore a persisted room before clients join (relay boot, Durable Object wake). Refused
+   * (`false`) once the room has state or members: hydrating a live seq space would corrupt
+   * it. Load asynchronously at the adapter layer, then hydrate synchronously.
+   */
+  hydrate(name: string, snapshot: RoomSnapshot): boolean;
 };
 
 type Member = {
@@ -65,6 +106,7 @@ type Bucket = { tokens: number; last: number };
 type Room = {
   seq: number;
   epoch: string;
+  schemaVersion: number;
   root: unknown;
   journal: SeqEnvelope[];
   members: Set<Member>;
@@ -76,7 +118,7 @@ type Room = {
 let epochCounter = 0;
 
 /**
- * The reference relay core (op-protocol RFC §6/§7): room-scoped sequencing, journal +
+ * The reference relay core: room-scoped sequencing, journal +
  * snapshot compaction, the tri-state join answer, presence fan-out, and tripwire policy
  * enforcement. Pure over injected sockets — runs identically under ws, Bun, a Durable
  * Object, or an in-memory test pair. The relay never interprets ops beyond folding them
@@ -102,6 +144,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       room = {
         seq: 0,
         epoch: `${now().toString(36)}-${(++epochCounter).toString(36)}`,
+        schemaVersion: 0,
         root: undefined,
         journal: [],
         members: new Set(),
@@ -120,15 +163,30 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     }
   };
 
-  const eject = (name: string, room: Room, writer: string, violation: PolicyViolation): void => {
+  const eject = (
+    name: string,
+    room: Room,
+    writer: string,
+    violation: PolicyViolation,
+  ): void => {
     room.ejected.add(writer);
     opt.onViolation?.(name, violation);
-    broadcast(room, { t: 'eject', room: name, writer, reason: violation.reason });
+    broadcast(room, {
+      t: 'eject',
+      room: name,
+      writer,
+      reason: violation.reason,
+    });
     for (const member of [...room.members]) {
       if (member.ctx.writer !== writer) continue;
       room.members.delete(member);
       dropPresence(name, room, member);
-      broadcast(room, { t: 'member', room: name, origin: member.origin, gone: true });
+      broadcast(room, {
+        t: 'member',
+        room: name,
+        origin: member.origin,
+        gone: true,
+      });
       member.socket.close?.();
     }
   };
@@ -137,7 +195,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     const entry = room.presence.get(member.origin);
     if (!entry || entry.by !== member) return;
     room.presence.delete(member.origin);
-    broadcast(room, { t: 'presence', room: name, peer: entry.peer, gone: true });
+    broadcast(room, {
+      t: 'presence',
+      room: name,
+      peer: entry.peer,
+      gone: true,
+    });
   };
 
   const overRate = (room: Room, writer: string): boolean => {
@@ -148,7 +211,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       bucket = { tokens: rate * 2, last: at };
       room.buckets.set(writer, bucket);
     }
-    bucket.tokens = Math.min(rate * 2, bucket.tokens + ((at - bucket.last) / 1000) * rate);
+    bucket.tokens = Math.min(
+      rate * 2,
+      bucket.tokens + ((at - bucket.last) / 1000) * rate,
+    );
     bucket.last = at;
     if (bucket.tokens < 1) return true;
     bucket.tokens -= 1;
@@ -159,8 +225,29 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     room: (name) => {
       const room = rooms.get(name);
       return room
-        ? { seq: room.seq, members: room.members.size, journal: room.journal.length }
+        ? {
+            seq: room.seq,
+            members: room.members.size,
+            journal: room.journal.length,
+          }
         : undefined;
+    },
+    hydrate: (name, snapshot) => {
+      const room = roomOf(name);
+      if (room.seq !== 0 || room.members.size > 0 || room.journal.length > 0)
+        return false;
+      room.seq = snapshot.seq;
+      room.root = snapshot.root;
+      if (snapshot.epoch !== undefined) room.epoch = snapshot.epoch;
+      if (snapshot.schemaVersion !== undefined)
+        room.schemaVersion = snapshot.schemaVersion;
+      if (snapshot.journal) {
+        room.journal = snapshot.journal
+          .filter((e) => e.seq <= snapshot.seq)
+          .sort((a, b) => a.seq - b.seq)
+          .slice(-journalLimit);
+      }
+      return true;
     },
     connect: (socket, ctx) => {
       const joined = new Map<string, Member>();
@@ -171,7 +258,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           if (!room || !room.members.has(member)) continue;
           room.members.delete(member);
           dropPresence(name, room, member);
-          broadcast(room, { t: 'member', room: name, origin: member.origin, gone: true });
+          broadcast(room, {
+            t: 'member',
+            room: name,
+            origin: member.origin,
+            gone: true,
+          });
         }
         joined.clear();
       };
@@ -183,7 +275,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
 
           if (msg.t === 'hello') {
             if (room.ejected.has(ctx.writer)) {
-              socket.send({ t: 'reject', room: msg.room, reason: 'unauthorized' });
+              socket.send({
+                t: 'reject',
+                room: msg.room,
+                reason: 'unauthorized',
+              });
               return;
             }
             if (msg.proto !== MESH_PROTO_VERSION) {
@@ -204,6 +300,18 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               });
               return;
             }
+            if (
+              msg.schemaVersion !== undefined &&
+              msg.schemaVersion < room.schemaVersion
+            ) {
+              socket.send({
+                t: 'reject',
+                room: msg.room,
+                reason: 'schema',
+                expected: room.schemaVersion,
+              });
+              return;
+            }
 
             for (const prior of [...room.members]) {
               if (prior.origin !== msg.origin) continue;
@@ -215,7 +323,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             const member: Member = { socket, ctx, origin: msg.origin };
             joined.set(msg.room, member);
             room.members.add(member);
-            broadcast(room, { t: 'member', room: msg.room, origin: msg.origin }, member);
+            broadcast(
+              room,
+              { t: 'member', room: msg.room, origin: msg.origin },
+              member,
+            );
 
             const peers = [...room.presence.values()].map((e) => e.peer);
             const base = {
@@ -223,6 +335,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               room: msg.room,
               seq: room.seq,
               epoch: room.epoch,
+              schemaVersion: room.schemaVersion,
               peers,
               members: [...room.members]
                 .filter((m) => m !== member)
@@ -278,7 +391,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
 
           const env = msg.env;
           const violation: PolicyViolation | null =
-            env.policyVersion !== policyVersion || env.proto !== MESH_PROTO_VERSION
+            env.policyVersion !== policyVersion ||
+            env.proto !== MESH_PROTO_VERSION
               ? { writer: ctx.writer, reason: 'proto' }
               : env.ops.length > maxOps
                 ? { writer: ctx.writer, reason: 'ops-limit' }
@@ -293,8 +407,22 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };
           room.journal.push(seqEnv);
           room.root = applyWireOps(room.root, env.ops);
+          // a newer-schema envelope is a MIGRATION
+          if (
+            env.schemaVersion !== undefined &&
+            env.schemaVersion > room.schemaVersion
+          ) {
+            room.schemaVersion = env.schemaVersion;
+            room.epoch = `${now().toString(36)}-${(++epochCounter).toString(36)}`;
+          }
           if (room.journal.length > journalLimit) room.journal.shift();
           broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
+          opt.onCommit?.(msg.room, seqEnv, {
+            seq: room.seq,
+            epoch: room.epoch,
+            root: room.root,
+            schemaVersion: room.schemaVersion,
+          });
         },
       };
     },

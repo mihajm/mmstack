@@ -156,7 +156,7 @@ type Peer = {
 };
 
 /**
- * Peer-to-peer mesh sync (unsequenced topology, op-protocol RFC §4): the relay only signals
+ * Peer-to-peer mesh sync: the relay only signals
  * and tracks membership; envelopes flow over WebRTC data channels and converge via the
  * per-path register map. Catch-up is pairwise: on channel open both sides exchange
  * watermarks; a side whose state is strictly covered hydrates from the other. Two peers that

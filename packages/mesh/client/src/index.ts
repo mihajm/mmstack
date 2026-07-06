@@ -4,6 +4,8 @@ export {
   type MeshStatus,
   type MeshSyncOptions,
   type MeshSyncRef,
+  type SyncHealth,
+  type SyncHealthStatus,
 } from './lib/mesh-sync';
 export {
   directTransport,

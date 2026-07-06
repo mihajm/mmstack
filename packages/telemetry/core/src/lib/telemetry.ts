@@ -59,7 +59,7 @@ export type EmitOptions = {
  * another `span()` body joins the active span's trace (same synchronous stack
  * that correlates emits). Pass `parent: null` to force a fresh trace root.
  * `startSpan()` never auto-nests — a manually-managed span (like the HTTP
- * interceptor's) parents only through an explicit handle (RFC §8).
+ * interceptor's) parents only through an explicit handle.
  */
 export interface SpanCallOptions extends Omit<EmitOptions, 'parent'> {
   readonly attrs?: Attrs;

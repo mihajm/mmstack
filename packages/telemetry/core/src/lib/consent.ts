@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 
 /**
- * Headless, reactive consent (RFC §7). The consumer declares what the app wants
+ * Headless, reactive consent. The consumer declares what the app wants
  * to track as {@link TrackingRequirement}s; the facade exposes `requirements` /
  * `pending` / `consent` signals plus `decide()`, and gates categorized emits on
  * the decisions. No UI ships here — the prompt/flow is the consumer's.

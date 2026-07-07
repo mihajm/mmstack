@@ -49,8 +49,8 @@ const shuffle = <T>(arr: readonly T[], seed: number): T[] => {
 // per-writer max-hlc op + per-writer supersession watermark (highest cited hlc).
 // ────────────────────────────────────────────────────────────────────────────
 class DotRegister {
-  private readonly best = new Map<string, Op>(); // highest-hlc op per writer
-  private readonly water = new Map<string, number>(); // highest cited hlc per writer
+  readonly best = new Map<string, Op>(); // highest-hlc op per writer
+  readonly water = new Map<string, number>(); // highest cited hlc per writer
 
   ingest(op: Op): void {
     for (const c of op.cites) {
@@ -59,12 +59,37 @@ class DotRegister {
     const cur = this.best.get(op.writer);
     if (!cur || op.hlc > cur.hlc) this.best.set(op.writer, op);
   }
+  /** admission gate: reject a straggler at/below the GC frontier (prevents post-prune resurrection). */
+  admit(op: Op, frontier = -1): boolean {
+    if (op.hlc <= frontier) return false;
+    this.ingest(op);
+    return true;
+  }
   live(): Op[] {
     const out: Op[] = [];
     for (const [w, op] of this.best) {
       if (op.hlc > (this.water.get(w) ?? 0)) out.push(op);
     }
     return out.sort((a, b) => (a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0));
+  }
+  /** the seed contract: ship register STATE (siblings + watermarks), not just the materialized value. */
+  seedState(): { best: Map<string, Op>; water: Map<string, number> } {
+    return { best: new Map(this.best), water: new Map(this.water) };
+  }
+  static fromState(s: { best: Map<string, Op>; water: Map<string, number> }): DotRegister {
+    const r = new DotRegister();
+    for (const [k, v] of s.best) r.best.set(k, v);
+    for (const [k, v] of s.water) r.water.set(k, v);
+    return r;
+  }
+  /** GC: drop superseded siblings + watermarks at/below the frontier (state bounding). */
+  prune(frontier: number): void {
+    for (const [w, op] of [...this.best]) {
+      if (op.hlc <= frontier && op.hlc <= (this.water.get(w) ?? 0)) this.best.delete(w);
+    }
+    for (const [w, h] of [...this.water]) {
+      if (h <= frontier) this.water.delete(w); // the frontier globally subsumes anything below it
+    }
   }
 }
 const liveFrom = (ops: readonly Op[], seed: number): Op[] => {
@@ -266,5 +291,147 @@ describe('PROOF: static rank tier vs dynamic epoch — precise behavior (refines
     const current: Op = { writer: 'u', hlc: 100, value: 'CURRENT', cites: [{ writer: 'admin', hlc: 5 }], rank: 0, epoch: 2 };
     const staleHighRank: Op = { writer: 'x', hlc: 6, value: 'OLD', cites: [base], rank: 10, epoch: 1 };
     expect(fold(liveFrom([A, current, staleHighRank], 1), byEpoch)).toBe('CURRENT'); // epoch 2 > epoch 1
+  });
+});
+
+// ─── proofs of the completeness-review gaps that are pure-model (Fable review 2026-07-07) ───
+
+describe('PROOF: seed contract — STATE seed converges; VALUE-only seed diverges (register #17)', () => {
+  it('fold(seed(STATE), suffix) ≡ fold(∅, allOps) — shipping siblings+watermarks is sound', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const all = genOps(seed * 13, 3, 5);
+      const cut = Math.floor(all.length / 2);
+      const r = new DotRegister();
+      for (const op of shuffle(all.slice(0, cut), seed)) r.ingest(op);
+      const joiner = DotRegister.fromState(r.seedState()); // seed = register STATE
+      for (const op of shuffle(all.slice(cut), seed + 1)) joiner.ingest(op);
+      expect(sig(joiner.live())).toBe(sig(liveFrom(all, seed + 2))); // == replaying everything
+    }
+  });
+
+  it('VALUE-only seed (watermarks dropped) diverges: a late below-seed op resurrects on the joiner', () => {
+    const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
+    const B: Op = { writer: 'b', hlc: 7, value: 'B', cites: [{ writer: 'a', hlc: 5 }] }; // supersedes A
+    const peer = liveFrom([A, B], 1).map((o) => o.writer);
+    expect(peer).toEqual(['b']); // established: A superseded
+
+    // a relay that folds to a single VALUE ships the joiner just that value (no watermark for a):
+    const joiner = new DotRegister();
+    joiner.ingest({ writer: 'b', hlc: 7, value: 'B', cites: [] }); // the folded value, as a synthetic op
+    joiner.ingest(A); // a late straggler of the already-superseded A
+    const j = joiner.live().map((o) => o.writer).sort();
+    expect(j).toEqual(['a', 'b']); // A RESURRECTED → diverges from the peer's ['b']. QED: ship STATE, not value.
+    expect(j).not.toEqual(peer);
+  });
+});
+
+describe('PROOF: GC/prune — fold-equivalence + below-frontier admission prevents resurrection (register #18)', () => {
+  it('pruning superseded state at/below the frontier does NOT change the live set (fold-equivalence)', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const all = genOps(seed * 19, 3, 5);
+      const r = new DotRegister();
+      for (const op of shuffle(all, seed)) r.ingest(op);
+      const before = sig(r.live());
+      r.prune(3);
+      expect(sig(r.live())).toBe(before);
+    }
+  });
+
+  it('admission REJECTS below-frontier stragglers → no post-prune resurrection (T1(7) via GC)', () => {
+    const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
+    const B: Op = { writer: 'b', hlc: 20, value: 'B', cites: [{ writer: 'a', hlc: 5 }] };
+    const r = new DotRegister();
+    r.ingest(A);
+    r.ingest(B);
+    r.prune(10); // GC drops A's sibling AND its watermark (state bounding)
+
+    const naive = DotRegister.fromState(r.seedState());
+    naive.ingest(A); // no admission gate → below-frontier straggler resurrects
+    expect(naive.live().map((o) => o.writer).sort()).toEqual(['a', 'b']); // the hazard
+
+    const guarded = DotRegister.fromState(r.seedState());
+    expect(guarded.admit(A, 10)).toBe(false); // admission rejects hlc 5 ≤ frontier 10
+    expect(guarded.live().map((o) => o.writer)).toEqual(['b']); // no resurrection
+  });
+});
+
+describe('PROOF: epoch monotone-at-read + concurrent-bump convergence (register #20)', () => {
+  it('the exposed (winning) epoch never decreases as ops stream in — given adopt-highest emission', () => {
+    // concurrent ops; the epoch fold is a max, so the winner epoch is non-decreasing.
+    const stream: Op[] = [
+      { writer: 'a', hlc: 1, value: 'a', cites: [], epoch: 1 },
+      { writer: 'b', hlc: 2, value: 'b', cites: [], epoch: 3 },
+      { writer: 'c', hlc: 3, value: 'c', cites: [], epoch: 2 }, // a lower epoch must NOT lower the read
+    ];
+    const r = new DotRegister();
+    let prev = -Infinity;
+    for (const op of stream) {
+      r.ingest(op);
+      const winner = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y));
+      const e = winner.epoch ?? 0;
+      expect(e >= prev).toBe(true);
+      prev = e;
+    }
+  });
+
+  it('two concurrent AUTHORIZED bumps to the same epoch N converge deterministically', () => {
+    const b1: Op = { writer: 'admin1', hlc: 5, value: 'X', cites: [], epoch: 2 };
+    const b2: Op = { writer: 'admin2', hlc: 6, value: 'Y', cites: [], epoch: 2 };
+    expect(fold(liveFrom([b1, b2], 1), byEpoch)).toBe(fold(liveFrom([b1, b2], 2), byEpoch));
+  });
+});
+
+describe('PROOF: bounded state + why replica-id uniqueness & deterministic validation are load-bearing', () => {
+  it('register state is O(writers), not O(ops)', () => {
+    const many = genOps(7, 3, 20); // 3 writers × 20 rounds = 60 ops
+    const r = new DotRegister();
+    for (const op of many) r.ingest(op);
+    const writers = new Set(many.map((o) => o.writer)).size;
+    expect(r.best.size).toBeLessThanOrEqual(writers);
+    expect(r.water.size).toBeLessThanOrEqual(writers);
+  });
+
+  it('dot collision (two writers share an id) BREAKS convergence → replica-id must be unique (register #23/#24)', () => {
+    const one: Op = { writer: 'shared', hlc: 5, value: 'ONE', cites: [] };
+    const two: Op = { writer: 'shared', hlc: 5, value: 'TWO', cites: [] }; // distinct op, SAME dot
+    const r1 = new DotRegister();
+    r1.ingest(one);
+    r1.ingest(two); // equal hlc → not replaced → keeps ONE
+    const r2 = new DotRegister();
+    r2.ingest(two);
+    r2.ingest(one); // keeps TWO
+    expect(r1.live()[0].value).not.toBe(r2.live()[0].value); // ONE vs TWO — divergence from a shared id
+  });
+
+  it('nondeterministic validation diverges → validation must be deterministic + total (register #16)', () => {
+    const op: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
+    const accept = new DotRegister();
+    accept.ingest(op);
+    const reject = new DotRegister(); // same op, rejected here → different set
+    expect(sig(accept.live())).not.toBe(sig(reject.live()));
+  });
+});
+
+describe('PROOF (liveness L1/L2): op-id dedup delivers to all AND bounds forwarding in a CYCLIC mesh', () => {
+  it('no infinite rebroadcast despite the cycle; every peer receives exactly once, forwarding terminates', () => {
+    const peers = ['p0', 'p1', 'p2', 'p3']; // a ring: each floods to its neighbor, p3 → p0 (a cycle)
+    const seen = new Map(peers.map((p) => [p, new Set<string>()]));
+    const nextOf = (p: string) => peers[(peers.indexOf(p) + 1) % peers.length];
+    let forwards = 0;
+    const queue: Array<[string, string]> = [['p0', 'X']]; // p0 originates op X
+    let steps = 0;
+    while (queue.length > 0 && steps++ < 10_000) {
+      const item = queue.shift();
+      if (!item) break;
+      const [p, id] = item;
+      const set = seen.get(p) ?? new Set<string>();
+      if (set.has(id)) continue; // dedup: already relayed → do NOT re-forward (this is what cuts the cycle)
+      set.add(id);
+      seen.set(p, set);
+      forwards++;
+      queue.push([nextOf(p), id]); // forward exactly once
+    }
+    expect([...seen.values()].every((s) => s.has('X'))).toBe(true); // delivered to ALL (L1 in this model)
+    expect(forwards).toBe(peers.length); // exactly one forward per peer → bounded, terminates (L2)
   });
 });

@@ -134,6 +134,36 @@ function genOps(seed: number, writers: number, per: number): Op[] {
   return ops;
 }
 
+// like genOps but with WELL-FORMED epochs: every op adopts the highest epoch among the dots it cites
+// (occasionally bumping) → an op's epoch is always >= the epoch of every op it supersedes.
+function genWellFormed(seed: number, writers: number, per: number): Op[] {
+  const r = mulberry32(seed);
+  const ops: Op[] = [];
+  let clock = 0;
+  const dots: Dot[] = [];
+  const epochOf = new Map<string, number>();
+  const writerEpoch = new Map<string, number>(); // a writer's own epoch is MONOTONE (part of "observed")
+  const key = (d: Dot) => d.writer + ':' + d.hlc;
+  for (let m = 0; m < per; m++) {
+    for (let w = 0; w < writers; w++) {
+      const writer = 'w' + w;
+      const hlc = ++clock + Math.floor(r() * 3);
+      const cites = dots.filter(() => r() < 0.4);
+      // "highest epoch observed" = max(cited dots' epochs, this writer's OWN prior epoch)
+      let epoch = writerEpoch.get(writer) ?? 1;
+      for (const c of cites) epoch = Math.max(epoch, epochOf.get(key(c)) ?? 1);
+      if (r() < 0.15) epoch += 1; // an authorized bump
+      const op: Op = { writer, hlc, value: `${writer}:${hlc}`, cites, epoch };
+      ops.push(op);
+      const d = { writer, hlc };
+      dots.push(d);
+      epochOf.set(key(d), epoch);
+      writerEpoch.set(writer, epoch);
+    }
+  }
+  return ops;
+}
+
 const sig = (ops: Op[]): string => JSON.stringify(ops.map((o) => [o.writer, o.hlc, o.value]));
 
 describe('PROOF: dot-citation register converges (live set = pure function of the op SET)', () => {
@@ -356,22 +386,38 @@ describe('PROOF: GC/prune — fold-equivalence + below-frontier admission preven
 });
 
 describe('PROOF: epoch monotone-at-read + concurrent-bump convergence (register #20)', () => {
-  it('the exposed (winning) epoch never decreases as ops stream in — given adopt-highest emission', () => {
-    // concurrent ops; the epoch fold is a max, so the winner epoch is non-decreasing.
-    const stream: Op[] = [
-      { writer: 'a', hlc: 1, value: 'a', cites: [], epoch: 1 },
-      { writer: 'b', hlc: 2, value: 'b', cites: [], epoch: 3 },
-      { writer: 'c', hlc: 3, value: 'c', cites: [], epoch: 2 }, // a lower epoch must NOT lower the read
-    ];
-    const r = new DotRegister();
-    let prev = -Infinity;
-    for (const op of stream) {
-      r.ingest(op);
-      const winner = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y));
-      const e = winner.epoch ?? 0;
-      expect(e >= prev).toBe(true);
-      prev = e;
+  it('WELL-FORMED emission → exposed epoch = max epoch of ALL delivered ops (∴ monotone), any arrival order', () => {
+    // the strong theorem (subsumes "monotone"): the live winner's epoch always equals the running max of
+    // delivered epochs — because supersession only removes an op in favor of a causal successor with >=
+    // epoch, so a live op with epoch >= any superseded op always exists. Exercises supersession, not just
+    // concurrency, across many seeds AND arrival orders.
+    for (let seed = 1; seed <= 40; seed++) {
+      const ops = genWellFormed(seed * 23, 3, 6);
+      for (let order = 1; order <= 8; order++) {
+        const r = new DotRegister();
+        let deliveredMax = -Infinity;
+        for (const op of shuffle(ops, order + seed * 5)) {
+          r.ingest(op);
+          deliveredMax = Math.max(deliveredMax, op.epoch ?? 0);
+          const winner = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y));
+          expect(winner.epoch ?? 0).toBe(deliveredMax); // exposed == running max → monotone by construction
+        }
+      }
     }
+  });
+
+  it('ILL-FORMED emission BREAKS monotone → the adopt-highest emission rule is LOAD-BEARING (not optional)', () => {
+    // a causal successor that CITES a high-epoch op but carries a LOWER epoch supersedes it → exposed drops.
+    const B: Op = { writer: 'b', hlc: 5, value: 'B', cites: [], epoch: 3 };
+    const C: Op = { writer: 'c', hlc: 6, value: 'C', cites: [{ writer: 'b', hlc: 5 }], epoch: 2 }; // ill-formed
+    const r = new DotRegister();
+    r.ingest(B);
+    const before = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
+    r.ingest(C); // supersedes B → live {C}
+    const after = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
+    expect(before).toBe(3);
+    expect(after).toBe(2);
+    expect(after).toBeLessThan(before); // monotone violated → emission MUST adopt the highest observed epoch
   });
 
   it('two concurrent AUTHORIZED bumps to the same epoch N converge deterministically', () => {

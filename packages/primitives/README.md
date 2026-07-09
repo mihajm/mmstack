@@ -21,7 +21,7 @@ npm install @mmstack/primitives
 - [Effects](#effects) — `nestedEffect`
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
-- [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, `rebaseOps`, `policyStrategy`
+- [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`orderedEntries`, `insertElement`, `moveElement`, `rebalanceContainer`), `rebaseOps`, `policyStrategy`, `syncedFork`
 - [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -183,7 +183,7 @@ The fork is a full store (`draft.store.user.name(...)`, `extendStore`, deep read
 
 > The fork inherits the base's `vivify` / `noUnionLeaves` and its injector-scoped proxy cache automatically, so its write semantics match the base. Pass them explicitly only to override (advanced).
 
-When the base is a synced store from `@mmstack/mesh`, a fork is also how an agent proposes a change for review. The agent writes to the fork, `ops()` is the staged change to render for a person, and `commit()` merges the approved change into the synced store. See the `@mmstack/mesh` README for the pattern.
+When the base is a synced store, a fork is also how an agent proposes a change for review. Wire it with `syncedFork(sync, base)` (or `mesh.fork()` on a meshed store) so the commit cites what the fork observed: an edit that lands mid-review stays a concurrent value the merge policy decides, never silently overwritten by the approval. The agent writes to the fork, `ops()` is the staged change to render for a person, and `commit()` emits the approved change. See the `@mmstack/mesh` README for the pattern.
 
 ### `toWritable`
 

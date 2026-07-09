@@ -6,7 +6,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
-import { applyOps, opLog, type OpLog } from '@mmstack/primitives';
+import { createHlcClock, opSync, type OpSync } from '@mmstack/primitives';
 import {
   generateId,
   PROTO_VERSION,
@@ -62,6 +62,13 @@ export type WorkerHost<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
   /** Serve an additional transport (multi-client / tests). Returns a disconnect handle. */
   connect(port: WorkerPortLike): () => void;
   /**
+   * Apply an AUTHORITATIVE owner correction to an owned store: writes made inside `fn` are stamped
+   * at a bumped epoch, so they deterministically win the merge against any concurrent replica write
+   * (owner authority rides the epoch fold). Readers can gate effects on owner-settled values by the
+   * winning op's epoch. No-op for a read-only (published) or unknown store.
+   */
+  override(store: string, fn: () => void): void;
+  /**
    * Synchronously emit any pending owned-store changes to subscribers NOW, instead of waiting for
    * the microtask driver. Makes the mirror deterministic (tests call it before asserting) and is
    * the honest settle point before applying a routed write (phase 4). No-op when nothing is pending.
@@ -80,9 +87,8 @@ type Connection = {
 
 type Subtree = {
   readonly read: () => unknown;
-  readonly log: OpLog<any>;
-  version: number;
-  readonly writable: WritableSignal<any> | null;
+  readonly sync: OpSync<any>;
+  readonly writable: boolean;
 };
 
 function toRemoteStatus(
@@ -170,31 +176,30 @@ export function createWorkerHost<
   const observe = (
     key: string,
     src: Signal<unknown>,
-    writable: WritableSignal<any> | null,
+    writable: boolean,
   ): void => {
-    const entry: Subtree = {
-      read: () => untracked(src),
-      log: null as unknown as OpLog<any>,
-      version: 0,
-      writable,
-    };
-    (entry as { log: OpLog<any> }).log = opLog(
-      src as unknown as WritableSignal<any>,
-      { driver: microtaskOpLogDriver(), origin: hostId },
-    );
-    entry.log.subscribe((batch) => {
-      entry.version = batch.version;
-      devAssertCloneable(batch, `store '${key}' update`);
-      fanout(key, { type: 'store:ops', store: key, batch });
+    // Each subtree runs the owner's opSync (a real origin + HLC): its batches are real envelopes,
+    // so the whole main<->worker sync is opSync over the MessageChannel transport, no bespoke
+    // sequencer. Owner writes emit host-origin envelopes; received client writes fold in and are
+    // relayed on. Emission is driven off the microtask queue (no injector inside a worker).
+    const sync = opSync(src as unknown as WritableSignal<any>, {
+      writer: hostId,
+      origin: `${hostId}:${key}`,
+      driver: microtaskOpLogDriver(),
+      clock: createHlcClock(),
     });
-    subtrees.set(key, entry);
+    sync.subscribe((env) => {
+      devAssertCloneable(env, `store '${key}' update`);
+      fanout(key, { type: 'store:sync', store: key, env });
+    });
+    subtrees.set(key, { read: () => untracked(src), sync, writable });
   };
 
-  for (const key of storeKeys) observe(key, sources[key], sources[key]);
+  for (const key of storeKeys) observe(key, sources[key], true);
 
   for (const key of publishedKeys) {
     const src = publishedSources[key];
-    observe(key, src as Signal<unknown>, null);
+    observe(key, src as Signal<unknown>, false);
     const statusSig = (src as { status?: Signal<ResourceStatus> }).status;
     if (statusSig) {
       publishedStatus.set(key, () => toRemoteStatus(untracked(statusSig)));
@@ -276,13 +281,13 @@ export function createWorkerHost<
         const sub = subtrees.get(msg.store);
         if (!sub) return;
         conn.stores.add(msg.store);
-        const snapshot = sub.read();
-        devAssertCloneable(snapshot, `store '${msg.store}' snapshot`);
+        sub.sync.flush(); // settle any pending owner change into the register state first
+        const checkpoint = sub.sync.snapshot();
+        devAssertCloneable(checkpoint, `store '${msg.store}' checkpoint`);
         conn.port.postMessage({
-          type: 'store:snapshot',
+          type: 'store:checkpoint',
           store: msg.store,
-          version: sub.version,
-          value: snapshot,
+          checkpoint,
         });
         const currentStatus = publishedStatus.get(msg.store);
         if (currentStatus)
@@ -317,40 +322,14 @@ export function createWorkerHost<
         conn.taskRuns.delete(msg.runId);
         return;
       }
-      case 'store:write': {
+      case 'store:sync': {
+        // a routed client write: fold it into the owner store, then RELAY it to every subscriber
+        // (including the sender, whose replica reads its own echo as the write acknowledgement).
+        // Writes to a read-only (published) or unknown store are ignored: those never route.
         const sub = subtrees.get(msg.store);
-        if (!sub || !sub.writable) {
-          conn.port.postMessage({
-            type: 'store:write:error',
-            store: msg.store,
-            writeId: msg.writeId,
-            error: serializeError(
-              new Error(
-                sub
-                  ? `[@mmstack/worker] store is read-only (published): ${msg.store}`
-                  : `[@mmstack/worker] unknown store: ${msg.store}`,
-              ),
-            ),
-          });
-          return;
-        }
-        try {
-          sub.writable.set(applyOps(sub.read(), msg.ops));
-          sub.log.flush();
-          conn.port.postMessage({
-            type: 'store:write:ack',
-            store: msg.store,
-            writeId: msg.writeId,
-            version: sub.version,
-          });
-        } catch (err) {
-          conn.port.postMessage({
-            type: 'store:write:error',
-            store: msg.store,
-            writeId: msg.writeId,
-            error: serializeError(err),
-          });
-        }
+        if (!sub || !sub.writable) return;
+        sub.sync.receive(msg.env);
+        fanout(msg.store, { type: 'store:sync', store: msg.store, env: msg.env });
         return;
       }
     }
@@ -383,11 +362,15 @@ export function createWorkerHost<
   return {
     hostId,
     connect,
+    override(store, fn) {
+      const sub = subtrees.get(store);
+      if (sub?.writable) sub.sync.override(fn);
+    },
     flush() {
-      for (const { log } of subtrees.values()) log.flush();
+      for (const { sync } of subtrees.values()) sync.flush();
     },
     dispose() {
-      for (const { log } of subtrees.values()) log.destroy();
+      for (const { sync } of subtrees.values()) sync.destroy();
       for (const w of statusWatches) w.destroy();
       connections.clear();
     },

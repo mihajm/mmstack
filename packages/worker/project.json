@@ -4,7 +4,7 @@
   "sourceRoot": "packages/worker/src",
   "prefix": "mm",
   "projectType": "library",
-  "tags": [],
+  "tags": ["scope:worker"],
   "targets": {
     "build": {
       "executor": "@nx/angular:package",

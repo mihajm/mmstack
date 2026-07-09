@@ -48,7 +48,8 @@ describe('boot arbitration (branching-state) — resolves the boot race by rebas
       TestBed.tick();
 
       const roomRoot: SimDoc = { counters: { a: 0, b: 5, c: 0 }, labels: { x: 'init', y: 'room-edit' } };
-      sync.hydrate(roomRoot, {}); // reconnect: adopt the room, re-apply the offline pending
+      // reconnect: adopt the room checkpoint, re-apply the offline pending
+      sync.hydrate({ root: roomRoot, registers: [], wm: {} });
       TestBed.tick();
 
       const out = s();

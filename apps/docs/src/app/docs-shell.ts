@@ -132,7 +132,7 @@ import { DocsMenu } from './layout/docs-menu';
         bottom: 0;
         left: auto;
         width: min(82vw, 20rem);
-        max-height: none;
+        max-height: 100%;
         padding: 1.25rem 1.15rem;
         background: var(--bg);
         border-right: none;

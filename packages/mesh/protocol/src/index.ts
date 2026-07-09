@@ -6,6 +6,8 @@ export {
   type PolicyViolation,
   type PrincipalCtx,
 } from './lib/policy';
+export { createRegisterStore, type RegisterStore } from './lib/register';
+export { validateEnvelope } from './lib/validate';
 export {
   createRelay,
   type Relay,
@@ -18,12 +20,12 @@ export {
   type RoomState,
 } from './lib/relay';
 export {
-  applyWireOps,
   MESH_PROTO_VERSION,
   type ClientEnvMsg,
   type ClientMsg,
   type ClientPresenceMsg,
   type ClientSignalMsg,
+  type Dot,
   type EjectMsg,
   type HelloMsg,
   type Hlc,
@@ -31,6 +33,7 @@ export {
   type MemberMsg,
   type OpEnvelope,
   type PresenceState,
+  type RegisterCheckpoint,
   type RejectMsg,
   type SeqEnvelope,
   type ServerEnvMsg,
@@ -38,5 +41,7 @@ export {
   type ServerPresenceMsg,
   type ServerSignalMsg,
   type StoreOp,
+  type SyncOp,
+  type SyncSibling,
   type WelcomeMsg,
 } from './lib/wire';

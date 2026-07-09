@@ -1,5 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { createRelay, type SeqEnvelope } from '@mmstack/mesh-protocol';
+import {
+  createRelay,
+  type RegisterCheckpoint,
+  type SeqEnvelope,
+} from '@mmstack/mesh-protocol';
 import { meshSync, type MeshStatus } from '../mesh-sync';
 import { directTransport } from '../transport';
 import { prng, type Prng } from './prng';
@@ -33,8 +37,8 @@ type Peer = {
 export type SimResult = {
   /** Each peer's final root. */
   readonly roots: SimDoc[];
-  /** The relay's incrementally-folded room root. */
-  readonly relayRoot: unknown;
+  /** The relay's retained register state at the last commit (the relay holds no root). */
+  readonly relayRegisters: readonly RegisterCheckpoint[];
   /** The room journal in commit order. */
   readonly journal: SeqEnvelope[];
   /** The room's final seq. */
@@ -67,11 +71,11 @@ export function runSimulation(opt: SimOptions): SimResult {
   const restore = installDeterminism(r, clock);
   try {
     const journal: SeqEnvelope[] = [];
-    let relayRoot: unknown = undefined;
+    let relayRegisters: readonly RegisterCheckpoint[] = [];
     const relay = createRelay({
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRoot = state.root;
+        relayRegisters = state.registers;
       },
     });
 
@@ -98,7 +102,7 @@ export function runSimulation(opt: SimOptions): SimResult {
 
     const result: SimResult = {
       roots: peers.map((p) => p.s()),
-      relayRoot,
+      relayRegisters,
       journal,
       seq: relay.room('sim')?.seq ?? 0,
       statuses: peers.map((p) => p.status()),

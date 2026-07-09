@@ -1,4 +1,4 @@
-import { commitOrdered, converged, journalFolds, seqDense, versionsMonotone } from './invariants';
+import { commitOrdered, converged, journalFoldMatchesClients, relayRetainsJournal, seqDense, versionsMonotone } from './invariants';
 import { runSimulation } from './harness';
 
 describe('mesh simulation harness — baseline convergence (no faults)', () => {
@@ -7,7 +7,12 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
 
     expect(res.statuses.every((s) => s === 'live')).toBe(true); // no faults → all connected, none ejected
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
-    expect(journalFolds(res.journal, res.relayRoot).ok, journalFolds(res.journal, res.relayRoot).message).toBe(true);
+    // audit 2a: the journal, folded through a client-side register+fold, IS every peer's root
+    const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
+    expect(j.ok, j.message).toBe(true);
+    // audit 2b: the relay retained exactly what re-ingesting the journal through the twin yields
+    const r = relayRetainsJournal(undefined, res.journal, res.relayRegisters);
+    expect(r.ok, r.message).toBe(true);
     expect(seqDense(res.journal, res.seq).ok, seqDense(res.journal, res.seq).message).toBe(true);
     expect(versionsMonotone(res.journal).ok, versionsMonotone(res.journal).message).toBe(true);
     // post local-pending-as-branch: no re-entrant flush, so onCommit fires in seq order
@@ -18,13 +23,15 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
     for (let seed = 0; seed < 100; seed++) {
       const res = runSimulation({ seed, peers: 3, rounds: 8, opsPerRound: 2 });
       const c = converged(res.roots);
-      const j = journalFolds(res.journal, res.relayRoot);
+      const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
+      const r = relayRetainsJournal(undefined, res.journal, res.relayRegisters);
       const d = seqDense(res.journal, res.seq);
       const m = versionsMonotone(res.journal); // invariant 4
       const o = commitOrdered(res.journal); // onCommit seq-ordered (no re-entrant flush)
       // seed printed in the message for exact repro
       expect(c.ok, `seed ${seed}: ${c.message}`).toBe(true);
       expect(j.ok, `seed ${seed}: ${j.message}`).toBe(true);
+      expect(r.ok, `seed ${seed}: ${r.message}`).toBe(true);
       expect(d.ok, `seed ${seed}: ${d.message}`).toBe(true);
       expect(m.ok, `seed ${seed}: ${m.message}`).toBe(true);
       expect(o.ok, `seed ${seed}: ${o.message}`).toBe(true);
@@ -34,7 +41,8 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
   it('scales to more peers', () => {
     const res = runSimulation({ seed: 42, peers: 6, rounds: 10, opsPerRound: 2 });
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
-    expect(journalFolds(res.journal, res.relayRoot).ok, journalFolds(res.journal, res.relayRoot).message).toBe(true);
+    const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
+    expect(j.ok, j.message).toBe(true);
   });
 
   it('is reproducible: the same seed produces the identical run (roots, journal, origins)', () => {
@@ -42,7 +50,7 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
     const a = runSimulation(cfg);
     const b = runSimulation(cfg);
     expect(a.roots).toEqual(b.roots);
-    expect(a.relayRoot).toEqual(b.relayRoot);
+    expect(a.relayRegisters).toEqual(b.relayRegisters);
     // full journal equality (incl. origins/hlc) proves the RNG + clock are fully controlled
     expect(a.journal).toEqual(b.journal);
   });

@@ -10,7 +10,7 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="The relay"
       pkg="@mmstack/mesh-protocol"
-      lead="A runtime-agnostic reference relay. It sequences operations, keeps a journal, compacts a snapshot, answers a joining client with whatever it is missing, routes presence, and enforces an optional policy. It never merges, validates schemas, or holds application logic."
+      lead="A runtime-agnostic reference relay. It sequences operations, keeps a journal, retains per-path register state, answers a joining client with whatever it is missing, routes presence, and enforces an optional policy. It retains operations but never resolves them to a value: which write wins is client-configured policy, so a relay that picked a winner would seed late joiners into disagreement with everyone already in the room."
     >
       <docs-section title="Creating a relay" id="create">
         <p>
@@ -31,9 +31,12 @@ import { DocSection } from '../../../layout/doc-section';
           When a client joins, the relay answers with one of three shapes:
           <code>up-to-date</code> when it already has the latest sequence,
           <code>delta</code> with just the envelopes it missed for a fast
-          reconnect, or <code>snapshot</code> with the full root when it is too
-          far behind for the journal to cover. Deletes fold into the snapshot, so
-          a late joiner never resurrects a removed key.
+          reconnect, or <code>snapshot</code> with the retained register state
+          when it is too far behind for the journal to cover. The snapshot is
+          register state, not a resolved value: the joiner folds it locally with
+          its own policy and lands on the same value as everyone else. A deleted
+          key whose tombstone has settled is dropped from the retained state, so
+          a late joiner never resurrects it.
         </p>
       </docs-section>
 
@@ -46,6 +49,18 @@ import { DocSection } from '../../../layout/doc-section';
           <code>pathPrefixAcl</code> grants write access by path prefix and can
           discriminate by principal.
         </p>
+        <p>
+          What the relay enforces is shape and path access: a well-formed
+          envelope and a writer allowed to touch that path. It does not verify
+          the precedence an op claims (its authority level) or that its citations
+          are genuine, so a room that needs "only this role may override" enforces
+          that in the policy, on a trusted <code>writer</code> that your adapter
+          authenticates. Eject is scoped to that writer, which bans the principal
+          across its connections rather than one device. Two clients connected
+          directly over WebRTC skip the relay, so a peer-to-peer room is
+          trust-full for authority: use it among clients that already trust each
+          other, or route through the relay when they do not.
+        </p>
         <docs-code [code]="policy" lang="ts" />
       </docs-section>
 
@@ -53,15 +68,15 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Rooms live in memory, and the relay exposes a seam rather than a
           storage engine. <code>onCommit</code> fires after every envelope is
-          sequenced and folded, with the envelope and the room's current
-          <code>{{ '{' }} seq, epoch, root {{ '}' }}</code>. The envelope is the
-          persistence record: append it to a journal and checkpoint the root as
-          often as you like. <code>relay.hydrate</code> restores a persisted
-          room before clients join and refuses once the room has state or
-          members. Restoring the persisted <code>epoch</code> lets returning
-          clients keep their sequence watermark and catch up with a delta
-          answer; omitting it falls back to a full snapshot, which is always
-          safe.
+          sequenced and retained, with the envelope and the room's current
+          <code>{{ '{' }} seq, instance, registers, wm, schemaVersion {{ '}' }}</code>.
+          The envelope is the persistence record: append it to a journal and
+          checkpoint the register state as often as you like.
+          <code>relay.hydrate</code> restores a persisted room before clients
+          join and refuses once the room has state or members. Restoring the
+          persisted <code>instance</code> lets returning clients keep their
+          sequence watermark and catch up with a delta answer; omitting it falls
+          back to a full snapshot, which is always safe.
         </p>
         <docs-code [code]="persistence" lang="ts" />
       </docs-section>
@@ -109,7 +124,7 @@ const policy = pathPrefixAcl([
 const saved = await checkpoints.get(roomName);
 if (saved) {
   relay.hydrate(roomName, {
-    ...saved, // seq, epoch, root
+    ...saved, // seq, instance, registers, wm, schemaVersion
     journal: await journal.tail(roomName, saved.seq),
   });
 }`;

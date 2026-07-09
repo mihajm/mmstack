@@ -25,7 +25,11 @@ function peer(relay: Relay, writer: string, over?: Partial<MeshSyncOptions>) {
 }
 const flush = () => TestBed.tick();
 
-/** A deploy-job migrator: connects, emits the migration envelope, done. */
+/**
+ * A deploy-job migrator: connects, emits the migration envelope, done. The root replace is
+ * epoch-BUMPED — the migrator is an authorized bumper, and an un-bumped migration root-set
+ * would let concurrent old-schema edits outrank the migrated value.
+ */
 function migrate(relay: Relay, root: State, schemaVersion: number): void {
   const conn = relay.connect(
     { send: () => undefined, close: () => undefined },
@@ -49,7 +53,7 @@ function migrate(relay: Relay, root: State, schemaVersion: number): void {
       version: 1,
       hlc: { p: Date.now(), l: 0 },
       policyVersion: 0,
-      ops: [{ kind: 'set', path: [], next: root }],
+      ops: [{ kind: 'set', path: [], next: root, cites: [], epoch: 1 }],
       schemaVersion,
     },
   });

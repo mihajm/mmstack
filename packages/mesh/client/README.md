@@ -38,8 +38,8 @@ store also participates in transition scopes, so a reconnect shows up as `pendin
 
 Reconnection is automatic, with exponential backoff. On reconnect the client resumes from a
 delta when possible, and re-applies any writes made while offline on top of whatever the room
-moved to in the meantime. A relay restart is detected through a room epoch, so a stale sequence
-number never corrupts state.
+moved to in the meantime. A relay restart is detected through a room instance nonce, so a stale
+sequence number never corrupts state.
 
 ## Conflict resolution
 
@@ -63,9 +63,9 @@ meshSync(board, {
 });
 ```
 
-`preserve` turns a clash into a `Conflicted` value holding both sides, so nothing is silently
-lost and a resolution is just a later write. See `@mmstack/primitives` for the full set of
-merge policies; they are the same ones the store uses for forks and tabs.
+`preserve` turns a clash into a `Conflicted` value holding every side that clashed, not just two,
+so nothing is silently lost and a resolution is just a later write. See `@mmstack/primitives` for
+the full set of merge policies; they are the same ones the store uses for forks and tabs.
 
 The default is last-writer-wins on a leaf, which drops one side of a true clash on the same field.
 For a field where losing a write matters, set `preserve` on its path and resolve the `Conflicted`
@@ -230,27 +230,28 @@ There are two ways to give it write access, for two levels of trust.
 
 ### Review a branch
 
-Give the agent a fork of the synced store. Its writes stay on the fork, so nothing reaches the room
-until a person approves. `ops()` is the staged change as data, ready to render for review. `commit()`
-applies it onto the synced store, which then emits to the room. `discard()` drops it.
+`mesh.fork()` gives the agent a fork of the synced store. Its writes stay on the fork, so nothing
+reaches the room until a person approves. `ops()` is the staged change as data, ready to render for
+review. `commit()` emits it to the room; `discard()` drops it.
 
 ```ts
-import { forkStore } from '@mmstack/primitives';
-
 const board = store<Board>(initialBoard());
-meshSync(board, { room: 'board-42', writer: userId, transport });
+const mesh = meshSync(board, { room: 'board-42', writer: userId, transport });
 
-const proposal = forkStore(board); // the agent's isolated branch, off the room
-runAgent(proposal.store);          // it writes here
+const proposal = mesh.fork();   // the agent's isolated branch, off the room
+runAgent(proposal.store);       // it writes here
 
-const changes = proposal.ops();    // StoreOp[] for the reviewer to see
-proposal.commit();                 // approve: merges onto board, which syncs
-// proposal.discard();             // reject: drops the staged writes
+const changes = proposal.ops(); // StoreOp[] for the reviewer to see
+proposal.commit();              // approve: emits as concurrent writes to the room
+// proposal.rebase();           // re-observe the room, then commit on top
+// proposal.discard();          // reject: drops the staged writes
 ```
 
-The fork reconciles as the base moves, so a proposal stays current while a person looks at it. The
-reviewer reads and writes normal store values, and the agent never touches the room directly. This
-is the fit when a write should be seen before it lands.
+The commit cites what the fork observed when it forked, so an edit that lands on the room while a
+person reviews stays a concurrent value the merge policy decides, never silently overwritten by the
+approval. Call `rebase()` to re-observe the room first when the proposal should apply on top of the
+latest. The reviewer reads and writes normal store values, and the agent never touches the room
+directly. This is the fit when a write should be seen before it lands.
 
 ### Write as a peer
 
@@ -299,7 +300,7 @@ meshSync(store, { room, writer, transport, schemaVersion: 2 });
 ```
 
 A migration is an envelope: a privileged writer (run from your deploy) emits a root set carrying the
-new `schemaVersion`. The relay bumps the room's schema and its epoch, so every watermark dies and
+new `schemaVersion`. The relay bumps the room's schema and its instance nonce, so every watermark dies and
 clients re-hydrate into the new shape. A client older than the room is rejected with reason
 `schema`, and a client already connected when the migration lands stops applying and reports
 `outdated`. Because the migration rides the log, a compacted snapshot and `relay.hydrate` are

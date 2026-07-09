@@ -120,14 +120,14 @@ import { DocSection } from '../../../layout/doc-section';
           is a delta.
         </p>
         <p>
-          Writes route to the owner instead of applying locally. The owner is
-          the single sequencer: it applies incoming write operations, emits one
-          authoritative batch covering that write, and sends it to every replica
-          including the writer. The writer updates from that echo, and the echo
-          is also the acknowledgement. Because all replicas apply the same
-          owner-ordered stream, they converge, even under interleaved writes
-          from several components. There is no optimistic divergence and no
-          CRDT.
+          A write applies optimistically on the writer and routes to the owner,
+          which folds it in and echoes it to every replica; the echo is also the
+          acknowledgement. The main thread and the worker run the same convergent
+          sync the mesh uses, so interleaved writes from several components land
+          on the same value on every replica. The owner can also correct a value
+          authoritatively, and that correction wins wherever it meets a
+          concurrent write, which is how a single owner keeps the last word over
+          its subtree.
         </p>
         <p>
           Reads stay synchronous because a replica always holds a value. Only

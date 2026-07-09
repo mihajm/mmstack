@@ -15,11 +15,14 @@ describe('scenario: boot race (disk vs relay) — KNOWN GAP, feeds branching-sta
     expect(res.bootRoot.counters.a).toBe(7); // relay's value, not disk's 42
   });
 
-  it('mesh-first: the boot peer silently adopts stale disk and DIVERGES from the room (split-brain)', async () => {
+  it('mesh-first: the boot peer adopts stale disk and PROPAGATES it — the room converges onto the stale snapshot', async () => {
     const res = await runBootRace({ attachOrder: 'mesh-first' });
     expect(res.bootRoot.labels.x).toBe('offline-edit'); // stale disk adopted over the synced state
     expect(res.bootRoot.counters.a).toBe(42); // disk's value
-    expect(res.roomRoot.labels.x).toBe('from-room'); // <- the room disagrees: no merge, a split brain
+    // Since the register-state exchange landed, the disk adoption emits as an ordinary cited
+    // write, so the old split-brain became convergence — onto the STALE value. The remaining
+    // gap is unchanged: persist has no provenance, so a stale snapshot passes as a fresh write.
+    expect(res.roomRoot.labels.x).toBe('offline-edit');
   });
 
   it('the two orderings disagree — the boot outcome is unarbitrated (never a merge)', async () => {

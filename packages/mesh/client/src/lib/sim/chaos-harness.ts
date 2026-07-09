@@ -3,6 +3,7 @@ import {
   createRelay,
   MESH_PROTO_VERSION,
   type OpPolicy,
+  type RegisterCheckpoint,
   type Relay,
   type SeqEnvelope,
 } from '@mmstack/mesh-protocol';
@@ -53,11 +54,11 @@ export function runChaosSimulation(opt: ChaosOptions): SimResult {
   vi.setSystemTime(BASE_TIME);
   try {
     const journal: SeqEnvelope[] = [];
-    let relayRoot: unknown = undefined;
+    let relayRegisters: readonly RegisterCheckpoint[] = [];
     const relay = createRelay({
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRoot = state.root;
+        relayRegisters = state.registers;
       },
     });
 
@@ -105,7 +106,7 @@ export function runChaosSimulation(opt: ChaosOptions): SimResult {
 
     const result: SimResult = {
       roots: peers.map((pe) => pe.s()),
-      relayRoot,
+      relayRegisters,
       journal,
       seq: relay.room('sim')?.seq ?? 0,
       statuses: peers.map((pe) => pe.status()),
@@ -123,9 +124,9 @@ export type RestartResult = {
   readonly roots: SimDoc[];
   readonly statuses: MeshStatus[];
   readonly checkpointSeq: number;
-  readonly checkpointRoot: unknown;
+  readonly checkpointRegisters: readonly RegisterCheckpoint[];
   readonly postSeq: number;
-  readonly postRelayRoot: unknown;
+  readonly postRelayRegisters: readonly RegisterCheckpoint[];
   readonly postJournal: SeqEnvelope[];
 };
 
@@ -136,9 +137,9 @@ export type RestartOptions = {
   readonly opsPerRound?: number;
   readonly faults?: Faults;
   readonly restartRound: number;
-  /** Restore the room epoch so returning clients keep their watermark (delta resume); else they
-   *  meet a fresh epoch and re-snapshot. */
-  readonly preserveEpoch?: boolean;
+  /** Restore the room instance nonce so returning clients keep their watermark (delta resume);
+   *  else they meet a fresh instance and re-snapshot. */
+  readonly preserveInstance?: boolean;
 };
 
 /**
@@ -157,17 +158,24 @@ export function runRestartSimulation(opt: RestartOptions): RestartResult {
   vi.setSystemTime(BASE_TIME);
   try {
     let journal: SeqEnvelope[] = [];
-    let relayRoot: unknown = undefined;
-    let relayEpoch = '';
+    let relayRegisters: readonly RegisterCheckpoint[] = [];
+    let relayWm: Readonly<Record<string, number>> = {};
+    let relayInstance = '';
     let relaySeq = 0;
     const onCommit = (
       _room: string,
       env: SeqEnvelope,
-      state: { seq: number; epoch: string; root: unknown },
+      state: {
+        seq: number;
+        instance: string;
+        registers: readonly RegisterCheckpoint[];
+        wm: Readonly<Record<string, number>>;
+      },
     ) => {
       journal.push(env);
-      relayRoot = state.root;
-      relayEpoch = state.epoch;
+      relayRegisters = state.registers;
+      relayWm = state.wm;
+      relayInstance = state.instance;
       relaySeq = state.seq;
     };
     let currentRelay = createRelay({ onCommit });
@@ -196,19 +204,20 @@ export function runRestartSimulation(opt: RestartOptions): RestartResult {
     });
     drain();
 
-    let checkpointRoot: unknown = undefined;
+    let checkpointRegisters: readonly RegisterCheckpoint[] = [];
     let checkpointSeq = 0;
 
     for (let round = 0; round < opt.rounds; round++) {
       if (round === opt.restartRound) {
-        checkpointRoot = relayRoot;
+        checkpointRegisters = relayRegisters;
         checkpointSeq = relaySeq;
         const preJournal = [...journal];
         const restored = createRelay({ onCommit });
         restored.hydrate('sim', {
           seq: checkpointSeq,
-          root: checkpointRoot,
-          epoch: opt.preserveEpoch ? relayEpoch : undefined,
+          registers: checkpointRegisters,
+          wm: relayWm,
+          instance: opt.preserveInstance ? relayInstance : undefined,
           journal: preJournal,
         });
         journal = []; // capture post-restart commits only
@@ -228,9 +237,9 @@ export function runRestartSimulation(opt: RestartOptions): RestartResult {
       roots: peers.map((p) => p.s()),
       statuses: peers.map((p) => p.status()),
       checkpointSeq,
-      checkpointRoot,
+      checkpointRegisters,
       postSeq: relaySeq,
-      postRelayRoot: relayRoot,
+      postRelayRegisters: relayRegisters,
       postJournal: journal,
     };
     for (const peer of peers) peer.close();
@@ -241,7 +250,11 @@ export function runRestartSimulation(opt: RestartOptions): RestartResult {
   }
 }
 
-/** A deploy-job migrator: bumps the room to `schemaVersion` with a root-set. */
+/**
+ * A deploy-job migrator: bumps the room to `schemaVersion` with an epoch-BUMPED root-set (a
+ * migrator is an authorized bumper; an un-bumped migration root-set would let concurrent
+ * old-schema edits outrank the migrated value in the fold).
+ */
 function migrateRoom(
   relay: Relay,
   room: string,
@@ -270,7 +283,7 @@ function migrateRoom(
       version: 1,
       hlc: { p: BASE_TIME, l: 0 },
       policyVersion: 0,
-      ops: [{ kind: 'set', path: [], next: root }],
+      ops: [{ kind: 'set', path: [], next: root, cites: [], epoch: 1 }],
       schemaVersion,
     },
   });
@@ -483,7 +496,7 @@ export type EjectionResult = {
   readonly honestStatuses: MeshStatus[];
   readonly rogueStatus: MeshStatus;
   readonly journal: SeqEnvelope[];
-  readonly relayRoot: unknown;
+  readonly relayRegisters: readonly RegisterCheckpoint[];
 };
 
 export type EjectionOptions = {
@@ -510,12 +523,12 @@ export function runEjectionSimulation(opt: EjectionOptions): EjectionResult {
   vi.setSystemTime(BASE_TIME);
   try {
     const journal: SeqEnvelope[] = [];
-    let relayRoot: unknown = undefined;
+    let relayRegisters: readonly RegisterCheckpoint[] = [];
     const relay = createRelay({
       policy: noNegatives,
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRoot = state.root;
+        relayRegisters = state.registers;
       },
     });
 
@@ -561,7 +574,7 @@ export function runEjectionSimulation(opt: EjectionOptions): EjectionResult {
       honestStatuses: honest.map((p) => p.status()),
       rogueStatus: rogue.status(),
       journal,
-      relayRoot,
+      relayRegisters,
     };
     for (const p of honest) p.close();
     rogue.close();

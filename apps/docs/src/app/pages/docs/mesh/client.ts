@@ -120,12 +120,13 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Agents" id="agents">
         <p>
-          An agent acts under the same protocol as a person. Give it a fork of
-          the synced store and its writes stay off the room until a person
-          approves: <code>ops()</code> is the staged change as data,
-          <code>commit()</code> merges it onto the synced store, and
-          <code>discard()</code> drops it. The fork reconciles as the base moves,
-          so a proposal stays current while a person reviews it.
+          An agent acts under the same protocol as a person. <code>mesh.fork()</code>
+          gives it a branch of the synced store and its writes stay off the room
+          until a person approves: <code>ops()</code> is the staged change as data,
+          <code>commit()</code> emits it to the room, and <code>discard()</code>
+          drops it. The commit cites what the fork observed, so an edit that lands
+          mid-review stays a concurrent value the merge policy decides rather than
+          being overwritten by the approval.
         </p>
         <docs-code [code]="agentBranch" lang="ts" />
         <p>
@@ -205,13 +206,12 @@ meshSync(board, {
 
 const others = mesh.peers(); // [{ writer, origin, data }, ...]`;
 
-  protected readonly agentBranch = `import { forkStore } from '@mmstack/primitives';
-
-const proposal = forkStore(board); // the agent's branch, off the room
-runAgent(proposal.store);          // it writes here
+  protected readonly agentBranch = `const proposal = mesh.fork(); // the agent's branch, off the room
+runAgent(proposal.store);      // it writes here
 
 proposal.ops();      // StoreOp[] for the reviewer to see
-proposal.commit();   // approve: merges onto board, which syncs
+proposal.commit();   // approve: emits as concurrent writes; a mid-review room edit is never steamrolled
+// proposal.rebase();  // re-observe the room, then commit on top
 // proposal.discard(); // reject: drops the staged writes`;
 
   protected readonly agentPeer = `meshSync(board, {

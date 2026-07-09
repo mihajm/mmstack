@@ -17,8 +17,8 @@ import { DocSection } from '../../../layout/doc-section';
         For an owned subtree it is a real, writable signal store: you read it
         deeply per leaf and route changes with <code>write</code>, like any store
         from <code>&#64;mmstack/primitives</code>. It hydrates from the owner's
-        first snapshot, then folds each authoritative batch in through an
-        echo-free apply.
+        first checkpoint, then folds each owner update in through an echo-free
+        apply.
       </p>
 
       <docs-code [code]="replica" lang="ts" />
@@ -26,12 +26,13 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Writing (optimistic)" id="write">
         <p>
           <code>write</code> applies your recipe locally right away, ships the
-          diff to the owner as minimal operations, and the owner (the single
-          sequencer) applies and re-emits it. The returned promise resolves once
-          that authoritative batch lands back, so you can await confirmation while
-          the value is already on screen. The owner stays authoritative: every
-          replica reconciles to its ordering, and interleaved writes converge to
-          the same state everywhere.
+          diff to the owner as minimal operations, and the owner folds it in and
+          echoes it back. The returned promise resolves once that echo lands, so
+          you can await confirmation while the value is already on screen. The
+          main thread and the worker run the same convergent sync, so interleaved
+          writes from several components land on the same state everywhere, and an
+          authoritative owner correction wins wherever it meets a concurrent
+          write.
         </p>
         <docs-code [code]="write" lang="ts" />
       </docs-section>

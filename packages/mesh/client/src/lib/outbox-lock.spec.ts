@@ -135,7 +135,7 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     expect(fake.held.has(LOCK('k'))).toBe(false); // released on close
   });
 
-  it('a second tab on the same key WAITS while the first holds, then takes over on close (reusing the origin)', async () => {
+  it('a second tab on the same key WAITS while the first holds, then takes over on close (minting a fresh origin)', async () => {
     fake = installFakeLocks();
     const relay = createRelay();
     const { store: disk, backing } = memStore();
@@ -151,11 +151,13 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     expect(b.mesh.status()).toBe('connecting'); // queued, never went live
     expect(fake.held.has(LOCK('shared'))).toBe(true); // still A's
 
-    // A closes → the lock hands off → B boots and adopts the persisted (A-owned) origin
+    // A closes → the lock hands off → B boots. It does NOT reuse A's origin: every boot mints a
+    // fresh one (a byte clone of this disk must never resurrect an origin and mint colliding dots).
+    // A's unacked tail still resends verbatim under A's origin; B's new writes are its own.
     a.mesh.close();
     await settle();
     expect(b.mesh.status()).toBe('live');
-    expect((backing.get('shared') as { origin: string }).origin).toBe(ownedOrigin); // reused, not re-minted
+    expect((backing.get('shared') as { origin: string }).origin).not.toBe(ownedOrigin); // fresh mint
 
     b.mesh.close();
   });

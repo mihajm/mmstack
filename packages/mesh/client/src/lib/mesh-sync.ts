@@ -19,13 +19,21 @@ import {
   type ServerMsg,
 } from '@mmstack/mesh-protocol';
 import {
+  createConvergingApply,
+  forkStore,
+  OP_PROTO_VERSION,
   opSync,
   registerResource,
   type AsyncStore,
+  type DotFrontier,
+  type ForkStoreOptions,
   type MergePolicyEntry,
   type OpEnvelope,
   type OpSync,
   type ResourceLike,
+  type SyncedFork,
+  type SyncOp,
+  type WritableSignalStore,
 } from '@mmstack/primitives';
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
@@ -61,6 +69,19 @@ export type SyncHealth = {
     | (string & {});
   /** `Date.now()` of the last successful sync (welcome or applied env). */
   readonly lastSyncedAt?: number;
+  /**
+   * Offline writes persisted by an older build that could not be restored on boot. Envelopes
+   * from a previous wire-protocol version lack the citation metadata current merging needs,
+   * so they are dropped (loudly) instead of being upgraded with fabricated citations.
+   */
+  readonly droppedOfflineWrites?: number;
+  /**
+   * Received envelopes rejected as malformed by the deterministic well-formedness check (a bad id
+   * or path segment, a non-integer version, an unknown op kind, a negative epoch, forged cites, a
+   * root delete). Direct peer-to-peer rooms are trust-full for authority, so this is a peer's line
+   * against a malformed neighbor; through a relay these are also rejected at the relay.
+   */
+  readonly droppedInvalidEnvelopes?: number;
 };
 
 // a versioned reject means "your build is behind" → prompt an update, not a dead socket
@@ -81,6 +102,13 @@ export type MeshSyncOptions = {
   readonly policy?: OpPolicy;
   /** kind/claims of this principal, so a shared policy evaluates identically on both sides. */
   readonly ctx?: Omit<PrincipalCtx, 'writer'>;
+  /**
+   * The room's shared configuration pin, checked at hello against the relay's. Bump it
+   * together whenever anything peers must agree on changes: the write policy, and just as
+   * importantly the merge/fold configuration (`policies`). Peers folding the same register
+   * state with different rules read different values, so one room means one fold config; a
+   * client pinned to an older version is rejected `policy-version` and surfaces `outdated`.
+   */
   readonly policyVersion?: number;
   /** The data shape this client speaks. Older-than-room → `outdated`, and a
    *  newer-schema migration envelope arriving mid-session flips this client to `outdated` too. */
@@ -133,13 +161,21 @@ type PersistedOutbox = {
   readonly envs: readonly OpEnvelope[];
 };
 
-export type MeshSyncRef = {
+export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   readonly status: Signal<MeshStatus>;
   /** Composed sync-health for a user-facing surface. */
   readonly health: Signal<SyncHealth>;
   readonly peers: Signal<readonly MeshPeer[]>;
   /** Publish this client's ephemeral presence payload (cursor, section, activity…). */
   setPresence(data: unknown): void;
+  /**
+   * Fork the synced store for isolated, reviewable edits (an agent branch, a staged change). The
+   * fork observes the room as it is now; committing emits its diff citing only those observed
+   * writes, so an edit that lands on the room while the fork is open stays a concurrent value the
+   * merge policy decides rather than being overwritten by the commit. Call `rebase()` to re-observe
+   * the room and commit on top of the latest instead. `discard()` drops the staged edits.
+   */
+  fork(opt?: ForkStoreOptions<T & Record<string, any>>): SyncedFork<T & Record<string, any>>;
   close(): void;
 };
 
@@ -156,28 +192,36 @@ const OUTBOX_DEBOUNCE_MS = 300;
 export function meshSync<T extends object>(
   source: WritableSignal<T>,
   opt: MeshSyncOptions,
-): MeshSyncRef {
+): MeshSyncRef<T> {
   const injector = opt.injector ?? inject(Injector);
   const status = signal<MeshStatus>('connecting');
   const lastReason = signal<string | undefined>(undefined);
   const lastSyncedAt = signal<number | undefined>(undefined);
+  const droppedOffline = signal(0);
+  const droppedInvalid = signal(0);
   const peerMap = signal<ReadonlyMap<string, MeshPeer>>(new Map());
   const peers = computed(() => [...peerMap().values()]);
   const policyVersion = opt.policyVersion ?? 0;
 
   const health = computed<SyncHealth>(() => {
     const at = lastSyncedAt();
+    const dropped = droppedOffline();
+    const invalid = droppedInvalid();
+    const extra = {
+      ...(dropped > 0 ? { droppedOfflineWrites: dropped } : undefined),
+      ...(invalid > 0 ? { droppedInvalidEnvelopes: invalid } : undefined),
+    };
     switch (status()) {
       case 'live':
-        return { status: 'live', lastSyncedAt: at };
+        return { status: 'live', lastSyncedAt: at, ...extra };
       case 'ejected': {
         const reason = lastReason();
         return reason && OUTDATED_REASONS.has(reason)
-          ? { status: 'outdated', reason, lastSyncedAt: at }
-          : { status: 'ejected', reason, lastSyncedAt: at };
+          ? { status: 'outdated', reason, lastSyncedAt: at, ...extra }
+          : { status: 'ejected', reason, lastSyncedAt: at, ...extra };
       }
       default: // connecting / reconnecting / closed — not reachable
-        return { status: 'offline', lastSyncedAt: at };
+        return { status: 'offline', lastSyncedAt: at, ...extra };
     }
   });
 
@@ -186,10 +230,17 @@ export function meshSync<T extends object>(
   let started = false;
   let unsubLocal: () => void = () => undefined;
 
-  const unacked = new Map<number, OpEnvelope>();
-  let highestAcked = 0;
+  // A fresh origin is minted every boot; a restored outbox tail resends under ITS recorded origin.
+  // So this client is responsible for more than one origin, and unacked writes are keyed by
+  // (origin, version) with an acked high-water per origin. `ownOrigins` is every origin we resend
+  // for (the fresh mint plus any restored-tail origins), so an echo of any of them clears an ack.
+  const ownOrigins = new Set<string>();
+  const unacked = new Map<string, OpEnvelope>();
+  const acked = new Map<string, number>();
+  const unackedKey = (env: { origin: string; version: number }): string =>
+    `${env.origin} ${env.version}`;
   let lastSeq = 0;
-  let epoch: string | undefined;
+  let instance: string | undefined;
   let presenceData: unknown;
   let hasPresence = false;
   let transport: MeshTransport | null = null;
@@ -251,8 +302,9 @@ export function meshSync<T extends object>(
   };
 
   const flushUnacked = (): void => {
-    for (const env of [...unacked.values()].sort(
-      (a, b) => a.version - b.version,
+    // per origin, versions must go out in order; across origins the order is irrelevant
+    for (const env of [...unacked.values()].sort((a, b) =>
+      a.origin === b.origin ? a.version - b.version : a.origin < b.origin ? -1 : 1,
     )) {
       sendEnv(env);
     }
@@ -262,13 +314,29 @@ export function meshSync<T extends object>(
     if (msg.room !== opt.room) return;
     switch (msg.t) {
       case 'welcome': {
-        if (epoch !== undefined && msg.epoch !== epoch) lastSeq = 0;
-        epoch = msg.epoch;
+        if (instance !== undefined && msg.instance !== instance) lastSeq = 0;
+        instance = msg.instance;
         peerMap.set(new Map(msg.peers.map((p) => [p.origin, p])));
         if (msg.mode === 'delta') {
           for (const env of msg.envs) applyRemote(env);
         } else if (msg.mode === 'snapshot') {
-          sync.hydrate(msg.root as T, { [sync.origin]: highestAcked });
+          // The room ships register state, not a value: fold it locally (this client's own
+          // policies) to derive the root, then hydrate root + registers together. Each own
+          // origin's watermark stays at its acked high-water so unacked local writes rebase on top.
+          const conv = createConvergingApply({ policies: opt.policies });
+          conv.load(msg.registers);
+          const ownWm: Record<string, number> = {};
+          for (const o of ownOrigins) ownWm[o] = acked.get(o) ?? 0;
+          // rebase from the durable outbox, not opSync's bounded recent-local ring, so a long
+          // offline burst larger than that ring is never dropped from the rebase on a snapshot join
+          sync.hydrate(
+            {
+              root: conv.materialize() as T,
+              registers: msg.registers,
+              wm: { ...msg.wm, ...ownWm },
+            },
+            [...unacked.values()],
+          );
           lastSeq = msg.seq;
         } else if (msg.seq === 0 && lastSeq === 0) {
           sync.seed();
@@ -302,6 +370,11 @@ export function meshSync<T extends object>(
       case 'reject':
         terminal('ejected', msg.reason);
         return;
+      case 'frontier':
+        // the relay compacted past this stamp: reclaim our own settled register state to match,
+        // so a long-lived connection stays bounded by live data rather than history
+        if (started) sync.prune(msg.frontier);
+        return;
     }
   };
 
@@ -317,9 +390,9 @@ export function meshSync<T extends object>(
       terminal('ejected', 'schema');
       return;
     }
-    if (env.origin === sync.origin) {
-      unacked.delete(env.version);
-      highestAcked = Math.max(highestAcked, env.version);
+    if (ownOrigins.has(env.origin)) {
+      unacked.delete(unackedKey(env));
+      acked.set(env.origin, Math.max(acked.get(env.origin) ?? 0, env.version));
       persistOutbox();
       return;
     }
@@ -376,27 +449,61 @@ export function meshSync<T extends object>(
         }
         return;
       }
-      unacked.set(env.version, env);
+      ownOrigins.add(env.origin); // the fresh mint, or a restored-tail origin resending verbatim
+      unacked.set(unackedKey(env), env);
       persistOutbox();
       if (status() === 'live') sendEnv(env);
     });
   };
 
+  // A persisted envelope from a previous wire-protocol version lacks cites/epoch; there is no
+  // sound way to mint citations after the fact, so such writes are dropped loudly, never adapted.
+  const restorable = (env: OpEnvelope): boolean =>
+    env.proto === OP_PROTO_VERSION &&
+    env.ops.every(
+      (op) =>
+        Array.isArray((op as SyncOp).cites) &&
+        typeof (op as SyncOp).epoch === 'number',
+    );
+
   const initCore = (restore?: PersistedOutbox): void => {
     if (closed) return;
+    // Mint a FRESH origin every boot: a dot is (origin, hlc), so a never-before-used origin cannot
+    // collide with anything a prior boot (or a byte clone of this outbox) emitted. The persisted
+    // origin is NOT reused for minting; it survives only as metadata on the restored tail, which
+    // resends verbatim under it. Per-boot origin growth is bounded (one per boot) and dead origins'
+    // register watermarks compact away below the prune frontier.
     sync = opSync(source, {
       writer: opt.writer,
       policies: opt.policies,
       policyVersion,
       injector,
-      origin: restore?.origin,
+      onReject: (_env, reason) => {
+        droppedInvalid.update((n) => n + 1);
+        if (isDevMode()) {
+          console.warn(`[@mmstack/mesh] dropped malformed envelope from a peer (${reason})`);
+        }
+      },
     });
+    ownOrigins.add(sync.origin);
     started = true;
     wireLocal();
     if (restore && (restore.envs.length > 0 || restore.version > 0)) {
-      sync.restore(restore.envs, restore.version); // → subscribe repopulates `unacked` for resend
+      const kept = restore.envs.filter(restorable);
+      const dropped = restore.envs.length - kept.length;
+      if (dropped > 0) {
+        droppedOffline.set(dropped);
+        if (isDevMode()) {
+          console.warn(
+            `[@mmstack/mesh] dropped ${dropped} persisted offline write(s) from an older protocol version: ops without cites/epoch cannot be merged soundly, and citations are never fabricated`,
+          );
+        }
+      }
+      // the tail resends verbatim under its recorded origin; new writes mint on the fresh origin,
+      // so a version acked + dropped before the reboot can never be re-minted (the origin differs)
+      sync.restore(kept, restore.version); // → subscribe repopulates `unacked` for resend
     }
-    persistOutbox(true); // pin the (possibly freshly minted) origin so later boots reuse it
+    persistOutbox(true); // pin the freshly minted origin immediately, so a crash before any write is safe
     connect();
   };
 
@@ -513,6 +620,29 @@ export function meshSync<T extends object>(
       if (status() === 'live') {
         transport?.send({ t: 'presence', room: opt.room, data });
       }
+    },
+    fork: (forkOpt) => {
+      const f = forkStore(
+        source as unknown as WritableSignalStore<T & Record<string, any>>,
+        forkOpt,
+      );
+      // a fork created before the sync connected observed nothing, so an empty frontier is correct
+      // (its commit cites nothing and lands as concurrent); once connected, capture the live one
+      let frontier: DotFrontier = started ? sync.captureFrontier() : { seq: 0 };
+      const recapture = (): void => {
+        frontier = started ? sync.captureFrontier() : { seq: 0 };
+      };
+      return {
+        store: f.store,
+        ops: f.ops,
+        commit: () =>
+          started ? sync.commitScope(frontier, () => f.commit()) : f.commit(),
+        discard: () => {
+          f.discard();
+          recapture();
+        },
+        rebase: recapture,
+      };
     },
     close: () => {
       if (!closed) terminal('closed');

@@ -86,7 +86,7 @@ describe('meshSync over a real WebSocket server', () => {
   function peer(writer: string) {
     return TestBed.runInInjectionContext(() => {
       const s = store<State>(initial());
-      const mesh: MeshSyncRef = meshSync(s, {
+      const mesh: MeshSyncRef<State> = meshSync(s, {
         room: 'net',
         writer,
         transport: nodeWsTransport(() => `${url}/?writer=${writer}`),

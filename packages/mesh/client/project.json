@@ -4,7 +4,7 @@
   "sourceRoot": "packages/mesh/client/src",
   "prefix": "mm",
   "projectType": "library",
-  "tags": [],
+  "tags": ["scope:mesh"],
   "targets": {
     "build": {
       "executor": "@nx/angular:package",

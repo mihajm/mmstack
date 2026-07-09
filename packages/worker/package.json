@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/worker",
-  "version": "22.1.0",
+  "version": "22.2.0",
   "keywords": [
     "angular",
     "signals",
@@ -19,7 +19,7 @@
   "peerDependencies": {
     "@angular/core": ">=22 <23",
     "@angular/common": ">=22 <23",
-    "@mmstack/primitives": ">=22.6 <23"
+    "@mmstack/primitives": ">=22.8 <23"
   },
   "sideEffects": false
 }

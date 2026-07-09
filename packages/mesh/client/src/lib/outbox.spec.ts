@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { createRelay, type Relay, type SeqEnvelope } from '@mmstack/mesh-protocol';
-import { store, type AsyncStore, type OpEnvelope } from '@mmstack/primitives';
+import { OP_PROTO_VERSION, store, type AsyncStore, type OpEnvelope } from '@mmstack/primitives';
 import { meshSync, type MeshSyncOptions } from './mesh-sync';
 import { directTransport } from './transport';
 
@@ -42,13 +42,22 @@ async function settle(): Promise<void> {
 }
 
 const offlineEnv = (): OpEnvelope => ({
-  proto: 1,
+  proto: OP_PROTO_VERSION,
   origin: 'A',
   writer: 'wa',
   version: 1,
   hlc: { p: Date.now(), l: 0 },
   policyVersion: 0,
-  ops: [{ kind: 'set', path: ['title'], next: 'offline', prev: 'init' }],
+  ops: [
+    {
+      kind: 'set',
+      path: ['title'],
+      next: 'offline',
+      prev: 'init',
+      cites: [],
+      epoch: 0,
+    },
+  ],
 });
 
 describe('meshSync durable outbox — reboot survival', () => {
@@ -71,7 +80,7 @@ describe('meshSync durable outbox — reboot survival', () => {
     b.mesh.close();
   });
 
-  it('continues the version sequence past the restored high-water (no collision with an acked-but-dropped mint)', async () => {
+  it('mints new writes on a FRESH origin, so they never collide with an acked-but-dropped mint on the old one', async () => {
     const seen: SeqEnvelope[] = [];
     const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
     const { store: disk, backing } = memStore();
@@ -81,13 +90,22 @@ describe('meshSync durable outbox — reboot survival', () => {
       version: 5,
       envs: [
         {
-          proto: 1,
+          proto: OP_PROTO_VERSION,
           origin: 'A',
           writer: 'wa',
           version: 3,
           hlc: { p: Date.now(), l: 0 },
           policyVersion: 0,
-          ops: [{ kind: 'set', path: ['title'], next: 'restored', prev: 'init' }],
+          ops: [
+            {
+              kind: 'set',
+              path: ['title'],
+              next: 'restored',
+              prev: 'init',
+              cites: [],
+              epoch: 0,
+            },
+          ],
         } satisfies OpEnvelope,
       ],
     });
@@ -98,34 +116,79 @@ describe('meshSync durable outbox — reboot survival', () => {
     await settle();
 
     const aVersions = seen.filter((e) => e.origin === 'A').map((e) => e.version);
-    expect(aVersions).toContain(3); // the restored tail resent
-    expect(aVersions).toContain(6); // the fresh write minted ABOVE the high-water, never re-mints 4/5
-    expect(Math.min(...aVersions.filter((v) => v > 3))).toBe(6);
+    expect(aVersions).toEqual([3]); // the restored tail resent VERBATIM under 'A', and only that
+    // the old origin is never minted on again — v4/v5 (acked, dropped) can never be re-minted
+    expect(seen.some((e) => e.origin === 'A' && e.version > 3)).toBe(false);
+    // the fresh local write landed on a NEW origin, so no collision is even possible by construction
+    expect(seen.some((e) => e.origin !== 'A')).toBe(true);
 
     a.mesh.close();
   });
 
-  it('persists the origin immediately on boot and the unacked tail as it accrues', async () => {
+  it('pins a fresh origin to disk immediately on boot, and re-mints a distinct one on every reboot', async () => {
     const relay = createRelay();
     const { store: disk, backing } = memStore();
 
     const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
     await settle();
 
-    // a fresh origin was minted and pinned to disk immediately (so a later boot reuses it)
+    // a fresh origin was minted and pinned to disk immediately (so a crash before any write is safe)
     const pinned = backing.get('m:A') as { origin: string; version: number };
     expect(typeof pinned.origin).toBe('string');
     expect(pinned.origin.length).toBeGreaterThan(0);
     const origin = pinned.origin;
 
-    // reboot: a second session over the SAME disk adopts that origin, not a fresh one
+    // reboot: a second session over the SAME disk mints a DISTINCT origin, never reusing a stored one
+    // (a byte clone of this disk must not resurrect an origin and mint colliding dots)
     a.mesh.close();
     await settle();
     const b = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
     await settle();
-    expect((backing.get('m:A') as { origin: string }).origin).toBe(origin);
+    expect((backing.get('m:A') as { origin: string }).origin).not.toBe(origin);
 
     b.mesh.close();
+  });
+
+  it('drops (loudly) persisted envelopes from a pre-citation protocol version instead of fabricating citations', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const seen: SeqEnvelope[] = [];
+      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const { store: disk, backing } = memStore();
+      // a proto-1 build persisted this outbox: ops carry no cites/epoch
+      backing.set('m:A', {
+        origin: 'A',
+        version: 2,
+        envs: [
+          {
+            proto: 1,
+            origin: 'A',
+            writer: 'wa',
+            version: 2,
+            hlc: { p: Date.now(), l: 0 },
+            policyVersion: 0,
+            ops: [{ kind: 'set', path: ['title'], next: 'stale', prev: 'init' }],
+          },
+        ],
+      });
+
+      const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+      await settle();
+
+      expect(a.s().title).toBe('init'); // the stale write was NOT applied
+      expect(a.mesh.health().droppedOfflineWrites).toBe(1); // and the loss is surfaced
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('dropped 1'));
+      expect(seen.filter((e) => e.origin === 'A')).toHaveLength(0); // the dropped write is never resent
+
+      a.s.v.set(1); // fresh writes mint on a fresh origin, never touching the dropped origin 'A'
+      await settle();
+      expect(seen.some((e) => e.origin === 'A')).toBe(false); // 'A' stays silent (dropped, never re-minted)
+      expect(seen.some((e) => e.origin !== 'A')).toBe(true); // the room seed + fresh write are their own origin
+
+      a.mesh.close();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('a store with no persisted outbox boots clean and replicates through the deferred boot', async () => {
@@ -198,13 +261,15 @@ describe('meshSync whenReady — assemble the local base before connecting', () 
       version: 1,
       envs: [
         {
-          proto: 1,
+          proto: OP_PROTO_VERSION,
           origin: 'A',
           writer: 'wa',
           version: 1,
           hlc: { p: Date.now(), l: 0 },
           policyVersion: 0,
-          ops: [{ kind: 'set', path: ['v'], next: 42, prev: 0 }],
+          ops: [
+            { kind: 'set', path: ['v'], next: 42, prev: 0, cites: [], epoch: 0 },
+          ],
         },
       ],
     });

@@ -1,13 +1,38 @@
 export type Key = string | number;
 
+/**
+ * One structural operation. `set` and `delete` change a value at a path; `clear` retires a
+ * per-path register without contributing a value (the observed-remove half of a subtree
+ * replace). A `clear` is still a WRITE at its path for policy purposes.
+ */
 export type StoreOp =
   | { kind: 'set'; path: readonly Key[]; next: unknown; prev?: unknown }
-  | { kind: 'delete'; path: readonly Key[]; prev: unknown };
+  | { kind: 'delete'; path: readonly Key[]; prev: unknown }
+  | { kind: 'clear'; path: readonly Key[] };
 
 /** Hybrid logical clock stamp: physical epoch ms + logical counter. */
 export type Hlc = { readonly p: number; readonly l: number };
 
-export const MESH_PROTO_VERSION = 1;
+/** The identity of one write at one path: the emitting replica plus its clock stamp. */
+export type Dot = { readonly origin: string; readonly hlc: Hlc };
+
+/**
+ * A wire op: a structural {@link StoreOp} plus the causal metadata the per-path register
+ * needs. `cites` lists the sibling dot(s) the writer observed at the op's path when it wrote
+ * (exactly those get superseded); `epoch` is the op's precedence term, stamped at emission.
+ */
+export type SyncOp = StoreOp & {
+  readonly cites: readonly Dot[];
+  readonly epoch: number;
+};
+
+/**
+ * Wire protocol version. Version 2 ops carry `cites` + `epoch`: an op without citations
+ * cannot be merged soundly (it would supersede nothing and its siblings would accumulate
+ * forever), so the relay rejects envelopes from any other protocol version outright rather
+ * than silently mixing pre-citation emitters into a room.
+ */
+export const MESH_PROTO_VERSION = 2;
 
 export type OpEnvelope = {
   readonly proto: number;
@@ -16,17 +41,46 @@ export type OpEnvelope = {
   readonly version: number;
   readonly hlc: Hlc;
   readonly policyVersion: number;
-  readonly ops: readonly StoreOp[];
+  readonly ops: readonly SyncOp[];
   /**
    * Present only on a MIGRATION envelope: the new `schemaVersion` this envelope
-   * establishes. The relay bumps the room's schema + epoch when it sequences one; normal writes
-   * omit it.
+   * establishes. The relay bumps the room's schema + instance when it sequences one; normal
+   * writes omit it.
    */
   readonly schemaVersion?: number;
 };
 
 /** An envelope the relay has ordered: `seq` is the room-scoped total order. */
 export type SeqEnvelope = OpEnvelope & { readonly seq: number };
+
+/**
+ * One retained concurrent write at a path. A register keeps at most one sibling per origin
+ * (a replica's newer op replaces its own older one), so state stays bounded by the
+ * concurrent-writer count, not the op count.
+ */
+export type SyncSibling = {
+  readonly kind: 'set' | 'delete' | 'clear';
+  /** The written value for a `set`; absent for `delete`/`clear`. */
+  readonly value?: unknown;
+  /** The emitter's inversion hint, kept for value-merging folds on the client. */
+  readonly prev?: unknown;
+  readonly writer: string;
+  readonly origin: string;
+  readonly hlc: Hlc;
+  readonly epoch: number;
+};
+
+/**
+ * Serializable per-path register state: the retained siblings plus the per-origin
+ * supersession watermarks. This is what a snapshot ships, never a folded value: the fold is
+ * client-configured policy, so a joiner seeded with a bare value could neither supersede nor
+ * be superseded correctly afterwards.
+ */
+export type RegisterCheckpoint = {
+  readonly path: readonly Key[];
+  readonly siblings: readonly SyncSibling[];
+  readonly water: Readonly<Record<string, Hlc>>;
+};
 
 export type PresenceState = {
   readonly origin: string;
@@ -80,7 +134,7 @@ export type WelcomeMsg = {
   readonly seq: number;
   /** Room-instance nonce: changes when a room is recreated (relay restart, DO eviction),
    *  so clients know their seq watermark belongs to a dead seq space. */
-  readonly epoch: string;
+  readonly instance: string;
   /** The room's current data shape. */
   readonly schemaVersion: number;
   readonly peers: readonly PresenceState[];
@@ -89,7 +143,13 @@ export type WelcomeMsg = {
 } & (
   | { readonly mode: 'up-to-date' }
   | { readonly mode: 'delta'; readonly envs: readonly SeqEnvelope[] }
-  | { readonly mode: 'snapshot'; readonly root: unknown }
+  | {
+      readonly mode: 'snapshot';
+      /** The room's retained register state; the client folds it with its own policy. */
+      readonly registers: readonly RegisterCheckpoint[];
+      /** Per-origin envelope-version high-water marks at the snapshot point. */
+      readonly wm: Readonly<Record<string, number>>;
+    }
 );
 
 export type ServerEnvMsg = {
@@ -134,6 +194,14 @@ export type ServerSignalMsg = {
   readonly data: unknown;
 };
 
+/** The room's stability frontier advanced (the relay compacted past it). A client may reclaim its
+ *  own register state at or below this stamp; a straggler below it is rejected at ingest. */
+export type FrontierMsg = {
+  readonly t: 'frontier';
+  readonly room: string;
+  readonly frontier: Hlc;
+};
+
 export type ServerMsg =
   | WelcomeMsg
   | ServerEnvMsg
@@ -141,50 +209,5 @@ export type ServerMsg =
   | RejectMsg
   | EjectMsg
   | MemberMsg
-  | ServerSignalMsg;
-
-/**
- * Minimal pure op application for the relay's snapshot compaction — the same fold the L0
- * `applyOps` performs, owned here so the protocol package stays dependency-free.
- */
-export function applyWireOps<T>(root: T, ops: readonly StoreOp[]): T {
-  let next: unknown = root;
-  for (const op of ops) {
-    if (op.path.length === 0) {
-      if (op.kind === 'set') next = op.next;
-      continue;
-    }
-    next = applyAt(next, op.path, 0, op);
-  }
-  return next as T;
-}
-
-function applyAt(
-  container: unknown,
-  path: readonly Key[],
-  idx: number,
-  op: StoreOp,
-): unknown {
-  const seg = path[idx];
-  const base: Record<Key, unknown> | unknown[] = Array.isArray(container)
-    ? container.slice()
-    : container !== null && typeof container === 'object'
-      ? { ...container }
-      : typeof seg === 'number'
-        ? []
-        : {};
-
-  if (idx === path.length - 1) {
-    if (op.kind === 'delete') delete (base as Record<Key, unknown>)[seg];
-    else (base as Record<Key, unknown>)[seg] = op.next;
-    return base;
-  }
-
-  (base as Record<Key, unknown>)[seg] = applyAt(
-    (base as Record<Key, unknown>)[seg],
-    path,
-    idx + 1,
-    op,
-  );
-  return base;
-}
+  | ServerSignalMsg
+  | FrontierMsg;

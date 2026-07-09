@@ -39,10 +39,11 @@ describe('workerStore — version-gap recovery', () => {
     const { port1, port2 } = new MessageChannel();
     createWorkerHost({ stores: { app: owned }, port: port2 });
     const injector = TestBed.inject(Injector);
-    // drop the batch that would carry version 2
+    // drop the owner envelope that would carry version 2 (no client writes here, so version is the
+    // host origin's; the client detects the gap and resyncs)
     const port = droppingPort(
       port1 as unknown as WorkerPortLike,
-      (msg) => msg.type === 'store:ops' && msg.batch.version === 2,
+      (msg) => msg.type === 'store:sync' && msg.env.version === 2,
     );
     const worker = TestBed.runInInjectionContext(() =>
       connectWorker(() => port, { injector }),

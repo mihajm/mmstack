@@ -10,12 +10,14 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
+import { createWatch } from '@angular/core/primitives/signals';
 import {
   injectTransitionScope,
-  opLog,
+  opSync,
   toStore,
+  type OpEnvelope,
+  type OpLogDriver,
   type SignalStore,
-  type StoreOp,
   type WritableSignalStore,
 } from '@mmstack/primitives';
 import {
@@ -32,6 +34,27 @@ import {
   type WorkerRef,
 } from './connect-worker';
 
+// An injector-free opLog driver (schedules emission off the microtask queue via `createWatch`), so
+// the replica's `opSync` emits without depending on an application tick. Writes force a synchronous
+// `flush()` at the call site; between writes, owner envelopes drive apply, never local emission.
+const microtaskDriver = (): OpLogDriver => (run) => {
+  let scheduled = false;
+  const watch = createWatch(
+    () => run(),
+    (w) => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        w.run();
+      });
+    },
+    false,
+  );
+  watch.notify();
+  return { destroy: () => watch.destroy() };
+};
+
 export type WorkerStoreOptions<T> = {
   readonly injector?: Injector;
   /** Value the replica holds before the first snapshot arrives. */
@@ -43,10 +66,11 @@ export type WorkerStoreOptions<T> = {
 /** The write path — present only on OWNED (writable) subtrees; absent on published (read-only) ones. */
 export type WorkerStoreWrite<T> = {
   /**
-   * Route a write to the OWNER: `recipe` applies optimistically to the store, its diff ships as ops,
-   * and the owner sequences and re-emits it. Resolves once that authoritative batch reconciles this
-   * replica. To hide the value until the owner confirms it, fork the store and reveal on resolve.
-   * Rejects if the owner reports a write error.
+   * Route a write to the OWNER: `recipe` applies optimistically to the store, its diff ships as a
+   * stamped op envelope, and the owner folds it in and echoes it back. Resolves once the owner has
+   * acknowledged it (its echo reconciles this replica). The owner can override with a higher-epoch
+   * correction that wins the merge. To hide the value until the owner confirms it, fork the store
+   * and reveal on resolve. Rejects if the worker is disconnected or the store is read-only.
    */
   write(recipe: (draft: WritableSignalStore<T>) => void): Promise<void>;
 };
@@ -70,13 +94,13 @@ export type WorkerStoreRef<T, W extends boolean = true> = {
 } & (W extends true ? WorkerStoreWrite<T> : object);
 
 /**
- * A live replica of a store subtree OWNED by the worker. Subscribes over the {@link WorkerRef},
- * hydrates from the owner's snapshot, then folds each authoritative op batch into a main-thread
- * `store` through an echo-free `opLog.apply`. For an owned subtree the store is WRITABLE: a write
- * applies optimistically and its diff routes to the owner (which reconciles it back), and any
- * op-log reader — `meshSync`, `persist` — can attach to the same store, so a persisted, meshed,
- * worker-owned graph is just extra readers. Satisfies `ResourceLike`/`UseSource`, so it participates
- * in transition scopes and nests in `latest()`/`use()`.
+ * A live replica of a store subtree OWNED by the worker. It runs its own `opSync` over the worker
+ * transport: it hydrates from the owner's checkpoint, then folds each owner (or peer) envelope into
+ * a main-thread `store` convergently. For an owned subtree the store is WRITABLE: a write applies
+ * optimistically and its stamped envelope routes to the owner (which folds it and echoes it back),
+ * and any op-log reader — `meshSync`, `persist` — can attach to the same store, so a persisted,
+ * meshed, worker-owned graph is just extra readers. Satisfies `ResourceLike`/`UseSource`, so it
+ * participates in transition scopes and nests in `latest()`/`use()`.
  */
 export function workerStore<M extends WorkerSchema, K extends StoreKeys<M>>(
   worker: WorkerRef<M>,
@@ -107,7 +131,14 @@ function build<T extends object>(
   const s = toStore(root as unknown as WritableSignal<T>, {
     injector,
   }) as unknown as WritableSignalStore<T>;
-  const log = opLog(root as unknown as WritableSignal<T>, { injector });
+  // The replica runs its own opSync over the worker transport: local writes emit stamped envelopes
+  // routed to the owner, owner envelopes fold in convergently. A driver (not the injector) so
+  // emission stays synchronous under an explicit `flush()`, matching the DI-free worker model.
+  const sync = opSync(root as unknown as WritableSignal<T>, {
+    writer: worker.clientId,
+    driver: microtaskDriver(),
+    onGap: () => resync(),
+  });
 
   const status = signal<ResourceStatus>('loading');
   const error = signal<unknown>(undefined);
@@ -116,87 +147,67 @@ function build<T extends object>(
     return st === 'loading' || st === 'reloading';
   });
   let hasSnapshot = false;
-  let resyncing = false;
-  let lastVersion = 0;
-  let writeSeq = 0;
+  let lastEmitted = 0; // highest own-origin version emitted; the write() ack key
+  // own writes awaiting the owner's echo (resolve), plus the raw envelopes to resend after a resync
   const writePending = new Map<
     number,
-    {
-      version: number | null;
-      resolve?: () => void;
-      reject?: (e: unknown) => void;
-    }
+    { resolve: () => void; reject: (e: unknown) => void }
   >();
+  const unacked = new Map<number, OpEnvelope>();
 
   const hasValue = () => hasSnapshot;
 
   const isOwned = () => worker.manifest()?.stores.includes(key) ?? false;
 
-  const settleWrites = () => {
-    for (const [id, p] of writePending) {
-      if (p.version !== null && lastVersion >= p.version) {
-        writePending.delete(id);
-        p.resolve?.();
+  const ackUpTo = (version: number): void => {
+    for (const [v, p] of writePending) {
+      if (v <= version) {
+        writePending.delete(v);
+        p.resolve();
       }
     }
+    for (const v of [...unacked.keys()]) if (v <= version) unacked.delete(v);
   };
 
-  const shipLocal = (ops: readonly StoreOp[]): void => {
-    if (!ops.length || !isOwned() || !untracked(worker.connected)) return;
-    const id = ++writeSeq;
-    writePending.set(id, { version: null });
-    worker._send({
-      type: 'store:write',
-      store: key,
-      writeId: id,
-      clientId: worker.clientId,
-      ops,
-    });
-  };
-  const shipUnsub = log.subscribe((batch) => shipLocal(batch.ops));
+  const shipUnsub = sync.subscribe((env) => {
+    lastEmitted = env.version;
+    unacked.set(env.version, env);
+    if (isOwned() && untracked(worker.connected)) {
+      worker._send({ type: 'store:sync', store: key, env });
+    }
+  });
 
   const onStoreMessage = (msg: WorkerEnvelope): void => {
     if (!('store' in msg) || msg.store !== key) return;
     switch (msg.type) {
-      case 'store:snapshot': {
-        log.apply([{ kind: 'set', path: [], next: msg.value }]);
-        lastVersion = msg.version;
+      case 'store:checkpoint': {
+        // rebase from the full unacked outbox, not opSync's bounded recent-local ring, so a burst
+        // of writes larger than that ring is never dropped from the local rebase on re-hydrate
+        sync.hydrate(msg.checkpoint as Parameters<typeof sync.hydrate>[0], [
+          ...unacked.values(),
+        ]);
         hasSnapshot = true;
-        resyncing = false;
         status.set('resolved');
         error.set(undefined);
-        settleWrites();
+        // writes the owner already applied are covered by the checkpoint watermark; resolve them,
+        // then resend any still-unacked tail so a write made before the (re)hydrate is never lost
+        ackUpTo(msg.checkpoint.wm?.[sync.origin] ?? 0);
+        if (isOwned() && untracked(worker.connected)) {
+          for (const env of [...unacked.values()].sort(
+            (a, b) => a.version - b.version,
+          )) {
+            worker._send({ type: 'store:sync', store: key, env });
+          }
+        }
         return;
       }
-      case 'store:ops': {
-        if (!hasSnapshot || resyncing) return;
-        if (msg.batch.version <= lastVersion) return;
-        if (msg.batch.version > lastVersion + 1) {
-          resync(); // gap: re-hydrate rather than apply out of order
+      case 'store:sync': {
+        const env = msg.env;
+        if (env.origin === sync.origin) {
+          ackUpTo(env.version); // the owner echoed our own write back: acknowledgement
           return;
         }
-        log.apply(msg.batch.ops);
-        lastVersion = msg.batch.version;
-        settleWrites();
-        return;
-      }
-      case 'store:write:ack': {
-        const p = writePending.get(msg.writeId);
-        if (!p) return;
-        if (lastVersion >= msg.version) {
-          writePending.delete(msg.writeId);
-          p.resolve?.();
-        } else {
-          p.version = msg.version;
-        }
-        return;
-      }
-      case 'store:write:error': {
-        const p = writePending.get(msg.writeId);
-        if (p) {
-          writePending.delete(msg.writeId);
-          p.reject?.(deserializeError(msg.error));
-        }
+        sync.receive(env); // owner or peer envelope; a version gap triggers onGap -> resync
         return;
       }
       case 'store:status': {
@@ -235,7 +246,6 @@ function build<T extends object>(
   };
 
   const resync = (): void => {
-    resyncing = true;
     status.set('reloading');
     worker._send({
       type: 'store:subscribe',
@@ -248,8 +258,9 @@ function build<T extends object>(
   const offReady = worker._onReady(subscribe);
   if (untracked(worker.connected)) subscribe(); // already up (created post-handshake): _onReady won't fire
   const offDisconnect = worker._onDisconnect(() => {
-    for (const [, p] of writePending) p.reject?.(new WorkerCrashedError());
+    for (const [, p] of writePending) p.reject(new WorkerCrashedError());
     writePending.clear();
+    unacked.clear();
   });
 
   const self: WorkerStoreRef<T> = {
@@ -277,26 +288,24 @@ function build<T extends object>(
           new Error(`[@mmstack/worker] store is read-only (published): ${key}`),
         );
       recipe(s);
-      const before = writeSeq;
-      log.flush();
-      if (writeSeq === before) return Promise.resolve();
-      const writeId = writeSeq;
+      const before = lastEmitted;
+      sync.flush(); // emit the routed write synchronously (driver-backed opSync)
+      if (lastEmitted === before) return Promise.resolve(); // no-op recipe: nothing shipped
+      const version = lastEmitted;
       return new Promise<void>((resolve, reject) => {
-        const p = writePending.get(writeId);
-        if (!p) return resolve();
-        p.resolve = resolve;
-        p.reject = reject;
+        writePending.set(version, { resolve, reject });
       });
     },
     destroy: () => {
       shipUnsub();
-      log.destroy();
+      sync.destroy();
       unsub();
       offReady();
       offDisconnect();
       for (const [, p] of writePending)
-        p.reject?.(new WorkerAbortError('worker store destroyed'));
+        p.reject(new WorkerAbortError('worker store destroyed'));
       writePending.clear();
+      unacked.clear();
       worker._send({
         type: 'store:unsubscribe',
         store: key,

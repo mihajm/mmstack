@@ -19,10 +19,16 @@ type Key = string | number;
  * One structural operation. `set` on a key that did not previously exist carries NO `prev`
  * property (an absent key is not the same as a key holding `undefined` — the merge3 lesson),
  * which is what lets {@link invertBatch} invert an add into a delete.
+ *
+ * `clear` is a sync-layer intent, not a value change: it retires a per-path register (the
+ * observed-remove half of a subtree replace) and contributes NOTHING to a value: {@link applyOps}
+ * treats it as a no-op and the structural diff ({@link diffOps}) never emits one. Only the sync
+ * emission layer produces clears; they ride batches so undo/rebase plumbing can pass them through.
  */
 export type StoreOp =
   | { kind: 'set'; path: readonly Key[]; next: unknown; prev?: unknown }
-  | { kind: 'delete'; path: readonly Key[]; prev: unknown };
+  | { kind: 'delete'; path: readonly Key[]; prev: unknown }
+  | { kind: 'clear'; path: readonly Key[] };
 
 /** One emission: every op derived from one commit window (a tick), in path order. */
 export type OpBatch = {
@@ -144,9 +150,10 @@ function applyAt(
   container: unknown,
   path: readonly Key[],
   idx: number,
-  op: StoreOp,
+  op: Exclude<StoreOp, { kind: 'clear' }>,
 ): unknown {
   const seg = path[idx];
+  if (seg === '__proto__') return container;
   const base: Record<Key, unknown> | unknown[] = isPlainArray(container)
     ? container.slice()
     : isRecord(container)
@@ -185,6 +192,7 @@ export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
   const list = Array.isArray(ops) ? ops : (ops as OpBatch).ops;
   let next: unknown = root;
   for (const op of list) {
+    if (op.kind === 'clear') continue; // register retirement, never a value change
     if (op.path.length === 0) {
       if (op.kind === 'set') next = op.next;
       continue; // a root delete is meaningless — ignore (mirrors OpLog.apply)
@@ -198,7 +206,8 @@ export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
  * Pure reference-pruned structural diff of two roots into minimal ops (the emission core of
  * {@link opLog}, exported so code outside a log can produce a batch — e.g. diffing a scratch
  * draft against a replica's current value to route a write to its owner). Trusts the
- * copy-on-write contract: an untouched subtree that kept its reference is skipped.
+ * copy-on-write contract: an untouched subtree that kept its reference is skipped. Emits only
+ * `set` and `delete`; `clear` is an emission-layer intent, never a diff product.
  */
 export function diffOps(prev: unknown, next: unknown): StoreOp[] {
   const ops: StoreOp[] = [];
@@ -210,13 +219,16 @@ export function diffOps(prev: unknown, next: unknown): StoreOp[] {
  * Inverts a batch for undo: reversed order, `set`↔its own inverse (an add — a `set` with no
  * `prev` — inverts to a `delete`; a `delete` inverts to a `set` restoring `prev`). Feed the
  * result to {@link OpLog.apply}. Requires the ops' `prev`s, which in-memory batches always
- * carry — a wire-serialized batch that stripped them is not invertible.
+ * carry (a wire-serialized batch that stripped them is not invertible). A `clear` is skipped:
+ * it never changed a value, so it has no independent inverse (the accompanying subtree `set`'s
+ * `prev` subsumes restoration).
  */
 export function invertBatch(batch: OpBatch | readonly StoreOp[]): StoreOp[] {
   const ops = Array.isArray(batch) ? batch : (batch as OpBatch).ops;
   const inverted: StoreOp[] = [];
   for (let i = ops.length - 1; i >= 0; i--) {
     const op = ops[i];
+    if (op.kind === 'clear') continue;
     if (op.kind === 'delete') {
       inverted.push({
         kind: 'set',

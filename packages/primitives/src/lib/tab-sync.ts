@@ -15,12 +15,15 @@ import {
   opSync,
   type MergePolicyEntry,
   type OpEnvelope,
+  type OpSyncCheckpoint,
 } from './store/op-sync';
 
 type TabMsg =
   | { t: 'env'; env: OpEnvelope }
   | { t: 'hello'; from: string; wm: Record<string, number> }
-  | { t: 'state'; to: string; root: unknown; wm: Record<string, number> }
+  // a checkpoint (root + register state + watermark), NOT a bare value: the joiner must
+  // inherit supersession state or already-superseded stragglers would resurrect on it
+  | { t: 'state'; to: string; state: OpSyncCheckpoint<object> }
   | { t: 'uptodate'; to: string };
 
 /** Op-mode sync for a writable store: hello exchange, then live envelopes. */
@@ -72,7 +75,7 @@ function storeTabSync(
           post(
             covered
               ? { t: 'uptodate', to: msg.from }
-              : { t: 'state', to: msg.from, root: snap.root, wm: snap.wm },
+              : { t: 'state', to: msg.from, state: snap },
           );
         }, Math.random() * jitterMs);
         responseTimers.set(msg.from, timer);
@@ -86,7 +89,7 @@ function storeTabSync(
           responseTimers.delete(msg.to);
         }
         if (msg.to !== sync.origin || phase !== 'joining') return;
-        if (msg.t === 'state') sync.hydrate(msg.root as object, msg.wm);
+        if (msg.t === 'state') sync.hydrate(msg.state);
         goLive();
         return;
       }

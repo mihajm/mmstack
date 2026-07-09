@@ -18,6 +18,14 @@ export type PrincipalCtx = {
  *
  * This is a WRITE ACL, not a read ACL: every room member sees the whole root, so the room is
  * the confidentiality boundary. Data with different audiences belongs in different rooms.
+ *
+ * A `clear` op counts as a write at its path (it retires that path's register as part of a
+ * subtree replace), so `canWrite` and `validate` see clears like any other op.
+ *
+ * This gates SHAPE and PATH access on a trusted `ctx.writer` (your adapter authenticates it). It
+ * does not by itself check the precedence an op claims or the authenticity of its citations; a rule
+ * like "only this role may override" belongs in `validate` against that trusted writer. A direct
+ * peer-to-peer connection bypasses the relay, so a peer-to-peer room is trust-full for authority.
  */
 export type OpPolicy = {
   canWrite?(ctx: PrincipalCtx, path: readonly Key[]): boolean;
@@ -29,10 +37,13 @@ export type PolicyViolation = {
   readonly reason:
     | 'can-write'
     | 'validate'
+    | 'malformed'
     | 'writer-mismatch'
     | 'proto'
     | 'ops-limit'
     | 'rate';
+  /** the specific well-formedness failure, when `reason` is `'malformed'`. */
+  readonly detail?: string;
   readonly path?: readonly Key[];
 };
 

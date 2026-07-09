@@ -4,11 +4,14 @@ import {
   type PolicyViolation,
   type PrincipalCtx,
 } from './policy';
+import { createRegisterStore, type RegisterStore } from './register';
+import { validateEnvelope } from './validate';
 import {
-  applyWireOps,
   MESH_PROTO_VERSION,
   type ClientMsg,
+  type Hlc,
   type PresenceState,
+  type RegisterCheckpoint,
   type SeqEnvelope,
   type ServerMsg,
 } from './wire';
@@ -20,7 +23,11 @@ export type RelaySocket = {
 };
 
 export type RelayLimits = {
-  /** Ops per envelope; a larger envelope is a violation (default 1024). */
+  /**
+   * Ops per envelope; a larger envelope is a violation (default 1024). A subtree replace
+   * legitimately emits one `set` plus one `clear` per observed live descendant register in a
+   * single envelope, so a tightened limit must still accommodate honest clear-groups.
+   */
   readonly maxOpsPerEnvelope?: number;
   /** Sustained envelopes/second per writer (token bucket, burst = 2×; off by default). */
   readonly maxEnvelopesPerSecond?: number;
@@ -31,15 +38,16 @@ export type RelayOptions = {
   readonly policy?: OpPolicy;
   readonly policyVersion?: number;
   readonly limits?: RelayLimits;
-  /** Seq-envelopes retained per room for delta answers; older fold into the snapshot (default 1000). */
+  /** Seq-envelopes retained per room for delta answers; older compact into register state (default 1000). */
   readonly journalLimit?: number;
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
   /**
-   * The persistence egress: fired after an envelope is sequenced, folded into the room
-   * snapshot, and broadcast. The envelope is the persistence record (append it to a journal);
-   * `state` carries the folded root for throttled checkpoints. Called synchronously and never
-   * awaited: batch, debounce, and store at the adapter layer. Pair with {@link Relay.hydrate}.
+   * The persistence egress: fired after an envelope is sequenced, retained into the room's
+   * register state, and broadcast. The envelope is the persistence record (append it to a
+   * journal); `state` carries the retained register state for throttled checkpoints. Called
+   * synchronously and never awaited: batch, debounce, and store at the adapter layer. Pair
+   * with {@link Relay.hydrate}.
    */
   readonly onCommit?: (
     room: string,
@@ -51,8 +59,11 @@ export type RelayOptions = {
 /** The room's durable state at a commit: what a checkpoint needs to capture. */
 export type RoomState = {
   readonly seq: number;
-  readonly epoch: string;
-  readonly root: unknown;
+  readonly instance: string;
+  /** The room's retained per-path register state, never a folded value. */
+  readonly registers: readonly RegisterCheckpoint[];
+  /** Per-origin envelope-version high-water marks. */
+  readonly wm: Readonly<Record<string, number>>;
   /** The room's data shape; restored via {@link Relay.hydrate}. */
   readonly schemaVersion: number;
 };
@@ -60,12 +71,16 @@ export type RoomState = {
 /** A persisted room to restore via {@link Relay.hydrate}. */
 export type RoomSnapshot = {
   readonly seq: number;
-  readonly root: unknown;
+  /** The retained register state captured at the checkpoint. */
+  readonly registers?: readonly RegisterCheckpoint[];
+  /** Per-origin envelope-version high-water marks captured at the checkpoint. */
+  readonly wm?: Readonly<Record<string, number>>;
   /**
-   * Restore the persisted epoch so clients reconnecting across the restart keep their seq
-   * watermark and get a `delta` answer; omit to mint a fresh one (they re-snapshot instead).
+   * Restore the persisted instance nonce so clients reconnecting across the restart keep
+   * their seq watermark and get a `delta` answer; omit to mint a fresh one (they re-snapshot
+   * instead).
    */
-  readonly epoch?: string;
+  readonly instance?: string;
   /** Restore the persisted schema version (a compacted snapshot is post-migration). */
   readonly schemaVersion?: number;
   /** Journal tail (ascending seq, entries at or below `seq`) enabling those delta answers. */
@@ -105,9 +120,12 @@ type Bucket = { tokens: number; last: number };
 
 type Room = {
   seq: number;
-  epoch: string;
+  instance: string;
   schemaVersion: number;
-  root: unknown;
+  registers: RegisterStore;
+  wm: Map<string, number>;
+  /** The stamp compaction has folded past: what the journal no longer covers. */
+  frontier: Hlc | undefined;
   journal: SeqEnvelope[];
   members: Set<Member>;
   presence: Map<string, { peer: PresenceState; by: Member }>;
@@ -115,20 +133,23 @@ type Room = {
   buckets: Map<string, Bucket>;
 };
 
-let epochCounter = 0;
+let instanceCounter = 0;
 
 /**
- * The reference relay core: room-scoped sequencing, journal +
- * snapshot compaction, the tri-state join answer, presence fan-out, and tripwire policy
- * enforcement. Pure over injected sockets — runs identically under ws, Bun, a Durable
- * Object, or an in-memory test pair. The relay never interprets ops beyond folding them
- * for snapshots, and never mints identity: `writer` comes from the adapter's auth.
+ * The reference relay core: room-scoped sequencing, journal + register-state compaction, the
+ * tri-state join answer, presence fan-out, and tripwire policy enforcement. Pure over
+ * injected sockets — runs identically under ws, Bun, a Durable Object, or an in-memory test
+ * pair. The relay RETAINS ops (per-path registers, the same pure ingest rules every client
+ * runs) but never resolves them: conflict resolution is client-configured policy, so a relay
+ * that folded values would seed late joiners into permanent divergence from established
+ * peers. Snapshots therefore ship register state, never a value tree. It also never mints
+ * identity: `writer` comes from the adapter's auth.
  *
  * Room-initialization contract: a fresh room (seq 0) answers `up-to-date`; the first client
- * then SEEDS it with a root-set envelope so the room's snapshot root is complete (deletes
- * fold correctly, joiners replace-hydrate). Near-simultaneous first-joins of a brand-new
- * room may last-writer-wins their seeds; rooms created by a single client first (the
- * overwhelmingly common case) are unaffected.
+ * then SEEDS it with a root-set envelope so the room's register state is complete (joiners
+ * hydrate from it). Near-simultaneous first-joins of a brand-new room may race their seeds
+ * (the register retains both as concurrent siblings); rooms created by a single client first
+ * (the overwhelmingly common case) are unaffected.
  */
 export function createRelay(opt: RelayOptions = {}): Relay {
   const rooms = new Map<string, Room>();
@@ -138,14 +159,19 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const rate = opt.limits?.maxEnvelopesPerSecond;
   const now = opt.now ?? Date.now;
 
+  const mintInstance = (): string =>
+    `${now().toString(36)}-${(++instanceCounter).toString(36)}`;
+
   const roomOf = (name: string): Room => {
     let room = rooms.get(name);
     if (!room) {
       room = {
         seq: 0,
-        epoch: `${now().toString(36)}-${(++epochCounter).toString(36)}`,
+        instance: mintInstance(),
         schemaVersion: 0,
-        root: undefined,
+        registers: createRegisterStore(),
+        wm: new Map(),
+        frontier: undefined,
         journal: [],
         members: new Set(),
         presence: new Map(),
@@ -155,6 +181,22 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       rooms.set(name, room);
     }
     return room;
+  };
+
+  // reclaim a room that never accrued state and holds nothing: a first-contact hello that is
+  // rejected mints a Room via `roomOf` before the check, and a room whose members all leave before
+  // anyone seeds it is dead weight. Only ever drops a room with no members, no sequence, and no ban
+  // list, so a live member, retained state, or a remembered ejection always keeps it.
+  const maybeEvictEmpty = (name: string): void => {
+    const room = rooms.get(name);
+    if (
+      room &&
+      room.members.size === 0 &&
+      room.seq === 0 &&
+      room.ejected.size === 0
+    ) {
+      rooms.delete(name);
+    }
   };
 
   const broadcast = (room: Room, msg: ServerMsg, except?: Member): void => {
@@ -221,6 +263,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     return false;
   };
 
+  const laterHlc = (a: Hlc | undefined, b: Hlc): Hlc =>
+    !a || b.p > a.p || (b.p === a.p && b.l > a.l) ? b : a;
+
   return {
     room: (name) => {
       const room = rooms.get(name);
@@ -237,8 +282,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       if (room.seq !== 0 || room.members.size > 0 || room.journal.length > 0)
         return false;
       room.seq = snapshot.seq;
-      room.root = snapshot.root;
-      if (snapshot.epoch !== undefined) room.epoch = snapshot.epoch;
+      room.registers.load(snapshot.registers ?? []);
+      for (const [origin, v] of Object.entries(snapshot.wm ?? {})) {
+        room.wm.set(origin, Math.max(room.wm.get(origin) ?? 0, v));
+      }
+      if (snapshot.instance !== undefined) room.instance = snapshot.instance;
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
       if (snapshot.journal) {
@@ -264,6 +312,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             origin: member.origin,
             gone: true,
           });
+          maybeEvictEmpty(name); // last member left a never-seeded room: reclaim it
         }
         joined.clear();
       };
@@ -289,6 +338,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'proto',
                 expected: MESH_PROTO_VERSION,
               });
+              maybeEvictEmpty(msg.room);
               return;
             }
             if (msg.policyVersion !== policyVersion) {
@@ -298,6 +348,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'policy-version',
                 expected: policyVersion,
               });
+              maybeEvictEmpty(msg.room);
               return;
             }
             if (
@@ -310,6 +361,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'schema',
                 expected: room.schemaVersion,
               });
+              maybeEvictEmpty(msg.room);
               return;
             }
 
@@ -334,7 +386,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               t: 'welcome',
               room: msg.room,
               seq: room.seq,
-              epoch: room.epoch,
+              instance: room.instance,
               schemaVersion: room.schemaVersion,
               peers,
               members: [...room.members]
@@ -355,7 +407,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 envs: room.journal.filter((e) => e.seq > since),
               });
             } else {
-              socket.send({ ...base, mode: 'snapshot', root: room.root });
+              socket.send({
+                ...base,
+                mode: 'snapshot',
+                registers: room.registers.checkpoint(),
+                wm: Object.fromEntries(room.wm),
+              });
             }
             return;
           }
@@ -390,37 +447,75 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
 
           const env = msg.env;
+          // proto is checked per envelope too: a pre-citation emitter's ops carry no
+          // cites/epoch and would silently accumulate forever-live siblings, so protocol
+          // versions are rejected outright, never mixed. `validateEnvelope` is the structural
+          // twin of the client's well-formedness check (identical decisions): a malformed
+          // envelope is rejected before authority is even consulted.
+          const malformed = validateEnvelope(env);
           const violation: PolicyViolation | null =
             env.policyVersion !== policyVersion ||
             env.proto !== MESH_PROTO_VERSION
               ? { writer: ctx.writer, reason: 'proto' }
-              : env.ops.length > maxOps
-                ? { writer: ctx.writer, reason: 'ops-limit' }
-                : overRate(room, ctx.writer)
-                  ? { writer: ctx.writer, reason: 'rate' }
-                  : checkEnvelope(opt.policy, env, ctx);
+              : malformed !== null
+                ? { writer: ctx.writer, reason: 'malformed', detail: malformed }
+                : env.ops.length > maxOps
+                  ? { writer: ctx.writer, reason: 'ops-limit' }
+                  : overRate(room, ctx.writer)
+                    ? { writer: ctx.writer, reason: 'rate' }
+                    : checkEnvelope(opt.policy, env, ctx);
           if (violation) {
             eject(msg.room, room, ctx.writer, violation);
             return;
           }
 
+          if (
+            env.schemaVersion !== undefined &&
+            env.schemaVersion < room.schemaVersion
+          ) {
+            return;
+          }
+
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };
           room.journal.push(seqEnv);
-          room.root = applyWireOps(room.root, env.ops);
-          // a newer-schema envelope is a MIGRATION
+          // a newer-schema envelope is a MIGRATION: the old shape's register state and
+          // journal belong to the retired schema, so retention restarts at this envelope
+          // (replaying pre-migration ops into a migrated room would resurrect the old shape
+          // beside the new root)
           if (
             env.schemaVersion !== undefined &&
             env.schemaVersion > room.schemaVersion
           ) {
             room.schemaVersion = env.schemaVersion;
-            room.epoch = `${now().toString(36)}-${(++epochCounter).toString(36)}`;
+            room.instance = mintInstance();
+            room.registers.reset();
+            room.frontier = undefined;
+            room.journal = [seqEnv];
           }
-          if (room.journal.length > journalLimit) room.journal.shift();
+          room.registers.ingest(env);
+          room.wm.set(
+            env.origin,
+            Math.max(room.wm.get(env.origin) ?? 0, env.version),
+          );
+          if (room.journal.length > journalLimit) {
+            const trimmed = room.journal.shift();
+            if (trimmed) {
+              room.frontier = laterHlc(room.frontier, trimmed.hlc);
+              room.registers.compact(room.frontier);
+              // tell connected clients the frontier moved so they reclaim their own register state
+              broadcast(room, {
+                t: 'frontier',
+                room: msg.room,
+                frontier: room.frontier,
+              });
+            }
+          }
           broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
           opt.onCommit?.(msg.room, seqEnv, {
             seq: room.seq,
-            epoch: room.epoch,
-            root: room.root,
+            instance: room.instance,
+            registers: room.registers.checkpoint(),
+            wm: Object.fromEntries(room.wm),
             schemaVersion: room.schemaVersion,
           });
         },

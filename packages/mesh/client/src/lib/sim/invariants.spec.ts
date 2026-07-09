@@ -1,8 +1,8 @@
-import type { SeqEnvelope, StoreOp } from '@mmstack/mesh-protocol';
-import { commitOrdered, converged, deepEqual, journalFolds, seqDense } from './invariants';
+import { createRegisterStore, MESH_PROTO_VERSION, type SeqEnvelope, type SyncOp } from '@mmstack/mesh-protocol';
+import { commitOrdered, converged, deepEqual, journalFoldMatchesClients, relayRetainsJournal, seqDense } from './invariants';
 
-const env = (seq: number, ops: StoreOp[]): SeqEnvelope => ({
-  proto: 1,
+const env = (seq: number, ops: SyncOp[]): SeqEnvelope => ({
+  proto: MESH_PROTO_VERSION,
   origin: `o${seq}`,
   writer: `w${seq}`,
   version: 1,
@@ -11,7 +11,8 @@ const env = (seq: number, ops: StoreOp[]): SeqEnvelope => ({
   ops,
   seq,
 });
-const set = (path: (string | number)[], next: unknown): StoreOp => ({ kind: 'set', path, next });
+// uncited fixture ops are CONCURRENT writes; the default fold picks the max-stamp winner
+const set = (path: (string | number)[], next: unknown): SyncOp => ({ kind: 'set', path, next, cites: [], epoch: 0 });
 
 describe('deepEqual', () => {
   it('holds for equal primitives and nested structures', () => {
@@ -50,22 +51,44 @@ describe('converged (invariant 1) — must reject divergence, not just pass', ()
   });
 });
 
-describe('journalFolds (invariant 2) — must reject a wrong root', () => {
-  it('ok when the fold matches the relay root', () => {
-    const journal = [env(1, [set(['a'], 1)]), env(2, [set(['b'], 2)])];
-    expect(journalFolds(journal, { a: 1, b: 2 }).ok).toBe(true);
+describe('journalFoldMatchesClients (invariant 2a) — must reject a wrong client root', () => {
+  it('ok when the client-side register fold of the journal matches every root', () => {
+    const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)]), env(3, [set(['b'], 2)])];
+    const v = journalFoldMatchesClients(undefined, journal, [{ a: 1, b: 2 }, { a: 1, b: 2 }]);
+    expect(v.ok, v.message).toBe(true);
   });
 
-  it('folds out-of-order journals by seq (onCommit is not seq-ordered)', () => {
-    const journal = [env(2, [set(['a'], 2)]), env(1, [set(['a'], 1)])]; // seq 2 before seq 1
-    expect(journalFolds(journal, { a: 2 }).ok).toBe(true); // seq 2 wins → a:2
+  it('is order-independent: a scrambled journal folds to the same state', () => {
+    const journal = [env(3, [set(['a'], 3)]), env(1, [set([], {})]), env(2, [set(['a'], 1)])];
+    // the register resolves the concurrent a-writes by stamp, regardless of arrival order
+    const v = journalFoldMatchesClients(undefined, journal, [{ a: 3 }]);
+    expect(v.ok, v.message).toBe(true);
   });
 
-  it('fails when the claimed relay root is wrong', () => {
-    const journal = [env(1, [set(['a'], 1)])];
-    const v = journalFolds(journal, { a: 999 });
+  it('fails when a claimed client root is wrong, and names the peer', () => {
+    const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)])];
+    const v = journalFoldMatchesClients(undefined, journal, [{ a: 1 }, { a: 999 }]);
     expect(v.ok).toBe(false);
-    expect(v.message).toContain('fold');
+    expect(v.message).toContain('peer 1');
+  });
+});
+
+describe('relayRetainsJournal (invariant 2b) — must reject tampered register state', () => {
+  it('ok when the relay retained exactly the twin re-ingest of the journal', () => {
+    const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)])];
+    const twin = createRegisterStore();
+    for (const e of journal) twin.ingest(e);
+    const v = relayRetainsJournal(undefined, journal, twin.checkpoint());
+    expect(v.ok, v.message).toBe(true);
+  });
+
+  it('fails when the relay state lost or altered a register', () => {
+    const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)])];
+    const twin = createRegisterStore();
+    twin.ingest(journal[0]); // "forgot" the second envelope
+    const v = relayRetainsJournal(undefined, journal, twin.checkpoint());
+    expect(v.ok).toBe(false);
+    expect(v.message).toContain('register state');
   });
 });
 

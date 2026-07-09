@@ -1,4 +1,4 @@
-import { converged, journalFolds, seqDense, versionsMonotone } from './invariants';
+import { converged, journalFoldMatchesClients, relayRetainsJournal, seqDense, versionsMonotone } from './invariants';
 import { runChaosSimulation } from './chaos-harness';
 
 describe('chaos scenarios — the real stack under network faults', () => {
@@ -12,7 +12,10 @@ describe('chaos scenarios — the real stack under network faults', () => {
     });
     expect(res.statuses.every((s) => s === 'live')).toBe(true);
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
-    expect(journalFolds(res.journal, res.relayRoot).ok, journalFolds(res.journal, res.relayRoot).message).toBe(true);
+    const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
+    expect(j.ok, j.message).toBe(true);
+    const r = relayRetainsJournal(undefined, res.journal, res.relayRegisters);
+    expect(r.ok, r.message).toBe(true);
     expect(seqDense(res.journal, res.seq).ok, seqDense(res.journal, res.seq).message).toBe(true);
     expect(versionsMonotone(res.journal).ok, versionsMonotone(res.journal).message).toBe(true); // inv 4
   });
@@ -45,7 +48,8 @@ describe('chaos scenarios — the real stack under network faults', () => {
     });
     expect(res.statuses.every((s) => s === 'live'), 'a peer failed to rejoin after heal').toBe(true);
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
-    expect(journalFolds(res.journal, res.relayRoot).ok, journalFolds(res.journal, res.relayRoot).message).toBe(true);
+    const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
+    expect(j.ok, j.message).toBe(true);
   });
 
   it('(b) partition-heal converges across several seeds', () => {

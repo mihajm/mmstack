@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, vi } from 'vitest';
-import type { ClientMsg, ServerMsg } from '@mmstack/mesh-protocol';
+import { MESH_PROTO_VERSION, type ClientMsg, type ServerMsg } from '@mmstack/mesh-protocol';
 import type { MeshTransportFactory } from '../transport';
 import { chaosLink } from './chaos';
 import { prng } from './prng';
@@ -33,7 +33,7 @@ function mockInner() {
 const env = (v: number): ClientMsg => ({
   t: 'env',
   room: 'r',
-  env: { proto: 1, origin: 'o', writer: 'w', version: v, hlc: { p: 0, l: v }, policyVersion: 0, ops: [] },
+  env: { proto: MESH_PROTO_VERSION, origin: 'o', writer: 'w', version: v, hlc: { p: 0, l: v }, policyVersion: 0, ops: [] },
 });
 
 describe('chaosLink — the fault injector must actually inject faults', () => {

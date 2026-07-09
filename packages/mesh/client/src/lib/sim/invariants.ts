@@ -1,4 +1,13 @@
-import { applyWireOps, type SeqEnvelope } from '@mmstack/mesh-protocol';
+import {
+  createRegisterStore,
+  type RegisterCheckpoint,
+  type SeqEnvelope,
+} from '@mmstack/mesh-protocol';
+import {
+  createConvergingApply,
+  type MergePolicyEntry,
+  type OpEnvelope,
+} from '@mmstack/primitives';
 
 /** A checked invariant: `ok`, plus a human-readable reason when it fails. */
 export type Verdict = { readonly ok: boolean; readonly message: string };
@@ -42,29 +51,68 @@ export function converged(roots: readonly unknown[]): Verdict {
 }
 
 /**
- * Invariant 2: folding the journal (by seq) from `base` equals the relay's incrementally-folded
- * root. Audit determinism — the journal is a faithful, replayable record. `base` is `undefined`
- * for a fresh room, or the hydrated checkpoint root after a relay restart.
+ * Invariant 2a (client half of the audit): folding the journal from the base register
+ * checkpoint through a CLIENT-side register + fold reproduces every peer's materialized
+ * root. The relay has no root of its own — the journal plus the register semantics are the
+ * replayable record, and materialization is a pure function of the delivered op set.
  */
-export function journalFoldsFrom(
-  base: unknown,
+export function journalFoldMatchesClients(
+  base: readonly RegisterCheckpoint[] | undefined,
   journal: readonly SeqEnvelope[],
-  relayRoot: unknown,
+  roots: readonly unknown[],
+  policies?: readonly MergePolicyEntry[],
 ): Verdict {
-  let root = base;
+  const conv = createConvergingApply({ policies });
+  if (base) conv.load(base);
   for (const env of [...journal].sort((a, b) => a.seq - b.seq)) {
-    root = applyWireOps(root, env.ops);
+    conv.ingest(env as OpEnvelope);
   }
-  return deepEqual(root, relayRoot)
+  const folded = conv.materialize();
+  for (let i = 0; i < roots.length; i++) {
+    if (!deepEqual(folded, roots[i])) {
+      return {
+        ok: false,
+        message: `journal fold ≠ peer ${i} root:\n  fold: ${JSON.stringify(folded)}\n  peer: ${JSON.stringify(roots[i])}`,
+      };
+    }
+  }
+  return ok;
+}
+
+const canonRegisters = (regs: readonly RegisterCheckpoint[]) =>
+  regs
+    .filter((r) => r.siblings.length || Object.keys(r.water).length)
+    .map((r) => ({
+      path: r.path.map(String),
+      siblings: [...r.siblings].sort((a, b) => (a.origin < b.origin ? -1 : 1)),
+      water: Object.fromEntries(Object.entries(r.water).sort()),
+    }))
+    .sort((a, b) => (a.path.join('') < b.path.join('') ? -1 : 1));
+
+/**
+ * Invariant 2b (relay half of the audit): the relay's RETAINED register state equals
+ * re-ingesting the same journal through the structural twin of the register rules. The relay
+ * retains; it never folds — so its whole state must be reproducible from the record alone.
+ * (Assumes the journal window was not compacted during the run.)
+ */
+export function relayRetainsJournal(
+  base: readonly RegisterCheckpoint[] | undefined,
+  journal: readonly SeqEnvelope[],
+  relayRegisters: readonly RegisterCheckpoint[],
+): Verdict {
+  const twin = createRegisterStore();
+  if (base) twin.load(base);
+  for (const env of [...journal].sort((a, b) => a.seq - b.seq)) {
+    twin.ingest(env);
+  }
+  const replayed = canonRegisters(twin.checkpoint());
+  const retained = canonRegisters(relayRegisters);
+  return deepEqual(replayed, retained)
     ? ok
     : {
         ok: false,
-        message: `journal fold ≠ relay root:\n  fold:  ${JSON.stringify(root)}\n  relay: ${JSON.stringify(relayRoot)}`,
+        message: `relay register state ≠ journal re-ingest:\n  replayed: ${JSON.stringify(replayed)}\n  retained: ${JSON.stringify(retained)}`,
       };
-}
-
-export function journalFolds(journal: readonly SeqEnvelope[], relayRoot: unknown): Verdict {
-  return journalFoldsFrom(undefined, journal, relayRoot);
 }
 
 /**
@@ -73,7 +121,8 @@ export function journalFolds(journal: readonly SeqEnvelope[], relayRoot: unknown
  * — `receive` no longer re-entrantly flushes a peer's pending writes back through the relay mid-
  * broadcast, so commits no longer nest and unwind out of order. This is what lets a persistence
  * adapter append on `onCommit` and trust arrival order == seq order (the {@link seqDense} /
- * {@link journalFoldsFrom} defensive sorts become belt-and-suspenders for honest single-relay runs).
+ * {@link journalFoldMatchesClients} defensive sorts become belt-and-suspenders for honest
+ * single-relay runs).
  */
 export function commitOrdered(journal: readonly SeqEnvelope[]): Verdict {
   for (let i = 1; i < journal.length; i++) {
@@ -106,10 +155,10 @@ export function seqDense(journal: readonly SeqEnvelope[], seq: number): Verdict 
 }
 
 /**
- * Invariant 4: watermarks monotone per (epoch, origin). Within one epoch's seq space, each origin's
- * envelope `version`s appear strictly increasing in seq order — the room never accepts a regressed
- * or duplicated version from a writer (what `opSync`'s version dedup enforces per peer, asserted
- * here at the room level).
+ * Invariant 4: watermarks monotone per (instance, origin). Within one instance's seq space, each
+ * origin's envelope `version`s appear strictly increasing in seq order — the room never accepts a
+ * regressed or duplicated version from a writer (what `opSync`'s version dedup enforces per peer,
+ * asserted here at the room level).
  */
 export function versionsMonotone(journal: readonly SeqEnvelope[]): Verdict {
   const sorted = [...journal].sort((a, b) => a.seq - b.seq);

@@ -12,7 +12,7 @@ Built on the store op-log from [`@mmstack/primitives`](https://www.npmjs.com/pac
 
 - **Main renders, worker computes.** The worker owns stores and derivations and runs off the main thread. The main thread holds a live replica of each owned store (a real, writable signal store), so heavy work makes the UI pending, not frozen.
 - **Deltas, not snapshots.** State mirrors as op batches (one `set`/`delete` per changed path), diffed by reference identity. The initial hydration is the only snapshot; everything after is a minimal delta.
-- **Single sequencer, provable convergence.** Each store subtree has exactly one owner (the worker). Writes apply optimistically on the main thread and route to that owner, which sequences them and fans the authoritative result back to every replica; because every op is idempotent, replicas reconcile without divergence. Owner-authoritative, no CRDTs. Interleaved writes converge to identical state.
+- **One owner, provable convergence.** Each store subtree has exactly one owner (the worker). Writes apply optimistically on the main thread and route to that owner, which folds them in and echoes them back. The main thread and the worker run the same convergent sync the mesh uses, so interleaved writes from several components land on identical state, and an authoritative owner correction wins wherever it meets a concurrent write.
 - **Optimistic by default, composable.** A write is visible immediately and its promise resolves once the owner confirms; fork the store if you want honest hide-until-confirmed. And because an owned store is a writable op-log endpoint, `persist` and `@mmstack/mesh`'s `meshSync` attach to it directly: a persisted, meshed, worker-owned graph with no bridge.
 - **The resource surface you already know.** `workerResource` runs a function off-main and exposes `value` / `status` / `error` / `isLoading`, so it drops into `latest()` / `use()` and Suspense boundaries with no adapter.
 - **Typed from the worker's contract.** `connectWorker<typeof host>()` infers store keys, value types, task signatures, and whether a subtree is writable, all from the worker you wrote.
@@ -250,24 +250,20 @@ await todos.write((draft) => {
 });
 ```
 
-`write` runs your recipe against a scratch draft of the current replica, diffs it to minimal ops, and ships them to the owner. The owner applies them and emits the authoritative batch, which comes back and updates your replica. The promise resolves once that batch has landed locally. Nothing is applied optimistically, which is what guarantees every replica converges to the owner's ordering.
+`write` runs your recipe against the replica right away, diffs it to minimal ops, and ships them to the owner. The owner folds them in and echoes them back; the promise resolves once that echo lands. The value is on screen immediately, and the round trip is honest in the API rather than hidden behind a `set` you cannot read back.
 
-### Optimistic UI
+### Hide until confirmed (opt-in)
 
-Because writes are honest, optimism is opt-in. Keep a local overlay, show it, route the write underneath, and drop the overlay when the authoritative value lands:
+Optimistic is the default because it matches how the rest of the stack syncs. When you would rather not show a value until the owner accepts it (say the owner can correct or reject the write), fork the store, write to the fork, and reveal it only when the promise resolves:
 
 ```ts
-const optimistic = signal<Todo[] | null>(null);
-const view = computed(() => optimistic() ?? todos.value() ?? []); // render view()
-
-async function add(todo: Todo) {
-  const next = [...(todos.value() ?? []), todo];
-  optimistic.set(next); // shown immediately
-  try {
-    await todos.write((d) => d.set(next));
-  } finally {
-    optimistic.set(null); // the owner's authoritative batch has landed on the replica
-  }
+const draft = forkStore(todos.store);
+draft.store.status.set('done');
+try {
+  await todos.write((d) => d.status.set('done'));
+  draft.commit(); // accepted: reveal
+} catch {
+  draft.discard(); // rejected: drop it
 }
 ```
 
@@ -307,9 +303,9 @@ workerResource(() => transfer({ buffer }, [buffer]), { worker, task: 'process' }
 
 ## How it works
 
-Every owned store on the worker is observed by an op-log (the same `opLog` from `@mmstack/primitives`). A leaf change becomes a minimal batch of path ops, tagged with a monotonic version. The batch is fanned to every subscribed replica, which applies it in a single `set` (one notification wave, regardless of how many ops it carries).
+The main thread and the worker run the same convergent sync as the mesh (`opSync` from `@mmstack/primitives`) over a `MessageChannel`. Each owned store on the worker runs the owner side; every replica applies incoming envelopes in a single `set` (one notification wave, regardless of how many ops an envelope carries). The first join hydrates from a checkpoint, everything after is a minimal delta, and a version gap re-hydrates.
 
-Writes route to the owner rather than applying locally. The owner is the single sequencer: it applies incoming write ops through the store, which emits one authoritative owner-origin batch covering that write, and that batch goes to every replica including the writer. The writer's replica updates from that echo, and the echo is also the write's acknowledgement. Because all replicas apply the identical owner-ordered stream, they converge, and the async round trip is honest in the API (a `write()` that returns a promise) rather than hidden behind a `set` you cannot read back synchronously.
+A write applies optimistically on the writer and routes to the owner, which folds it in and echoes it to every replica; the writer's replica reads its own echo as the acknowledgement. Because it is the same convergent register the mesh uses, interleaved writes from several components land on the same value on every replica. The owner can also correct a value authoritatively, and that correction wins wherever it meets a concurrent write, so a single owner keeps the last word over its subtree without a separate request protocol.
 
 The protocol rides a minimal structural port (`postMessage` / `onmessage`), so a `MessageChannel` pair works in tests and the same envelope stream can later run over other transports.
 

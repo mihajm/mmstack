@@ -12,6 +12,7 @@ import {
   opSync,
   type MergePolicyEntry,
   type OpEnvelope,
+  type OpSyncCheckpoint,
 } from '@mmstack/primitives';
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
@@ -126,7 +127,9 @@ export function rtcPeerConnector(config?: RTCConfiguration): PeerConnector {
 
 type P2PMsg =
   | { t: 'hello'; wm: Record<string, number> }
-  | { t: 'state'; root: unknown; wm: Record<string, number> }
+  // the full checkpoint (root + register state + watermark), NOT a bare value: the covered
+  // side must inherit supersession state or already-superseded stragglers would resurrect
+  | { t: 'state'; state: OpSyncCheckpoint<object> }
   | { t: 'uptodate' }
   | { t: 'env'; env: OpEnvelope };
 
@@ -159,9 +162,11 @@ type Peer = {
  * Peer-to-peer mesh sync: the relay only signals
  * and tracks membership; envelopes flow over WebRTC data channels and converge via the
  * per-path register map. Catch-up is pairwise: on channel open both sides exchange
- * watermarks; a side whose state is strictly covered hydrates from the other. Two peers that
- * diverged while BOTH held state keep their convergent go-forward guarantees but do not
- * retroactively merge history (same contract as the tab rung).
+ * watermarks; a side whose state is strictly covered hydrates from the other's FULL
+ * checkpoint (root + per-path register state + watermark), so supersession and precedence
+ * carry over intact: a late joiner is indistinguishable from a peer that saw every
+ * envelope. Two peers that each hold envelopes the other lacks keep their convergent
+ * go-forward guarantees but do not exchange the missed envelopes retroactively.
  */
 export function webRtcMesh<T extends object>(
   source: WritableSignal<T>,
@@ -248,12 +253,12 @@ export function webRtcMesh<T extends object>(
       case 'hello': {
         const snap = sync.snapshot();
         if (covered(snap.wm, msg.wm)) sendTo(peer, { t: 'uptodate' });
-        else sendTo(peer, { t: 'state', root: snap.root, wm: snap.wm });
+        else sendTo(peer, { t: 'state', state: snap });
         return;
       }
       case 'state': {
-        if (covered(sync.watermark(), msg.wm)) {
-          sync.hydrate(msg.root as T, msg.wm);
+        if (covered(sync.watermark(), msg.state.wm)) {
+          sync.hydrate(msg.state as OpSyncCheckpoint<T>);
         }
         return;
       }

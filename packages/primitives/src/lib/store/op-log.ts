@@ -230,12 +230,9 @@ export function invertBatch(batch: OpBatch | readonly StoreOp[]): StoreOp[] {
     const op = ops[i];
     if (op.kind === 'clear') continue;
     if (op.kind === 'delete') {
-      inverted.push({
-        kind: 'set',
-        path: op.path,
-        next: op.prev,
-        prev: undefined,
-      });
+      // no `prev`: the key is ABSENT once the delete applied, so this inverse is an add —
+      // inverting it again yields the delete back (redo removes the key, not sets undefined)
+      inverted.push({ kind: 'set', path: op.path, next: op.prev });
       continue;
     }
     if (!Object.hasOwn(op, 'prev')) {

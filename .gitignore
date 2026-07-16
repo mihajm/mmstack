@@ -34,6 +34,11 @@ yarn-error.log
 testem.log
 /typings
 
+# environment — server secrets live here, never committed (.env.example is the template)
+.env
+.env.*
+!.env.example
+
 # System Files
 .DS_Store
 Thumbs.db
@@ -48,3 +53,6 @@ test-results
 
 /articles
 /idea
+
+# agent instructions stay on the private side, same as idea/
+/CLAUDE.md

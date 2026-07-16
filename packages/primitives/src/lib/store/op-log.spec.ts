@@ -496,10 +496,29 @@ describe('invertBatch (deeper)', () => {
       { kind: 'delete', path: ['removed'], prev: 'gone' }, // a delete
     ];
     expect(invertBatch(forward)).toEqual([
-      { kind: 'set', path: ['removed'], next: 'gone', prev: undefined }, // delete → restore, first (reversed)
+      { kind: 'set', path: ['removed'], next: 'gone' }, // delete → restore (an ADD: no prev), first (reversed)
       { kind: 'set', path: ['edited'], next: 'A', prev: 'B' }, // change → swap
       { kind: 'delete', path: ['added'], prev: 'new' }, // add → delete
     ]);
+    // the delete-inversion carries NO prev property: the key is absent post-delete, so the
+    // inverse is an add and double inversion yields the delete back exactly
+    expect(Object.hasOwn(invertBatch(forward)[0], 'prev')).toBe(false);
+  });
+
+  it('a deletion round-trips: undo restores the key, redo REMOVES it again (never sets undefined)', () => {
+    const s = TestBed.runInInjectionContext(() =>
+      store<Record<string, unknown>>({ keep: 1, drop: 2 }),
+    );
+    const log = TestBed.runInInjectionContext(() => opLog(s));
+    const batch: StoreOp[] = [{ kind: 'delete', path: ['drop'], prev: 2 }];
+
+    log.apply(batch);
+    expect(untracked(s)).toEqual({ keep: 1 });
+    log.apply(invertBatch(batch)); // undo the deletion
+    expect(untracked(s)).toEqual({ keep: 1, drop: 2 });
+    log.apply(invertBatch(invertBatch(batch))); // redo it
+    expect(untracked(s)).toEqual({ keep: 1 });
+    expect(Object.hasOwn(untracked(s), 'drop')).toBe(false); // absent, not present-undefined
   });
 
   it('apply → invert → invert returns to the applied state (undo of undo = redo)', () => {

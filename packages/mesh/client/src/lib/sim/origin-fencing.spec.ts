@@ -200,8 +200,10 @@ describe('origin fencing', () => {
         return { s, mesh };
       });
 
-    const a1 = boot(disk1.store, 'w1');
-    const a2 = boot(disk2.store, 'w2');
+    // both boot as 'wa' — the writer the tail was recorded under (a byte clone is the same
+    // principal on two disks; a tail under a FOREIGN writer is dropped at restore, not resent)
+    const a1 = boot(disk1.store, 'wa');
+    const a2 = boot(disk2.store, 'wa');
     await settle();
 
     const pinned1 = (disk1.backing.get('k') as { origin: string }).origin;

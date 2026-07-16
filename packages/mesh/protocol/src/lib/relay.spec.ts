@@ -1,4 +1,4 @@
-import { pathPrefixAcl, type PrincipalCtx } from './policy';
+import { pathPrefixAcl, type PolicyViolation, type PrincipalCtx } from './policy';
 import { createRelay, type RelaySocket } from './relay';
 import { createRegisterStore } from './register';
 import {
@@ -670,11 +670,19 @@ describe('pathPrefixAcl', () => {
 
     const canWrite = acl.canWrite;
     if (!canWrite) throw new Error('pathPrefixAcl must define canWrite');
-    expect(canWrite(human, ['notes', 3, 'text'])).toBe(true);
-    expect(canWrite(human, ['cases', 'c1', 'plan', 'step'])).toBe(true);
-    expect(canWrite(agent, ['cases', 'c1', 'plan', 'step'])).toBe(false);
-    expect(canWrite(agent, ['notes', 0])).toBe(true);
-    expect(canWrite(human, ['admin'])).toBe(false);
+    expect(canWrite(human, ['notes', 3, 'text'], 'r')).toBe(true);
+    expect(canWrite(human, ['cases', 'c1', 'plan', 'step'], 'r')).toBe(true);
+    expect(canWrite(agent, ['cases', 'c1', 'plan', 'step'], 'r')).toBe(false);
+    expect(canWrite(agent, ['notes', 0], 'r')).toBe(true);
+    expect(canWrite(human, ['admin'], 'r')).toBe(false);
+  });
+
+  it('rules see the room, so one relay expresses per-room authority', () => {
+    const acl = pathPrefixAcl([
+      { prefix: [], allow: (_ctx, room) => room === 'mine' },
+    ]);
+    expect(acl.canWrite?.({ writer: 'w' }, ['x'], 'mine')).toBe(true);
+    expect(acl.canWrite?.({ writer: 'w' }, ['x'], 'other')).toBe(false);
   });
 
   it('isolates rooms on one relay: envelopes and sequencing do not leak across rooms', () => {
@@ -943,6 +951,450 @@ describe('createRelay: frontier broadcast', () => {
     const frontiers = b.sock.sent.filter((m) => m.t === 'frontier');
     expect(frontiers.length).toBeGreaterThan(0);
     expect(frontiers[0]).toMatchObject({ t: 'frontier', room: 'r' });
+  });
+});
+
+describe('createRelay: epoch-bump admission (canBump)', () => {
+  it('tripwire: an unauthorized epoch RAISE ejects with "epoch-bump"; the whole envelope is rejected, never an op mid-log', () => {
+    const violations: PolicyViolation[] = [];
+    const relay = createRelay({
+      policy: { canBump: (ctx) => ctx.claims?.['role'] === 'owner' },
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const a = client(relay, 'wa', 'oa'); // no owner claim
+    a.hello();
+    // first op is clean; the second claims precedence — nothing of the envelope may land
+    a.env([set(['ok'], 1), set(['doc'], 'mine', { epoch: 1 })]);
+
+    expect(violations).toEqual([
+      {
+        writer: 'wa',
+        reason: 'epoch-bump',
+        path: ['doc'],
+        detail: 'epoch 1 > observed 0',
+      },
+    ]);
+    expect(a.sock.closed).toBe(true);
+    expect(relay.room('r')).toMatchObject({ seq: 0 }); // the clean first op did not sequence either
+  });
+
+  it('an authorized bump is admitted; an unauthorized writer CARRYING (or trailing) the observed epoch is always admitted without consulting authority', () => {
+    let asked = 0;
+    const relay = createRelay({
+      policy: {
+        canBump: (ctx) => {
+          asked++;
+          return ctx.claims?.['role'] === 'owner';
+        },
+      },
+    });
+    const owner = client(relay, 'wo', 'oo', { claims: { role: 'owner' } });
+    const peer = client(relay, 'wp', 'op');
+    owner.hello();
+    peer.hello();
+
+    owner.env([set(['doc'], 'v1', { epoch: 5 })]); // a raise, granted
+    expect(owner.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 1 });
+    expect(asked).toBe(1);
+
+    // the peer observed the bump: citing it and carrying epoch 5 forward is how the room keeps
+    // merging after an override — it must need NO authority
+    peer.env([
+      set(['doc'], 'v2', {
+        epoch: 5,
+        cites: [{ origin: 'oo', hlc: { p: 1, l: 0 } }],
+      }),
+    ]);
+    // and an op still racing BELOW the observed max is not a raise either
+    peer.env([set(['doc'], 'race', { epoch: 0 })]);
+
+    expect(peer.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 3 });
+    expect(asked).toBe(1); // never consulted for the carry or the trailing write
+  });
+
+  it('backward compatible: a policy without canBump (and no policy at all) leaves epochs ungated', () => {
+    const gated = createRelay({ policy: { canWrite: () => true } });
+    const a = client(gated, 'wa', 'oa');
+    a.hello();
+    a.env([set(['doc'], 'x', { epoch: 999 })]);
+    expect(a.sock.closed).toBe(false);
+    expect(gated.room('r')).toMatchObject({ seq: 1 });
+
+    const open = createRelay();
+    const b = client(open, 'wb', 'ob');
+    b.hello();
+    b.env([set(['doc'], 'x', { epoch: 999 })]);
+    expect(b.sock.closed).toBe(false);
+  });
+});
+
+describe('createRelay: citation-existence admission (verifyCitations)', () => {
+  it('tripwire: a cite of a dot the room has no record of ejects with "unknown-citation" (the forged-watermark vector)', () => {
+    const violations: PolicyViolation[] = [];
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const a = client(relay, 'wa', 'oa');
+    const forger = client(relay, 'wf', 'of');
+    a.hello();
+    forger.hello();
+    a.env([set(['doc'], 'real')]); // (oa, 1.0) is the only dot oa ever minted here
+
+    // citing a FUTURE dot of a known origin would raise oa's supersession watermark past
+    // writes it never made, killing them on arrival
+    forger.env([
+      set(['doc'], 'kill', { cites: [{ origin: 'oa', hlc: { p: 99, l: 0 } }] }),
+    ]);
+
+    expect(violations).toEqual([
+      {
+        writer: 'wf',
+        reason: 'unknown-citation',
+        path: ['doc'],
+        detail: 'cites oa@99.0',
+      },
+    ]);
+    expect(forger.sock.closed).toBe(true);
+    expect(relay.room('r')).toMatchObject({ seq: 1 });
+  });
+
+  it("admits a cite of a retained dot, and of an origin's OLDER dot its newer sibling already covers", () => {
+    const relay = createRelay({ policy: { verifyCitations: true } });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set(['doc'], 'v1')]); // (oa, 1.0)
+    a.env([set(['doc'], 'v2')]); // (oa, 2.0) — the register keeps only oa's best sibling
+
+    b.env([
+      set(['doc'], 'w1', { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] }),
+    ]);
+    // the older dot is no longer a sibling, but it sits within oa's known extent at the path:
+    // a writer that raced oa's newer write legitimately still cites it
+    b.env([
+      set(['doc'], 'w2', { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] }),
+    ]);
+
+    expect(b.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 4 });
+  });
+
+  it('exempts cites at or below the compaction frontier: a stale-but-honest cite of a compacted dot is admitted', () => {
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      journalLimit: 2,
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set([], {})]);
+    a.env([set(['items', 'a'], 1)]); // (oa, 2.0)
+    a.env([del(['items', 'a'], 1, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })]);
+    a.env([set(['other'], 1)]);
+    a.env([set(['other'], 2)]); // journal trims past the delete; ['items','a'] compacts away entirely
+
+    // an observer that saw (oa, 2.0) before it settled: the relay can no longer verify the cite,
+    // and a forged cite down there could kill nothing anyway (below-frontier ops are settled)
+    const b = client(relay, 'wb', 'ob');
+    b.hello();
+    b.env(
+      [set(['items', 'a'], 7, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })],
+      { hlc: { p: 50, l: 0 } },
+    );
+    expect(b.sock.closed).toBe(false);
+  });
+
+  it("tolerates a self-citation of the envelope's own dot, exactly as ingest does (born-dead guard)", () => {
+    const relay = createRelay({ policy: { verifyCitations: true } });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([
+      set(['doc'], 'x', { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] }),
+    ]); // cites its own envelope stamp
+    expect(a.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 1 });
+  });
+
+  it('a stale-schema straggler stays a silent drop, never an ejection for its now-unverifiable cites', () => {
+    const violations: PolicyViolation[] = [];
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set([], { v: 1 })]);
+    a.env([set(['old'], 'x')]); // (oa, 2.0) at ['old']
+    b.env([set([], { v: 2 })], { schemaVersion: 1 }); // migration: retention restarts
+
+    // a's in-flight pre-migration write cites its own earlier dot, which the reset room no
+    // longer knows; it is outdated, not malicious — the schema floor drops it before authority
+    // is consulted
+    a.env(
+      [set(['old'], 'stale', { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })],
+      { schemaVersion: 0 },
+    );
+    expect(a.sock.closed).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it('backward compatible: without verifyCitations an unknown cite is admitted as before', () => {
+    const relay = createRelay({ policy: { canWrite: () => true } });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([
+      set(['doc'], 'x', { cites: [{ origin: 'ghost', hlc: { p: 9, l: 0 } }] }),
+    ]);
+    expect(a.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 1 });
+  });
+});
+
+describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
+  const rEnv = (origin: string, ops: SyncOp[], p: number): OpEnvelope => ({
+    proto: MESH_PROTO_VERSION,
+    origin,
+    writer: origin,
+    version: p,
+    hlc: { p, l: 0 },
+    policyVersion: 0,
+    ops,
+  });
+
+  it('maxEpoch spans ALL retained siblings — a superseded bump still counts within the retention window — and is 0 where nothing is retained', () => {
+    const store = createRegisterStore();
+    store.ingest(rEnv('oa', [set(['doc'], 'v', { epoch: 5 })], 1));
+    // cite-supersession is rank-independent: a lower-epoch write citing the bump supersedes it,
+    // but the observed max must not regress until compaction actually reclaims the sibling
+    store.ingest(
+      rEnv(
+        'ob',
+        [
+          set(['doc'], 'w', {
+            cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }],
+            epoch: 3,
+          }),
+        ],
+        2,
+      ),
+    );
+    expect(store.maxEpoch(['doc'])).toBe(5);
+    expect(store.maxEpoch(['elsewhere'])).toBe(0);
+  });
+
+  it('covers: an exact dot, an older dot under the sibling, a watermarked dot; never an unknown origin or an unminted future dot', () => {
+    const store = createRegisterStore();
+    store.ingest(rEnv('oa', [set(['doc'], 'v1')], 1));
+    store.ingest(rEnv('oa', [set(['doc'], 'v2')], 2)); // oa's sibling advances to 2.0
+    // a cite can precede its op (cites-before-ops): the watermark is the only trace of (oc, 9.0)
+    store.ingest(
+      rEnv(
+        'ob',
+        [set(['doc'], 'w', { cites: [{ origin: 'oc', hlc: { p: 9, l: 0 } }] })],
+        3,
+      ),
+    );
+
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 2, l: 0 } })).toBe(true);
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(true);
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 3, l: 0 } })).toBe(false); // oa never minted it
+    expect(store.covers(['doc'], { origin: 'oc', hlc: { p: 9, l: 0 } })).toBe(true); // watermark trace
+    expect(store.covers(['doc'], { origin: 'ghost', hlc: { p: 1, l: 0 } })).toBe(false);
+    expect(store.covers(['nope'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(false);
+  });
+});
+
+describe('createRelay: observational hooks (onDrop / onReject)', () => {
+  it('a stale-schema straggler fires onDrop("schema"): dropped, not sequenced, not ejected, no violation', () => {
+    const drops: { room: string; version: number; reason: string }[] = [];
+    const violations: PolicyViolation[] = [];
+    const relay = createRelay({
+      onDrop: (room, env, reason) =>
+        drops.push({ room, version: env.version, reason }),
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+
+    a.env([set([], { v: 1 })]); // sequenced normally: must not fire onDrop
+    b.env([set([], { v: 2 })], { schemaVersion: 1 }); // migration to schema 1
+    a.env([set(['old'], 'stale')], { schemaVersion: 0 }); // the silent drop (a's version 2)
+
+    expect(drops).toEqual([{ room: 'r', version: 2, reason: 'schema' }]);
+    expect(violations).toEqual([]);
+    expect(a.sock.closed).toBe(false);
+    expect(relay.room('r')).toMatchObject({ seq: 2 }); // the straggler never sequenced
+  });
+
+  it('every hello denial fires onReject with the writer, the reason, and the expected pin', () => {
+    const rejects: {
+      room: string;
+      writer: string;
+      reason: string;
+      expected?: number;
+    }[] = [];
+    const relay = createRelay({
+      policyVersion: 3,
+      policy: { canWrite: (_ctx, path) => path[0] !== 'admin' },
+      onReject: (room, ctx, reason, expected) =>
+        rejects.push({ room, writer: ctx.writer, reason, expected }),
+    });
+
+    const ok = client(relay, 'wok', 'ook');
+    ok.sock.sent.length = 0;
+    ok.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'ook',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 3,
+    });
+    expect(rejects).toEqual([]); // a successful hello is not a denial
+
+    const stale = client(relay, 'ws', 'os');
+    stale.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'os',
+      proto: MESH_PROTO_VERSION - 1,
+      policyVersion: 3,
+    });
+    stale.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'os',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
+
+    const bad = client(relay, 'wb', 'ob');
+    bad.hello = () =>
+      bad.conn.receive({
+        t: 'hello',
+        room: 'r',
+        origin: 'ob',
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 3,
+      });
+    bad.hello();
+    bad.env([set(['admin', 'x'], 1)], { policyVersion: 3 }); // tripwire: ejected
+    bad.hello(); // the banned writer knocking again
+
+    expect(rejects).toEqual([
+      { room: 'r', writer: 'ws', reason: 'proto', expected: MESH_PROTO_VERSION },
+      { room: 'r', writer: 'ws', reason: 'policy-version', expected: 3 },
+      { room: 'r', writer: 'wb', reason: 'unauthorized', expected: undefined },
+    ]);
+  });
+
+  it('onJoin fires per accepted hello with the origin-principal binding; never for a denied hello', () => {
+    const joins: { room: string; writer: string; kind?: string; origin: string }[] = [];
+    const relay = createRelay({
+      policyVersion: 1,
+      onJoin: (room, ctx, origin) =>
+        joins.push({ room, writer: ctx.writer, kind: ctx.kind, origin }),
+    });
+    const sock = socket();
+    const conn = relay.connect(sock, { writer: 'w', kind: 'agent' });
+
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o1',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0, // denied: no binding was established
+    });
+    expect(joins).toEqual([]);
+
+    const hello = () =>
+      conn.receive({
+        t: 'hello',
+        room: 'r',
+        origin: 'o1',
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 1,
+      });
+    hello();
+    hello(); // a reconnect re-asserts the binding: fires again, adapter dedupes
+    expect(joins).toEqual([
+      { room: 'r', writer: 'w', kind: 'agent', origin: 'o1' },
+      { room: 'r', writer: 'w', kind: 'agent', origin: 'o1' },
+    ]);
+  });
+
+  it('a schema-behind hello fires onReject("schema") with the room schema as expected', () => {
+    const rejects: { reason: string; expected?: number }[] = [];
+    const relay = createRelay({
+      onReject: (_room, _ctx, reason, expected) =>
+        rejects.push({ reason, expected }),
+    });
+    relay.hydrate('r', { seq: 5, registers: [], schemaVersion: 3 });
+
+    const old = client(relay, 'wo', 'oo');
+    old.conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'oo',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+      schemaVersion: 1,
+    });
+    expect(rejects).toEqual([{ reason: 'schema', expected: 3 }]);
+  });
+});
+
+describe('createRelay: per-room policy authority', () => {
+  it('canWrite and canBump receive the room, so ONE relay holds different authority per room', () => {
+    const relay = createRelay({
+      policy: {
+        canWrite: (_ctx, _path, room) => room !== 'readonly-room',
+        canBump: (_ctx, _path, _epoch, room) => room === 'owned-room',
+      },
+    });
+    const writeTo = (
+      writer: string,
+      origin: string,
+      room: string,
+      ops: SyncOp[],
+    ) => {
+      const sock = socket();
+      const conn = relay.connect(sock, { writer });
+      conn.receive({
+        t: 'hello',
+        room,
+        origin,
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 0,
+      });
+      conn.receive({
+        t: 'env',
+        room,
+        env: {
+          proto: MESH_PROTO_VERSION,
+          origin,
+          writer,
+          version: 1,
+          hlc: { p: 1, l: 0 },
+          policyVersion: 0,
+          ops,
+        },
+      });
+      return sock;
+    };
+
+    // the SAME write by the same principal shape: admitted in one room, tripwired in another
+    expect(writeTo('w1', 'o1', 'open-room', [set(['x'], 1)]).closed).toBe(false);
+    expect(writeTo('w2', 'o2', 'readonly-room', [set(['x'], 1)]).closed).toBe(true);
+    // the SAME epoch raise: granted only in the room whose authority allows it
+    expect(writeTo('w3', 'o3', 'owned-room', [set(['x'], 1, { epoch: 1 })]).closed).toBe(false);
+    expect(writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]).closed).toBe(true);
   });
 });
 

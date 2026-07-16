@@ -1,4 +1,5 @@
 import type {
+  Dot,
   Hlc,
   Key,
   OpEnvelope,
@@ -44,6 +45,22 @@ export type RegisterStore = {
   compact(frontier: Hlc): void;
   /** Drop all register state (a migration establishes a fresh retention window). */
   reset(): void;
+  /**
+   * The max epoch across ALL retained siblings at `path` (0 when nothing is retained): the
+   * room's observed epoch, the baseline an admission gate compares an incoming op's epoch
+   * against. Superseded-but-uncompacted siblings count too, so a carry that superseded the
+   * bump it cites never lowers the observed max within the retention window; a full
+   * below-frontier prune legitimately resets it.
+   */
+  maxEpoch(path: readonly Key[]): number;
+  /**
+   * Does the retained state at `path` cover `dot` — is it at or below that origin's known
+   * extent there? True when the origin's retained sibling or its supersession watermark sits
+   * at or above the dot's stamp. Every op sequenced into the room leaves such a trace until
+   * compaction, so above the compaction frontier a cite of an uncovered dot is a forgery (or
+   * an op the relay never saw).
+   */
+  covers(path: readonly Key[], dot: Dot): boolean;
 };
 
 export function createRegisterStore(): RegisterStore {
@@ -196,5 +213,22 @@ export function createRegisterStore(): RegisterStore {
     },
 
     reset: () => registers.clear(),
+
+    maxEpoch: (path) => {
+      const reg = registers.get(keyOf(path));
+      if (!reg) return 0;
+      let max = 0;
+      for (const s of reg.siblings.values()) if (s.epoch > max) max = s.epoch;
+      return max;
+    },
+
+    covers: (path, dot) => {
+      const reg = registers.get(keyOf(path));
+      if (!reg) return false;
+      const s = reg.siblings.get(dot.origin);
+      if (s && compareHlc(dot.hlc, s.hlc) <= 0) return true;
+      const w = reg.water.get(dot.origin);
+      return !!w && compareHlc(dot.hlc, w) <= 0;
+    },
   };
 }

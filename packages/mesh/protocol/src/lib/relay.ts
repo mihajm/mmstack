@@ -10,8 +10,10 @@ import {
   MESH_PROTO_VERSION,
   type ClientMsg,
   type Hlc,
+  type OpEnvelope,
   type PresenceState,
   type RegisterCheckpoint,
+  type RejectMsg,
   type SeqEnvelope,
   type ServerMsg,
 } from './wire';
@@ -54,6 +56,35 @@ export type RelayOptions = {
     env: SeqEnvelope,
     state: RoomState,
   ) => void;
+  /**
+   * Observation of a silently dropped envelope: received but neither sequenced nor a
+   * violation (today: a stale-schema straggler arriving after a migration — its sender is
+   * outdated, not malicious, so it is not ejected and nothing is broadcast). Without this
+   * hook the drop is invisible to an audit adapter. Pure observation, zero semantic effect;
+   * synchronous and never awaited, like {@link RelayOptions.onCommit}.
+   */
+  readonly onDrop?: (room: string, env: OpEnvelope, reason: 'schema') => void;
+  /**
+   * Observation of a rejected hello: an ejected writer knocking again (`'unauthorized'`), or
+   * a client whose proto / policy-version / schema pin is behind the room's. The client
+   * already receives the `reject` message; this is the server-side trace for an audit
+   * adapter, with `expected` carrying the room's version where one applies. Pure
+   * observation; synchronous and never awaited.
+   */
+  readonly onReject?: (
+    room: string,
+    ctx: PrincipalCtx,
+    reason: RejectMsg['reason'],
+    expected?: number,
+  ) => void;
+  /**
+   * Observation of an admitted hello: the server-side record that `origin` (the replica) now
+   * speaks for `ctx` (the authenticated principal) in this room — the origin-to-principal
+   * binding an audit adapter joins ops against. Fires on EVERY accepted hello, including a
+   * reconnect re-asserting an existing binding (dedupe at the adapter). Pure observation;
+   * synchronous and never awaited.
+   */
+  readonly onJoin?: (room: string, ctx: PrincipalCtx, origin: string) => void;
 };
 
 /** The room's durable state at a commit: what a checkpoint needs to capture. */
@@ -183,10 +214,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     return room;
   };
 
-  // reclaim a room that never accrued state and holds nothing: a first-contact hello that is
-  // rejected mints a Room via `roomOf` before the check, and a room whose members all leave before
-  // anyone seeds it is dead weight. Only ever drops a room with no members, no sequence, and no ban
-  // list, so a live member, retained state, or a remembered ejection always keeps it.
   const maybeEvictEmpty = (name: string): void => {
     const room = rooms.get(name);
     if (
@@ -266,6 +293,55 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const laterHlc = (a: Hlc | undefined, b: Hlc): Hlc =>
     !a || b.p > a.p || (b.p === a.p && b.l > a.l) ? b : a;
 
+  const hlcLte = (a: Hlc, b: Hlc): boolean =>
+    a.p < b.p || (a.p === b.p && a.l <= b.l);
+
+  const checkAdmission = (
+    name: string,
+    room: Room,
+    env: OpEnvelope,
+    ctx: PrincipalCtx,
+  ): PolicyViolation | null => {
+    const policy = opt.policy;
+    if (!policy || (!policy.canBump && !policy.verifyCitations)) return null;
+    for (const op of env.ops) {
+      if (policy.canBump) {
+        const observed = room.registers.maxEpoch(op.path);
+        if (
+          op.epoch > observed &&
+          !policy.canBump(ctx, op.path, op.epoch, name)
+        ) {
+          return {
+            writer: ctx.writer,
+            reason: 'epoch-bump',
+            path: op.path,
+            detail: `epoch ${op.epoch} > observed ${observed}`,
+          };
+        }
+      }
+      if (!policy.verifyCitations) continue;
+      for (const c of op.cites) {
+        if (room.frontier && hlcLte(c.hlc, room.frontier)) continue;
+        // a self-citation of this very envelope's dot is ignored at ingest (born-dead guard)
+        if (
+          c.origin === env.origin &&
+          c.hlc.p === env.hlc.p &&
+          c.hlc.l === env.hlc.l
+        )
+          continue;
+        if (!room.registers.covers(op.path, c)) {
+          return {
+            writer: ctx.writer,
+            reason: 'unknown-citation',
+            path: op.path,
+            detail: `cites ${c.origin}@${c.hlc.p}.${c.hlc.l}`,
+          };
+        }
+      }
+    }
+    return null;
+  };
+
   return {
     room: (name) => {
       const room = rooms.get(name);
@@ -329,6 +405,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 room: msg.room,
                 reason: 'unauthorized',
               });
+              opt.onReject?.(msg.room, ctx, 'unauthorized');
               return;
             }
             if (msg.proto !== MESH_PROTO_VERSION) {
@@ -338,6 +415,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'proto',
                 expected: MESH_PROTO_VERSION,
               });
+              opt.onReject?.(msg.room, ctx, 'proto', MESH_PROTO_VERSION);
               maybeEvictEmpty(msg.room);
               return;
             }
@@ -348,6 +426,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'policy-version',
                 expected: policyVersion,
               });
+              opt.onReject?.(msg.room, ctx, 'policy-version', policyVersion);
               maybeEvictEmpty(msg.room);
               return;
             }
@@ -361,6 +440,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 reason: 'schema',
                 expected: room.schemaVersion,
               });
+              opt.onReject?.(msg.room, ctx, 'schema', room.schemaVersion);
               maybeEvictEmpty(msg.room);
               return;
             }
@@ -375,6 +455,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             const member: Member = { socket, ctx, origin: msg.origin };
             joined.set(msg.room, member);
             room.members.add(member);
+            opt.onJoin?.(msg.room, ctx, msg.origin);
             broadcast(
               room,
               { t: 'member', room: msg.room, origin: msg.origin },
@@ -447,11 +528,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
 
           const env = msg.env;
-          // proto is checked per envelope too: a pre-citation emitter's ops carry no
-          // cites/epoch and would silently accumulate forever-live siblings, so protocol
-          // versions are rejected outright, never mixed. `validateEnvelope` is the structural
-          // twin of the client's well-formedness check (identical decisions): a malformed
-          // envelope is rejected before authority is even consulted.
           const malformed = validateEnvelope(env);
           const violation: PolicyViolation | null =
             env.policyVersion !== policyVersion ||
@@ -463,7 +539,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   ? { writer: ctx.writer, reason: 'ops-limit' }
                   : overRate(room, ctx.writer)
                     ? { writer: ctx.writer, reason: 'rate' }
-                    : checkEnvelope(opt.policy, env, ctx);
+                    : checkEnvelope(opt.policy, env, ctx, msg.room);
           if (violation) {
             eject(msg.room, room, ctx.writer, violation);
             return;
@@ -473,15 +549,20 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             env.schemaVersion !== undefined &&
             env.schemaVersion < room.schemaVersion
           ) {
+            opt.onDrop?.(msg.room, env, 'schema');
+            return;
+          }
+
+          // after the stale-schema drop: a silently-dropped envelope never ingests, so its
+          // epochs and cites gate nothing (an outdated client stays 'outdated', not ejected)
+          const admission = checkAdmission(msg.room, room, env, ctx);
+          if (admission) {
+            eject(msg.room, room, ctx.writer, admission);
             return;
           }
 
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };
           room.journal.push(seqEnv);
-          // a newer-schema envelope is a MIGRATION: the old shape's register state and
-          // journal belong to the retired schema, so retention restarts at this envelope
-          // (replaying pre-migration ops into a migrated room would resurrect the old shape
-          // beside the new root)
           if (
             env.schemaVersion !== undefined &&
             env.schemaVersion > room.schemaVersion

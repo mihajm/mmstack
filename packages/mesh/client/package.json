@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/mesh",
-  "version": "22.2.0",
+  "version": "22.3.0",
   "keywords": [
     "angular",
     "signals",
@@ -21,7 +21,7 @@
   "peerDependencies": {
     "@angular/core": ">=22 <23",
     "@mmstack/primitives": ">=22.8 <23",
-    "@mmstack/mesh-protocol": ">=0.3 <1"
+    "@mmstack/mesh-protocol": ">=0.4 <1"
   },
   "sideEffects": false
 }

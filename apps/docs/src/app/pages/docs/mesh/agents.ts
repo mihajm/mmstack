@@ -11,17 +11,36 @@ import { DocSection } from '../../../layout/doc-section';
     <docs-page
       title="Agents"
       pkg="@mmstack/mesh"
-      lead="An agent writes through the same protocol as a person: the same envelopes, attribution, and ACLs. How much authority you give it is the choice. Review its work on a branch, or let it write to the room directly under a scoped policy."
+      lead="An agent writes through the same protocol as a person: the same envelopes, attribution, and ACLs. agentSeat gives it a seat anywhere JavaScript runs, and how much authority you give it is the choice. Review its work on a branch, or let it write to the room directly under a scoped policy."
     >
+      <docs-section title="A seat at the table" id="seat">
+        <p>
+          <code>agentSeat</code> is a headless room peer: no Angular injector, no
+          browser APIs, so it runs in the Node service that hosts your model
+          loop. It holds a live replica of the room document as a normal signal
+          store, writes with the same attribution as any peer, and reconnects and
+          rebases exactly like the browser client, because both are shells over
+          one session implementation.
+        </p>
+        <docs-code [code]="seat" lang="ts" />
+        <p>
+          One seat is one identity. For several agents in one room, a drafting
+          assistant and an adversarial reviewer say, open a seat per agent and
+          scope each with the relay policy. Roles are a policy question, not an
+          API one.
+        </p>
+      </docs-section>
+
       <docs-section title="Review a branch" id="branch">
         <p>
           An agent's write is a sample that can be wrong, so the safe default is
-          to keep it behind a person's approval. <code>mesh.fork()</code> gives
-          the agent a <a mmLink="/docs/primitives/store">fork</a> of the synced
-          store. Its writes stay on the fork, off the room. <code>ops()</code> is
-          the staged change as data, ready to render for a reviewer.
-          <code>commit()</code> emits it to the room; <code>discard()</code> drops
-          it.
+          to keep it behind a person's approval. <code>seat.fork()</code> (and
+          <code>mesh.fork()</code> in the browser) gives the agent a
+          <a mmLink="/docs/primitives/store">fork</a> of the synced store. Its
+          writes stay on the fork, off the room. <code>ops()</code> is the
+          staged change as data, ready to render for a reviewer.
+          <code>commit()</code> emits it to the room; <code>discard()</code>
+          drops it.
         </p>
         <docs-code [code]="branch" lang="ts" />
         <p>
@@ -36,11 +55,38 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
+      <docs-section title="Feed the model diffs, not the world" id="context">
+        <p>
+          Resending the whole document every turn wastes the context window and
+          defeats provider prompt caching. The seat splits room state into a
+          cacheable base and an append-only tail.
+          <code>stableSnapshot()</code> returns the document stamped with the
+          relay sequence number it is provably the fold of, or
+          <code>null</code> while one of the seat's own writes is still in
+          flight. A non-null result is byte-stable for its seq: any replica at
+          that seq holds exactly this document, which is what makes it safe to
+          cache. <code>changes</code> then delivers everything after that seq in
+          order, and <code>describeOp</code> turns each op into a line of plain
+          English for the model.
+        </p>
+        <docs-code [code]="context" lang="ts" />
+        <p>
+          When to refresh the base is your policy: message velocity, suffix
+          length, context size. The one rule is the <code>resync</code> event. A
+          seat that rejoins past the relay's retention re-establishes state from
+          a snapshot, the missed changes are not replayable, and the accumulated
+          tail no longer extends the stream. Drop it and take a fresh base. The
+          seat carries no model code and no provider dependency; its reads and
+          writes are plain JSON-shaped functions that wrap directly into a tool
+          definition for the AI SDK of your choice.
+        </p>
+      </docs-section>
+
       <docs-section title="Write as a peer" id="peer">
         <p>
-          A trusted, in-scope agent can join the room directly. Give it a narrower
-          <code>ctx</code> and a <code>policy</code>, and the relay ejects any
-          write outside its scope, the same
+          A trusted, in-scope agent can write to the room directly. Give it a
+          narrower <code>ctx</code> and a <code>policy</code>, and the relay
+          ejects any write outside its scope, the same
           <a mmLink="/docs/mesh/client">tripwire</a> that guards a human peer.
         </p>
         <docs-code [code]="peer" lang="ts" />
@@ -67,25 +113,48 @@ import { DocSection } from '../../../layout/doc-section';
   `,
 })
 export class MeshAgents {
-  protected readonly branch = `import { store } from '@mmstack/primitives';
-import { meshSync } from '@mmstack/mesh';
+  protected readonly seat = `import { agentSeat, describeOp, webSocketTransport } from '@mmstack/mesh';
 
-const board = store<Board>(initialBoard());
-const mesh = meshSync(board, { room: 'board-42', writer: userId, transport });
+const seat = agentSeat(initialBoard(), {
+  room: 'board-42',
+  writer: agentId, // an opaque principal id, like any peer's
+  transport: webSocketTransport('wss://sync.example.com'),
+  ctx: { kind: 'agent' },
+});
 
-const proposal = mesh.fork(); // the agent's branch, off the room
-runAgent(proposal.store);     // it writes here
+seat.snapshot();                       // the current document, plain data
+seat.setAtPath('tasks.t1.done', true); // dot paths, the shape a tool call produces
+seat.setPresence({ name: 'Scribe', kind: 'agent' });`;
+
+  protected readonly branch = `const proposal = seat.fork(); // the agent's branch, off the room
+setAtPath(proposal.store, 'plan.endDate', '2026-10-11'); // it writes here
 
 proposal.ops();      // StoreOp[] for the reviewer to see
 proposal.commit();   // approve: emits as concurrent writes; a mid-review room edit is never steamrolled
 // proposal.rebase();  // re-observe the room, then commit on top
 // proposal.discard(); // reject: drops the staged writes`;
 
-  protected readonly peer = `meshSync(board, {
+  protected readonly context = `let base = seat.stableSnapshot(); // { seq, doc } | null while a write is in flight
+const sinceBase: string[] = [];
+
+seat.changes((e) => {
+  if (e.kind === 'change') {
+    sinceBase.push(...e.ops.map((op) => describeOp(op, e.writer)));
+  } else {
+    base = null;          // 'resync': the tail no longer extends the stream
+    sinceBase.length = 0; // rebuild from a fresh base
+  }
+});
+
+// per model turn: cached prefix + appended suffix, refresh on your own cadence
+const prompt = { doc: base?.doc, activity: sinceBase };`;
+
+  protected readonly peer = `agentSeat(initialBoard(), {
   room: 'board-42',
   writer: agentId,
   transport,
   ctx: { kind: 'agent', claims: { scope: 'pricing' } },
   policy: pricingScopeOnly, // the relay ejects a write outside 'pricing'
+  onEject: (reason) => log.warn('agent ejected', reason),
 });`;
 }

@@ -1,4 +1,15 @@
 export {
+  agentSeat,
+  describeOp,
+  setAtPath,
+  type AgentSeat,
+  type AgentSeatOptions,
+  type SeatChange,
+  type SeatEvent,
+  type SeatResync,
+  type StableSnapshot,
+} from './lib/agent-seat';
+export {
   meshSync,
   type MeshPeer,
   type MeshStatus,

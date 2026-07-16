@@ -405,14 +405,18 @@ describe('meshSync (full loop over an in-process relay)', () => {
     expect(b.s().nested.a).toBe(5);
   });
 
-  it('emit-side policy honesty: a locally-invalid write never reaches the wire', () => {
+  it('emit-side policy honesty: a locally-invalid write never reaches the wire, and the eject matches the relay outcome', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
+      const violations: unknown[] = [];
       const relay = createRelay({
         policy: { canWrite: (_ctx, path) => path[0] !== 'title' },
+        onViolation: (_room, v) => violations.push(v),
       });
+      const ejections: (string | undefined)[] = [];
       const a = peer(relay, 'wa', {
         policy: { canWrite: (_ctx, path) => path[0] !== 'title' },
+        onEject: (reason) => ejections.push(reason),
       });
       const b = peer(relay, 'wb');
       flush();
@@ -420,8 +424,12 @@ describe('meshSync (full loop over an in-process relay)', () => {
       a.s.title.set('forbidden');
       flush();
 
-      expect(a.mesh.status()).toBe('live');
+      // same outcome the relay-side test above produces — one hop early
+      expect(a.mesh.status()).toBe('ejected');
+      expect(ejections).toEqual(['can-write']);
+      expect(violations).toEqual([]); // the optimization: the relay never even saw it
       expect(b.s().title).toBe('init');
+      expect(b.mesh.status()).toBe('live');
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();

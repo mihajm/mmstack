@@ -80,6 +80,94 @@ describe('meshSync durable outbox — reboot survival', () => {
     b.mesh.close();
   });
 
+  it('flushes the restored tail BEFORE the fresh-origin seed that cites it, so a citation-verifying relay admits the boot', async () => {
+    const violations: unknown[] = [];
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const { store: disk, backing } = memStore();
+    // 'zzz…' sorts AFTER the fresh uuid origin, so plain lexicographic flushing would send the
+    // seed first — and its clear-group cites this tail's dot, which the room wouldn't know yet
+    backing.set('m:Z', {
+      origin: 'zzz-restored',
+      version: 1,
+      envs: [{ ...offlineEnv(), origin: 'zzz-restored' }],
+    });
+
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:Z', store: disk, crossTab: 'off' },
+    });
+    await settle(); // boot restores the tail, joins a FRESH room, seeds it
+
+    expect(violations).toEqual([]); // every cite was already retained when its envelope arrived
+    expect(a.mesh.status()).toBe('live');
+
+    const b = peer(relay, 'wb'); // a joiner folds the seeded register state
+    await settle();
+    expect(b.s().title).toBe('offline');
+
+    a.mesh.close();
+    b.mesh.close();
+  });
+
+  it('flushes a multi-boot restored tail in outbox order, so a citation chain across restored origins is admitted', async () => {
+    const violations: unknown[] = [];
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      onViolation: (_room, v) => violations.push(v),
+    });
+    const { store: disk, backing } = memStore();
+    // boot 1 wrote e1 under 'zzz-boot1'; boot 2 restored it, then wrote e2 under 'aaa-boot2'
+    // citing e1's dot. 'aaa…' sorts before 'zzz…', so any origin-ordered flush would send the
+    // citing envelope first — outbox order is the only order that respects the chain.
+    const e1: OpEnvelope = {
+      proto: OP_PROTO_VERSION,
+      origin: 'zzz-boot1',
+      writer: 'wa',
+      version: 1,
+      hlc: { p: 10, l: 0 },
+      policyVersion: 0,
+      ops: [
+        { kind: 'set', path: ['title'], next: 'boot1', prev: 'init', cites: [], epoch: 0 },
+      ],
+    };
+    const e2: OpEnvelope = {
+      proto: OP_PROTO_VERSION,
+      origin: 'aaa-boot2',
+      writer: 'wa',
+      version: 1,
+      hlc: { p: 20, l: 0 },
+      policyVersion: 0,
+      ops: [
+        {
+          kind: 'set',
+          path: ['title'],
+          next: 'boot2',
+          prev: 'boot1',
+          cites: [{ origin: 'zzz-boot1', hlc: { p: 10, l: 0 } }],
+          epoch: 0,
+        },
+      ],
+    };
+    backing.set('m:multi', { origin: 'aaa-boot2', version: 1, envs: [e1, e2] });
+
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:multi', store: disk, crossTab: 'off' },
+    });
+    await settle();
+
+    expect(violations).toEqual([]); // e1 was already retained when the envelope citing it arrived
+    expect(a.mesh.status()).toBe('live');
+
+    const b = peer(relay, 'wb');
+    await settle();
+    expect(b.s().title).toBe('boot2'); // the whole chain landed, in order
+
+    a.mesh.close();
+    b.mesh.close();
+  });
+
   it('mints new writes on a FRESH origin, so they never collide with an acked-but-dropped mint on the old one', async () => {
     const seen: SeqEnvelope[] = [];
     const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
@@ -185,6 +273,92 @@ describe('meshSync durable outbox — reboot survival', () => {
       expect(seen.some((e) => e.origin === 'A')).toBe(false); // 'A' stays silent (dropped, never re-minted)
       expect(seen.some((e) => e.origin !== 'A')).toBe(true); // the room seed + fresh write are their own origin
 
+      a.mesh.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('drops (loudly) a persisted tail recorded under a different writer instead of resending it as this principal', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const seen: SeqEnvelope[] = [];
+      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const { store: disk, backing } = memStore();
+      backing.set('m:F', {
+        origin: 'A',
+        version: 1,
+        envs: [{ ...offlineEnv(), writer: 'someone-else' }],
+      });
+
+      const a = peer(relay, 'wa', {
+        outbox: { key: 'm:F', store: disk, crossTab: 'off' },
+      });
+      await settle();
+
+      expect(a.mesh.status()).toBe('live'); // stale disk is not a policy tripwire — no eject
+      expect(a.s().title).toBe('init'); // the foreign write was not applied
+      expect(a.mesh.health().droppedOfflineWrites).toBe(1); // and the loss is surfaced
+      expect(seen.some((e) => e.origin === 'A')).toBe(false); // never resent under this principal
+
+      a.mesh.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an eject mid-restore keeps the legal unacked prefix on disk instead of clobbering it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const relay = createRelay();
+      const { store: disk, backing } = memStore();
+      const legal = offlineEnv(); // v1 sets title — still allowed
+      const violating: OpEnvelope = {
+        ...offlineEnv(),
+        version: 2,
+        ops: [
+          { kind: 'set', path: ['v'], next: 99, prev: 0, cites: [], epoch: 0 },
+        ],
+      };
+      backing.set('m:P', { origin: 'A', version: 2, envs: [legal, violating] });
+
+      // the app's policy narrowed between boots (same policyVersion): 'v' is not writable
+      const a = peer(relay, 'wa', {
+        policy: { canWrite: (_ctx, path) => path[0] !== 'v' },
+        outbox: { key: 'm:P', store: disk, crossTab: 'off' },
+      });
+      await settle();
+
+      expect(a.mesh.status()).toBe('ejected'); // the tripwire fired during restore
+      const slot = backing.get('m:P') as { envs: readonly OpEnvelope[] };
+      // the onTerminal persist is the final word — the legal prefix survives for the next boot
+      expect(slot.envs.map((e) => e.version)).toEqual([1]);
+      a.mesh.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('drops (loudly) a persisted tail recorded under a stale policyVersion pin instead of a boot-eject loop', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const seen: SeqEnvelope[] = [];
+      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const { store: disk, backing } = memStore();
+      backing.set('m:V', {
+        origin: 'A',
+        version: 1,
+        envs: [{ ...offlineEnv(), policyVersion: 3 }], // recorded under an older pin
+      });
+
+      const a = peer(relay, 'wa', {
+        outbox: { key: 'm:V', store: disk, crossTab: 'off' },
+      });
+      await settle();
+
+      expect(a.mesh.status()).toBe('live'); // the relay would reject the stale pin — never resend it
+      expect(a.mesh.health().droppedOfflineWrites).toBe(1);
+      expect(seen.some((e) => e.origin === 'A')).toBe(false);
       a.mesh.close();
     } finally {
       warn.mockRestore();

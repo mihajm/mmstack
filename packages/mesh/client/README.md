@@ -211,7 +211,10 @@ here", or an agent's current activity.
 
 Pass a `policy` and (when your policy reads claims) a `ctx`, and the client validates each write
 before it hits the wire, matching the relay's own check. An honest client never emits an op the
-relay would reject, so the tripwire only ever fires on a broken or hostile peer.
+relay would reject, so the tripwire only ever fires on a broken or hostile peer. When it does
+fire, the client ejects itself with the same reason the relay would have used: the local check
+saves the room a round trip, but it is an optimization, not the enforcement. The relay validates
+every envelope on arrival no matter what the client claims to have checked.
 
 ```ts
 meshSync(store, {
@@ -226,25 +229,54 @@ meshSync(store, {
 ## Agents
 
 An agent acts under the same protocol as a person: the same envelopes, attribution, ACLs, and undo.
-There are two ways to give it write access, for two levels of trust.
+`agentSeat` gives it a seat anywhere JavaScript runs, with no Angular and no browser APIs: a Node
+service, a worker, an edge runtime. A seat is one identity holding its own live replica; for
+several agents in one room (one drafting, one reviewing), open several seats and scope each with
+the relay policy. Roles are a policy question, not an API one.
+
+### A seat at the table
+
+```ts
+import { agentSeat, describeOp, webSocketTransport } from '@mmstack/mesh';
+
+const seat = agentSeat(initialBoard(), {
+  room: 'board-42',
+  writer: agentId, // an opaque principal id, like any peer's
+  transport: webSocketTransport('wss://sync.example.com'),
+  ctx: { kind: 'agent' },
+});
+
+seat.snapshot(); // the current document, plain data
+seat.changes((e) => {
+  if (e.kind === 'change') {
+    activity.push(...e.ops.map((op) => describeOp(op, e.writer)));
+  }
+});
+seat.setAtPath('tasks.t1.done', true); // a direct write, attributed like any peer's
+seat.setPresence({ name: 'Scribe', kind: 'agent' });
+```
+
+`seat.doc` is the same signal store `meshSync` replicates in the browser, so computeds and reactive
+reads work as usual. `setAtPath` takes the dot paths a tool-calling model naturally produces.
+Reconnection, delta resume, and offline rebase behave exactly as in `meshSync`; the two are shells
+over one session implementation.
 
 ### Review a branch
 
-`mesh.fork()` gives the agent a fork of the synced store. Its writes stay on the fork, so nothing
-reaches the room until a person approves. `ops()` is the staged change as data, ready to render for
-review. `commit()` emits it to the room; `discard()` drops it.
+An agent's write is a sample that can be wrong, so the safe default keeps it behind a person's
+approval. `seat.fork()` (and `mesh.fork()` in the browser) gives the agent an isolated branch of
+the synced store. Its writes stay on the fork, so nothing reaches the room until someone approves.
+`ops()` is the staged change as data, ready to render for review. `commit()` emits it to the room;
+`discard()` drops it.
 
 ```ts
-const board = store<Board>(initialBoard());
-const mesh = meshSync(board, { room: 'board-42', writer: userId, transport });
+const proposal = seat.fork();                       // the agent's isolated branch, off the room
+setAtPath(proposal.store, 'plan.endDate', '2026-10-11'); // it writes here
 
-const proposal = mesh.fork();   // the agent's isolated branch, off the room
-runAgent(proposal.store);       // it writes here
-
-const changes = proposal.ops(); // StoreOp[] for the reviewer to see
-proposal.commit();              // approve: emits as concurrent writes to the room
-// proposal.rebase();           // re-observe the room, then commit on top
-// proposal.discard();          // reject: drops the staged writes
+const staged = proposal.ops(); // StoreOp[] for the reviewer to see
+proposal.commit();             // approve: emits as concurrent writes to the room
+// proposal.rebase();          // re-observe the room, then commit on top
+// proposal.discard();         // reject: drops the staged writes
 ```
 
 The commit cites what the fork observed when it forked, so an edit that lands on the room while a
@@ -253,18 +285,79 @@ approval. Call `rebase()` to re-observe the room first when the proposal should 
 latest. The reviewer reads and writes normal store values, and the agent never touches the room
 directly. This is the fit when a write should be seen before it lands.
 
-### Write as a peer
+### Feed the model diffs, not the world
 
-An agent can also join the room directly, scoped by the relay ACL. Give it a narrower `ctx` and a
-`policy`, and the relay ejects any write outside its scope (see [Trust](#trust)).
+Room state and the model loop meet at two calls. `stableSnapshot()` returns the document stamped
+with the relay sequence number it is provably the fold of, or `null` while one of the seat's own
+writes is still in flight. A non-null result is byte-stable for its seq: rebuilding the room at
+that seq yields exactly this document, which is what makes it safe to put in a provider prompt
+cache. `changes` then delivers everything after that seq in order, so a prompt becomes a cached
+prefix plus an append-only suffix, and each turn sends only what happened since.
 
 ```ts
-meshSync(board, {
+let base = seat.stableSnapshot(); // { seq, doc } | null
+const sinceBase: string[] = [];
+
+seat.changes((e) => {
+  if (e.kind === 'change') {
+    sinceBase.push(...e.ops.map((op) => describeOp(op, e.writer)));
+  } else {
+    // 'resync': the seat rejoined past the relay's retention, the suffix no longer
+    // extends the stream. Rebuild: take a fresh base, drop the accumulated lines.
+    base = null;
+    sinceBase.length = 0;
+  }
+});
+
+// per model turn: refresh the base on your own cadence (message velocity, context size)
+if (!base || sinceBase.length > 200) {
+  const next = seat.stableSnapshot();
+  if (next) {
+    base = next;         // new cached prefix
+    sinceBase.length = 0;
+  }
+}
+```
+
+The seat carries no model code and no provider dependency. Its reads and writes are plain
+JSON-shaped functions, so they wrap directly into any tool-calling loop, for example the
+[`ai`](https://www.npmjs.com/package/ai) SDK:
+
+```ts
+import { setAtPath } from '@mmstack/mesh';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const propose = tool({
+  description: 'Stage edits for human review.',
+  inputSchema: z.object({
+    rationale: z.string(),
+    changes: z.array(z.object({ path: z.string(), value: z.unknown() })),
+  }),
+  execute: async ({ rationale, changes }) => {
+    const fork = seat.fork();
+    for (const c of changes) setAtPath(fork.store, c.path, c.value);
+    openProposals.set(stageForReview(fork, rationale), fork);
+    return 'staged for review';
+  },
+});
+// approval, wherever it happens in your UI: fork.commit() or fork.discard()
+```
+
+### Write as a peer
+
+A trusted, in-scope agent can also write to the room directly, scoped by the relay ACL. Give it a
+narrower `ctx` and a `policy`, and the relay ejects any write outside its scope (see
+[Trust](#trust)). The options are the same on `agentSeat` and `meshSync`.
+
+```ts
+agentSeat(initialBoard(), {
   room: 'board-42',
   writer: agentId,
   transport,
   ctx: { kind: 'agent', claims: { scope: 'pricing' } },
   policy: pricingScopeOnly,
+  onEject: (reason) => log.warn('agent ejected', reason),
 });
 ```
 

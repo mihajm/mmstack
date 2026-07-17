@@ -107,7 +107,7 @@ function getCachedChild(
   const proxy = build();
   const ref = new WeakRef(proxy);
   storeCache.set(prop, ref);
-  cleanupRegistry.register(proxy, { target, prop }, ref);
+  cleanupRegistry.register(proxy, { targetRef: new WeakRef(target), prop }, ref);
   return proxy;
 }
 
@@ -626,7 +626,9 @@ export function mutableStore<T extends AnyRecord>(
 export function createStoreContext(): toStoreOptions {
   const cache: ProxyCache = new WeakMap();
   const registry: ProxyCleanupRegistry = new FinalizationRegistry(
-    ({ target, prop }) => {
+    ({ targetRef, prop }) => {
+      const target = targetRef.deref();
+      if (!target) return;
       const entry = cache.get(target);
       if (entry) entry.delete(prop);
     },

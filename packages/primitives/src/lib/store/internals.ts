@@ -38,10 +38,14 @@ export type ProxyCache = WeakMap<
 
 /**
  * @internal
- * Prunes a cache entry once its proxy is reclaimed by the GC.
+ * Prunes a cache entry once its proxy is reclaimed by the GC. The held value must reference
+ * `target` only weakly: held values are retained by the registry until its cleanup callbacks
+ * run (host tasks — they never run inside a synchronous burst), so a strong `target` here
+ * keeps every dropped subtree's backing-signal ancestry alive across GCs. If `target` is
+ * already dead its whole cache entry died with it (WeakMap), and there is nothing to prune.
  */
 export type ProxyCleanupRegistry = FinalizationRegistry<{
-  target: object;
+  targetRef: WeakRef<object>;
   prop: PropertyKey;
 }>;
 
@@ -59,7 +63,9 @@ export const PROXY_CLEANUP_TOKEN = new InjectionToken<ProxyCleanupRegistry>(
     providedIn: 'root',
     factory: () => {
       const cache = inject(PROXY_CACHE_TOKEN);
-      return new FinalizationRegistry(({ target, prop }) => {
+      return new FinalizationRegistry(({ targetRef, prop }) => {
+        const target = targetRef.deref();
+        if (!target) return;
         const store = cache.get(target);
         if (store) store.delete(prop);
       });

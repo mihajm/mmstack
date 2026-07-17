@@ -84,9 +84,7 @@ export const appRoutes: Route[] = [
   {
     path: 'vflow-store',
     loadComponent: () =>
-      import('./examples/vflow-store-example').then(
-        (m) => m.VflowStoreExample,
-      ),
+      import('./examples/vflow-store-example').then((m) => m.VflowStoreExample),
   },
   // the app-internal canvas engine graduated into @mmstack/dnd — old routes forward
   { path: 'canvas', redirectTo: 'canvas-controller' },
@@ -111,33 +109,33 @@ export const appRoutes: Route[] = [
     loadComponent: () =>
       import('./examples/telemetry-example').then((m) => m.TelemetryExample),
   },
-  {
-    path: 'mesh',
-    loadComponent: () =>
-      import('./examples/mesh-example').then((m) => m.MeshExample),
-  },
+  // {
+  //   path: 'mesh',
+  //   loadComponent: () =>
+  //     import('./examples/mesh-example').then((m) => m.MeshExample),
+  // },
   {
     path: 'webrtc',
     loadComponent: () =>
       import('./examples/webrtc-example').then((m) => m.WebRtcExample),
   },
-  {
-    path: 'mesh-agent',
-    loadComponent: () =>
-      import('./examples/mesh-agent-example').then((m) => m.MeshAgentExample),
-  },
-  {
-    path: 'mesh-outbox',
-    loadComponent: () =>
-      import('./examples/mesh-outbox-example').then((m) => m.MeshOutboxExample),
-  },
-  {
-    path: 'worker-mesh',
-    loadComponent: () =>
-      import('./examples/worker-mesh-example').then(
-        (m) => m.WorkerMeshExample,
-      ),
-  },
+  // {
+  //   path: 'mesh-agent',
+  //   loadComponent: () =>
+  //     import('./examples/mesh-agent-example').then((m) => m.MeshAgentExample),
+  // },
+  // {
+  //   path: 'mesh-outbox',
+  //   loadComponent: () =>
+  //     import('./examples/mesh-outbox-example').then((m) => m.MeshOutboxExample),
+  // },
+  // {
+  //   path: 'worker-mesh',
+  //   loadComponent: () =>
+  //     import('./examples/worker-mesh-example').then(
+  //       (m) => m.WorkerMeshExample,
+  //     ),
+  // },
   { path: '', pathMatch: 'full', redirectTo: 'core' },
   { path: '**', redirectTo: 'core' },
 ];

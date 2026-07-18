@@ -8,6 +8,59 @@ import {
 } from '@angular/core';
 
 /**
+ * Opt-in policy describing how `keyArray` should treat duplicate keys.
+ *
+ * With the `'ordinal'` policy, keys are coerced to strings and disambiguated by
+ * their occurrence order: the first item with a given base key keeps `base`, the
+ * second becomes `base#1`, the third `base#2`, and so on. Each duplicate therefore
+ * gets a stable, distinct entry instead of collapsing.
+ *
+ * Identity follows position-among-duplicates: removing an earlier occurrence
+ * promotes the next one to the base key, which changes its effective key and thus
+ * re-creates its mapped entry.
+ */
+export type DuplicateKeyPolicy = {
+  /** Disambiguation strategy. Currently only ordinal (`base`, `base#1`, `base#2`, ...). */
+  policy: 'ordinal';
+  /**
+   * Optional diagnostics side-channel. When a recompute observes duplicate keys,
+   * this is invoked once with the duplicate base keys in first-occurrence order.
+   * It is called untracked and must not be relied upon to create reactive dependencies.
+   */
+  report?: (bases: readonly string[]) => void;
+};
+
+function effectiveKeys<T, K>(
+  arr: readonly T[],
+  getKey: (item: T) => K,
+  report?: (bases: readonly string[]) => void,
+): string[] {
+  const out = new Array<string>(arr.length);
+  const counts = new Map<string, number>();
+  const firstOrder: string[] = [];
+  let duped: Set<string> | null = null;
+
+  for (let i = 0; i < arr.length; i++) {
+    const base = String(getKey(arr[i]));
+    const seen = counts.get(base) ?? 0;
+    if (seen === 0) {
+      firstOrder.push(base);
+    } else {
+      (duped ??= new Set<string>()).add(base);
+    }
+    out[i] = seen === 0 ? base : base + '#' + seen;
+    counts.set(base, seen + 1);
+  }
+
+  if (report && duped) {
+    const bases = firstOrder.filter((b) => duped.has(b));
+    untracked(() => report(bases));
+  }
+
+  return out;
+}
+
+/**
  * Reactively maps items from a source array to a new array by value (identity).
  *
  * similar to `Array.prototype.map`, but:
@@ -25,6 +78,8 @@ import {
  *  - `onDestroy`: A callback invoked when a mapped item is removed from the array.
  *  - `key`: A custom key extractor for identity matching (e.g. `(item) => item.id`)
  *    when item references change but conceptual identity is preserved.
+ *  - `duplicateKeys`: Opt-in policy for handling duplicate keys. When omitted,
+ *    behavior is unchanged (duplicates collapse). See {@link DuplicateKeyPolicy}.
  * @returns A `Signal<U[]>` containing the mapped array.
  *
  * @example
@@ -59,6 +114,12 @@ export function keyArray<T, U, K>(
      * even if the item reference changes.
      */
     key?: (item: T) => K;
+    /**
+     * Opt-in policy for disambiguating duplicate keys. When present, keys are
+     * coerced to strings and duplicates get distinct ordinal effective keys
+     * (`base`, `base#1`, `base#2`, ...). When absent, behavior is unchanged.
+     */
+    duplicateKeys?: DuplicateKeyPolicy;
   } = {},
 ): Signal<U[]> {
   const sourceSignal = isSignal(source) ? source : computed(source);
@@ -75,10 +136,13 @@ export function keyArray<T, U, K>(
 
   const newIndexesCache = new Array<WritableSignal<number>>();
 
+  const dup = options.duplicateKeys;
+
   return computed(() => {
     const newItems = sourceSignal() || [];
 
     return untracked(() => {
+      const newKeys = dup ? effectiveKeys(newItems, getKey, dup.report) : null;
       let i: number;
       let j: number;
       const newLen = newItems.length;
@@ -120,9 +184,17 @@ export function keyArray<T, U, K>(
         tempIndexes.length = 0;
         newIndicesNext.length = 0;
 
+        const oldKeys = dup ? effectiveKeys(items, getKey) : null;
+        const kNew = newKeys
+          ? (idx: number) => newKeys[idx]
+          : (idx: number) => getKey(newItems[idx]);
+        const kOld = oldKeys
+          ? (idx: number) => oldKeys[idx]
+          : (idx: number) => getKey(items[idx]);
+
         for (
           start = 0, end = Math.min(len, newLen);
-          start < end && getKey(items[start]) === getKey(newItems[start]);
+          start < end && kOld(start) === kNew(start);
           start++
         ) {
           newMapped[start] = mapped[start];
@@ -131,9 +203,7 @@ export function keyArray<T, U, K>(
 
         for (
           end = len - 1, newEnd = newLen - 1;
-          end >= start &&
-          newEnd >= start &&
-          getKey(items[end]) === getKey(newItems[newEnd]);
+          end >= start && newEnd >= start && kOld(end) === kNew(newEnd);
           end--, newEnd--
         ) {
           temp[newEnd] = mapped[end];
@@ -141,17 +211,15 @@ export function keyArray<T, U, K>(
         }
 
         for (j = newEnd; j >= start; j--) {
-          item = newItems[j];
-          key = getKey(item);
-          i = newIndices.get(key)!;
+          key = kNew(j);
+          i = newIndices.get(key) ?? -1;
           newIndicesNext[j] = i === undefined ? -1 : i;
           newIndices.set(key, j);
         }
 
         for (i = start; i <= end; i++) {
-          item = items[i];
-          key = getKey(item);
-          j = newIndices.get(key)!;
+          key = kOld(i);
+          j = newIndices.get(key) ?? -1;
           if (j !== undefined && j !== -1) {
             temp[j] = mapped[i];
             tempIndexes[j] = indexes[i];

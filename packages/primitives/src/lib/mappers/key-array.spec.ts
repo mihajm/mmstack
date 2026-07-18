@@ -145,6 +145,37 @@ describe('keyArray', () => {
   });
 
   describe('duplicateKeys: ordinal policy', () => {
+    it('passes the effective key to mapFn (ordinal for duplicates, raw key in default mode)', () => {
+      TestBed.runInInjectionContext(() => {
+        type Item = { id: string };
+        const source = signal<Item[]>([{ id: 'a' }, { id: 'a' }, { id: 'b' }]);
+
+        const seen: (string | unknown)[] = [];
+        const mapped = keyArray(source, (v, _i, key) => (seen.push(key), v), {
+          key: (item) => item.id,
+          duplicateKeys: { policy: 'ordinal' },
+        });
+        mapped();
+        expect(seen).toEqual(['a', 'a#1', 'b']);
+
+        source.set([{ id: 'a' }, { id: 'a' }, { id: 'b' }, { id: 'a' }]);
+        mapped();
+        expect(seen).toEqual(['a', 'a#1', 'b', 'a#2']);
+
+        const plainSeen: unknown[] = [];
+        const plainSource = signal<Item[]>([{ id: 'x' }, { id: 'y' }]);
+        const plain = keyArray(plainSource, (v, _i, key) => (plainSeen.push(key), v), {
+          key: (item) => item.id,
+        });
+        plain();
+        expect(plainSeen).toEqual(['x', 'y']);
+
+        plainSource.set([{ id: 'x' }, { id: 'y' }, { id: 'z' }]);
+        plain();
+        expect(plainSeen).toEqual(['x', 'y', 'z']);
+      });
+    });
+
     it('gives duplicates stable, distinct entries and keeps the first entry across an unrelated update', () => {
       TestBed.runInInjectionContext(() => {
         type Item = { id: string; n: number };

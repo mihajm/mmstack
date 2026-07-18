@@ -143,4 +143,173 @@ describe('keyArray', () => {
       expect(mapped()).toEqual([40, 60, 80]);
     });
   });
+
+  describe('duplicateKeys: ordinal policy', () => {
+    it('gives duplicates stable, distinct entries and keeps the first entry across an unrelated update', () => {
+      TestBed.runInInjectionContext(() => {
+        type Item = { id: string; n: number };
+        const source = signal<Item[]>([
+          { id: 'a', n: 1 },
+          { id: 'a', n: 2 },
+        ]);
+
+        const mapFn = vi.fn((v: Item, i) => ({ item: v, index: i }));
+        const mapped = keyArray(source, mapFn, {
+          key: (item) => item.id,
+          duplicateKeys: { policy: 'ordinal' },
+        });
+
+        const first = mapped();
+        expect(mapFn).toHaveBeenCalledTimes(2);
+        expect(first).toHaveLength(2);
+        expect(first[0]).not.toBe(first[1]);
+        const firstEntry = first[0];
+        const secondEntry = first[1];
+
+        // Append an unrelated item; both duplicate entries must be reused.
+        source.set([
+          { id: 'a', n: 1 },
+          { id: 'a', n: 2 },
+          { id: 'b', n: 9 },
+        ]);
+        const second = mapped();
+
+        expect(mapFn).toHaveBeenCalledTimes(3);
+        expect(second[0]).toBe(firstEntry);
+        expect(second[1]).toBe(secondEntry);
+        expect(second[2]).not.toBe(firstEntry);
+      });
+    });
+
+    it('assigns ordinal effective keys deterministically (a, a, a -> a, a#1, a#2)', () => {
+      TestBed.runInInjectionContext(() => {
+        let uid = 0;
+        const source = signal(['a', 'a', 'a']);
+        const mapFn = vi.fn((v: string) => ({ value: v, uid: uid++ }));
+        const mapped = keyArray(source, mapFn, {
+          duplicateKeys: { policy: 'ordinal' },
+        });
+
+        const first = mapped();
+        expect(first.map((e) => e.uid)).toEqual([0, 1, 2]);
+
+        // Re-set an equal array: every ordinal key (a, a#1, a#2) is stable,
+        // so all three entries are reused, none recreated.
+        source.set(['a', 'a', 'a']);
+        const second = mapped();
+        expect(mapFn).toHaveBeenCalledTimes(3);
+        expect(second.map((e) => e.uid)).toEqual([0, 1, 2]);
+
+        // Drop to two a's: keys a and a#1 survive (uid 0, 1); a#2 (uid 2) is gone.
+        source.set(['a', 'a']);
+        const third = mapped();
+        expect(mapFn).toHaveBeenCalledTimes(3);
+        expect(third.map((e) => e.uid)).toEqual([0, 1]);
+      });
+    });
+
+    it('promotes the second duplicate when the first is removed (identity follows position-among-duplicates)', () => {
+      TestBed.runInInjectionContext(() => {
+        type Item = { id: string; tag: string };
+        const x: Item = { id: 'a', tag: 'X' };
+        const y: Item = { id: 'a', tag: 'Y' };
+        const destroySpy = vi.fn();
+        const source = signal<Item[]>([x, y]);
+
+        const mapFn = vi.fn((v: Item) => ({ tag: v.tag }));
+        const mapped = keyArray(source, mapFn, {
+          key: (item) => item.id,
+          duplicateKeys: { policy: 'ordinal' },
+          onDestroy: destroySpy,
+        });
+
+        const first = mapped();
+        expect(mapFn).toHaveBeenCalledTimes(2);
+        const entryX = first[0]; // effective key 'a'
+        const entryY = first[1]; // effective key 'a#1'
+
+        // Remove the first duplicate. Y is promoted to the base key 'a', which
+        // changes its identity: its original 'a#1' entry is destroyed and the
+        // surviving base-'a' entry is the one originally created for X.
+        source.set([y]);
+        const second = mapped();
+
+        expect(second).toHaveLength(1);
+        expect(second[0]).toBe(entryX);
+        expect(second[0]).not.toBe(entryY);
+        expect(destroySpy).toHaveBeenCalledTimes(1);
+        expect(destroySpy).toHaveBeenCalledWith(entryY);
+      });
+    });
+
+    it('destroys the correct entry when a middle duplicate is removed', () => {
+      TestBed.runInInjectionContext(() => {
+        let uid = 0;
+        const destroySpy = vi.fn();
+        const source = signal(['a', 'a', 'b']);
+        const mapFn = vi.fn((v: string) => ({ value: v, uid: uid++ }));
+        const mapped = keyArray(source, mapFn, {
+          duplicateKeys: { policy: 'ordinal' },
+          onDestroy: destroySpy,
+        });
+
+        const first = mapped();
+        const middle = first[1]; // effective key 'a#1'
+        expect(first.map((e) => e.uid)).toEqual([0, 1, 2]);
+
+        source.set(['a', 'b']);
+        const second = mapped();
+
+        expect(second.map((e) => e.uid)).toEqual([0, 2]);
+        expect(destroySpy).toHaveBeenCalledTimes(1);
+        expect(destroySpy).toHaveBeenCalledWith(middle);
+      });
+    });
+
+    it('reports duplicate base keys once per recompute, in first-occurrence order, and not when there are none', () => {
+      TestBed.runInInjectionContext(() => {
+        const report = vi.fn();
+        const source = signal(['a', 'a', 'b', 'b', 'c']);
+        const mapped = keyArray(source, (v) => v, {
+          duplicateKeys: { policy: 'ordinal', report },
+        });
+
+        mapped();
+        expect(report).toHaveBeenCalledTimes(1);
+        expect(report).toHaveBeenLastCalledWith(['a', 'b']);
+
+        // No duplicates: report must not fire.
+        source.set(['a', 'b', 'c']);
+        mapped();
+        expect(report).toHaveBeenCalledTimes(1);
+
+        // New duplicates: report fires again, once, with the new base.
+        source.set(['x', 'x']);
+        mapped();
+        expect(report).toHaveBeenCalledTimes(2);
+        expect(report).toHaveBeenLastCalledWith(['x']);
+      });
+    });
+
+    it('regression guard: with the option absent, reorder-reuse behavior is unchanged', () => {
+      TestBed.runInInjectionContext(() => {
+        const source = signal(['a', 'b', 'c']);
+        const mapFn = vi.fn((v: string, i) => ({ value: v, index: i }));
+        const mapped = keyArray(source, mapFn);
+
+        const first = mapped();
+        const originalA = first[0];
+        const originalC = first[2];
+
+        source.set(['c', 'b', 'a']);
+        const second = mapped();
+
+        expect(mapFn).toHaveBeenCalledTimes(3);
+        expect(second[0]).toBe(originalC);
+        expect(second[2]).toBe(originalA);
+        expect(second[0].index()).toBe(0);
+        expect(second[2].index()).toBe(2);
+      });
+    });
+  });
 });

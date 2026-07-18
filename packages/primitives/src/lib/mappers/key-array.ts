@@ -73,7 +73,9 @@ function effectiveKeys<T, K>(
  * when the list is reordered.
  *
  * @param source A `Signal<T[]>` or a function returning `T[]`.
- * @param mapFn The mapping function. Receives the item and its index as a Signal.
+ * @param mapFn The mapping function. Receives the item, its index as a Signal, and the
+ *   entry's key (the effective ordinal key when `duplicateKeys` is enabled, otherwise
+ *   the raw key) — stable for the lifetime of the mapped entry.
  * @param options Optional configuration:
  *  - `onDestroy`: A callback invoked when a mapped item is removed from the array.
  *  - `key`: A custom key extractor for identity matching (e.g. `(item) => item.id`)
@@ -105,7 +107,7 @@ function effectiveKeys<T, K>(
  */
 export function keyArray<T, U, K>(
   source: Signal<T[]> | (() => T[]),
-  mapFn: (v: T, i: Signal<number>) => U,
+  mapFn: (v: T, i: Signal<number>, key: K | string) => U,
   options: {
     onDestroy?: (value: U) => void;
     /**
@@ -176,7 +178,7 @@ export function keyArray<T, U, K>(
           items[j] = item;
           const indexSignal = signal(j);
           newIndexes[j] = indexSignal;
-          newMapped[j] = mapFn(item, indexSignal);
+          newMapped[j] = mapFn(item, indexSignal, newKeys ? newKeys[j] : getKey(item));
         }
       } else {
         newIndices.clear();
@@ -239,7 +241,7 @@ export function keyArray<T, U, K>(
           } else {
             const indexSignal = signal(j);
             newIndexes[j] = indexSignal;
-            newMapped[j] = mapFn(newItems[j], indexSignal);
+            newMapped[j] = mapFn(newItems[j], indexSignal, kNew(j));
           }
         }
 

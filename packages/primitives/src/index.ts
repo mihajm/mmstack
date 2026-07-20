@@ -19,6 +19,7 @@ export {
 } from './lib/tab-sync';
 export * from './lib/throttled';
 export * from './lib/to-writable';
+export * from './lib/traced';
 export * from './lib/until';
 export type { Vivify, WithVivify } from './lib/util';
 export * from './lib/with-history';

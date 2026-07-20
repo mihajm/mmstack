@@ -107,7 +107,11 @@ function getCachedChild(
   const proxy = build();
   const ref = new WeakRef(proxy);
   storeCache.set(prop, ref);
-  cleanupRegistry.register(proxy, { targetRef: new WeakRef(target), prop }, ref);
+  cleanupRegistry.register(
+    proxy,
+    { targetRef: new WeakRef(target), prop },
+    ref,
+  );
   return proxy;
 }
 
@@ -252,8 +256,11 @@ export function toStore<T extends AnyRecord>(
           return idx >= 0 && idx < v.length;
         }
       }
-      // nullish node values are routinely descended with vivify on — `in` must not throw
-      return v == null ? false : Reflect.has(v, prop);
+      // nullish/primitive node values are routinely descended with vivify on or probed
+      // with `in` (e.g. isMutable) — `in` must not throw
+      return v == null || (typeof v !== 'object' && typeof v !== 'function')
+        ? false
+        : Reflect.has(v, prop);
     },
     ownKeys() {
       const v = untracked(source) as any;

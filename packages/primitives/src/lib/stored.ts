@@ -315,3 +315,9 @@ export function stored<T>(
   writable.key = keySig;
   return writable;
 }
+
+export function isStored<T = unknown>(
+  value: WritableSignal<T>,
+): value is StoredSignal<T> {
+  return 'clear' in value && typeof value.clear === 'function' && 'key' in value;
+}

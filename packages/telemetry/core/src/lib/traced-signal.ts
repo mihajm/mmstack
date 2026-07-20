@@ -1,4 +1,5 @@
 import { inject, signal, type WritableSignal } from '@angular/core';
+import { traced, type Traced } from '@mmstack/primitives';
 import { type SpanHandle } from './sink';
 import { TELEMETRY } from './telemetry';
 
@@ -41,4 +42,12 @@ export function tracedSignal<T>(initial: T): CausalSignal<T> {
   inner.causedBy = () => cause;
 
   return inner;
+}
+
+export function tracedBy<S extends WritableSignal<unknown>>(
+  sig: S,
+  opt?: { pure?: boolean },
+): Traced<S, SpanHandle> {
+  const telemetry = inject(TELEMETRY);
+  return traced(sig, () => telemetry.activeSpan(), opt);
 }

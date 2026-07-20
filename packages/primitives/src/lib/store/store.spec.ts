@@ -7,6 +7,7 @@ import {
   STORE_SHARED_GLOBALS,
   STORE_SHARED_OPTIONS,
 } from './internals';
+import { isMutable } from '../mutable';
 import { isLeaf } from './leaf';
 import { isOpaque, OPAQUE, opaque } from './opaque';
 import { mutableStore, store } from './store';
@@ -70,6 +71,27 @@ describe('store', () => {
     const s = store(src, { injector });
     expect('a' in s).toBe(true);
     expect('c' in s).toBe(false);
+  });
+
+  it('should return false from `in` over a primitive-valued leaf without throwing', () => {
+    const src = { num: 5, str: 'x', bool: true };
+    const s = store(src, { injector });
+    expect('anything' in s.num).toBe(false);
+    expect('anything' in s.str).toBe(false);
+    expect('anything' in s.bool).toBe(false);
+  });
+
+  it('should answer isMutable over a primitive-valued leaf without throwing', () => {
+    const src = { num: 5 };
+    const s = store(src, { injector });
+    expect(isMutable(s.num as any)).toBe(false);
+  });
+
+  it('should keep `in` forwarding over an object-valued node', () => {
+    const src = { obj: { a: 1 } };
+    const s = store(src, { injector });
+    expect('a' in s.obj).toBe(true);
+    expect('missing' in s.obj).toBe(false);
   });
 
   it('should suport getOwnPropertyDescriptor', () => {

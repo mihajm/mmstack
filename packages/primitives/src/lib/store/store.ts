@@ -318,6 +318,12 @@ export function toStore<T extends AnyRecord>(
           );
         };
 
+      if (
+        (typeof prop === 'symbol' && prop !== Symbol.iterator) ||
+        (typeof prop === 'string' && SIGNAL_FN_PROP.has(prop))
+      )
+        return target[prop];
+
       const k = untracked(kind);
 
       if (prop === 'extend' && k !== 'array')
@@ -341,9 +347,6 @@ export function toStore<T extends AnyRecord>(
             for (let i = 0; i < len(); i++) yield receiver[i];
           };
       }
-
-      if (typeof prop === 'symbol' || SIGNAL_FN_PROP.has(prop))
-        return target[prop];
 
       if (k === 'array' && !isIndexProp(prop))
         return Reflect.get(target, prop, receiver);

@@ -138,27 +138,29 @@ function buildChildNode(
   isMutableSource: boolean,
   options: Required<toStoreOptions>,
 ): Signal<any> {
-  const value = untracked(target);
-
-  const nodeVivify = resolveVivify(value, options.vivify);
-  const vivifyFn = createVivify(nodeVivify);
-
-  const equalFn =
-    isMutableSource && (isRecord(value) || Array.isArray(value))
-      ? mutableChildEqual
-      : undefined;
+  let vivifyFn = options.vivify === false ? createVivify(false) : undefined;
+  const resolveVivifyFn = (sample: unknown) =>
+    (vivifyFn ??= createVivify(resolveVivify(sample, options.vivify)));
+  const lazyVivify = (value: any, key: PropertyKey) =>
+    resolveVivifyFn(value)(value, key);
 
   const computation = derived(target, {
-    from: (v: any) => v?.[prop],
-    onChange: createFallbackOnChange(target, prop, vivifyFn, isMutableSource),
-    equal: equalFn,
+    from: (v: any) => {
+      resolveVivifyFn(v);
+      return v?.[prop];
+    },
+    onChange: createFallbackOnChange(target, prop, lazyVivify, isMutableSource),
+    equal: isMutableSource ? mutableChildEqual : undefined,
   });
 
-  const childSample = untracked(computation);
-  const childVivify = resolveVivify(childSample, options.vivify);
   const proxy = toStore(computation, options);
 
-  markAsLeaf(proxy, computation, childVivify !== false, options.noUnionLeaves);
+  markAsLeaf(
+    proxy,
+    computation,
+    options.vivify !== false,
+    options.noUnionLeaves,
+  );
   return proxy;
 }
 
@@ -323,7 +325,23 @@ export function toStore<T extends AnyRecord>(
       )
         return target[prop];
 
-      const k = untracked(kind);
+      const child = (key: Key) =>
+        getCachedChild(
+          target,
+          prop,
+          () => buildChildNode(target, key, isMutableSource, STORE_OPTIONS),
+          STORE_OPTIONS[STORE_SHARED_GLOBALS].cache,
+          STORE_OPTIONS[STORE_SHARED_GLOBALS].registry,
+        );
+
+      let k: 'array' | 'record' | 'primitive';
+      try {
+        k = untracked(kind);
+      } catch (cause) {
+        if (typeof prop === 'string' && prop !== 'extend')
+          return child(isIndexProp(prop) ? +prop : prop);
+        throw cause;
+      }
 
       if (prop === 'extend' && k !== 'array')
         return (seed: AnyRecord | Signal<AnyRecord>) =>
@@ -350,19 +368,7 @@ export function toStore<T extends AnyRecord>(
       if (k === 'array' && !isIndexProp(prop))
         return Reflect.get(target, prop, receiver);
 
-      return getCachedChild(
-        target,
-        prop,
-        () =>
-          buildChildNode(
-            target,
-            k === 'array' ? +(prop as string) : (prop as Key),
-            isMutableSource,
-            STORE_OPTIONS,
-          ),
-        STORE_OPTIONS[STORE_SHARED_GLOBALS].cache,
-        STORE_OPTIONS[STORE_SHARED_GLOBALS].registry,
-      );
+      return child(k === 'array' ? +(prop as string) : (prop as Key));
     },
   });
 

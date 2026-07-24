@@ -1,4 +1,4 @@
-import { computed, type Signal, untracked } from '@angular/core';
+import { computed, type Signal } from '@angular/core';
 import { isStore } from './internals';
 import { isLeafValue } from './predicates';
 
@@ -35,13 +35,19 @@ export function markAsLeaf<TSig>(
 ): TSig & { readonly [LEAF]: () => boolean } {
   if (typeof (sig as any)[LEAF] !== 'function') {
     let memo: (() => boolean) | undefined;
+    let initialClassification: Signal<boolean> | undefined;
     const probe = () => {
       if (memo) return memo();
-      memo = noUnionLeaves
-        ? isLeafValue(untracked(value), vivifyEnabled)
-          ? alwaysTrue
-          : alwaysFalse
-        : computed(() => isLeafValue(value(), vivifyEnabled));
+      if (noUnionLeaves) {
+        initialClassification ??= computed(() =>
+          isLeafValue(value(), vivifyEnabled),
+        );
+        const result = initialClassification();
+        memo = result ? alwaysTrue : alwaysFalse;
+        initialClassification = undefined;
+      } else {
+        memo = computed(() => isLeafValue(value(), vivifyEnabled));
+      }
       return memo();
     };
     Object.defineProperty(sig, LEAF, {

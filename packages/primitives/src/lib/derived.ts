@@ -71,13 +71,12 @@ function createImmutableObjectUpdater<T extends object, TKey extends keyof T>(
     });
 }
 
-function createUpdater<T, U>(
+function createUpdaterFromSample<T, U>(
   source: WritableSignal<T> | MutableSignal<T>,
   key: PropertyKey,
   vivify: Vivify<T>,
+  sample: T,
 ): (next: U) => void {
-  const sample = untracked(source);
-
   // fast path for when vivification is off
   if (!vivify) {
     if (Array.isArray(sample) && typeof key === 'number') {
@@ -147,6 +146,29 @@ function createUpdater<T, U>(
   return isMutable(source)
     ? createMutableObjectUpdater(source, key, vivifyFn)
     : createImmutableObjectUpdater(source, key, vivifyFn);
+}
+
+/**
+ * Selects the property updater once, on the first actual write. Construction must not sample the
+ * source: a writable derivation may currently throw, and reads still need a child producer that can
+ * subscribe and recover. The routing sample remains deliberately untracked, so deferring it adds no
+ * dependency to the caller.
+ */
+function createUpdater<T, U>(
+  source: WritableSignal<T> | MutableSignal<T>,
+  key: PropertyKey,
+  vivify: Vivify<T>,
+): (next: U) => void {
+  let update: ((next: U) => void) | undefined;
+  return (next) => {
+    update ??= createUpdaterFromSample(
+      source,
+      key,
+      vivify,
+      untracked(source),
+    );
+    update(next);
+  };
 }
 
 /**

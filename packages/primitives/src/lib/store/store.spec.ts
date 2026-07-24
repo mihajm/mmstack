@@ -1,4 +1,4 @@
-import { computed, effect, Injector, isSignal } from '@angular/core';
+import { computed, effect, Injector, isSignal, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   isStore,
@@ -10,7 +10,7 @@ import {
 import { isMutable } from '../mutable';
 import { isLeaf } from './leaf';
 import { isOpaque, OPAQUE, opaque } from './opaque';
-import { mutableStore, store } from './store';
+import { extendStore, mutableStore, store } from './store';
 
 describe('store', () => {
   let injector: Injector;
@@ -57,6 +57,40 @@ describe('store', () => {
     const s = store(src, { injector });
     expect(s.a).toBeDefined();
     expect(isSignal(s.a)).toBe(true);
+  });
+
+  it('signal reflection does not evaluate a throwing leaf or prevent a consumer from recovering', () => {
+    const first = new Error('first');
+    const second = new Error('second');
+    const current = signal<{ readonly value: string }>({ value: 'initial' });
+    const parent = store({}, { injector });
+    const scoped = extendStore(parent, current);
+    const leaf = scoped.value;
+    const observed = computed(() => {
+      expect(isSignal(leaf)).toBe(true);
+      // Signal methods are reflective properties too: inspecting one must not evaluate the leaf.
+      expect(typeof leaf.asReadonly).toBe('function');
+      return leaf();
+    });
+
+    expect(observed()).toBe('initial');
+
+    current.set({
+      get value(): string {
+        throw first;
+      },
+    });
+    expect(() => observed()).toThrow(first);
+
+    current.set({
+      get value(): string {
+        throw second;
+      },
+    });
+    expect(() => observed()).toThrow(second);
+
+    current.set({ value: 'recovered' });
+    expect(observed()).toBe('recovered');
   });
 
   it('should support key iteration', () => {

@@ -28,6 +28,30 @@ describe('derived', () => {
     expect(user()).toEqual({ name: 'Jane', age: 30 });
   });
 
+  it('property derivation constructs over a first-error source and recovers reactively', () => {
+    const first = new Error('first');
+    const current = signal<{ readonly value: string }>({
+      get value(): string {
+        throw first;
+      },
+    });
+    const parent = derived(current, {
+      from: (value) => value,
+      onChange: (value) => current.set(value),
+    });
+
+    // Updater routing is private write-side setup; it must not evaluate `parent` during creation.
+    const value = derived(parent, 'value');
+    const observed = computed(() => value());
+    expect(() => observed()).toThrow(first);
+
+    current.set({ value: 'recovered' });
+    expect(observed()).toBe('recovered');
+
+    value.set('written');
+    expect(current()).toEqual({ value: 'written' });
+  });
+
   it('should derive from mutable signal', () => {
     const user = mutable({ name: 'John', age: 30 });
     const nameSig = derived(user, 'name');

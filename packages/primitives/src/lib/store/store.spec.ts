@@ -93,6 +93,72 @@ describe('store', () => {
     expect(observed()).toBe('recovered');
   });
 
+  it('a leaf that throws on its first evaluation subscribes and recovers in the same consumer', () => {
+    const first = new Error('first');
+    const second = new Error('second');
+    const current = signal<{ readonly value: string }>({
+      get value(): string {
+        throw first;
+      },
+    });
+    const parent = store({}, { injector });
+    const scoped = extendStore(parent, current);
+    const leaf = scoped.value;
+    const observed = computed(() => leaf());
+
+    expect(() => observed()).toThrow(first);
+
+    current.set({
+      get value(): string {
+        throw second;
+      },
+    });
+    expect(() => observed()).toThrow(second);
+
+    current.set({ value: 'recovered' });
+    expect(observed()).toBe('recovered');
+  });
+
+  it('a deep path recovers when its intermediate node throws on the first evaluation', () => {
+    const first = new Error('first');
+    const current = signal<{ readonly branch: { readonly value: string } }>({
+      get branch(): { readonly value: string } {
+        throw first;
+      },
+    });
+    const scoped = extendStore(store({}, { injector }), current);
+    const observed = computed(() => scoped.branch.value());
+
+    expect(() => observed()).toThrow(first);
+
+    current.set({ branch: { value: 'recovered' } });
+    expect(observed()).toBe('recovered');
+  });
+
+  it('noUnionLeaves waits for a successful first leaf classification and recovers from a throw', () => {
+    const first = new Error('first');
+    const current = signal<{ readonly value: string }>({
+      get value(): string {
+        throw first;
+      },
+    });
+    const scoped = extendStore(
+      store({}, { injector, noUnionLeaves: true }),
+      current,
+    );
+    const leaf = scoped.value;
+    const observed = computed(() => isLeaf(leaf));
+
+    expect(() => observed()).toThrow(first);
+
+    current.set({ value: 'recovered' });
+    expect(observed()).toBe(true);
+
+    // The promised stable-shape fast path is constant after its first successful classification.
+    current.set({ value: 'still-a-leaf' });
+    expect(observed()).toBe(true);
+  });
+
   it('should support key iteration', () => {
     const src = { a: 1, b: 2 };
     const s = store(src, { injector });

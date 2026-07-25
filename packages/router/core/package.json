@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/router-core",
-  "version": "22.5.0",
+  "version": "22.6.0",
   "keywords": [
     "angular",
     "signals",
@@ -25,7 +25,7 @@
     "@angular/common": ">=22 <23",
     "@angular/router": ">=22 <23",
     "@angular/platform-browser": ">=22 <23",
-    "@mmstack/primitives": ">=22.6 <23",
+    "@mmstack/primitives": ">=22.9 <23",
     "rxjs": "~7.8.2"
   },
   "sideEffects": false

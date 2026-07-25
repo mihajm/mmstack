@@ -27,11 +27,17 @@ type NavState<T> = {
 /** The stabilized result: the read surface of a `Resource`, plus `reload()` delegated to the source. */
 export type HeldResource<T> = Resource<T> & { reload(): boolean };
 
-// Sole `Resource.snapshot` touchpoint (Angular 22+); backport v19-21 by synthesizing from value/status/error.
+// Synthesized rather than read off `resource.snapshot` so this file carries no dependency on the
+// Angular 22 `Resource.snapshot` member; the shape mirrors Angular's own snapshot computed.
 function liveSnapshot<T>(
   resource: ResourceRef<T>,
 ): Signal<ResourceSnapshot<T>> {
-  return resource.snapshot;
+  return computed(() => {
+    const status = resource.status();
+    if (status === 'error')
+      return { status, error: resource.error() as Error } as const;
+    return { status, value: resource.value() } as ResourceSnapshot<T>;
+  });
 }
 
 const isLoadingStatus = (s: ResourceStatus): boolean =>

@@ -22,9 +22,11 @@ import { injectTitleConfig } from './title-config';
 })
 export class TitleStore {
   private readonly map = mutable<Map<string, Signal<string>>>(new Map());
-  // Stage registrations so a cancelled navigation can't flip the title early.
+  // Stage registrations so a cancelled navigation can't flip the title early, and so a held
+  // transition doesn't retitle the page while the previous view is still the one on screen.
   private readonly stagedApply = createStagedApply<Signal<string>>(
     (id, titleFn) => this.map.inline((m) => m.set(id, titleFn)),
+    'visual-commit',
   );
 
   constructor() {

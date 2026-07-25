@@ -123,6 +123,23 @@ export class PreloadStrategy implements PreloadingStrategy {
     return EMPTY;
   }
 
+  /**
+   * Forgets what has been warmed under `pathPrefix` — the path itself and everything below it —
+   * so those routes can be preloaded again.
+   *
+   * A path is normally warmed at most once, because a loaded route stays loaded. Dropping a
+   * route's cached load (see `injectRemountHandle`) breaks that assumption: the route is
+   * factory-fresh again and has to be re-warmable, or it can only ever be loaded by an actual
+   * navigation.
+   */
+  forget(pathPrefix: string): void {
+    const under = (fp: string) =>
+      fp === pathPrefix || fp.startsWith(`${pathPrefix}/`);
+    for (const fp of [...this.loaders.keys()])
+      if (under(fp)) this.loaders.delete(fp);
+    for (const fp of [...this.loading]) if (under(fp)) this.loading.delete(fp);
+  }
+
   private trigger(path: string): void {
     if (this.loaders.size === 0 || hasSlowConnection()) return;
 

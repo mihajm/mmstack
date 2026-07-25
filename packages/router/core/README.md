@@ -18,8 +18,10 @@ npm install @mmstack/router-core
 - **Resolver-driven UI** — declare your document title, breadcrumbs, and one or more nav menus from your `Routes` config; consume them reactively from any component.
 - **Smart preloading** — a `RouterLink` replacement and `PreloadingStrategy` that preload lazy-loaded route modules on hover, visibility, or imperatively.
 - **Transition navigation** — a drop-in `RouterOutlet` that keeps the current route on screen until the incoming route's data settles, then swaps in one frame.
+- **Visual commit** — one signal for "the new route is on screen", plus scroll restoration and screen-reader announcements that fire on it instead of on `NavigationEnd`.
 - **Route-level data** — declare a route's data once; it fires at the resolve phase (before the component, in parallel across the matched chain), stays reactive to param/query changes, coordinates with the transition outlet, and can be warmed on `mmLink` hover.
 - **Navigation hold** — stabilize a persisted/reused resource across navigation so it never flashes to loading mid-transition, and rolls back cleanly on a cancelled navigation.
+- **Route config at runtime** — throw a lazy subtree away and load it again, or swap a route's whole definition transactionally, with a rollback when the navigation onto it aborts.
 
 ## Table of contents
 
@@ -37,11 +39,18 @@ npm install @mmstack/router-core
   - [`injectTriggerPreload`](#injecttriggerpreload)
 - [Transition outlet](#transition-outlet)
   - [`TransitionRouterOutlet` (`mm-transition-outlet`)](#transitionrouteroutlet-mm-transition-outlet)
+- [Visual commit](#visual-commit)
+  - [`injectVisualCommit`](#injectvisualcommit)
+  - [Scroll restoration — `provideTransitionScrollRestoration`](#scroll-restoration)
+  - [Route announcements — `provideRouteA11y`](#route-announcements)
 - [Route-level data](#route-level-data)
   - [`provideRouteData` / `createRouteData` / `injectRouteData`](#defining-route-data)
   - [Prefetch on hover — `withRouteData`](#prefetch-on-hover)
 - [Navigation hold](#navigation-hold)
   - [`holdThroughNavigation`](#holdthroughnavigation)
+- [Route config at runtime](#route-config-at-runtime)
+  - [Remounting a lazy subtree — `remountable` / `injectRemountHandle`](#remounting-a-lazy-subtree)
+  - [Swapping a mount — `mountSwitchRoute` / `injectMountController`](#swapping-a-mount)
 
 ---
 
@@ -182,7 +191,9 @@ export const appRoutes: Routes = [
 ];
 ```
 
-Title (and breadcrumb/nav) registrations made during a navigation are **staged** — they apply when the navigation commits (`NavigationEnd`) and are dropped if it's cancelled or errors, so a guard-rejected navigation can never flip the document title.
+Title registrations made during a navigation are **staged** — they're buffered and applied when the swap reaches the screen (the [visual commit](#visual-commit)), and dropped if the navigation is cancelled or errors. So a guard-rejected navigation can never flip the document title, and a held transition doesn't retitle the page while the previous view is still the one on screen. Without a transition outlet the commit is one render after `NavigationEnd`, and on the server it _is_ `NavigationEnd`, so nothing changes for SSR.
+
+Breadcrumb registrations stage the same way but flush at `NavigationEnd`, since breadcrumbs render outside the outlet and lead the swap.
 
 #### Configuration (optional)
 
@@ -636,6 +647,33 @@ Behaviour:
 - **Per-view isolation** — the swap waits on the _incoming_ view's resources only, so long-running background work (e.g. a `keepPrevious` poll) on the outgoing view can't delay it. Routes that opt into [route-level data](#route-level-data) get their own scope automatically (full isolation); others share the outlet's scope, with the swap attributed to the incoming view.
 - **`data: { immediateTransition: true }`** on a route opts it out of the hold — it swaps in immediately, even while loading (handy for routes that should show their own skeleton).
 
+#### What a staged view may do
+
+While it is staged, the incoming view is constructed, rendered and running — it is only hidden (`display: none` plus `inert`). Anything it does inside its own subtree is invisible until the swap, which is the whole point. Anything it does to the page _outside_ that subtree is not, and lands while the user is still looking at the previous route:
+
+- overlays, dialogs, portals, toasts — anything appended to the body
+- body or `:root` classes, CSS variables, scroll position
+- writing `document.title` directly
+
+Titles are the one case handled for you: register them with [`createTitle`](#title) and they're buffered until the swap. For the rest, defer the work until the view is visible — read [`injectVisualCommit`](#visual-commit), or move it into the swapped-in view's own subtree.
+
+#### `swapCommit`
+
+An output that fires once per swap this outlet performs, saying how it ended.
+
+```html
+<mm-transition-outlet (swapCommit)="onSwap($event)" />
+```
+
+| `outcome`          | Meaning                                                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `committed`        | a held view was swapped out and the incoming view is on screen                                                                     |
+| `immediate`        | the outlet activated without holding (nothing to hold, `immediateTransition`, or a `RouteReuseStrategy` re-attach) and has rendered |
+| `superseded`       | an armed hold was dropped or re-targeted before it could commit; the outlet re-arms under the interrupting navigation               |
+| `outlet-destroyed` | the outlet was destroyed while still holding a view                                                                                |
+
+`committed` and `immediate` fire after the view is actually on screen, which under a hold is well after `NavigationEnd`. For the navigation-wide answer across several (or nested) outlets, read [`injectVisualCommit`](#visual-commit) instead.
+
 #### View Transitions
 
 The swap can be wrapped in the browser's [View Transitions API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) — the old view cross-fades (or whatever your `::view-transition-*` CSS says) into the new one. Feature-detected: browsers without `document.startViewTransition` fall back to the instant swap.
@@ -665,6 +703,85 @@ Why the wrapper is needed: Angular fires its transition at route **activation**,
 - **Held routes** — Angular's inert transition is skipped, and the outlet fires the real one at the swap. The same `::view-transition-*` CSS applies to both.
 
 Your own `onViewTransitionCreated` / `skipInitialTransition` options are preserved (pass them to `mmRouterViewTransitions({ ... })`). To opt a specific outlet out even when router view transitions are enabled app-wide, set `[viewTransition]="false"`.
+
+---
+
+## Visual commit
+
+`NavigationEnd` means the router is finished, not that anything changed on screen. Under a [held transition](#transition-outlet) the incoming view is still hidden at that point, and with several or nested outlets there's no single moment `NavigationEnd` could stand in for. The visual commit is that moment: every outlet that armed for the navigation has finished its swap, so the screen finally shows the new route. Anything that has to line up with what the user sees — scroll restoration, focus moves, announcements, analytics — belongs there rather than on `NavigationEnd`.
+
+### `injectVisualCommit`
+
+A read-only Signal of `{ status, navigationId }`. `navigationId` is the router's own `NavigationStart.id`, so it correlates with router events.
+
+```typescript
+import { Component, effect, inject } from '@angular/core';
+import { injectVisualCommit } from '@mmstack/router-core';
+
+@Component({ selector: 'app-shell' /* ... */ })
+export class AppShell {
+  private readonly analytics = inject(Analytics);
+  private readonly commit = injectVisualCommit();
+
+  constructor() {
+    effect(() => {
+      if (this.commit().status === 'committed') this.analytics.pageView();
+    });
+  }
+}
+```
+
+- **`pending`** from `NavigationStart` until every outlet that armed for the navigation has committed or swapped in immediately. A navigation no outlet armed for commits one render after `NavigationEnd`.
+- **`committed`** once the swap is on screen.
+- **`idle`** after a cancelled or failed navigation that no successor follows and that left no swap outstanding.
+- **An interrupting navigation** re-enters `pending` under its own id; outlets whose hold it superseded re-arm under it.
+- **A navigation that dies with no successor** while an earlier navigation's hold is still on its way to the screen falls back to `pending` under that earlier navigation, and commits when it finally swaps. The status tracks outstanding visual work, not the router's bookkeeping — a hold that lands for real gets a commit even though the navigation that interrupted it never arrived.
+- **On the server** nothing paints and `afterNextRender` never runs, so `NavigationEnd` is the commit and outlet arms are ignored.
+
+Two providers ride this signal. Both are opt-in, both fire once per committed navigation, and neither fires for a navigation superseded before it reached the screen.
+
+### Scroll restoration
+
+`provideTransitionScrollRestoration()` restores scroll on the visual commit.
+
+Angular's own restoration scrolls when the router activates the route, which under a hold is while the _previous_ view is still on screen: the old page jumps, and the new one arrives already scrolled to the wrong place. This restores after the swap, when the content the position refers to actually exists.
+
+```typescript
+import { provideRouter } from '@angular/router';
+import { provideTransitionScrollRestoration } from '@mmstack/router-core';
+
+bootstrapApplication(App, {
+  providers: [provideRouter(routes), provideTransitionScrollRestoration()],
+});
+```
+
+- Back and forward restore the position that page was left at.
+- A forward navigation goes to the top, or to the element named by the URL fragment.
+- It switches the browser's own restoration to `manual`, since the browser would otherwise restore against the pre-swap DOM.
+
+> **Heads up:** this replaces `withInMemoryScrolling({ scrollPositionRestoration: 'enabled' })`. Enable one or the other, not both, or the two fight over the same scroll.
+
+### Route announcements
+
+`provideRouteA11y()` makes route changes perceivable to assistive technology. A client-side navigation replaces the page without any of the signals a document load gives a screen reader: focus stays wherever it was, and nothing is announced. On the commit it
+
+- moves focus to the root element of the view that swapped in — given a transient `tabindex="-1"` if it doesn't already have one (dropped again on the next `blur`), and focused with `preventScroll` so it can't fight scroll restoration, and
+- announces the new document title in a polite live region.
+
+The title is read after the hold-aware [title store](#title) has applied, so what's announced is what the page is actually called.
+
+```typescript
+import { provideRouteA11y } from '@mmstack/router-core';
+
+bootstrapApplication(App, {
+  providers: [provideRouter(routes), provideRouteA11y()],
+});
+
+// both halves default to on — announce only, the app moves focus itself:
+provideRouteA11y({ focus: false });
+```
+
+With nested outlets the focus target is the outermost view that swapped in. Two _sibling_ outlets swapping in one navigation have no containment relation, so the first to settle is the one focused.
 
 ---
 
@@ -818,3 +935,121 @@ Three tools, three layers — reach for the one that matches:
 | [`TransitionRouterOutlet`](#transition-outlet) | the outgoing **view** | cross-route navigation |
 | `holdThroughNavigation` | a persisted **resource**'s state | navigation lifecycle (with rollback) |
 | [`<mm-suspense>` / transition scope](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) `commit` | a value while **registered resources** load | scope `pending` |
+
+---
+
+## Route config at runtime
+
+Two primitives for apps whose route config isn't fully known at build time: a lazy feature whose routes are generated from data that changes, a preview of a page the user is editing, an A/B variant. Both are keyed by a **marker id** rather than by `Route` identity — `Router.resetConfig` shallow-copies every route it standardizes, so identity goes stale while the marker survives.
+
+### Remounting a lazy subtree
+
+`remountable(id)` marks a lazy route; `injectRemountHandle(id)` invalidates it — throw the loaded subtree away and run `loadChildren` again.
+
+```typescript
+import { Routes } from '@angular/router';
+import { remountable } from '@mmstack/router-core';
+
+export const appRoutes: Routes = [
+  {
+    path: 'reports',
+    loadChildren: () => import('./reports/routes').then((m) => m.reportRoutes),
+    data: { ...remountable('reports') },
+  },
+];
+```
+
+```typescript
+import { Component } from '@angular/core';
+import { injectRemountHandle } from '@mmstack/router-core';
+
+@Component({
+  /* ... */
+})
+export class ReportDesigner {
+  private readonly reports = injectRemountHandle('reports');
+
+  async onDefinitionChanged() {
+    const { outcome } = await this.reports.invalidate();
+    if (outcome === 'remounted') this.toast('Reports reloaded');
+  }
+}
+```
+
+Behaviour:
+
+- **Invalidation orphans the route object** — the cached children, injector, module factory and component are dropped, and the `Route` they were cached on is replaced in the config. A load or preload already in flight lands on the discarded object, so it can never repopulate the live config.
+- **It re-enters the current URL** with `onSameUrlNavigation: 'reload'`, and `invalidate()` resolves once that navigation is done — `await invalidate()` means "the subtree is back". `navigation: 'none'` drops the cache without navigating; the next navigation into the subtree picks up the fresh load.
+- **The old subtree's injectors are destroyed** once the replacement has loaded _and_ its navigation is visually committed, the point at which the old view is gone by construction. Under `navigation: 'none'` that's the eventual next load of the marker — the still-mounted view keeps its injector until then, stale by design.
+- **Preload memory is cleared** for the invalidated path and everything under it, so the subtree can be hover-warmed again ([`PreloadStrategy`](#preloadstrategy) otherwise warms a path at most once).
+- **`generation`** is a counter signal that bumps on every invalidation that dropped something — key derived state off it, or use it to tell whether work started under an older config is still the current one.
+- **The outcome** says what happened: `remounted`, `no-op` (the route had nothing cached, so `generation` doesn't move and no navigation runs), or `rejected` (below).
+
+`invalidate()` takes an `inFlight` option for what to do when _any_ navigation is already in flight. It's deliberately conservative about relevance: a navigation mid-recognition can still turn out to touch the subtree.
+
+- **`'wait'`** (default) — run once the in-flight navigation settles. Invalidations that queue up meanwhile coalesce into a single run, which navigates if any of the queued callers asked it to.
+- **`'cancel-and-retry'`** — abort the in-flight navigation, then run.
+- **`'reject'`** — do nothing, and resolve `{ outcome: 'rejected' }`.
+
+The handle is shared per id, so every injection sees the same one. `invalidate()` throws if no route in the config carries the marker — that's a wiring bug, not a runtime outcome.
+
+### Swapping a mount
+
+`mountSwitchRoute(id, factory)` declares a route whose definition can be replaced at runtime; `injectMountController(id)` performs the swap. The factory produces the route: once for the initial mount, again for every switch.
+
+```typescript
+import { mountSwitchRoute, injectMountController } from '@mmstack/router-core';
+
+export const appRoutes: Routes = [
+  mountSwitchRoute('preview', () => ({
+    path: 'preview',
+    children: buildRoutesFromDefinition(currentDefinition()),
+  })),
+];
+```
+
+```typescript
+@Component({
+  /* ... */
+})
+export class PreviewToolbar {
+  private readonly preview = injectMountController('preview');
+
+  // later, when the definition changes:
+  async rebuild() {
+    const { outcome } = await this.preview.switch();
+    if (outcome === 'rolled-back') this.toast('Preview could not be rebuilt');
+  }
+}
+```
+
+Swapping is transactional: the new definition goes into the config, navigation re-enters (the current URL, or `switch({ target })`), and the transaction settles on the router's own events.
+
+- **`committed`** — the navigation onto the new mount reached `NavigationEnd`.
+- **`rolled-back`**, with `reason: 'cancelled' | 'error'` — the navigation hit a `NavigationError`, or a cancel that isn't a redirect (a guard rejecting the new definition, say). The previous definition goes back into the config with its lazy cache intact, so the loader doesn't re-run, and whatever the abandoned navigation staged, its title registration included, is dropped with it.
+- **`superseded`** — a newer switch took over the config first. The queue is one deep and the newest wins; the newer transaction inherits the older one's rollback point, so a rollback lands on the mount that was last live rather than on one that only ever existed mid-transaction.
+
+`switch()` is for anywhere outside the router's own recognition pass — an effect, a click handler. Inside recognition, use `beginSwitch()`: it swaps synchronously and returns the `UrlTree` the navigation should re-enter with, which is exactly what a `canMatch` guard returns to redirect. The router's redirect hop then lands on the new mount, and the transaction rides it rather than reading it as an abort.
+
+```typescript
+mountSwitchRoute('preview', () => ({
+  path: 'preview',
+  canMatch: [
+    () => {
+      const controller = injectMountController('preview');
+      // the redirect hop runs this guard again — the second pass must not swap again
+      if (!definitionChanged()) return true;
+
+      void controller.outcome().then((result) => {
+        if (result.outcome === 'rolled-back') selected.set(lastCommitted());
+      });
+      return controller.beginSwitch();
+    },
+  ],
+  children: buildRoutesFromDefinition(currentDefinition()),
+}));
+```
+
+`outcome()` resolves with the result of the switch currently in flight or, when there is none, of the next one to begin. Same taxonomy either way, so a `beginSwitch()` caller can react to a rollback without subscribing to router events itself; `switch()` returns the same promise for the transaction it starts, so the two views of one transaction can't disagree.
+
+The controller is shared per id, which is what makes the queue-of-one global to the mount rather than per caller.

@@ -11,6 +11,8 @@ import {
   inject,
   Injector,
   input,
+  output,
+  type OutputEmitterRef,
   untracked,
   ViewContainerRef,
 } from '@angular/core';
@@ -23,6 +25,21 @@ import {
   type ResourceLike,
 } from '@mmstack/primitives';
 import { RouterViewTransitions } from './view-transition';
+import { VisualCommitCoordinator } from './visual-commit';
+
+/**
+ * How one outlet's swap ended.
+ *
+ * - `committed` — a held view was swapped out and the incoming view became visible.
+ * - `immediate` — the outlet activated without holding (nothing to hold, `immediateTransition`,
+ *   or a `RouteReuseStrategy` re-attach) and the view has rendered.
+ * - `superseded` — an armed hold was re-targeted or dropped before it could commit; the outlet
+ *   re-arms under the navigation that interrupted it.
+ * - `outlet-destroyed` — the outlet was destroyed while still holding a view.
+ */
+export type SwapCommitEvent = {
+  outcome: 'committed' | 'immediate' | 'superseded' | 'outlet-destroyed';
+};
 
 /**
  * A `RouterOutlet` that turns navigation into a transition: the current route's view
@@ -44,6 +61,22 @@ import { RouterViewTransitions } from './view-transition';
  * route's own scope when the route opts in (via `provideRouteData`/`provideTransitionScope()`),
  * giving per-view isolation. Routes that don't opt in share the outlet's own scope, where the
  * swap ignores the snapshotted outgoing refs.
+ *
+ * ## What a staged view may do
+ *
+ * While it is staged, the incoming view is constructed, rendered and running — it is simply
+ * hidden (`display: none` plus `inert`). Anything it does to its own subtree is invisible until
+ * the swap, which is the point. Anything it does to the page *outside* its subtree is not, and
+ * lands while the user is still looking at the previous route:
+ *
+ * - opening overlays, dialogs, portals, toasts or anything else appended to the body
+ * - setting body/`:root` classes, CSS variables or scroll position
+ * - writing `document.title` directly
+ *
+ * Titles are the one case handled for you: register them through the title store
+ * ({@link createTitle}), which buffers registrations and applies them on the visual commit.
+ * For the rest, defer the effect until the view is actually visible — read
+ * {@link injectVisualCommit}, or move the work into the swapped-in view's own subtree.
  */
 @Directive({
   // eslint-disable-next-line @angular-eslint/directive-selector
@@ -62,6 +95,17 @@ export class TransitionRouterOutlet extends RouterOutlet {
   );
 
   private readonly routerViewTransitions = inject(RouterViewTransitions);
+  private readonly visualCommit = inject(VisualCommitCoordinator);
+
+  /**
+   * Fires once per swap this outlet performs, saying how it ended. `committed` and `immediate`
+   * fire after the view is actually on screen, which under a hold is well after `NavigationEnd`.
+   *
+   * For the navigation-wide answer across several (or nested) outlets, read
+   * {@link injectVisualCommit} instead.
+   */
+  readonly swapCommit: OutputEmitterRef<SwapCommitEvent> =
+    output<SwapCommitEvent>();
 
   /**
    * Wrap the swap in the View Transitions API (`document.startViewTransition`) for an
@@ -128,6 +172,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     if (!hadHeld || route.snapshot.data?.['immediateTransition'] === true) {
       this.dropHeld();
       this.resetArm();
+      this.armImmediate();
       return;
     }
 
@@ -173,16 +218,22 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.dropHeld();
     this.resetArm();
     super.attach(ref, route);
+    this.armImmediate();
   }
 
   override ngOnDestroy(): void {
     this.swapEpoch++;
+    const wasHolding = !!this.held;
+    this.armed = false;
     this.dropHeld();
+    this.visualCommit.release(this);
+    if (wasHolding) this.swapCommit.emit({ outcome: 'outlet-destroyed' });
     super.ngOnDestroy();
   }
 
   private arm(): void {
     this.armed = true;
+    this.visualCommit.arm(this);
     this.sawPending = untracked(this.incomingPending);
     // Fallback for an incoming route that loads nothing.
     afterNextRender(
@@ -200,10 +251,26 @@ export class TransitionRouterOutlet extends RouterOutlet {
   }
 
   private resetArm(): void {
+    if (this.armed) this.report('superseded');
     this.armed = false;
     this.sawPending = false;
     this.swapEpoch++;
     this.outgoingRefs.clear();
+  }
+
+  /** An activation that never holds still owes the navigation one render before it is visible. */
+  private armImmediate(): void {
+    this.visualCommit.arm(this);
+    afterNextRender(() => this.report('immediate'), {
+      injector: this.outletInjector,
+    });
+  }
+
+  private report(outcome: SwapCommitEvent['outcome']): void {
+    if (outcome === 'committed' || outcome === 'immediate')
+      this.visualCommit.settle(this, this.incomingRootNodes()[0] ?? null);
+    else this.visualCommit.release(this);
+    this.swapCommit.emit({ outcome });
   }
 
   /** Bumped on re-target/reset so a deferred `startViewTransition` from a superseded swap can't fire. */
@@ -228,13 +295,15 @@ export class TransitionRouterOutlet extends RouterOutlet {
   }
 
   private finishSwap(epoch: number): void {
-    if (epoch !== this.swapEpoch) return; // superseded while deferred
+    if (epoch !== this.swapEpoch) return; // superseded while deferred, and already reported
     this.dropHeld();
     if (this.hiddenIncoming) {
       this.setHidden(this.hiddenIncoming, false);
       this.hiddenIncoming = null;
     }
+    this.armed = false; // this arm committed — the reset below must not read it as superseded
     this.resetArm();
+    this.report('committed');
   }
 
   /** Commit immediately if the held view's env injector is destroyed under it. */
@@ -275,9 +344,16 @@ export class TransitionRouterOutlet extends RouterOutlet {
     );
   }
 
+  /**
+   * `display: none` already removes the staged view from layout and the a11y tree; `inert` is the
+   * belt to that pair of braces, covering anything that reaches the subtree by other means
+   * (programmatic focus, `find-in-page`, a descendant that overrides the display).
+   */
   private setHidden(nodes: HTMLElement[], hidden: boolean): void {
     for (const el of nodes) {
       el.style.display = hidden ? 'none' : '';
+      if (hidden) el.setAttribute('inert', '');
+      else el.removeAttribute('inert');
     }
   }
 }

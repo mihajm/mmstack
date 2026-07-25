@@ -5,7 +5,7 @@ import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import { Component, signal } from '@angular/core';
+import { Component, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { registerResource } from '@mmstack/primitives';
@@ -105,7 +105,9 @@ describe('holdThroughNavigation — eager settledness (unread consumers)', () =>
     });
     const snapshot = signal(snap('resolved', { name: 'Alice' }));
     const fake = {
-      snapshot,
+      status: computed(() => (snapshot() as { status: string }).status),
+      value: computed(() => (snapshot() as { value: unknown }).value),
+      error: computed(() => (snapshot() as { error: unknown }).error),
       reload: () => true,
     } as unknown as Parameters<typeof holdThroughNavigation>[0];
 

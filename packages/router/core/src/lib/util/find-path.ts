@@ -3,6 +3,7 @@
 // Copyright (c) Minko Gechev and contributors, licensed under the MIT License.
 
 import { PRIMARY_OUTLET, type Route } from '@angular/router';
+import { loadedChildren } from '../remount/lazy-route-internals';
 
 function isPrimaryRoute(route: Route): boolean {
   return route.outlet === PRIMARY_OUTLET || !route.outlet;
@@ -32,15 +33,13 @@ export const findPath = (config: Route[], route: Route): string => {
       }
     });
 
-    const lazyRoutes = (el as any)._loadedRoutes || [];
-    if (Array.isArray(lazyRoutes)) {
-      lazyRoutes.forEach((lazyRoute: Route) => {
-        if (lazyRoute && !visited.has(lazyRoute)) {
-          parent.set(lazyRoute, el);
-          configQueue.push(lazyRoute);
-        }
-      });
-    }
+    const lazyRoutes = loadedChildren(el) ?? [];
+    lazyRoutes.forEach((lazyRoute: Route) => {
+      if (lazyRoute && !visited.has(lazyRoute)) {
+        parent.set(lazyRoute, el);
+        configQueue.push(lazyRoute);
+      }
+    });
   }
 
   let path = '';

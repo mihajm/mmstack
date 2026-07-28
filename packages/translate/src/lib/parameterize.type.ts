@@ -56,7 +56,7 @@ type mergeParams<TExtracted extends [string, any]> = {
   [K in TExtracted as K[0]]: K[1];
 };
 
-declare const PARAM_BRAND: unique symbol;
+export declare const PARAM_BRAND: unique symbol;
 
 /**
  * Branded string type produced by `withParams<P>(message)`. The brand carries

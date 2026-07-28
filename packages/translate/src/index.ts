@@ -19,5 +19,6 @@ export {
   injectSupportedLocales,
   provideIntlConfig,
 } from './lib/translation-store';
+export type { PARAM_BRAND, WithParams } from './lib/parameterize.type';
 export { Translator } from './lib/translator';
 export { withParams } from './lib/with-params';

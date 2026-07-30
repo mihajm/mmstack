@@ -45,6 +45,14 @@ Bugfixes are guaranteed for 1 major version back, though most new features/fixes
 
 Contributions are welcome and greatly appreciated! Please see our [Contributing Guidelines](CONTRIBUTING.md) to learn how you can get involved with the `@mmstack` project.
 
+## Contributors
+
+Thanks to everyone who has pitched in! :)
+
+<a href="https://github.com/mihajm/mmstack/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=mihajm/mmstack" alt="mmstack contributors" />
+</a>
+
 ## Code of Conduct
 
 We are committed to providing a friendly, safe, and welcoming environment for all. Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md).

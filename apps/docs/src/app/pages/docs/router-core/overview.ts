@@ -101,6 +101,37 @@ import { DocSection } from '../../../layout/doc-section';
             </tr>
             <tr>
               <td>
+                Run scroll, focus, or analytics work when the new route is
+                actually on screen
+              </td>
+              <td>
+                <a mmLink="/docs/router-core/visual-commit"
+                  ><code>injectVisualCommit</code></a
+                >
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Restore scroll and announce route changes after the swap
+              </td>
+              <td>
+                <a mmLink="/docs/router-core/visual-commit"
+                  ><code>provideTransitionScrollRestoration</code>,
+                  <code>provideRouteA11y</code></a
+                >
+              </td>
+            </tr>
+            <tr>
+              <td>Rebuild a lazy subtree or swap a route's definition at runtime</td>
+              <td>
+                <a mmLink="/docs/router-core/runtime-config"
+                  ><code>injectRemountHandle</code>,
+                  <code>mountSwitchRoute</code></a
+                >
+              </td>
+            </tr>
+            <tr>
+              <td>
                 Set the document title, breadcrumbs, or nav menus from routes
               </td>
               <td>

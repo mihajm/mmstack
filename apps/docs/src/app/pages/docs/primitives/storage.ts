@@ -187,7 +187,8 @@ const profile = persistedStore({ first: '', last: '' }, {
   migrate: async (data, from) => (await import('./migrations')).run(data, from),
 });`;
 
-  protected readonly persist = `import { store, persist, meshSync } from '@mmstack/primitives';
+  protected readonly persist = `import { store, persist } from '@mmstack/primitives';
+import { meshSync } from '@mmstack/mesh';
 
 // persist attaches to a store you already have; persistedStore is store() + persist()
 const doc = store({ title: '', body: '' });

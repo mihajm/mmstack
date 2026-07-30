@@ -59,6 +59,8 @@ export const appRoutes: Route[] = [
               { label: 'Preloading', link: 'router-core/preloading' },
               { label: 'Route data', link: 'router-core/route-data' },
               { label: 'Transition outlet', link: 'router-core/transition-outlet' },
+              { label: 'Visual commit', link: 'router-core/visual-commit' },
+              { label: 'Runtime route config', link: 'router-core/runtime-config' },
               { label: 'Titles, breadcrumbs & nav', link: 'router-core/route-ui' },
             ],
           },
@@ -335,6 +337,22 @@ export const appRoutes: Route[] = [
         loadComponent: () =>
           import('./pages/docs/router-core/transition-outlet').then(
             (m) => m.TransitionOutletDoc,
+          ),
+      },
+      {
+        path: 'router-core/visual-commit',
+        title: createTitle('Visual commit'),
+        loadComponent: () =>
+          import('./pages/docs/router-core/visual-commit').then(
+            (m) => m.VisualCommitDoc,
+          ),
+      },
+      {
+        path: 'router-core/runtime-config',
+        title: createTitle('Runtime route config'),
+        loadComponent: () =>
+          import('./pages/docs/router-core/runtime-config').then(
+            (m) => m.RuntimeConfigDoc,
           ),
       },
       {

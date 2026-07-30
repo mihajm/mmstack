@@ -92,6 +92,85 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
+      <docs-section title="What a staged view may do" id="staged-view">
+        <p>
+          While it is staged, the incoming view is constructed, rendered and
+          running; it is only hidden (<code>display: none</code> plus
+          <code>inert</code>). Anything it does inside its own subtree stays
+          invisible until the swap, which is the whole point. Anything it does
+          to the page <em>outside</em> that subtree does not, and lands while
+          the user is still looking at the previous route:
+        </p>
+        <ul>
+          <li>
+            overlays, dialogs, portals, toasts, anything appended to the body
+          </li>
+          <li>
+            body or <code>:root</code> classes, CSS variables, scroll position
+          </li>
+          <li>writing <code>document.title</code> directly</li>
+        </ul>
+        <p>
+          Titles are the one case handled for you: register them with
+          <a mmLink="/docs/router-core/route-ui"><code>createTitle</code></a>
+          and they are buffered until the swap. For the rest, defer the work
+          until the view is visible, either by keying it off the
+          <a mmLink="/docs/router-core/visual-commit">visual commit</a> or by
+          moving it into the swapped-in view's own subtree.
+        </p>
+      </docs-section>
+
+      <docs-section title="swapCommit" id="swap-commit">
+        <p>
+          The outlet reports how each swap ended through the
+          <code>swapCommit</code> output, one event per swap it performs.
+        </p>
+        <docs-code [code]="swapCommitOutput" lang="html" />
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Outcome</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>committed</code></td>
+              <td>
+                a held view was swapped out and the incoming view is on screen
+              </td>
+            </tr>
+            <tr>
+              <td><code>immediate</code></td>
+              <td>
+                the outlet activated without holding (nothing to hold,
+                <code>immediateTransition</code>, or a
+                <code>RouteReuseStrategy</code> re-attach) and has rendered
+              </td>
+            </tr>
+            <tr>
+              <td><code>superseded</code></td>
+              <td>
+                an armed hold was dropped or re-targeted before it could
+                commit; the outlet re-arms under the interrupting navigation
+              </td>
+            </tr>
+            <tr>
+              <td><code>outlet-destroyed</code></td>
+              <td>the outlet was destroyed while still holding a view</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>committed</code> and <code>immediate</code> fire after the view
+          is actually on screen, which under a hold is well after
+          <code>NavigationEnd</code>. This output is per outlet; for the
+          navigation-wide answer across several or nested outlets, read the
+          <a mmLink="/docs/router-core/visual-commit">visual commit</a>
+          instead.
+        </p>
+      </docs-section>
+
       <docs-section title="View transitions" id="view-transitions">
         <p>
           The swap can be wrapped in the browser's View Transitions API, so the
@@ -220,6 +299,8 @@ export class UserPage {
     register: 'indicator',
   });
 }`;
+
+  protected readonly swapCommitOutput = `<mm-transition-outlet (swapCommit)="onSwap($event)" />`;
 
   protected readonly viewTransitionAttr = `<mm-transition-outlet viewTransition />`;
 

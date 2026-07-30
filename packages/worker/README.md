@@ -4,7 +4,7 @@
 
 Split-graph state and compute for Angular. Keep the reactive graph on the main thread for rendering, and hand owned state plus heavy computation to a Web Worker that runs its own graph. The main thread reads live replicas and routes writes; the worker owns the data, derives from it, and answers tasks. State stays in sync automatically over minimal deltas, never full snapshots.
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/worker/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
 
 Built on the store op-log from [`@mmstack/primitives`](https://www.npmjs.com/package/@mmstack/primitives): every change crosses the thread boundary as a small batch of path-level ops, applied in one notification wave on the other side.
 

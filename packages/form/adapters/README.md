@@ -2,7 +2,7 @@
 
 Provides a collection of **headless, reusable state adapters** for common form field types. Built upon [@mmstack/form-core](https://www.npmjs.com/package/@mmstack/form-core) and integrating with [@mmstack/form-validation](https://www.npmjs.com/package/@mmstack/form-validation), this library allows you to define reactive form state logic independently from any specific UI component library.
 
-[![npm version](https://badge.fury.io/js/%40mmstack%2Fobject.svg)](https://badge.fury.io/js/%40mmstack%2Fobject)
+[![npm version](https://badge.fury.io/js/%40mmstack%2Fform-adapters.svg)](https://badge.fury.io/js/%40mmstack%2Fform-adapters)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/form/adapters/LICENSE)
 
 Use these adapters to manage state for inputs like text fields, selects, date pickers, checkboxes, etc., and then bind that state to your chosen UI components. They are extended & re-exported by specific ui libraries like [@mmstack/form-material](https://www.npmjs.com/package/@mmstack/form-material).

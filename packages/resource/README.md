@@ -515,7 +515,7 @@ Overrides the shared `Cache` in the root injector. It's optional — without it 
 provideQueryCache({
   staleTime: 60_000, // default freshness, default: 1 hour
   ttl: 5 * 60_000, // default eviction, default: same as staleTime
-  cacheSize: 100, // max entries before LRU eviction
+  cleanup: { maxSize: 100 }, // max entries before LRU eviction
   persist: true, // mirror to IndexedDB
   version: 1, // bumping invalidates persisted entries
   syncTabs: true, // sync invalidations across tabs via BroadcastChannel

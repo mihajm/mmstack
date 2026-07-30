@@ -27,16 +27,16 @@ pnpm nx test form-core
 
 ## Running locally
 
-You can use the _demo_ application to test out stuff you're working on. To run it use
+You can use the _docs_ or _playground_ applications to test out stuff you're working on. To run one use
 
 ```bash
-pnpm nx serve mmstack
+pnpm nx serve docs
 ```
 
-or
+or serve both (docs on port 4200, playground on 4201):
 
 ```bash
-pnpm serve:demo
+pnpm start
 ```
 
 ### Build
@@ -82,17 +82,26 @@ The types we use are:
 
 The scopes we use are simply the name of the library your change affects, currently these are:
 
-- common-object
 - primitives
+- resource
+- local
+- forms
 - form-core
 - form-adapters
 - form-validation
 - form-material
-- resource
 - router-core
-- table-core
-- table-client
-- table-material
+- di
+- dnd
+- worker
+- mesh
+- mesh-protocol
+- translate
+- translate-tools
+- telemetry-core
+- telemetry-otel
+- telemetry-posthog
+- telemetry-sentry
 
 ## Submitting bug reports
 

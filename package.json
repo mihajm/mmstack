@@ -19,6 +19,11 @@
   "packageManager": "pnpm@11.5.2",
   "private": true,
   "scripts": {
+    "start": "pnpm --parallel run \"/^serve:/\"",
+    "serve:playground": "nx serve playground --port=4201",
+    "serve:docs": "nx serve docs",
+    "build": "nx run-many --target=build",
+    "test": "nx run-many --target=test",
     "idea:backup": "git add -f idea/ && git update-ref refs/heads/idea-vault $(git commit-tree $(git write-tree) $(git rev-parse -q --verify idea-vault >/dev/null 2>&1 && printf -- '-p idea-vault') -m \"backup: refresh idea $(date +%F)\") && git restore --staged idea/"
   },
   "dependencies": {

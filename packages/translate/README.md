@@ -4,7 +4,7 @@
 
 [![npm version](https://badge.fury.io/js/%40mmstack%2Ftranslate.svg)](https://badge.fury.io/js/%40mmstack%2Ftranslate)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/mihajm/mmstack/blob/master/CONTRIBUTING.md)
 
 `@mmstack/translate` is an opinionated internationalization (i18n) library for Angular applications. It uses the **FormatJS** Intl runtime (`@formatjs/intl`) for ICU message formatting and integrates with Angular's dependency injection, routing, and signals.
 
@@ -902,7 +902,7 @@ Conceptually close — both are runtime, signal-aware, and namespace/scope-based
 Migration sketch:
 
 1. Pick a locale strategy and configure `provideIntlConfig` accordingly (see [Example configurations](#example-configurations)).
-2. For each transloco scope: convert the JSON into a `createNamespace('<name>', defaultTranslations)` file plus one `createXTranslation('<locale>', ...)` file per non-default locale.
+2. For each transloco scope: convert the JSON into a `createNamespace('<name>', defaultTranslations)` file plus one `ns.createTranslation('<locale>', ...)` file per non-default locale (typically aliased, e.g. `export const createScopeTranslation = ns.createTranslation`).
 3. In each scope's loader module, call `registerNamespace(() => import('./<ns>.namespace'), { ... })` and tuple-destructure the result into your own names (e.g. `export const [injectScopeT, resolveScopeT] = registerNamespace(...)`). Wire the resolver into the matching route.
 4. Replace `TranslocoService.translate` / `translateSignal` calls with the injected typed `t`. Replace the `transloco` pipe and `*transloco` directive with typed subclasses of `Translator` and `Translate`.
 
@@ -923,7 +923,7 @@ Same source-level shape change as transloco but with more legacy API surface to 
 
 Migration sketch:
 
-1. Convert each JSON translation file to TypeScript with `createNamespace` (default locale) + `createXTranslation` (other locales). The compiler enforces parameter and shape consistency.
+1. Convert each JSON translation file to TypeScript with `createNamespace` (default locale) + `ns.createTranslation` (other locales). The compiler enforces parameter and shape consistency.
 2. Replace `TranslateService` usage with the typed `t` from `registerNamespace`. RxJS observables become plain strings (eager) or signals (`t.asSignal(...)`).
 3. Replace `TranslateHttpLoader` with dynamic `import()` factories — your bundler code-splits each locale automatically; no HTTP fetch needed.
 4. Pick a locale strategy: [route-based](#scenario-a-route-based-locale) (`canMatchLocale` + `localeParamName`) or [dynamic with persistence](#scenario-b-dynamic-locale-with-localstorage-persistence) (`injectDynamicLocale` + `localeStorage`).
@@ -1007,7 +1007,7 @@ const signalGreeting = t.asSignal('dynamicNs.greeting', () => ({
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Contributions, issues, and feature requests are welcome! Please see [CONTRIBUTING.md](https://github.com/mihajm/mmstack/blob/master/CONTRIBUTING.md) for details.
 
 ## License
 

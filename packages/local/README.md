@@ -1,7 +1,7 @@
 # @mmstack/local
 
 [![npm version](https://badge.fury.io/js/%40mmstack%2Flocal.svg)](https://www.npmjs.com/package/@mmstack/local)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/form/core/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/local/LICENSE)
 
 A set of signal based tools for your local data management needs.
 

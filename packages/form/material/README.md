@@ -17,10 +17,10 @@ It offers a collection of reusable, standalone Angular components (e.g., `<mm-st
 
 ## Manual Installation
 
-1.  Install `@mmstack/form-core`.
+1.  Install `@mmstack/form-material`.
 
     ```bash
-    npm install @mmstack/form-core
+    npm install @mmstack/form-material
     ```
 
 2.  Add global styles to `styles` in `angular.json`
@@ -233,7 +233,7 @@ Here's a summary of the core form state adapters provided by `@mmstack/form-adap
 
 ```typescript
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { createStringState, StringFiel } from '@mmstack/form-material';
+import { createStringState, StringField } from '@mmstack/form-material';
 
 @Component({
   selector: 'app-input-demo',

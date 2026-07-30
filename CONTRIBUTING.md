@@ -27,17 +27,7 @@ pnpm nx test form-core
 
 ## Running locally
 
-You can use the _demo_ application to test out stuff you're working on. To run it use
-
-```bash
-pnpm nx serve mmstack
-```
-
-or
-
-```bash
-pnpm serve:demo
-```
+This LTS branch has no demo application; the _docs_ and _playground_ applications live on `master`. To try changes out locally, build the affected library and link it into a project of yours.
 
 ### Build
 
@@ -82,17 +72,16 @@ The types we use are:
 
 The scopes we use are simply the name of the library your change affects, currently these are:
 
-- common-object
 - primitives
+- resource
+- local
 - form-core
 - form-adapters
 - form-validation
 - form-material
-- resource
 - router-core
-- table-core
-- table-client
-- table-material
+- di
+- translate
 
 ## Submitting bug reports
 

@@ -766,7 +766,8 @@ const profile = persistedStore({ first: '', last: '' }, {
 `persistedStore` is `store()` + `persist()`. Reach for `persist(store, opt)` directly to add durability to a store you already have — one you also `meshSync`, or a worker-owned store's replica. Persistence is a reader over the op-log, so it composes with the other readers on the same store.
 
 ```typescript
-import { store, persist, meshSync } from '@mmstack/primitives';
+import { store, persist } from '@mmstack/primitives';
+import { meshSync } from '@mmstack/mesh';
 
 const doc = store({ title: '', body: '' });
 persist(doc, { key: 'draft', store: idbKeyval });     // durable to IndexedDB

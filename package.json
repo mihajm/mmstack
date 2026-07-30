@@ -17,8 +17,11 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master",
   "scripts": {
-    "serve:demo": "nx serve mmstack",
-    "build:all": "nx run-many --target=build"
+    "start": "pnpm --parallel run \"/^serve:/\"",
+    "serve:playground": "nx serve playground --port=4201",
+    "serve:docs": "nx serve docs",
+    "build": "nx run-many --target=build",
+    "test": "nx run-many --target=test"
   },
   "private": true,
   "dependencies": {

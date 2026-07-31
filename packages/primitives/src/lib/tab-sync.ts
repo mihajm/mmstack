@@ -12,19 +12,26 @@ import {
 } from '@angular/core';
 import { STORE_KIND, type StoreKind } from './store/internals';
 import {
+  OP_PROTO_VERSION,
   opSync,
   type MergePolicyEntry,
   type OpEnvelope,
   type OpSyncCheckpoint,
 } from './store/op-sync';
 
+// Join messages carry the op-protocol version alongside the envelopes' own: hydration ingests
+// register STATE, so an unversioned join lane would let mismatched peers pair silently and then
+// half-sync (hydrate once, drop live traffic forever after). Mismatched join messages are
+// ignored instead — the joiner's hello timeout takes over and each version cohort runs
+// independently, loud on the envelope lane. A pre-versioning peer's messages simply lack the
+// field and fail the same check.
 type TabMsg =
   | { t: 'env'; env: OpEnvelope }
-  | { t: 'hello'; from: string; wm: Record<string, number> }
+  | { t: 'hello'; proto: number; from: string; wm: Record<string, number> }
   // a checkpoint (root + register state + watermark), NOT a bare value: the joiner must
   // inherit supersession state or already-superseded stragglers would resurrect on it
-  | { t: 'state'; to: string; state: OpSyncCheckpoint<object> }
-  | { t: 'uptodate'; to: string };
+  | { t: 'state'; proto: number; to: string; state: OpSyncCheckpoint<object> }
+  | { t: 'uptodate'; proto: number; to: string };
 
 /** Op-mode sync for a writable store: hello exchange, then live envelopes. */
 function storeTabSync(
@@ -58,6 +65,8 @@ function storeTabSync(
 
   const { unsub, post } = bus.subscribe<TabMsg>(opt.id, (msg) => {
     if (!msg || typeof msg !== 'object') return;
+    // the envelope lane has its own loud guard in `receive`; join messages are fenced here
+    if (msg.t !== 'env' && msg.proto !== OP_PROTO_VERSION) return;
     switch (msg.t) {
       case 'env':
         if (phase === 'joining') joinBuffer.push(msg.env);
@@ -74,8 +83,8 @@ function storeTabSync(
           );
           post(
             covered
-              ? { t: 'uptodate', to: msg.from }
-              : { t: 'state', to: msg.from, state: snap },
+              ? { t: 'uptodate', proto: OP_PROTO_VERSION, to: msg.from }
+              : { t: 'state', proto: OP_PROTO_VERSION, to: msg.from, state: snap },
           );
         }, Math.random() * jitterMs);
         responseTimers.set(msg.from, timer);
@@ -97,7 +106,7 @@ function storeTabSync(
   });
 
   const unsubEnv = sync.subscribe((env) => post({ t: 'env', env }));
-  post({ t: 'hello', from: sync.origin, wm: sync.watermark() });
+  post({ t: 'hello', proto: OP_PROTO_VERSION, from: sync.origin, wm: sync.watermark() });
   helloTimer = setTimeout(goLive, helloTimeoutMs);
 
   injector.get(DestroyRef).onDestroy(() => {

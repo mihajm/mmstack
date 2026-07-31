@@ -28,15 +28,20 @@ import {
   type OpLogDriver,
   type StoreOp,
 } from './op-log';
+import { isOpaque } from './opaque';
+import { isRecord } from './predicates';
 import type { WritableSignalStore } from './types';
 
 /**
- * Wire protocol version. Version 2 ops carry `cites` + `epoch` (the dot-citation register);
- * envelopes from other versions are dropped loudly: an op without citations cannot be merged
- * soundly (it would supersede nothing and its siblings would accumulate forever), so versions
- * are never silently mixed.
+ * Wire protocol version. Version 2 ops carry `cites` + `epoch` (the dot-citation register).
+ * Version 3 changes MATERIALIZATION semantics, not shape: grafts descend through plain arrays
+ * (per-index ops materialize instead of silently dropping) and the documented drop rule is
+ * enforced for non-plain ancestors — so a v2 replica and a v3 replica CANNOT converge on the
+ * same op set, which is exactly what the version fence exists to make loud. Envelopes from
+ * other versions are dropped loudly, and the tab-sync join protocol refuses to pair mismatched
+ * peers: versions are never silently mixed, in shape OR in meaning.
  */
-export const OP_PROTO_VERSION = 2;
+export const OP_PROTO_VERSION = 3;
 
 type Key = string | number;
 
@@ -528,8 +533,17 @@ type PathReg = {
   result?: FoldResult;
 };
 
+const isPlainArray = (v: unknown): v is unknown[] =>
+  Array.isArray(v) && !isOpaque(v);
+
+/**
+ * The graft-side container admission. MUST equal `diffNode`'s descent set (plain records and
+ * plain non-opaque arrays) and `applyAt`'s copy set: emission, incremental apply and
+ * checkpoint materialization decide "container or leaf" identically, or a checkpoint-seeded
+ * replica and an incrementally-applied one disagree about the same op set.
+ */
 const isContainer = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+  isPlainArray(v) || isRecord(v);
 
 /**
  * The unsequenced-topology convergence core: a dot-citation multi-value register per path.
@@ -597,8 +611,6 @@ export function createConvergingApply(opt?: {
     );
   };
 
-  // The live siblings a frontier had observed: those that arrived at or below its captured seq.
-  // Used by a fork commit so it supersedes only what it saw when it forked, not later writes.
   const liveObserved = (
     reg: PathReg,
     frontier: DotFrontier | undefined,
@@ -609,11 +621,6 @@ export function createConvergingApply(opt?: {
     return live.filter((s) => (sm?.get(s.origin) ?? 0) <= frontier.seq);
   };
 
-  // JSON of a tuple array, not a separator-joined string: `origin` is a caller-supplied value on a
-  // P2P peer, so a naive `origin@p.l#epoch` join lets a crafted origin collide the signatures of two
-  // distinct live sets. A collision makes refresh() skip a fold update, and since that skip is
-  // arrival-order-sensitive it breaks convergence. JSON.stringify escapes the strings and the array
-  // structure is unambiguous, so the signature is injective in the live set.
   const sigOf = (live: readonly SyncSibling[]): string =>
     JSON.stringify(
       live.map((s) => [s.origin, s.hlc.p, s.hlc.l, s.epoch, s.kind]),
@@ -672,9 +679,6 @@ export function createConvergingApply(opt?: {
     return true;
   };
 
-  // A lone tombstone is droppable only if nothing else still materializes its key: no live
-  // descendant register would resurface, and no live ancestor `set` value still holds it. Mirrors
-  // the relay's retention twin so a client that prunes converges with a joiner seeded from the relay.
   const tombstoneDroppable = (key: string, reg: PathReg): boolean => {
     for (const [k, other] of registers) {
       if (k === key) continue;
@@ -699,8 +703,6 @@ export function createConvergingApply(opt?: {
     return undefined;
   };
 
-  // graft with the deterministic type-change rule: a graft whose parent location is not a plain
-  // record is DROPPED (the register stays intact and resurfaces if the container is restored)
   const graft = (
     tree: unknown,
     rel: readonly Key[],
@@ -708,25 +710,37 @@ export function createConvergingApply(opt?: {
   ): unknown => {
     if (!isContainer(tree)) return tree;
     const head = String(rel[0]);
+
+    if (head === '__proto__') return tree;
+    const copyOf = (): Record<string, unknown> =>
+      (isPlainArray(tree) ? tree.slice() : { ...tree }) as Record<
+        string,
+        unknown
+      >;
     if (rel.length === 1) {
       if (res.kind === 'delete') {
         if (!Object.hasOwn(tree, head)) return tree;
-        const copy = { ...tree };
+        const copy = copyOf();
+
         delete copy[head];
         return copy;
       }
-      return { ...tree, [head]: (res as { value: unknown }).value };
+      const copy = copyOf();
+      copy[head] = (res as { value: unknown }).value;
+      return copy;
     }
     if (!Object.hasOwn(tree, head)) {
-      // vivify an absent middle container so a checkpoint-seeded materialization matches a peer that
-      // applied the ops incrementally (incremental apply creates missing parents). A numeric next
-      // segment vivifies an array, else an object, mirroring the incremental apply path.
       const vivified: Record<string, unknown> | unknown[] =
         typeof rel[1] === 'number' ? [] : {};
-      return { ...tree, [head]: graft(vivified, rel.slice(1), res) };
+      const copy = copyOf();
+      copy[head] = graft(vivified, rel.slice(1), res);
+      return copy;
     }
     const child = graft(tree[head], rel.slice(1), res);
-    return child === tree[head] ? tree : { ...tree, [head]: child };
+    if (child === tree[head]) return tree;
+    const copy = copyOf();
+    copy[head] = child;
+    return copy;
   };
 
   /** Would a value at `rel` under `value` materialize, per the graft rules? */
@@ -833,9 +847,8 @@ export function createConvergingApply(opt?: {
       const seq = ++ingestSeq;
 
       for (const op of env.ops) {
-        if (o?.frontier && compareHlc(env.hlc, o.frontier) <= 0) continue; // below the pruned horizon
-        // a delete or clear at the root has no parent register to abstain to; it can only blank the
-        // whole document, and materialize would then disagree with the delta path, so drop it
+        if (o?.frontier && compareHlc(env.hlc, o.frontier) <= 0) continue;
+
         if (!op.path.length && op.kind !== 'set') continue;
         const reg = regAt(op.path);
         const key = keyOf(op.path);
@@ -1249,15 +1262,8 @@ export function opSync<T extends object>(
     origin,
   });
   const subscribers = new Set<(env: OpEnvelope) => void>();
-  // per-origin high-watermark; `versions.get(origin)` IS the local emit counter, so a hydrate/restore
-  // that raises our own watermark also advances the next mint — no separate counter to drift out of
-  // sync and collide with a version acked before a reboot but dropped from a debounced outbox.
   const versions = new Map<string, number>();
   const recentLocal: OpEnvelope[] = [];
-  // highest stability frontier this peer has pruned to. A remote envelope at or below it is a settled
-  // straggler (its state is compacted away); re-admitting one could resurrect a value below the
-  // frontier, and per-origin version dedup cannot catch a FIRST-CONTACT straggler (no prior entry),
-  // so the frontier is the admission gate that closes that hole on the receive path.
   let prunedFrontier: Hlc | undefined;
 
   const resolvedInjector = opt.driver
@@ -1271,17 +1277,6 @@ export function opSync<T extends object>(
       : { origin, injector: resolvedInjector as Injector },
   );
 
-  // Local envelopes stamped + registered but not yet handed to the transport. A `receive` freezes
-  // this peer's pending writes here so it can ingest the remote WITHOUT emitting mid-receive — the
-  // synchronous re-entrant emission that used to scramble the relay's commit order. The outbox
-  // drains on a LATER tick, so emission always lands outside any receive callstack. Writes made
-  // while a drain is still owed queue here too, keeping wire order == version order (else a receiver
-  // would dedup the older, still-frozen envelope).
-  //
-  // Deferral rides an Angular effect, so it arms only on the injector path — the transport
-  // topologies (`tabSync`, `meshSync`) that actually re-enter through a relay. A custom `driver`
-  // (worker mirror, pure sim, multi-reader) owns its own scheduling and has no such re-entrancy, so
-  // it emits synchronously; the freeze-before-observe STAMPING fix below is identical either way.
   const canDefer = !opt.driver;
   const outbox: OpEnvelope[] = [];
   let receiving = false;
@@ -1370,11 +1365,7 @@ export function opSync<T extends object>(
         opt.onReject?.(env, reason);
         return;
       }
-      // a settled straggler at or below the pruned stability frontier: reject it (its state is
-      // compacted, re-admitting could resurrect a below-frontier value). All ops in an envelope share
-      // its stamp, so the envelope hlc is the dot for every op. The live relay path never delivers a
-      // below-frontier op (a lagging client gets a snapshot, not a delta), so this only fires on a
-      // stray re-broadcast, e.g. over a P2P/multi-path topology.
+
       if (prunedFrontier && compareHlc(env.hlc, prunedFrontier) <= 0) return;
       const known = versions.get(env.origin);
       if (known !== undefined && env.version <= known) return; // duplicate/covered — idempotent
@@ -1441,10 +1432,7 @@ export function opSync<T extends object>(
     },
     hydrate: (state, pending) => {
       log.flush();
-      // rebase this origin's uncovered local writes on top. A caller that keeps a durable outbox
-      // (meshSync, the worker replica) passes its full unacked set, so a long offline burst larger
-      // than the in-memory `recentLocal` cap is never dropped from the rebase; without it, fall back
-      // to the recent-local ring.
+
       const source = pending ?? recentLocal;
       const toReplay = source.filter(
         (e) => e.version > (state.wm?.[e.origin] ?? 0),

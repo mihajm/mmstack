@@ -67,7 +67,14 @@ type DraggableSharedOptions<TData, TMeta extends DragMeta> = {
   injector?: Injector;
   /** Fires when this element starts being dragged. */
   onDragStart?: (event: DragStartEvent<TData, TMeta>) => void;
-  /** Fires when this element is dropped (anywhere), with the resolved edge + targets. */
+  /**
+   * Fires when the drag gesture ENDS — including a cancel (Escape /
+   * pointercancel), mirroring the native adapter where a cancelled drag also
+   * reports a drop with an empty `location.current`. An empty `location.current`
+   * cannot distinguish "cancelled" from "released over nothing", so don't commit
+   * state changes from here: commit from a drop target's callback, which only
+   * fires on a genuine release over that target.
+   */
   onDrop?: (event: DropEvent<TData, TMeta>) => void;
 };
 

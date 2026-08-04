@@ -1,9 +1,15 @@
-import { ElementRef, PLATFORM_ID } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  ElementRef,
+  EnvironmentInjector,
+  PLATFORM_ID,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { trackRuns } from './testing/reactivity';
 import { makeDragSession } from './testing/drag-session';
 import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
+import { DndPointerEngine } from './element/pointer-engine';
 import { DndSession, injectDndActive, provideDndSession } from './session';
 
 // Capture the config DndSession hands to pragmatic's monitor, typed against the
@@ -186,6 +192,29 @@ describe('DndSession', () => {
 
     monitorConfig?.onDragStart?.(makeEvent({ sourceEl: inside }));
     expect(active()).toBe(true);
+  });
+
+  it('provideDndSession() scopes the pointer engine WITH the session (a scoped session must not split pointer drags)', () => {
+    const root = document.createElement('div');
+
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(root) }],
+    });
+    const rootSession = TestBed.inject(DndSession);
+    const child = createEnvironmentInjector(
+      [provideDndSession()],
+      TestBed.inject(EnvironmentInjector),
+    );
+
+    const engine = child.get(DndPointerEngine);
+    expect(engine).not.toBe(TestBed.inject(DndPointerEngine));
+
+    const el = document.createElement('div');
+    engine.begin({ el, data: {}, kind: 'move' }, 0, 0);
+
+    expect(child.get(DndSession).session()?.sourceEl).toBe(el);
+    expect(rootSession.session()).toBeNull();
   });
 
   it('the writable session lets a custom engine drive it imperatively', () => {

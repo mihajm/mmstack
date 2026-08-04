@@ -74,6 +74,36 @@ describe('pointerDrag', () => {
     expect(stopped).toBe(false);
   });
 
+  describe('capture phase (shielded surfaces)', () => {
+    function shielded(opts: Parameters<typeof pointerDrag>[0] = {}) {
+      const el = document.createElement('div');
+      const child = document.createElement('span');
+      el.appendChild(child);
+      const { drag } = setup(opts, el);
+      // The editor-shield scenario: a capture-phase listener on the surface
+      // stops propagation before the press can reach content or bubble back.
+      el.addEventListener('pointerdown', (e) => e.stopPropagation(), {
+        capture: true,
+      });
+      return { drag, el, child };
+    }
+
+    it('a bubble-phase sensor never sees a shielded press (the failure mode)', () => {
+      const { drag, child } = shielded();
+      child.dispatchEvent(pe('pointerdown', { pointerId: 4 }));
+      expect(drag.unthrottled().pointerId).toBeNull();
+    });
+
+    it('capture: true observes the press despite the shield', () => {
+      const { drag, child } = shielded({ capture: true });
+      child.dispatchEvent(pe('pointerdown', { pointerId: 4, clientX: 3, clientY: 4 }));
+      const s = drag.unthrottled();
+      expect(s.pointerId).toBe(4);
+      expect(s.start).toEqual({ x: 3, y: 4 });
+      expect(s.origin).toBe(child);
+    });
+  });
+
   it('exposes the pointerType (touch/pen/mouse) for the gesture', () => {
     const { drag, el } = setup();
     el.dispatchEvent(pe('pointerdown', { pointerType: 'touch', pointerId: 7 }));

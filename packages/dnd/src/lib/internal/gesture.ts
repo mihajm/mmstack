@@ -45,6 +45,12 @@ export type DriveGestureOptions = {
   buttons?: number[];
   /** Claiming presses stop propagation so an ancestor container doesn't also start. @default true */
   stopPropagation?: boolean;
+  /**
+   * Observe `pointerdown` in the capture phase — for surfaces whose own
+   * capture-phase listeners stop propagation before the bubble phase (editor
+   * shields). See {@link PointerDragOptions.capture}. @default false
+   */
+  capture?: boolean;
 };
 
 export type GestureDriver = {
@@ -63,6 +69,7 @@ export function driveGesture(
     activationThreshold: opts.activationThreshold,
     buttons: opts.buttons,
     stopPropagation: opts.stopPropagation ?? true,
+    capture: opts.capture,
   });
 
   const pointer = { x: 0, y: 0 };

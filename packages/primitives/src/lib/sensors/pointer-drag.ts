@@ -86,6 +86,16 @@ export type PointerDragOptions = SensorRunOptions & {
    * sortable inside another). @default false
    */
   stopPropagation?: boolean;
+  /**
+   * Listen for `pointerdown` in the capture phase. Lets the sensor observe
+   * presses on a surface whose own capture-phase listeners stop propagation
+   * (e.g. an editor shield swallowing events before they reach rendered
+   * content) — same-element listeners still run after a `stopPropagation()`,
+   * so a capture-phase sensor on the shielded surface sees every press.
+   * Subsequent move/up tracking is unaffected (the gesture holds pointer
+   * capture). @default false
+   */
+  capture?: boolean;
 };
 
 type InternalPointerDragSignal = Signal<PointerDragState> & {
@@ -171,6 +181,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     handleSelector,
     buttons = [0],
     stopPropagation = false,
+    capture = false,
     debugName = 'pointerDrag',
   } = opt ?? {};
 
@@ -309,6 +320,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     const controller = new AbortController();
     el.addEventListener('pointerdown', onDown(el) as EventListener, {
       signal: controller.signal,
+      capture,
     });
     return () => {
       controller.abort();

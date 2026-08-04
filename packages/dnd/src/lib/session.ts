@@ -13,6 +13,8 @@ import {
 } from '@angular/core';
 import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
+import { DndPointerEngine } from './element/pointer-engine';
+
 export type DropTargetHit = {
   element: Element;
   /** Raw pragmatic data — carries any closest-edge token a hitbox plugin attached. */
@@ -258,7 +260,12 @@ export function injectDndPointer(): Signal<{ x: number; y: number }> {
  * `providers` so a nested surface (e.g. a canvas) tracks only drags within its
  * own host element instead of sharing the root session. The `injectDnd*` helpers
  * resolve to this scoped instance inside the subtree.
+ *
+ * Also scopes the pointer engine: the engine holds a reference to its session,
+ * so a scoped session without a matching engine would silently split pointer
+ * drags across two sessions (sources writing the root one while the subtree
+ * watches its own).
  */
 export function provideDndSession(): Provider[] {
-  return [DndSession];
+  return [DndSession, DndPointerEngine];
 }

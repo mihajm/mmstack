@@ -74,9 +74,7 @@ function storeTabSync(
         return;
       case 'hello': {
         if (phase !== 'live' || msg.from === sync.origin) return;
-        // first responder wins: jittered answer, cancelled when someone else answers first
-        const timer = setTimeout(() => {
-          responseTimers.delete(msg.from);
+        const respond = () => {
           const snap = sync.snapshot();
           const covered = Object.entries(snap.wm).every(
             ([origin, v]) => (msg.wm[origin] ?? 0) >= v,
@@ -86,6 +84,21 @@ function storeTabSync(
               ? { t: 'uptodate', proto: OP_PROTO_VERSION, to: msg.from }
               : { t: 'state', proto: OP_PROTO_VERSION, to: msg.from, state: snap },
           );
+        };
+        // `jitterMs: 0` answers HERE, in the message handler, with no timer at all. This is the
+        // difference between "as fast as possible" and "possible": a hidden tab's timers are
+        // aligned to ≥1s, so even setTimeout(0) from a backgrounded responder routinely outlives
+        // the joiner's hello window — while message events are not throttled. A channel whose
+        // typical population is one hidden responder (a builder answering its preview tab) opts
+        // in; the jittered path stays the default for many-peer channels.
+        if (jitterMs === 0) {
+          respond();
+          return;
+        }
+        // first responder wins: jittered answer, cancelled when someone else answers first
+        const timer = setTimeout(() => {
+          responseTimers.delete(msg.from);
+          respond();
         }, Math.random() * jitterMs);
         responseTimers.set(msg.from, timer);
         return;

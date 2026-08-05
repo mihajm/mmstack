@@ -10,7 +10,7 @@ import { type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
 import { isWritableSignal } from './util';
 
-function pooledKeys<T extends Record<string, any>>(
+export function pooledKeys<T extends Record<string, any>>(
   src: Signal<T>,
 ): Signal<Set<keyof T>> {
   const aBuf = new Set<keyof T>();

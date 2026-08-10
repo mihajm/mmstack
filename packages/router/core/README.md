@@ -770,6 +770,8 @@ bootstrapApplication(App, {
 
 The title is read after the hold-aware [title store](#title) has applied, so what's announced is what the page is actually called.
 
+The initial navigation fires neither half: it rides the document load, which gives a screen reader those signals itself — focus at the top, title announced. Firing there would instead yank focus into the page on every load.
+
 ```typescript
 import { provideRouteA11y } from '@mmstack/router-core';
 

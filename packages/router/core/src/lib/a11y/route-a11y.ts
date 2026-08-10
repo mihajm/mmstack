@@ -42,6 +42,10 @@ const ROUTE_A11Y_OPTIONS = new InjectionToken<Required<RouteA11yOptions>>(
  * the page is actually called. Fires once per committed navigation and never for a navigation
  * that was superseded before it reached the screen.
  *
+ * The initial navigation fires neither half: it rides the document load, which gives a screen
+ * reader those signals itself — focus at the top, title announced. Firing there would instead
+ * yank focus into the page on every load, sighted users included.
+ *
  * @example
  * ```ts
  * bootstrapApplication(App, {
@@ -81,6 +85,7 @@ class RouteA11y {
 
   private liveRegion: HTMLElement | null = null;
   private announcedFor: number | null = null;
+  private initialSkipped = false;
 
   constructor() {
     if (!this.isBrowser) return;
@@ -94,6 +99,10 @@ class RouteA11y {
       )
         return;
       this.announcedFor = navigationId;
+      if (!this.initialSkipped) {
+        this.initialSkipped = true;
+        return;
+      }
       // One render later: the title store's own effect has applied by then, and the swapped-in
       // view is laid out, so it can take focus.
       untracked(() =>

@@ -41,6 +41,11 @@ const routes: Routes = [
     component: PagePlain,
     resolve: { title: createTitle('Page One') },
   },
+  {
+    path: 'two',
+    component: PagePlain,
+    resolve: { title: createTitle('Page Two') },
+  },
 ];
 
 @Component({
@@ -84,22 +89,38 @@ describe('provideRouteA11y', () => {
     TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true });
   });
 
-  it('announces the committed title and focuses the view that swapped in', async () => {
+  it('sits out the initial navigation: the document load carries its own signals', async () => {
     const { fixture, container, router } = await setup();
 
     await router.navigateByUrl('/one');
     await flush(fixture);
 
     const view = container.querySelector('page-plain') as HTMLElement;
+    expect(document.activeElement).not.toBe(view);
+    expect(view.hasAttribute('tabindex')).toBe(false);
+    expect(liveRegion()).toBeNull();
+  });
+
+  it('announces the committed title and focuses the view that swapped in', async () => {
+    const { fixture, container, router } = await setup();
+    await router.navigateByUrl('/one');
+    await flush(fixture);
+
+    await router.navigateByUrl('/two');
+    await flush(fixture);
+
+    const view = container.querySelector('page-plain') as HTMLElement;
     expect(document.activeElement).toBe(view);
     expect(view.getAttribute('tabindex')).toBe('-1');
-    expect(liveRegion()?.textContent).toBe('Page One');
+    expect(liveRegion()?.textContent).toBe('Page Two');
   });
 
   it('the transient tabindex goes away when focus leaves', async () => {
     const { fixture, container, router } = await setup();
-
     await router.navigateByUrl('/one');
+    await flush(fixture);
+
+    await router.navigateByUrl('/two');
     await flush(fixture);
     const view = container.querySelector('page-plain') as HTMLElement;
     expect(view.getAttribute('tabindex')).toBe('-1');
@@ -110,9 +131,12 @@ describe('provideRouteA11y', () => {
 
   it('waits for the swap: nothing is announced while the old view is still on screen', async () => {
     const { fixture, router, http } = await setup();
+    await router.navigateByUrl('/one');
+    await flush(fixture);
 
     await router.navigateByUrl('/a');
     await flush(fixture);
+    expect(liveRegion()).toBeNull(); // router is done, screen is not
     http.expectOne('/api/a').flush('AA');
     await flush(fixture);
     expect(liveRegion()?.textContent).toBe('Page A');
@@ -128,6 +152,8 @@ describe('provideRouteA11y', () => {
 
   it('says nothing for a navigation superseded before it reached the screen', async () => {
     const { fixture, router, http } = await setup();
+    await router.navigateByUrl('/two');
+    await flush(fixture);
 
     await router.navigateByUrl('/a');
     await flush(fixture);
@@ -148,8 +174,10 @@ describe('provideRouteA11y', () => {
 
   it('honours `announce: false`', async () => {
     const { fixture, container, router } = await setup({ announce: false });
-
     await router.navigateByUrl('/one');
+    await flush(fixture);
+
+    await router.navigateByUrl('/two');
     await flush(fixture);
 
     expect(liveRegion()).toBeNull();
@@ -160,11 +188,13 @@ describe('provideRouteA11y', () => {
 
   it('honours `focus: false`', async () => {
     const { fixture, container, router } = await setup({ focus: false });
-
     await router.navigateByUrl('/one');
     await flush(fixture);
 
-    expect(liveRegion()?.textContent).toBe('Page One');
+    await router.navigateByUrl('/two');
+    await flush(fixture);
+
+    expect(liveRegion()?.textContent).toBe('Page Two');
     expect(document.activeElement).not.toBe(
       container.querySelector('page-plain') as HTMLElement,
     );

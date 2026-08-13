@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
   STORE_SHARED_GLOBALS,
   type ProxyCache,
@@ -30,7 +31,6 @@ import { createStoreContext, store, type toStoreOptions } from './store';
  */
 
 declare global {
-  // eslint-disable-next-line no-var
   var gc: (() => void) | undefined;
 }
 

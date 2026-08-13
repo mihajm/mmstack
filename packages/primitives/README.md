@@ -21,7 +21,7 @@ npm install @mmstack/primitives
 - [Effects](#effects) — `nestedEffect`
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
-- [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`orderedEntries`, `insertElement`, `moveElement`, `rebalanceContainer`), `rebaseOps`, `policyStrategy`, `syncedFork`
+- [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`keyedContainer`, `wrappedContainer`, `orderedEntries`, `posBetween`), `rebaseOps`, `policyStrategy`, `syncedFork`
 - [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -791,6 +791,24 @@ const board = tabSync(store({ title: 'Board', todos: [] }), {
 ```
 
 A **merge policy** decides the result when two peers change one path at once: `lww` (default), `mergeThree` (three-way against the common ancestor), `keyedArray(idFn)` (list reconcile by identity), or `preserve` (both sides survive as a `Conflicted` value; `isConflicted(v)` narrows it, resolution is a later write). `rebaseOps(root, pending, remote, policies)` is the pure invert-apply-reapply routine behind optimistic updates and offline queues, and `policyStrategy(policies)` gives a `forkStore` the same per-path resolution. This is what [`@mmstack/mesh`](https://www.npmjs.com/package/@mmstack/mesh) wraps for multiplayer.
+
+### Keyed containers
+
+**A list several peers reorder is a record keyed by element id, never an array.** Each element carries a fractional position at `~pos`, so an insert is one write at `[list, id]` and a move is one write at `[list, id, '~pos']` — two peers inserting into the same list at once keep both elements, where one whole-array write would have folded over the other.
+
+```typescript
+import { keyedContainer } from '@mmstack/primitives';
+
+const board = store<{ todos: Record<string, Todo> }>({ todos: {} });
+const todos = keyedContainer({ key: (t: Todo) => t.id }); // or pass the key to insert
+
+todos.insert(board.todos, { id: 't1', title: 'Ship it' }, 0);
+todos.move(board.todos, 't1', 3); // writes the position and nothing else
+todos.entries(board.todos()); // reading order: by ~pos, key breaking ties
+todos.rebalance(sync, board.todos); // authority sweep when positions grow long
+```
+
+Reading order is a pure function of the materialized value, so every replica agrees without consulting the op log. `wrappedContainer` stores elements as `{ '~pos', value }` instead, keeping the payload a closed record a schema can validate; the choice is fixed when the container is created and never inferred from data, so peers of a synced container must agree on it. `posBetween(before, after)` is the fractional index underneath.
 
 ## Observability
 

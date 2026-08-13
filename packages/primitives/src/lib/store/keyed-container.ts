@@ -82,11 +82,18 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * deterministic on every replica.
  */
 export function orderedEntries<T>(container: Record<string, T>): OrderedEntry<T>[] {
+  return entriesOf(container, (element) => element);
+}
+
+function entriesOf<T, E>(
+  container: Record<string, E>,
+  payloadOf: (element: E) => T,
+): OrderedEntry<T>[] {
   const entries: OrderedEntry<T>[] = [];
   for (const key of Object.keys(container)) {
-    const value = container[key];
-    const raw = isRecord(value) ? value[POS_SEGMENT] : undefined;
-    entries.push({ key, pos: typeof raw === 'string' ? raw : '', value });
+    const element = container[key];
+    const raw = isRecord(element) ? element[POS_SEGMENT] : undefined;
+    entries.push({ key, pos: typeof raw === 'string' ? raw : '', value: payloadOf(element) });
   }
   entries.sort((a, b) =>
     a.pos < b.pos ? -1 : a.pos > b.pos ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
@@ -123,11 +130,25 @@ export function insertElement<T extends object>(
   value: T,
   index?: number,
 ): string {
-  if (POS_SEGMENT in value) devError(`insertElement: '${POS_SEGMENT}' is managed, drop it from the value`);
+  return insertInto(container, key, value, index, inlineElement);
+}
+
+const inlineElement = <T extends object>(value: T, pos: string): T => {
+  if (POS_SEGMENT in value) devError(`insert: '${POS_SEGMENT}' is managed, drop it from the value`);
+  return { ...value, [POS_SEGMENT]: pos };
+};
+
+function insertInto<T, E>(
+  container: ContainerNode<E>,
+  key: string,
+  value: T,
+  index: number | undefined,
+  elementOf: (value: T, pos: string) => E,
+): string {
   const entries = orderedEntries(container()).filter((e) => e.key !== key);
   const [before, after] = neighborPositions(entries, index ?? entries.length);
   const pos = posBetween(before, after);
-  container.update((c) => ({ ...c, [key]: { ...value, [POS_SEGMENT]: pos } }));
+  container.update((c) => ({ ...c, [key]: elementOf(value, pos) }));
   return pos;
 }
 
@@ -201,4 +222,111 @@ function evenPositions(n: number): string[] {
     out.push(s);
   }
   return out;
+}
+
+/**
+ * An element of a container in the WRAPPED representation: position beside the payload rather than
+ * inside it, so the payload stays a closed record a schema can validate without knowing about
+ * `~pos`. A move writes `[container, key, '~pos']` and a field edit writes
+ * `[container, key, 'value', field]` — still disjoint one-field paths.
+ */
+export type ContainerEntry<T> = {
+  readonly [POS_SEGMENT]: string;
+  readonly value: T;
+};
+
+/** `key` derives an element's key from the value, for payloads carrying their own identity field. */
+export type KeyedContainerConfig<T> = {
+  readonly key?: (value: T) => string;
+};
+
+/** The helpers of one container flavour, with keys supplied by the caller. */
+export type KeyedContainer<T extends object, E extends object = T> = {
+  entries(container: Record<string, E>): OrderedEntry<T>[];
+  insert(container: ContainerNode<E>, key: string, value: T, index?: number): string;
+  move(container: ContainerNode<E>, key: string, index: number): string | undefined;
+  remove(container: ContainerNode<E>, key: string): void;
+  rebalance(sync: Pick<OpSync, 'override'>, container: ContainerNode<E>): void;
+};
+
+/** The same helpers where a configured `key` extractor supplies the key, so `insert` takes none. */
+export type SelfKeyedContainer<T extends object, E extends object = T> = Omit<
+  KeyedContainer<T, E>,
+  'insert'
+> & {
+  insert(container: ContainerNode<E>, value: T, index?: number): string;
+};
+
+/**
+ * Binds one container flavour to the whole set of helpers, so every read and write of a container
+ * agrees on how its elements are shaped. Pass the container node itself per call: one flavour
+ * serves every container of a type. Positions live INSIDE the element; for a payload that must
+ * stay a closed record, use {@link wrappedContainer} instead.
+ *
+ * ```typescript
+ * const slots = keyedContainer({ key: (n: Node) => n.id });
+ * slots.insert(node, child, 2); // one set at [container, id]
+ * slots.move(node, 'child-1', 0); // one set at [container, 'child-1', '~pos']
+ * slots.entries(node()); // reading order
+ * ```
+ *
+ * With no extractor, `insert` takes the key: `keyedContainer<Node>()`. A duplicate key OVERWRITES,
+ * taking a fresh position at the requested index. An element's identity field is immutable while it
+ * is resident — re-keying is a remove plus an insert, never an edit.
+ */
+export function keyedContainer<T extends object>(config: {
+  key: (value: T) => string;
+}): SelfKeyedContainer<T>;
+export function keyedContainer<T extends object>(config?: { key?: never }): KeyedContainer<T>;
+export function keyedContainer<T extends object>(
+  config: KeyedContainerConfig<T> = {},
+): KeyedContainer<T> | SelfKeyedContainer<T> {
+  return helpersFor<T, T>(config.key, inlineElement, (element) => element);
+}
+
+/**
+ * {@link keyedContainer} storing every element as a {@link ContainerEntry}: the position sits
+ * beside the payload rather than inside it, so a schema that closes the payload record still
+ * validates. `entries` reads back payloads, never wrappers.
+ *
+ * ```typescript
+ * const slots = wrappedContainer({ key: (n: Node) => n.id });
+ * slots.insert(node, child, 2); // one set at [container, id] carrying { '~pos', value }
+ * ```
+ *
+ * A container's representation is fixed when it is created and is never carried on the wire, so
+ * every peer of a synced container must agree on it — converting one after the fact is a data
+ * migration, not a flag.
+ */
+export function wrappedContainer<T extends object>(config: {
+  key: (value: T) => string;
+}): SelfKeyedContainer<T, ContainerEntry<T>>;
+export function wrappedContainer<T extends object>(config?: {
+  key?: never;
+}): KeyedContainer<T, ContainerEntry<T>>;
+export function wrappedContainer<T extends object>(
+  config: KeyedContainerConfig<T> = {},
+): KeyedContainer<T, ContainerEntry<T>> | SelfKeyedContainer<T, ContainerEntry<T>> {
+  return helpersFor<T, ContainerEntry<T>>(
+    config.key,
+    (value, pos) => ({ [POS_SEGMENT]: pos, value }),
+    (element) => element.value,
+  );
+}
+
+function helpersFor<T extends object, E extends object>(
+  extract: ((value: T) => string) | undefined,
+  elementOf: (value: T, pos: string) => E,
+  payloadOf: (element: E) => T,
+): KeyedContainer<T, E> & SelfKeyedContainer<T, E> {
+  return {
+    entries: (container) => entriesOf(container, payloadOf),
+    insert: (container: ContainerNode<E>, a: string | T, b?: T | number, c?: number) =>
+      extract
+        ? insertInto(container, extract(a as T), a as T, b as number | undefined, elementOf)
+        : insertInto(container, a as string, b as T, c, elementOf),
+    move: (container, key, index) => moveElement(container, key, index),
+    remove: (container, key) => removeElement(container, key),
+    rebalance: (sync, container) => rebalanceContainer(sync, container),
+  };
 }

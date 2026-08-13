@@ -21,14 +21,20 @@ export {
 } from './hlc';
 export {
   insertElement,
+  keyedContainer,
   moveElement,
   orderedEntries,
   posBetween,
   POS_SEGMENT,
   rebalanceContainer,
   removeElement,
+  wrappedContainer,
+  type ContainerEntry,
   type ContainerNode,
+  type KeyedContainer,
+  type KeyedContainerConfig,
   type OrderedEntry,
+  type SelfKeyedContainer,
 } from './keyed-container';
 export {
   compareSiblings,

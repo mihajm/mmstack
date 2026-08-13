@@ -27,12 +27,16 @@ export type SyncOp = StoreOp & {
 };
 
 /**
- * Wire protocol version. Version 2 ops carry `cites` + `epoch`: an op without citations
- * cannot be merged soundly (it would supersede nothing and its siblings would accumulate
- * forever), so the relay rejects envelopes from any other protocol version outright rather
- * than silently mixing pre-citation emitters into a room.
+ * Wire protocol version, in lockstep with `OP_PROTO_VERSION` in `@mmstack/primitives`: the
+ * relay fences on the stamp the emitter puts on the envelope, so the two constants are one
+ * fence written in two places and must move together. Version 2 ops carry `cites` + `epoch`
+ * (an op without citations cannot be merged soundly — it would supersede nothing and its
+ * siblings would accumulate forever); version 3 changes materialization semantics rather than
+ * shape, so a v2 and a v3 replica cannot converge on the same op set. Either way the relay
+ * rejects envelopes from any other version outright rather than silently mixing incompatible
+ * emitters into a room.
  */
-export const MESH_PROTO_VERSION = 2;
+export const MESH_PROTO_VERSION = 3;
 
 export type OpEnvelope = {
   readonly proto: number;

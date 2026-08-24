@@ -6,6 +6,8 @@ export {
   injectFieldRef,
   raw,
   type Composition,
+  type CompositionOptions,
+  type CompositionRule,
   type FieldProjection,
   type FieldProjector,
   type FieldRef,

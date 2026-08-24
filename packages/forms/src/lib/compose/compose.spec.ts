@@ -135,6 +135,73 @@ describe('compose / composition', () => {
   });
 });
 
+describe('composition as a schema rule', () => {
+  @Component({
+    imports: [FormField, Probe],
+    template: ` <input [formField]="f.name" /> `,
+  })
+  class RuleHost {
+    readonly model = signal({ name: 'x' });
+    readonly f = form(this.model, (p) => {
+      textField(p.name, {
+        label: 'One',
+        hint: ({ value }) => `${value().length} chars`,
+      });
+    });
+  }
+
+  function ruleProbe(): Probe {
+    const fixture = TestBed.createComponent(RuleHost);
+    fixture.detectChanges();
+    return fixture.debugElement.query(By.directive(Probe)).injector.get(Probe);
+  }
+
+  it('applies several member rules in one call, values and LogicFns alike', () => {
+    const p = ruleProbe();
+    expect(p.tf.label()).toBe('One');
+    expect(p.tf.hint()).toBe('1 chars');
+  });
+
+  it('exposes member rules as properties — the record survives being callable', () => {
+    expect(textField.label).toBe(withLabel);
+    expect(textField.hint).toBe(withHint);
+    expect({ ...textField }).toEqual({
+      label: withLabel,
+      hint: withHint,
+      error: firstError,
+    });
+  });
+
+  it('skips undefined entries (unset)', () => {
+    @Component({
+      imports: [FormField, Probe],
+      template: ` <input [formField]="f.name" /> `,
+    })
+    class SkipHost {
+      readonly model = signal({ name: 'x' });
+      readonly f = form(this.model, (p) => {
+        textField(p.name, { label: 'L', hint: undefined });
+      });
+    }
+    const fixture = TestBed.createComponent(SkipHost);
+    fixture.detectChanges();
+    const p = fixture.debugElement
+      .query(By.directive(Probe))
+      .injector.get(Probe);
+    expect(p.tf.label()).toBe('L');
+    expect(p.tf.hint()).toBeUndefined();
+  });
+
+  it('throws for members that carry no rule (read-side projectables)', () => {
+    expect(() =>
+      (textField as unknown as (path: unknown, o: unknown) => void)(
+        {},
+        { error: () => 'boom' },
+      ),
+    ).toThrow(/"error" is not schema-settable/);
+  });
+});
+
 describe('fromMetadata', () => {
   const NULLABLE = createMetadataKey<string | null>();
 

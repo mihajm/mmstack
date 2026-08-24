@@ -3,7 +3,11 @@ import {
   type FieldState,
   FORM_FIELD,
   type FormField,
+  type LogicFn,
   MetadataKey,
+  type PathKind,
+  type SchemaPath,
+  type SchemaPathRules,
 } from '@angular/forms/signals';
 
 /**
@@ -211,16 +215,58 @@ export type Composition<M extends Record<string, Projectable>> = {
   [K in keyof M]: Projected<M[K]>;
 };
 
+/** A projectable that doubles as a schema rule — callable on a path, like a `fieldMetadata` rule. */
+type SettableProjectable = ((...args: any[]) => void) & {
+  readonly [PROJECTOR]: FieldProjector<unknown>;
+};
+
+/** The value a rule-carrying projectable accepts in a schema (its projected value, sans `undefined`). */
+type SettableValue<P> = Exclude<ProjectionValue<ProjectorReturn<P>>, undefined>;
+
+/**
+ * The options accepted when calling a composition as a schema rule: one optional entry per
+ * schema-settable member (rule-carrying projectables, e.g. `fieldMetadata` rules — value-only
+ * projectors and bare metadata keys are read-side and not settable). Each entry takes the value
+ * or a reactive {@link LogicFn}, exactly like calling that member rule directly.
+ */
+export type CompositionOptions<
+  M extends Record<string, Projectable>,
+  TValue = unknown,
+  TPathKind extends PathKind = PathKind.Root,
+> = {
+  [K in keyof M as M[K] extends SettableProjectable ? K : never]?:
+    | SettableValue<M[K]>
+    | LogicFn<TValue, SettableValue<M[K]>, TPathKind>;
+};
+
+/**
+ * The first element of a {@link composition} tuple: the projectable record itself (spread it,
+ * or call a member rule directly), which is **also callable** as a schema rule applying several
+ * members in one call — `textField(p.name, { label: 'Name', hint: 'Try me' })`.
+ */
+export type CompositionRule<M extends Record<string, Projectable>> = M & {
+  <TValue = unknown, TPathKind extends PathKind = PathKind.Root>(
+    path: SchemaPath<TValue, SchemaPathRules.Supported, TPathKind>,
+    options: CompositionOptions<M, TValue, TPathKind>,
+  ): void;
+};
+
 /**
  * Defines a reusable, named composition from a record of {@link Projectable}s. Returns a
- * `[composition, inject]` tuple mirroring `fieldMetadata`'s `[withX, injectX]`:
+ * `[rule, inject]` tuple mirroring `fieldMetadata`'s `[withX, injectX]`:
  *
  * - the first element **is** the projectable record — spread it to extend/combine compositions
- *   (`composition({ ...textField, options })`);
+ *   (`composition({ ...textField, options })`), or call a member rule directly
+ *   (`textField.label(p.name, 'Name')`). It is **also callable** as a schema rule that applies
+ *   several members in one call: `textField(p.name, { label: 'Name', hint: 'Try me' })`. Only
+ *   rule-carrying members (e.g. `fieldMetadata` rules) are settable this way — value-only
+ *   projectors and bare metadata keys are read-side, and passing one throws. Entry values accept
+ *   the same `value | LogicFn` the member rule does; `undefined` entries are skipped (unset).
  * - the second element is an inject reader that materializes it via {@link compose} (injecting
  *   the field once), for use inside a control.
  *
- * Lazy: safe to call at module level. The field is only injected when the reader runs.
+ * Lazy: safe to call at module level. The field is only injected when the reader runs, and no
+ * rule attaches until the composition is called in a schema.
  *
  * @example
  * ```ts
@@ -230,12 +276,43 @@ export type Composition<M extends Record<string, Projectable>> = {
  *   options: (f) => () => f.state().metadata(OPTIONS)?.() ?? [],
  * });
  *
+ * // in a schema:
+ * form(model, (p) => {
+ *   textField(p.name, { label: 'Full name', hint: ({ value }) => `${value().length}/50` });
+ * });
+ *
  * // in a control on a [formField] host:
  * readonly field = injectSelect();   // { label, hint, options } — one inject(FORM_FIELD)
  * ```
  */
 export function composition<M extends Record<string, Projectable>>(
   map: M,
-): [M, () => Composition<M>] {
-  return [map, () => compose(map)];
+): [CompositionRule<M>, () => Composition<M>] {
+  const rule = (path: unknown, options: Record<string, unknown>): void => {
+    for (const key in options) {
+      const value = options[key];
+      if (value === undefined) continue;
+      const member = map[key];
+      if (typeof member !== 'function' || !(PROJECTOR in member)) {
+        throw new Error(
+          `[mmstack/forms] composition: "${key}" is not schema-settable — only rule-carrying members (e.g. fieldMetadata rules) can be set through the composition call.`,
+        );
+      }
+      (member as unknown as (path: unknown, value: unknown) => void)(
+        path,
+        value,
+      );
+    }
+  };
+  // defineProperty (not Object.assign): map keys like `name`/`length` collide with
+  // non-writable function properties.
+  for (const key in map) {
+    Object.defineProperty(rule, key, {
+      value: map[key],
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return [rule as CompositionRule<M>, () => compose(map)];
 }

@@ -19,9 +19,7 @@
     "@angular/common": ">=21 <22",
     "@angular/core": ">=21 <22",
     "@atlaskit/pragmatic-drag-and-drop": "~2.0.1",
-    "@mmstack/primitives": ">=21.6 <22"
-  },
-  "optionalDependencies": {
+    "@mmstack/primitives": ">=21.6 <22",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "~2.0.0",
     "@atlaskit/pragmatic-drag-and-drop-auto-scroll": "~3.0.0",
     "@atlaskit/pragmatic-drag-and-drop-flourish": "~3.0.1",

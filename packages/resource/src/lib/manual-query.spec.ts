@@ -8,9 +8,13 @@ import {
   withNoXsrfProtection,
   type HttpRequest,
 } from '@angular/common/http';
-import { PLATFORM_ID } from '@angular/core';
+import { PLATFORM_ID, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import {
+  injectTransitionScope,
+  provideTransitionScope,
+} from '@mmstack/primitives';
 import { manualQueryResource } from './manual-query';
 import {
   createCacheInterceptor,
@@ -178,5 +182,95 @@ describe('manualQueryResource', () => {
     );
 
     await expect(res.trigger()).rejects.toThrow('produced no request');
+  });
+});
+
+describe('manualQueryResource — transition scope + pause', () => {
+  let inFlight: Array<{ url: string; respond: (body: unknown) => void }>;
+  const deferredInterceptor = (req: HttpRequest<unknown>) =>
+    new Observable<HttpResponse<unknown>>((sub) => {
+      inFlight.push({
+        url: req.urlWithParams,
+        respond: (body) => {
+          sub.next(new HttpResponse({ body, status: 200 }));
+          sub.complete();
+        },
+      });
+    });
+
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    TestBed.tick();
+  };
+
+  beforeEach(() => {
+    inFlight = [];
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideQueryCache(),
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([deferredInterceptor]),
+        ),
+        provideTransitionScope(),
+      ],
+    });
+  });
+
+  it("register: 'suspend' — untriggered is READY; only a triggered load suspends", async () => {
+    const { scope, res } = TestBed.runInInjectionContext(() => ({
+      scope: injectTransitionScope(),
+      res: manualQueryResource<{ id: number }>(
+        () => 'https://example.test/export',
+        { register: 'suspend' },
+      ),
+    }));
+    await settle();
+    expect(scope.pending()).toBe(false);
+    expect(scope.suspended('value')).toBe(false);
+
+    const p = res.trigger();
+    await settle();
+    expect(scope.pending()).toBe(true);
+    expect(scope.suspended('value')).toBe(true);
+
+    inFlight.shift()?.respond({ id: 1 });
+    await settle();
+    expect(scope.pending()).toBe(false);
+    expect(scope.suspended('value')).toBe(false);
+    await expect(p).resolves.toEqual({ id: 1 });
+  });
+
+  it('destroy() removes the manual query from its scope', async () => {
+    const { scope, res } = TestBed.runInInjectionContext(() => ({
+      scope: injectTransitionScope(),
+      res: manualQueryResource<{ id: number }>(
+        () => 'https://example.test/export',
+        { register: 'indicator' },
+      ),
+    }));
+    expect(scope.resources().length).toBe(1);
+    res.destroy();
+    expect(scope.resources().length).toBe(0);
+  });
+
+  it('pause: trigger() while paused holds the request; it fires on resume and settles the promise', async () => {
+    const paused = signal(true);
+    const res = TestBed.runInInjectionContext(() =>
+      manualQueryResource<{ id: number }>(() => 'https://example.test/export', {
+        pause: paused,
+      }),
+    );
+    const p = res.trigger();
+    await settle();
+    expect(inFlight.length).toBe(0);
+    expect(res.disabledReason()).toBe('no-request');
+
+    paused.set(false);
+    await settle();
+    expect(inFlight.length).toBe(1);
+    inFlight.shift()?.respond({ id: 7 });
+    await expect(p).resolves.toEqual({ id: 7 });
   });
 });

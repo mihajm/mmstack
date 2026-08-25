@@ -1,6 +1,14 @@
 import { type HttpResourceRequest } from '@angular/common/http';
-import { computed, inject, Injector, signal, untracked } from '@angular/core';
+import {
+  computed,
+  inject,
+  Injector,
+  signal,
+  untracked,
+  type ResourceRef,
+} from '@angular/core';
 import { nestedEffect } from '@mmstack/primitives';
+import { applyResourceRegistration } from './options';
 import {
   queryResource,
   type QueryResourceOptions,
@@ -132,7 +140,20 @@ export function manualQueryResource<TResult, TRaw = TResult>(
     },
   );
 
-  const resource = queryResource(req, options);
+  const resource = queryResource(req, { ...options, register: false });
+
+  // An untriggered manual query is READY, not missing data: with `register: 'suspend'`
+  // the boundary must only hold while a triggered load is in flight.
+  const unregister = applyResourceRegistration(
+    {
+      status: resource.status,
+      isLoading: resource.isLoading,
+      hasValue: () => untracked(trigger).epoch === 0 || resource.hasValue(),
+      abort: () => resource.abort(),
+    } as unknown as ResourceRef<unknown>,
+    options?.register,
+    injector,
+  );
 
   let pending: {
     res: (value: TResult) => void;
@@ -142,6 +163,10 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
   return {
     ...resource,
+    destroy: () => {
+      unregister();
+      resource.destroy();
+    },
     trigger: (override, injectorOverride) => {
       trigger.update((s) => ({
         epoch: s.epoch + 1,

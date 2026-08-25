@@ -788,7 +788,7 @@ export function mutationResource<
       );
     }
   }
-
+  //eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { abort: _abort, ...spreadableResource } = resource;
 
   const ref: MutationResourceRef<TResult, TMutation, TICTX> = {

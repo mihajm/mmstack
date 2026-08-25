@@ -409,7 +409,9 @@ export function streamResource<T, TOut = never>(
               retryTimer = setTimeout(connect, delay);
             },
           });
-          if (!failedSync && !disposed) conn = next;
+          if (failedSync) return;
+          if (disposed) return next.close();
+          conn = next;
           flushOutbox();
         };
 

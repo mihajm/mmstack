@@ -531,7 +531,7 @@ const chat = streamResource<ChatEvent, ChatCommand>(() => '/api/chat/socket', {
 chat.send({ type: 'message', text }); // true = delivered (or queued), false = dropped
 ```
 
-`send()` always writes to whichever connection is live right now, so a reconnect never leaves you holding a dead socket. Without `outbox`, a send while disconnected (connecting, offline, paused, aborted) is dropped and returns `false`; with it, messages queue for the current connection identity: a source change, `reload()`, `abort()` or `destroy()` discards the queue, and once retries are exhausted (`status: 'error'`) `send()` returns `false` rather than queueing into a connection that will never come. The queue is opt-in on purpose: after a long reconnect wait, the whole backlog hits the server at once.
+`send()` always writes to whichever connection is live right now, so a reconnect never leaves you holding a dead socket. Without `outbox`, a send while disconnected (connecting, offline, paused, aborted) is dropped and returns `false`; with it, messages queue for the current connection identity: a source change, `reload()`, `abort()` or `destroy()` discards the queue, and once retries are exhausted (`status: 'error'`) `send()` returns `false` rather than queueing into a connection that will never come. Messages queued before the stream has ever connected (source still `undefined`) are the one exception: with no old connection to be addressed to, they ride into the first one. The queue is opt-in on purpose: after a long reconnect wait, the whole backlog hits the server at once.
 
 ## Caching
 

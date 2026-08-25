@@ -7,7 +7,7 @@ import {
   withNoXsrfProtection,
   type HttpRequest,
 } from '@angular/common/http';
-import { PLATFORM_ID } from '@angular/core';
+import { PLATFORM_ID, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   injectTransitionScope,
@@ -209,5 +209,41 @@ describe('infiniteQueryResource — transition scope integration', () => {
 
     res.destroy();
     expect(scope.resources().length).toBe(0);
+  });
+
+  it('pause: fetchNextPage() while paused is held; the page loads on resume', async () => {
+    const paused = signal(false);
+    const res = TestBed.runInInjectionContext(() =>
+      infiniteQueryResource<PostPage, PostPage, number>(
+        ({ pageParam }) => ({
+          url: 'https://example.test/posts',
+          params: { page: `${pageParam}` },
+        }),
+        {
+          initialPageParam: 0,
+          getNextPageParam: (last) => last.nextCursor,
+          pause: paused,
+        },
+      ),
+    );
+    await settle();
+    inFlight.shift()?.respond(pageFor(0));
+    await settle();
+    expect(res.pages().length).toBe(1);
+
+    paused.set(true);
+    await settle();
+    res.fetchNextPage();
+    await settle();
+    expect(inFlight.length).toBe(0);
+    expect(res.pages().length).toBe(1);
+
+    paused.set(false);
+    await settle();
+    expect(inFlight.length).toBe(1);
+    expect(inFlight[0].url).toContain('page=1');
+    inFlight.shift()?.respond(pageFor(1));
+    await settle();
+    expect(res.pages().length).toBe(2);
   });
 });

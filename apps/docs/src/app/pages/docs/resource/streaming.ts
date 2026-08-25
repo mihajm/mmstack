@@ -35,8 +35,8 @@ import { DocSection } from '../../../layout/doc-section';
           transport. <code>sse()</code> for Server-Sent Events,
           <code>websocket()</code> for a socket, or your own
           <code>StreamTransport</code>. The URL is reactive, same as a query, so
-          changing <code>symbol()</code> tears the old connection down and
-          opens a new one.
+          changing <code>symbol()</code> tears the old connection down and opens
+          a new one.
         </p>
         <docs-code [code]="stream" lang="ts" />
         <p>
@@ -47,7 +47,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
-      <docs-section title="Status and connection are different signals" id="status">
+      <docs-section
+        title="Status and connection are different signals"
+        id="status"
+      >
         <p>
           <code>status()</code> stays <code>'loading'</code> until the first
           message arrives, because a connection with no data yet honestly isn't
@@ -86,18 +89,65 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Disabling and stopping" id="control">
         <p>
           Two levers, and they mean different things. Return
-          <code>undefined</code> from the request function to disconnect
-          (<code>status: 'idle'</code>), the same disable pattern as a query.
+          <code>undefined</code> from the request function to disconnect (<code
+            >status: 'idle'</code
+          >), the same disable pattern as a query.
           <code>abort()</code> disconnects and <em>stays</em> disconnected,
           keeping the current value (<code>status: 'local'</code>) until a
           <code>reload()</code> or a source change brings it back. That is what
-          <code>scope.abortPending()</code> reaches, so a stream cancels
-          cleanly with its transition scope.
+          <code>scope.abortPending()</code> reaches, so a stream cancels cleanly
+          with its transition scope.
         </p>
         <p>
           Streams never connect on the server. A stream never settles, so
           connecting during SSR would wedge serialization. They are client-only
           by design, and there is nothing to configure for that.
+        </p>
+      </docs-section>
+
+      <docs-section title="Pausing" id="pause">
+        <p>
+          A socket kept open for a subtree nobody is looking at is wasted
+          network and wasted server fan-out. The <code>pause</code> option
+          closes the live connection while a condition holds and reconnects the
+          moment it lifts, on a fresh backoff ladder. The current value and
+          status stay put, so nothing flickers on resume. It takes the same
+          forms as the query option: <code>true</code> follows the surrounding
+          Activity boundary, a predicate or
+          <code>Signal&lt;boolean&gt;</code> is read directly.
+        </p>
+        <docs-code [code]="pause" lang="ts" />
+        <p>
+          While paused, <code>connected()</code> is <code>false</code> and a
+          <code>send()</code> behaves exactly as it does while disconnected.
+        </p>
+      </docs-section>
+
+      <docs-section title="Sending messages" id="send">
+        <p>
+          A WebSocket goes both ways, so <code>websocket()</code> is a
+          bidirectional transport and the resource it produces has a
+          <code>send()</code> method. Server-Sent Events are read-only, and so
+          is the resource you get from <code>sse()</code>; the return type
+          follows the transport. Because the socket behind a reconnecting stream
+          changes over time, you never hold it yourself:
+          <code>send()</code> always writes to whichever connection is live.
+        </p>
+        <docs-code [code]="send" lang="ts" />
+        <p>
+          With no open connection (connecting, offline, paused, aborted),
+          <code>send()</code> drops the message and returns <code>false</code>.
+          Opt into <code>outbox: true</code> to queue instead. A queued message
+          is addressed to a connection, not to the resource: it flushes in order
+          on the next open of the same source, a source change,
+          <code>reload()</code>, <code>abort()</code> or
+          <code>destroy()</code> discards it, and once retries are exhausted
+          <code>send()</code> returns <code>false</code> rather than queueing
+          into a connection that will never come. That is a deliberate opt-in,
+          because after a long reconnect wait the whole backlog reaches the
+          server at once. Outgoing messages default to
+          <code>JSON.stringify</code>; pass <code>serialize</code> for binary
+          frames or another wire format.
         </p>
       </docs-section>
 
@@ -112,10 +162,12 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           The <code>transport</code> option is the extension point. A custom
           <code>StreamTransport</code> maps any connection-shaped thing (a
-          shared STOMP client's topic, a worker port) onto
-          <code>emit</code>, <code>open</code>, and <code>fail</code>, and the
-          reconnect and status machinery comes with it. If a consumer wants
-          events rather than the latest-value shape, bridge with
+          shared STOMP client's topic, a worker port) onto <code>emit</code>,
+          <code>open</code>, and <code>fail</code>, and the reconnect and status
+          machinery comes with it. Return a connection with a
+          <code>send</code> method (a <code>BidiStreamTransport</code>) and the
+          resource gains <code>send()</code> too. If a consumer wants events
+          rather than the latest-value shape, bridge with
           <code>toObservable(res.value)</code>.
         </p>
       </docs-section>
@@ -151,6 +203,28 @@ readonly prices = streamResource<PriceTick>(
   // reconnect: { max: 5, backoff: 2_000 },
   // reconnect: 0, // single-shot
 });`;
+
+  protected readonly pause = `readonly prices = streamResource<PriceTick>(() => '/api/prices/stream', {
+  transport: sse(),
+  pause: true, // closed while the Activity boundary is paused
+  // pause: this.tabHidden, // or any Signal<boolean> / predicate
+});`;
+
+  protected readonly send = `readonly chat = streamResource<ChatEvent, ChatCommand>(
+  () => '/api/chat/socket',
+  {
+    transport: websocket(), // bidirectional, so the ref has send()
+    outbox: true, // queue while reconnecting instead of dropping
+  },
+);
+
+sendMessage(text: string) {
+  const delivered = this.chat.send({ type: 'message', text });
+  // false only without outbox, when nothing was there to hand it to
+}
+
+// readonly feed = streamResource<Tick>(() => url, { transport: sse() });
+// feed.send(...) does not exist: sse() is a read-only transport`;
 
   protected readonly deserialize = `streamResource<PriceTick>(() => '/api/prices/stream', {
   transport: sse({

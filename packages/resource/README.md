@@ -207,39 +207,39 @@ queryResource<TResult, TRaw = TResult>(
 
 ### Options
 
-| Option                 | Type                                                   | Default            | What it does                                                                                                   |
-| ---------------------- | ------------------------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `defaultValue`         | `TResult`                                              | –                  | Initial value before the first request resolves. When set, `value()` is `TResult`, not `TResult \| undefined`. |
-| `keepPrevious`         | `boolean`                                              | `false`            | Hold the previous `value`, `status`, and `headers` while a refresh is in flight. Powered by `linkedSignal`.    |
-| `refresh`              | `number \| { interval?, onFocus?, onReconnect? }`      | –                  | Auto-refetch: a number polls every n ms; the object form adds event triggers — `onFocus` refetches when the tab becomes visible again, `onReconnect` when the browser comes back online. Triggers respect disabled/paused state. |
-| `retry`                | `number \| { max, backoff }`                           | `0`                | On failure, retry N times with exponential backoff (default 1000ms × 2^n).                                     |
-| `onError`              | `(err, retryCount, isFinal) => void`                   | –                  | Called on **every** failed attempt. `retryCount` is the number of retries already done (`0` on the first failure). `isFinal` is `true` when no further retry will be scheduled — branch on it to separate per-attempt instrumentation from "user-needs-to-know" side effects. |
-| `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                     |
-| `cache`                | `ResourceCacheOptions`                                 | off                | Enables caching for this resource. See [caching](#caching).                                                    |
-| `triggerOnSameRequest` | `boolean`                                              | `false`            | Re-run even if the request object equals the previous one. Use sparingly.                                      |
-| `register`             | `boolean \| { suspends?: boolean }`                    | `false`            | Auto-register into the nearest transition scope. See [transitions & Suspense](#transitions--suspense).         |
-| `equal`                | `ValueEqualityFn<TResult>`                             | `Object.is`        | Custom equality for the result value (forwarded to `httpResource`).                                            |
-| `equalRequest`         | `(a, b) => boolean`                                    | structural         | Custom equality for the **request** object (controls dedup / refetch). Defaults to a deep structural compare.   |
-| `injector`             | `Injector`                                             | `inject(Injector)` | Use this injector for cache/circuit-breaker resolution. Required if calling outside an injection context.      |
-| `parse`                | `(raw: TRaw) => TResult`                               | identity           | Transform the raw HTTP response. Does not affect cache keys.                                                   |
+| Option                 | Type                                                    | Default            | What it does                                                                                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultValue`         | `TResult`                                               | –                  | Initial value before the first request resolves. When set, `value()` is `TResult`, not `TResult \| undefined`.                                                                                                                                                                |
+| `keepPrevious`         | `boolean`                                               | `false`            | Hold the previous `value`, `status`, and `headers` while a refresh is in flight. Powered by `linkedSignal`.                                                                                                                                                                   |
+| `refresh`              | `number \| { interval?, onFocus?, onReconnect? }`       | –                  | Auto-refetch: a number polls every n ms; the object form adds event triggers — `onFocus` refetches when the tab becomes visible again, `onReconnect` when the browser comes back online. Triggers respect disabled/paused state.                                              |
+| `retry`                | `number \| { max, backoff }`                            | `0`                | On failure, retry N times with exponential backoff (default 1000ms × 2^n).                                                                                                                                                                                                    |
+| `onError`              | `(err, retryCount, isFinal) => void`                    | –                  | Called on **every** failed attempt. `retryCount` is the number of retries already done (`0` on the first failure). `isFinal` is `true` when no further retry will be scheduled — branch on it to separate per-attempt instrumentation from "user-needs-to-know" side effects. |
+| `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                                                                                                                                                                                    |
+| `cache`                | `ResourceCacheOptions`                                  | off                | Enables caching for this resource. See [caching](#caching).                                                                                                                                                                                                                   |
+| `triggerOnSameRequest` | `boolean`                                               | `false`            | Re-run even if the request object equals the previous one. Use sparingly.                                                                                                                                                                                                     |
+| `register`             | `boolean \| { suspends?: boolean }`                     | `false`            | Auto-register into the nearest transition scope. See [transitions & Suspense](#transitions--suspense).                                                                                                                                                                        |
+| `equal`                | `ValueEqualityFn<TResult>`                              | `Object.is`        | Custom equality for the result value (forwarded to `httpResource`).                                                                                                                                                                                                           |
+| `equalRequest`         | `(a, b) => boolean`                                     | structural         | Custom equality for the **request** object (controls dedup / refetch). Defaults to a deep structural compare.                                                                                                                                                                 |
+| `injector`             | `Injector`                                              | `inject(Injector)` | Use this injector for cache/circuit-breaker resolution. Required if calling outside an injection context.                                                                                                                                                                     |
+| `parse`                | `(raw: TRaw) => TResult`                                | identity           | Transform the raw HTTP response. Does not affect cache keys.                                                                                                                                                                                                                  |
 
 ### Return shape (`QueryResourceRef<T>`)
 
-| Member       | Type                                       | Notes                                                                                         |
-| ------------ | ------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `value`      | `WritableSignal<T>`                        | The current value. Writable so optimistic mutations can update it.                            |
-| `status`     | `Signal<ResourceStatus>`                   | `'idle' \| 'loading' \| 'error' \| 'reloading' \| 'resolved' \| …`                            |
-| `error`      | `Signal<unknown>`                          | –                                                                                             |
-| `headers`    | `WritableSignal<HttpHeaders \| undefined>` | Held when `keepPrevious: true`.                                                               |
-| `statusCode` | `WritableSignal<number \| undefined>`      | –                                                                                             |
-| `isLoading`  | `Signal<boolean>`                          | –                                                                                             |
-| `hasValue`   | `Signal<boolean>`                          | –                                                                                             |
-| `disabled`       | `Signal<boolean>`                                       | `true` when network is offline, circuit breaker is open, or `request()` returned `undefined`. |
-| `disabledReason` | `Signal<'offline' \| 'circuit-open' \| 'no-request' \| null>` | Why the resource is disabled. `null` when enabled. Branch your UI on this rather than parsing combined state. |
-| `reload`     | `() => void`                               | Force a refetch (ignores `staleTime` for the next request).                                   |
-| `abort`      | `() => void`                               | Cancel the in-flight load, keeping the current value (`status` → `'local'`). The request is genuinely torn down and an aborted response never reaches the cache; a later `reload()`/request change loads normally. No-op when idle. `scope.abortPending()` calls this. |
-| `prefetch`   | `(req?) => Promise<void>`                  | Warm the cache without subscribing. Silently skips on slow connections (`saveData` / 2g).     |
-| `destroy`    | `() => void`                               | –                                                                                             |
+| Member           | Type                                                          | Notes                                                                                                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `value`          | `WritableSignal<T>`                                           | The current value. Writable so optimistic mutations can update it.                                                                                                                                                                                                     |
+| `status`         | `Signal<ResourceStatus>`                                      | `'idle' \| 'loading' \| 'error' \| 'reloading' \| 'resolved' \| …`                                                                                                                                                                                                     |
+| `error`          | `Signal<unknown>`                                             | –                                                                                                                                                                                                                                                                      |
+| `headers`        | `WritableSignal<HttpHeaders \| undefined>`                    | Held when `keepPrevious: true`.                                                                                                                                                                                                                                        |
+| `statusCode`     | `WritableSignal<number \| undefined>`                         | –                                                                                                                                                                                                                                                                      |
+| `isLoading`      | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
+| `hasValue`       | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
+| `disabled`       | `Signal<boolean>`                                             | `true` when network is offline, circuit breaker is open, or `request()` returned `undefined`.                                                                                                                                                                          |
+| `disabledReason` | `Signal<'offline' \| 'circuit-open' \| 'no-request' \| null>` | Why the resource is disabled. `null` when enabled. Branch your UI on this rather than parsing combined state.                                                                                                                                                          |
+| `reload`         | `() => void`                                                  | Force a refetch (ignores `staleTime` for the next request).                                                                                                                                                                                                            |
+| `abort`          | `() => void`                                                  | Cancel the in-flight load, keeping the current value (`status` → `'local'`). The request is genuinely torn down and an aborted response never reaches the cache; a later `reload()`/request change loads normally. No-op when idle. `scope.abortPending()` calls this. |
+| `prefetch`       | `(req?) => Promise<void>`                                     | Warm the cache without subscribing. Silently skips on slow connections (`saveData` / 2g).                                                                                                                                                                              |
+| `destroy`        | `() => void`                                                  | –                                                                                                                                                                                                                                                                      |
 
 ### Raw responses: `queryResource.text` / `.arrayBuffer` / `.blob`
 
@@ -336,21 +336,24 @@ Queued mutations sit in a signal-backed queue and execute one at a time. The que
 Take the queue one step further: with `persist`, accepted-but-unsettled mutations survive an **app close** (IndexedDB) and replay when a `mutationResource` with the same `persist.key` is next instantiated while online — or on network regain:
 
 ```typescript
-mutationResource((n: Note) => ({ url: '/api/notes', method: 'POST', body: n }), {
-  queue: true,
-  persist: {
-    key: 'save-note', // stable identity of this mutation KIND across sessions
-    // serialize / deserialize for non-structured-cloneable payloads; ttl (default 7 days);
-    // keepOnError: boolean | (err, { replayed }) => boolean — retry transient failures
+mutationResource(
+  (n: Note) => ({ url: '/api/notes', method: 'POST', body: n }),
+  {
+    queue: true,
+    persist: {
+      key: 'save-note', // stable identity of this mutation KIND across sessions
+      // serialize / deserialize for non-structured-cloneable payloads; ttl (default 7 days);
+      // keepOnError: boolean | (err, { replayed }) => boolean — retry transient failures
+    },
   },
-});
+);
 ```
 
 Replay runs through the normal lifecycle — `onMutate`/`onSuccess`/`onError` fire with their lexical closures intact (which is why activation is at resource instantiation), and `onError` receives `{ replayed: true }` so reconciliation policy stays yours. Ordering is per-key FIFO for queued resources; a non-queue resource replays only the newest stash (its usual latest-wins). `invalidates` fires for replayed successes too, so server truth wins after a replay.
 
 For "3 changes waiting to sync" UX there's `injectPendingMutations()` — a live signal of every stashed mutation across the app, plus a `flush()` for a manual "sync now" button.
 
-**Multi-tab apps are handled**: a per-key Web Lock elects ONE tab as the replayer (no double-sends), a dying tab hands over automatically (Web Locks release on close/crash, and the successor re-syncs from disk first — settled rows never re-send, leftovers replay), and pending badges stay live across tabs via `BroadcastChannel`. A row stashed by a *living* sibling tab is visible everywhere but only ever sent by its owner.
+**Multi-tab apps are handled**: a per-key Web Lock elects ONE tab as the replayer (no double-sends), a dying tab hands over automatically (Web Locks release on close/crash, and the successor re-syncs from disk first — settled rows never re-send, leftovers replay), and pending badges stay live across tabs via `BroadcastChannel`. A row stashed by a _living_ sibling tab is visible everywhere but only ever sent by its owner.
 
 **The honest limit is delivery, not tabs**: semantics are AT-LEAST-ONCE — a close between sending a replay and its response re-sends next time. Make replayed requests idempotent (e.g. an idempotency-key header derived from the stash) and you're safe everywhere.
 
@@ -359,9 +362,12 @@ For "3 changes waiting to sync" UX there's `injectPendingMutations()` — a live
 After a successful mutation, related query caches usually need refreshing. Instead of wiring `injectQueryCache().invalidatePrefix(...)` into `onSuccess` by hand, declare it:
 
 ```typescript
-mutationResource((p: Post) => ({ url: '/api/posts', method: 'POST', body: p }), {
-  invalidates: ['/api/posts'], // every cached entry under /api/posts (any method, params, subpaths, varyHeaders variants)
-});
+mutationResource(
+  (p: Post) => ({ url: '/api/posts', method: 'POST', body: p }),
+  {
+    invalidates: ['/api/posts'], // every cached entry under /api/posts (any method, params, subpaths, varyHeaders variants)
+  },
+);
 
 // or derived from the result:
 mutationResource(request, {
@@ -369,7 +375,7 @@ mutationResource(request, {
 });
 ```
 
-Strings are URL prefixes matched against the request URL of every cached entry, regardless of HTTP method (so a POST-bodied search cached under the same URL is cleared too). Plain prefix matching also catches sibling paths sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` or an exact URL to narrow. Keys a custom `hash` merely *prepends* a namespace to (e.g. a tenant/`sub`) are still matched; keys that abandon the auto shape entirely need an `invalidateMatcher: (urlPrefix) => (key) => boolean` (set per-mutation or globally via `provideMutationResourceOptions`), or manual `injectQueryCache().invalidateWhere`.
+Strings are URL prefixes matched against the request URL of every cached entry, regardless of HTTP method (so a POST-bodied search cached under the same URL is cleared too). Plain prefix matching also catches sibling paths sharing the prefix (`/api/posts-archive`) — pass `'/api/posts/'` or an exact URL to narrow. Keys a custom `hash` merely _prepends_ a namespace to (e.g. a tenant/`sub`) are still matched; keys that abandon the auto shape entirely need an `invalidateMatcher: (urlPrefix) => (key) => boolean` (set per-mutation or globally via `provideMutationResourceOptions`), or manual `injectQueryCache().invalidateWhere`.
 
 ### Re-firing with an identical body (`triggerOnSameRequest`)
 
@@ -409,14 +415,14 @@ readonly pct = computed(() => {
 
 ### Return shape (`MutationResourceRef<T, TMutation>`)
 
-| Member                                        | Type                                       | Notes                                                  |
-| --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
-| `mutate`                                      | `(value, ctx?) => void`                    | Trigger the mutation (fire-and-forget).               |
-| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`        | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`. |
-| `current`                                     | `Signal<TMutation \| null>`                | The value currently being mutated (or `null` if idle). |
-| `progress`                                    | `Signal<HttpProgressEvent \| undefined>`   | Upload/download progress when `reportProgress: true`.  |
-| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                   | –                                                      |
-| `headers` / `statusCode`                      | as in `QueryResourceRef`                   | Response metadata, when available.                     |
+| Member                                        | Type                                     | Notes                                                                                 |
+| --------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| `mutate`                                      | `(value, ctx?) => void`                  | Trigger the mutation (fire-and-forget).                                               |
+| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`      | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`. |
+| `current`                                     | `Signal<TMutation \| null>`              | The value currently being mutated (or `null` if idle).                                |
+| `progress`                                    | `Signal<HttpProgressEvent \| undefined>` | Upload/download progress when `reportProgress: true`.                                 |
+| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                 | –                                                                                     |
+| `headers` / `statusCode`                      | as in `QueryResourceRef`                 | Response metadata, when available.                                                    |
 
 (Mutations deliberately don't expose `value`, `hasValue`, `set`, `update`, or `prefetch` — those don't make sense for one-off writes.)
 
@@ -436,7 +442,10 @@ onSubmit() {
 }
 ```
 
-`.trigger()` re-evaluates the `request()` function and fires. Everything else (`value`, `status`, `error`, retry, cache, etc.) works identically.
+`.trigger()` re-evaluates the `request()` function and fires. Everything else (`value`, `status`, `error`, retry, cache, etc.) works identically, with two manual-specific rules:
+
+- `register: 'suspend'` treats an untriggered query as ready. A suspense boundary only holds while a triggered load is in flight, so a page with an export button never blanks waiting for a click.
+- `pause` holds a `trigger()` made while paused: the request fires on resume and the returned promise settles from it (several triggers while paused collapse into one request).
 
 ## `infiniteQueryResource`
 
@@ -447,16 +456,16 @@ const posts = infiniteQueryResource<PostPage, PostPage, number>(
   ({ pageParam }) => ({ url: '/api/posts', params: { page: pageParam } }),
   {
     initialPageParam: 0,
-    getNextPageParam: (last, all) => (last.items.length < 20 ? null : all.length),
+    getNextPageParam: (last, all) =>
+      last.items.length < 20 ? null : all.length,
     cache: true,
   },
 );
 ```
 
 ```html
-@for (page of posts.pages(); track $index) {
-  @for (post of page.items; track post.id) { ... }
-}
+@for (page of posts.pages(); track $index) { @for (post of page.items; track
+post.id) { ... } }
 <button (click)="posts.fetchNextPage()" [disabled]="!posts.hasNextPage()">
   @if (posts.isFetchingNextPage()) { Loading… } @else { Load more }
 </button>
@@ -485,10 +494,13 @@ A live-connection resource with the standard status surface — so a stream part
 ```typescript
 import { streamResource, sse, websocket } from '@mmstack/resource';
 
-const prices = streamResource<PriceTick>(() => `/api/prices/${symbol()}/stream`, {
-  transport: sse(), // or websocket(), or your own StreamTransport
-  register: 'indicator',
-});
+const prices = streamResource<PriceTick>(
+  () => `/api/prices/${symbol()}/stream`,
+  {
+    transport: sse(), // or websocket(), or your own StreamTransport
+    register: 'indicator',
+  },
+);
 
 prices.value(); // the latest message
 prices.connected(); // live-connection indicator (the dot in the corner)
@@ -497,13 +509,29 @@ prices.connected(); // live-connection indicator (the dot in the corner)
 Semantics, in the order you'll meet them:
 
 - **`status` is `'loading'` until the first message** — a connection with no data yet is honestly not ready — then `'resolved'` with `value` tracking every message. `connected` is a separate signal: connection state for UX, independent of data readiness.
-- **Drops reconnect, the value holds.** Connection failures retry with exponential backoff (1s base, 30s cap, **persistent by default** — a live connection's job is to be alive; pass `reconnect: 0` for single-shot or `{ max, backoff }` to tune). The last value stays readable through the outage; only *exhausted* retries surface as `status: 'error'`, and `reload()` starts a fresh attempt budget.
+- **Drops reconnect, the value holds.** Connection failures retry with exponential backoff (1s base, 30s cap, **persistent by default** — a live connection's job is to be alive; pass `reconnect: 0` for single-shot or `{ max, backoff }` to tune). The last value stays readable through the outage; only _exhausted_ retries surface as `status: 'error'`, and `reload()` starts a fresh attempt budget.
 - **Offline-aware**: while offline nothing burns attempts; regain reconnects immediately with a fresh ladder.
 - **Reactive source**: a URL change tears the old connection down and connects anew; returning `undefined` disconnects (`status: 'idle'`) — the disable lever.
-- **`abort()`** disconnects and *stays* disconnected, keeping the current value (`status: 'local'`) — so `scope.abortPending()` reaches streams; `reload()` or a source change resumes.
+- **`abort()`** disconnects and _stays_ disconnected, keeping the current value (`status: 'local'`) — so `scope.abortPending()` reaches streams; `reload()` or a source change resumes.
+- **`pause`** closes the live connection while a condition holds (`true` = the surrounding Activity boundary, or any predicate / `Signal<boolean>`) and reconnects on a fresh ladder when it lifts. Value and status are kept, so nothing flickers on resume; `connected()` is `false` meanwhile.
 - **SSR-safe by never connecting on the server** (a stream never settles, so connecting would wedge serialization). Streams are client-only by design.
 
-Messages default to `JSON.parse`; both built-ins take a `deserialize` (and `sse()` an `event` name, `websocket()` `protocols`). The `transport` seam is the extension point — a custom `StreamTransport` maps any connection-shaped thing (a shared STOMP client's topic subscription, a worker port) onto `emit`/`open`/`fail`, and the reconnect/status machinery comes free. Event-shaped consumers (streams of commands rather than state) bridge with `toObservable(res.value)`.
+Messages default to `JSON.parse`; both built-ins take a `deserialize` (and `sse()` an `event` name, `websocket()` `protocols`). The `transport` seam is the extension point: a custom `StreamTransport` maps any connection-shaped thing (a shared STOMP client's topic subscription, a worker port) onto `emit`/`open`/`fail`, and the reconnect/status machinery comes free. Event-shaped consumers (streams of commands rather than state) bridge with `toObservable(res.value)`.
+
+### Sending messages (bidirectional streams)
+
+The return type follows the transport. `sse()` is read-only; `websocket()` (or any custom transport whose connection has a `send` method, a `BidiStreamTransport`) yields a `BidiStreamResourceRef` with `send()`:
+
+```typescript
+const chat = streamResource<ChatEvent, ChatCommand>(() => '/api/chat/socket', {
+  transport: websocket(), // serialize defaults to JSON.stringify
+  outbox: true, // optional: queue while disconnected, flush in order on open
+});
+
+chat.send({ type: 'message', text }); // true = delivered (or queued), false = dropped
+```
+
+`send()` always writes to whichever connection is live right now, so a reconnect never leaves you holding a dead socket. Without `outbox`, a send while disconnected (connecting, offline, paused, aborted) is dropped and returns `false`; with it, messages queue for the current connection identity: a source change, `reload()`, `abort()` or `destroy()` discards the queue, and once retries are exhausted (`status: 'error'`) `send()` returns `false` rather than queueing into a connection that will never come. The queue is opt-in on purpose: after a long reconnect wait, the whole backlog hits the server at once.
 
 ## Caching
 

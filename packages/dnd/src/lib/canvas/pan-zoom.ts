@@ -15,6 +15,7 @@ import { resolveElement, resolveSignal } from '../internal/resolve';
 import type { DragHandleLike, Resolvable } from '../internal/types';
 import { clamp } from './geometry';
 import type { CanvasSpaceTransform } from './session';
+import { suppressNativePinch, zoomWheelDelta } from './wheel';
 
 export type PanZoomOptions = {
   /** Mouse buttons that pan. @default [1] (middle) */
@@ -23,7 +24,7 @@ export type PanZoomOptions = {
   wheelZoom?: boolean;
   minScale?: number;
   maxScale?: number;
-  /** Wheel zoom sensitivity. @default 0.0015 */
+  /** Wheel zoom sensitivity. @default Math.LN2 * 0.002 (d3-zoom's exact feel) */
   zoomSpeed?: number;
   disabled?: Resolvable<boolean>;
 };
@@ -78,7 +79,7 @@ export function panZoom(
     wheelZoom = true,
     minScale = 0.1,
     maxScale = 8,
-    zoomSpeed = 0.0015,
+    zoomSpeed = Math.LN2 * 0.002,
   } = opts;
 
   const pan = pointerDrag({ target: elSig, buttons: panButtons });
@@ -123,7 +124,7 @@ export function panZoom(
         const localY = e.clientY - o.top;
         const t = untracked(transform);
         const nextScale = clamp(
-          t.scale * Math.exp(-e.deltaY * zoomSpeed),
+          t.scale * Math.exp(-zoomWheelDelta(e) * zoomSpeed),
           minScale,
           maxScale,
         );
@@ -137,7 +138,11 @@ export function panZoom(
         });
       };
       el.addEventListener('wheel', handler, { passive: false });
-      cleanup(() => el.removeEventListener('wheel', handler));
+      const releasePinch = suppressNativePinch(el);
+      cleanup(() => {
+        el.removeEventListener('wheel', handler);
+        releasePinch();
+      });
     });
   }
 

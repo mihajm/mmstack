@@ -1,4 +1,19 @@
-import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  LOCALE_ID,
+  computed,
+  inject,
+  runInInjectionContext,
+  signal,
+  type Signal,
+} from '@angular/core';
+import { provideLocaleSource } from './locale-source';
+import {
+  provideTranslationOverrides,
+  type TranslationOverrides,
+} from './translation-overrides';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
@@ -738,6 +753,7 @@ describe('translation-store', () => {
           provideIntlConfig({
             defaultLocale: 'en-US',
             supportedLocales: ['en-US', 'sl-SI'],
+            messageFormatOpts: { requiresOtherClause: false },
           }),
           { provide: Router, useValue: { options: {} } },
           { provide: ActivatedRoute, useValue: routeMock },
@@ -790,6 +806,273 @@ describe('translation-store', () => {
       expect(store.formatMessage('ns1::MMT_DELIM::key')).toBe('val1');
       expect(store.formatMessage('ns2::MMT_DELIM::key')).toBe('val2');
     });
+
+    it('replaceNamespace drops stale keys instead of merging', () => {
+      store.register('live', {
+        'en-US': { kept: 'old kept', stale: 'stale value' },
+        'sl-SI': { kept: 'staro', stale: 'zastarelo' },
+      });
+
+      store.replaceNamespace('live', {
+        'en-US': { kept: 'new kept', fresh: 'fresh value' },
+      });
+
+      expect(store.formatMessage('live::MMT_DELIM::kept')).toBe('new kept');
+      expect(store.formatMessage('live::MMT_DELIM::fresh')).toBe(
+        'fresh value',
+      );
+      expect(store.formatMessage('live::MMT_DELIM::stale')).toBe('');
+
+      store.locale.set('sl-SI');
+      // sl-SI was not part of the replacement — its old keys are gone too
+      // (kept falls back to the new en-US default)
+      expect(store.formatMessage('live::MMT_DELIM::kept')).toBe('new kept');
+      expect(store.formatMessage('live::MMT_DELIM::stale')).toBe('');
+    });
+
+    it('replaceNamespace leaves sibling namespaces untouched', () => {
+      store.register('a', { 'en-US': { key: 'a-val' } });
+      store.register('ab', { 'en-US': { key: 'ab-val' } });
+
+      store.replaceNamespace('a', { 'en-US': { key: 'a-new' } });
+
+      expect(store.formatMessage('a::MMT_DELIM::key')).toBe('a-new');
+      // 'ab' shares 'a' as a string prefix but not as a namespace
+      expect(store.formatMessage('ab::MMT_DELIM::key')).toBe('ab-val');
+    });
+
+    it('select without an `other` arm is a strict enumeration', () => {
+      store.register('sel', {
+        'en-US': { kind: '{k, select, a {Alpha} b {Beta}}' },
+      });
+
+      expect(store.formatMessage('sel::MMT_DELIM::kind', { k: 'a' })).toBe(
+        'Alpha',
+      );
+      expect(store.formatMessage('sel::MMT_DELIM::kind', { k: 'b' })).toBe(
+        'Beta',
+      );
+    });
+
+    it('select with `other`: an explicit undefined value routes to the other arm', () => {
+      store.register('sel', {
+        'en-US': { kind: '{k, select, a {Alpha} other {Fallback}}' },
+      });
+
+      expect(
+        store.formatMessage('sel::MMT_DELIM::kind', {
+          k: undefined as unknown as string,
+        }),
+      ).toBe('Fallback');
+      expect(store.formatMessage('sel::MMT_DELIM::kind', { k: 'zzz' })).toBe(
+        'Fallback',
+      );
+    });
+
+    it('removeNamespace drops all keys across locales', () => {
+      store.register('gone', {
+        'en-US': { key: 'value' },
+        'sl-SI': { key: 'vrednost' },
+      });
+      store.register('stays', { 'en-US': { key: 'still here' } });
+
+      store.removeNamespace('gone');
+
+      expect(store.formatMessage('gone::MMT_DELIM::key')).toBe('');
+      expect(store.formatMessage('stays::MMT_DELIM::key')).toBe('still here');
+    });
+  });
+});
+
+describe('translation overrides', () => {
+  const setup = (overrides: Signal<TranslationOverrides | null>) => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        provideIntlConfig({
+          defaultLocale: 'en-US',
+          supportedLocales: ['en-US', 'sl-SI'],
+        }),
+        provideTranslationOverrides(overrides),
+      ],
+    });
+    return TestBed.inject(TranslationStore);
+  };
+
+  it('overlays overrides reactively over registered translations, zero registration', () => {
+    const overrides = signal<TranslationOverrides | null>({
+      'en-US': { app: { title: 'Draft title', nested: { deep: 'Deep' } } },
+    });
+    const store = setup(overrides);
+    store.register('app', {
+      'en-US': { title: 'Registered title', keep: 'Kept' },
+    });
+
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Draft title');
+    expect(store.formatMessage('app::MMT_DELIM::keep')).toBe('Kept');
+    expect(store.formatMessage('app::MMT_DELIM::nested::MMT_DELIM::deep')).toBe(
+      'Deep',
+    );
+
+    overrides.set({ 'en-US': { app: { title: 'Edited' } } });
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Edited');
+    expect(store.formatMessage('app::MMT_DELIM::keep')).toBe('Kept');
+  });
+
+  it('null overrides fall through to registered behavior', () => {
+    const overrides = signal<TranslationOverrides | null>(null);
+    const store = setup(overrides);
+    store.register('app', { 'en-US': { title: 'Registered' } });
+
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Registered');
+  });
+
+  it('locale switch fully covered by overrides is instant — zero loading', async () => {
+    const overrides = signal<TranslationOverrides | null>({
+      'en-US': { app: { title: 'Title' } },
+      'sl-SI': { app: { title: 'Naslov' } },
+    });
+    const store = setup(overrides);
+    const locale = TestBed.runInInjectionContext(() => injectDynamicLocale());
+
+    locale.set('sl-SI');
+
+    // the switch is synchronous — no load queue, no resource round-trip
+    expect(store.locale()).toBe('sl-SI');
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Naslov');
+
+    // the loader resource never received work for this switch
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(locale.isLoading()).toBe(false);
+    expect(store.loadQueue()).toEqual([]);
+  });
+});
+
+describe('locale source', () => {
+  const setup = (source: Signal<string | null>) => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        provideIntlConfig({
+          defaultLocale: 'en-US',
+          supportedLocales: ['en-US', 'sl-SI', 'de-DE'],
+        }),
+        provideLocaleSource(source),
+        provideTranslationOverrides(
+          signal<TranslationOverrides | null>({
+            'en-US': { app: { title: 'Title' } },
+            'sl-SI': { app: { title: 'Naslov' } },
+            'de-DE': { app: { title: 'Titel' } },
+          }),
+        ),
+      ],
+    });
+    return TestBed.inject(TranslationStore);
+  };
+
+  it('the source drives the locale reactively', () => {
+    const source = signal<string | null>('sl-SI');
+    const store = setup(source);
+
+    expect(store.locale()).toBe('sl-SI');
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Naslov');
+
+    source.set('de-DE');
+    expect(store.locale()).toBe('de-DE');
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Titel');
+  });
+
+  it('a null source falls back to the default locale', () => {
+    const source = signal<string | null>(null);
+    const store = setup(source);
+
+    expect(store.locale()).toBe('en-US');
+  });
+
+  it('local writes override until the source emits again — then the source wins', () => {
+    const source = signal<string | null>('en-US');
+    const store = setup(source);
+    const locale = TestBed.runInInjectionContext(() => injectDynamicLocale());
+
+    locale.set('sl-SI');
+    expect(store.locale()).toBe('sl-SI');
+
+    source.set('de-DE');
+    expect(store.locale()).toBe('de-DE');
+    expect(store.formatMessage('app::MMT_DELIM::title')).toBe('Titel');
+  });
+});
+
+describe('scoped translation stores', () => {
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        provideIntlConfig({
+          defaultLocale: 'en-US',
+          supportedLocales: ['en-US', 'de-DE'],
+        }),
+      ],
+    });
+  });
+
+  it('provideIntlConfig in a child environment injector creates an independent store', () => {
+    const root = TestBed.inject(EnvironmentInjector);
+    const child = createEnvironmentInjector(
+      [
+        provideIntlConfig({
+          defaultLocale: 'sl-SI',
+          supportedLocales: ['sl-SI', 'en-US'],
+        }),
+      ],
+      root,
+    );
+
+    const rootStore = TestBed.inject(TranslationStore);
+    const childStore = child.get(TranslationStore);
+
+    expect(childStore).not.toBe(rootStore);
+    expect(rootStore.locale()).toBe('en-US');
+    expect(childStore.locale()).toBe('sl-SI');
+
+    rootStore.locale.set('de-DE');
+    expect(childStore.locale()).toBe('sl-SI');
+
+    child.destroy();
+  });
+
+  it('injectDynamicLocale resolves the scope it runs in', () => {
+    const root = TestBed.inject(EnvironmentInjector);
+    const child = createEnvironmentInjector(
+      [
+        provideIntlConfig({
+          defaultLocale: 'sl-SI',
+          supportedLocales: ['sl-SI', 'en-US'],
+        }),
+      ],
+      root,
+    );
+
+    const rootLocale = TestBed.runInInjectionContext(() =>
+      injectDynamicLocale(),
+    );
+    const childLocale = runInInjectionContext(child, () =>
+      injectDynamicLocale(),
+    );
+
+    expect(rootLocale()).toBe('en-US');
+    expect(childLocale()).toBe('sl-SI');
+
+    child.destroy();
+  });
+
+  it('a child injector without its own config inherits the outer store', () => {
+    const root = TestBed.inject(EnvironmentInjector);
+    const child = createEnvironmentInjector([], root);
+
+    expect(child.get(TranslationStore)).toBe(TestBed.inject(TranslationStore));
+
+    child.destroy();
   });
 });
 

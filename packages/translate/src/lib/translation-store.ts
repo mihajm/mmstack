@@ -5,6 +5,7 @@ import {
   Injectable,
   InjectionToken,
   isDevMode,
+  linkedSignal,
   LOCALE_ID,
   type Provider,
   resource,
@@ -20,15 +21,40 @@ import {
   NavigationEnd,
   Router,
 } from '@angular/router';
-import { createIntl, createIntlCache, type IntlConfig } from '@formatjs/intl';
+import {
+  createIntl,
+  createIntlCache,
+  type IntlConfig,
+  type IntlShape,
+} from '@formatjs/intl';
 import { filter, map } from 'rxjs';
-import { type CompiledTranslation } from './compile';
+import { type CompiledTranslation, compileTranslation } from './compile';
 import { prependDelim } from './delim';
+import { LOCALE_SOURCE } from './locale-source';
 import { type UnknownStringKeyObject } from './string-key-object.type';
+import { TRANSLATION_OVERRIDES } from './translation-overrides';
+
+/**
+ * Options forwarded to `IntlMessageFormat` on every message format — parser
+ * options (`requiresOtherClause`, `ignoreTag`, …) included. Derived from the
+ * installed `@formatjs/intl` signature so it can never drift from it.
+ */
+export type MessageFormatOpts = NonNullable<
+  Parameters<IntlShape['formatMessage']>[2]
+>;
 
 type BaseConfig = Omit<IntlConfig, 'locale' | 'messages'> & {
   /** Checks next locale is in provided array before switching locales */
   supportedLocales?: string[];
+  /**
+   * Forwarded to `IntlMessageFormat` on every format call. Stock ICU behavior
+   * when omitted. Example: `{ requiresOtherClause: false }` lets a `select`
+   * without an `other` arm act as a strict enumeration — useful when the
+   * caller's value set is closed (e.g. enforced by generated `withParams`
+   * types), so the catch-all arm is provably unnecessary. Keep `other` on
+   * `plural`/`selectordinal` either way — their domain is unbounded.
+   */
+  messageFormatOpts?: MessageFormatOpts;
   /** Preloads the default locale ensuring sync fallback, not necessary for most cases as it will lazily load automatically when needed */
   preloadDefaultLocale?: boolean;
   /**
@@ -73,6 +99,15 @@ const CONFIG_TOKEN = new InjectionToken<Config>('mmstack-intl-config');
  * it's also wired as Angular's `LOCALE_ID` so Angular pipes and CLDR fall
  * back to the same locale.
  *
+ * Also provides a `TranslationStore` instance scoped to the injector the config
+ * is registered in. At bootstrap (the common case) that is the root injector —
+ * identical to the store's tree-shakable root provider. Registered in a child
+ * environment injector instead, it creates an independent translation scope:
+ * its own active locale, translations, and caches, resolved by everything
+ * instantiated under that injector. Provide it at the injector that encloses
+ * every consumer of the scope — a resolver or service living above it still
+ * sees the outer store.
+ *
  * @param config Intl configuration: extends `@formatjs/intl`'s `IntlConfig`
  *   with `supportedLocales`, `preloadDefaultLocale`, `releaseCachedSignals`,
  *   and either `localeParamName` (route-based) or `localeStorage` (dynamic).
@@ -97,6 +132,7 @@ const CONFIG_TOKEN = new InjectionToken<Config>('mmstack-intl-config');
  */
 export function provideIntlConfig(config: Config): Provider[] {
   const providers: Provider[] = [
+    TranslationStore,
     {
       useFactory: (localeId: string) => {
         const next = {
@@ -340,6 +376,30 @@ export class TranslationStore {
     >
   >();
 
+  private readonly overrides = inject(TRANSLATION_OVERRIDES, {
+    optional: true,
+  });
+
+  private readonly effectiveTranslations = computed(() => {
+    const overrides = this.overrides?.() ?? null;
+    const base = this.translations();
+    if (!overrides) return base;
+
+    const merged = { ...base };
+    for (const [locale, namespaces] of Object.entries(overrides)) {
+      if (!namespaces) continue;
+      const localeTranslation = { ...(merged[locale] ?? {}) };
+      for (const [namespace, translation] of Object.entries(namespaces)) {
+        const flat = compileTranslation(translation, namespace).flat;
+        for (const [key, value] of Object.entries(flat)) {
+          localeTranslation[prependDelim(namespace, key)] = value;
+        }
+      }
+      merged[locale] = localeTranslation;
+    }
+    return merged;
+  });
+
   private readonly nonMessageConfig = computed(() => ({
     ...this.config,
     locale: this.locale(),
@@ -347,8 +407,8 @@ export class TranslationStore {
 
   private readonly messages = computed(
     () =>
-      this.translations()[this.locale()] ??
-      this.translations()[this.defaultLocale] ??
+      this.effectiveTranslations()[this.locale()] ??
+      this.effectiveTranslations()[this.defaultLocale] ??
       {},
   );
 
@@ -425,8 +485,20 @@ export class TranslationStore {
     ),
   );
 
+  private readonly localeSource = inject(LOCALE_SOURCE, { optional: true });
+
   constructor() {
-    this.locale = initLocale(proxyToGlobalSingleton(signal('en-US')));
+    const source = this.localeSource;
+
+    this.locale = source
+      ? proxyToGlobalSingleton(
+          linkedSignal<string | null, string>({
+            source,
+            computation: (next, prev) =>
+              next ?? prev?.value ?? this.defaultLocale,
+          }),
+        )
+      : initLocale(proxyToGlobalSingleton(signal('en-US')));
     const paramName = this.config?.localeParamName;
     if (paramName) {
       const router = inject(Router);
@@ -481,7 +553,8 @@ export class TranslationStore {
       this.loadQueue.update((q) => q.filter((l) => l !== requested));
 
       const hasTranslations =
-        dynamicLocales.locales.length > 0 || !!this.translations()[requested];
+        dynamicLocales.locales.length > 0 ||
+        !!this.effectiveTranslations()[requested];
 
       if (!hasTranslations && !dataOnly && isDevMode()) {
         console.warn(
@@ -536,8 +609,8 @@ export class TranslationStore {
     values?: Record<string, string | number>,
   ) {
     const message =
-      this.translations()[this.locale()]?.[key] ??
-      this.translations()[this.defaultLocale]?.[key] ??
+      this.effectiveTranslations()[this.locale()]?.[key] ??
+      this.effectiveTranslations()[this.defaultLocale]?.[key] ??
       '';
 
     if (!message) {
@@ -563,6 +636,7 @@ export class TranslationStore {
     return this.intl().formatMessage(
       { id: key, defaultMessage: message },
       values,
+      this.config?.messageFormatOpts,
     );
   }
 
@@ -595,6 +669,70 @@ export class TranslationStore {
     });
   }
 
+  replaceNamespace(
+    namespace: string,
+    flat: Partial<Record<string, Record<string, string>>>,
+  ) {
+    const prefix = prependDelim(namespace, '');
+
+    this.translations.update((cur) => {
+      const withoutNS = Object.fromEntries(
+        Object.entries(cur).map(([locale, translation]) => [
+          locale,
+          Object.fromEntries(
+            Object.entries(translation).filter(
+              ([key]) => !key.startsWith(prefix),
+            ),
+          ),
+        ]),
+      );
+
+      return Object.entries(flat).reduce(
+        (acc, [locale, translation]) => {
+          const localeTranslation = acc[locale] ?? {};
+
+          const withNS = Object.entries(translation ?? {}).reduce(
+            (acc, [key, value]) => {
+              acc[prependDelim(namespace, key)] = value;
+              return acc;
+            },
+            {} as Record<string, string>,
+          );
+
+          acc[locale] = {
+            ...localeTranslation,
+            ...withNS,
+          };
+
+          return acc;
+        },
+        { ...withoutNS },
+      );
+    });
+
+    // replaced data may satisfy previously-missing keys; allow another attempt
+    this.attemptedFallbackLoad = false;
+  }
+
+  removeNamespace(namespace: string) {
+    const prefix = prependDelim(namespace, '');
+
+    this.translations.update((cur) =>
+      Object.fromEntries(
+        Object.entries(cur).map(([locale, translation]) => [
+          locale,
+          Object.fromEntries(
+            Object.entries(translation).filter(
+              ([key]) => !key.startsWith(prefix),
+            ),
+          ),
+        ]),
+      ),
+    );
+
+    this.onDemandLoaders.delete(namespace);
+  }
+
   registerOnDemandLoaders(
     namespace: string,
     loaders: Record<string, () => Promise<any>>,
@@ -613,6 +751,15 @@ export class TranslationStore {
     return Array.from(this.onDemandLoaders.values()).some(
       (loaders) => loaders[locale],
     );
+  }
+
+  /**
+   * Whether any translation data (registered or override-provided) exists for
+   * `locale` right now. Locale switches use this to short-circuit: a target
+   * with no loaders but present data switches synchronously — nothing to load.
+   */
+  hasTranslationsFor(locale: string): boolean {
+    return !!untracked(this.effectiveTranslations)[locale];
   }
 }
 
@@ -720,10 +867,17 @@ export function injectDynamicLocale(): WritableSignal<string> & {
       return;
     }
 
-    if (isDevMode() && !store.hasLocaleLoaders(value))
-      console.warn(
-        `[Translate] No loaders registered for locale "${value}". Switching to this locale will have no effect.`,
-      );
+    if (!store.hasLocaleLoaders(value)) {
+      if (store.hasTranslationsFor(value)) {
+        store.locale.set(value);
+        return;
+      }
+
+      if (isDevMode())
+        console.warn(
+          `[Translate] No loaders registered for locale "${value}". Switching to this locale will have no effect.`,
+        );
+    }
 
     store.loadQueue.update((q) => [...q, value]);
   };

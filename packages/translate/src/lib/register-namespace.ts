@@ -53,26 +53,58 @@ function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {
   };
 }
 
-type TFunction<TMap extends AnyStringRecord> = <
+/**
+ * The bare `t` call signature over a "namespaced key → parameters" map:
+ * parameter-free keys take one argument, parameterized keys require their
+ * variables object. Compose maps from several namespaces with an intersection
+ * (`MapA & MapB`) to type a `t` spanning all of them.
+ *
+ * @typeParam TMap A key/parameter map, typically `inferCompiledTranslationMap<...>`.
+ */
+export type TFunction<TMap extends AnyStringRecord> = <
   TKey extends keyof TMap & string,
 >(
   key: TKey,
   ...args: TMap[TKey] extends void ? [] : [TMap[TKey]]
 ) => string;
 
-type SignalTFunction<TMap extends AnyStringRecord> = <
+/**
+ * The `t.asSignal` call signature — same key/parameter contract as
+ * {@link TFunction}, but parameters are passed as a thunk and the result is a
+ * `Signal<string>`.
+ *
+ * @typeParam TMap A key/parameter map, typically `inferCompiledTranslationMap<...>`.
+ */
+export type SignalTFunction<TMap extends AnyStringRecord> = <
   TKey extends keyof TMap & string,
 >(
   key: TKey,
   ...args: TMap[TKey] extends void ? [] : [() => TMap[TKey]]
 ) => Signal<string>;
 
-type TFunctionWithSignalConstructor<
+/**
+ * The full typed translation function as returned by `registerNamespace`'s
+ * `injectT`: the {@link TFunction} call signature carrying an `asSignal`
+ * companion ({@link SignalTFunction}).
+ *
+ * @typeParam TMap A key/parameter map, typically `inferCompiledTranslationMap<...>`.
+ */
+export type TFunctionWithSignalConstructor<
   TMap extends AnyStringRecord,
-  TFN extends TFunction<TMap>,
+  TFN extends TFunction<TMap> = TFunction<TMap>,
 > = TFN & {
   asSignal: SignalTFunction<TMap>;
 };
+
+/**
+ * Derives the fully typed `t` function type (call signature plus `asSignal`)
+ * from a `CompiledTranslation` — exactly what `registerNamespace`'s `injectT`
+ * returns for that namespace. Useful for typing a `t` received through another
+ * seam (a facade, a generated type surface) without re-running registration.
+ */
+export type inferTFunction<
+  T extends CompiledTranslation<UnknownStringKeyObject, string>,
+> = TFunctionWithSignalConstructor<inferCompiledTranslationMap<T>>;
 
 // Weak-cache pinning callback: keeps signals reachable for the consumer's
 // lifetime; null in strong mode. Must run in an injection context.

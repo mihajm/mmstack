@@ -471,7 +471,7 @@ The state seam is a pair of pure lenses: `frame` reads an item's `CanvasFrame` (
 
 Interaction defaults match the tools people know: Shift locks a move to the dominant axis and holds the aspect ratio on resize, Alt resizes from the center, Ctrl bypasses snapping, a drag of an unselected item selects it, Shift-click toggles selection, empty-surface presses marquee (or click to clear), Escape cancels. Arrows nudge the selection by the grid step (Shift for 10 steps), Cmd/Ctrl+arrows resize. `ctrl.session` exposes the pure derivation core (`guides`, `marqueeRect`, `hoverContainer`, live deltas) so your chrome renders from signals; the demo's SVG snaplines are a dozen lines of template.
 
-`panZoom()` owns the space transform (wheel zoom around the cursor, middle-button pan) and doubles as the `space` option, so every gesture projects through the live transform. You can zoom mid-drag and the grabbed point stays under the cursor.
+`panZoom()` owns the space transform (wheel zoom around the cursor, middle-button pan) and doubles as the `space` option, so every gesture projects through the live transform. You can zoom mid-drag and the grabbed point stays under the cursor. Wheel input is normalized before it touches the scale: line- and page-mode deltas are scaled to pixel magnitude, a ctrl-wheel — how browsers deliver trackpad pinch — is boosted so pinching feels like pinching, and Safari's native page pinch-zoom is suppressed over the viewport. Rolling your own viewport instead? `zoomWheelDelta(event)` and `suppressNativePinch(el)` are exported on their own.
 
 ### Containment (stages, frames, sections)
 

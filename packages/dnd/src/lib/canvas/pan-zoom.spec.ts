@@ -15,12 +15,19 @@ function pe(type: string, x: number, y: number, button = 0): Event {
   return e;
 }
 
-function wheel(deltaY: number, x: number, y: number): Event {
+function wheel(
+  deltaY: number,
+  x: number,
+  y: number,
+  opts: { deltaMode?: number; ctrlKey?: boolean } = {},
+): Event {
   const e = new Event('wheel', { bubbles: true, cancelable: true }) as Event &
     Record<string, unknown>;
   e['deltaY'] = deltaY;
   e['clientX'] = x;
   e['clientY'] = y;
+  e['deltaMode'] = opts.deltaMode ?? 0;
+  e['ctrlKey'] = opts.ctrlKey ?? false;
   return e;
 }
 
@@ -62,6 +69,25 @@ describe('panZoom', () => {
     // cursor at origin → no translation introduced
     expect(t.x).toBeCloseTo(0, 5);
     expect(t.y).toBeCloseTo(0, 5);
+  });
+
+  it('zooms a trackpad pinch — ctrl-wheel — tenfold', () => {
+    const { el, ref } = setup({ zoomSpeed: 0.0015 });
+    el.dispatchEvent(wheel(-100, 0, 0, { ctrlKey: true }));
+    expect(ref.transform().scale).toBeCloseTo(Math.exp(1.5), 5);
+  });
+
+  it('normalizes line-mode wheels to pixel magnitude', () => {
+    const { el, ref } = setup({ zoomSpeed: 0.0015 });
+    el.dispatchEvent(wheel(-4, 0, 0, { deltaMode: 1 }));
+    expect(ref.transform().scale).toBeCloseTo(Math.exp(0.15), 5);
+  });
+
+  it('cancels Safari gesture events over the viewport', () => {
+    const { el } = setup();
+    const e = new Event('gesturestart', { cancelable: true });
+    el.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
   });
 
   it('keeps the canvas point under the cursor fixed when zooming', () => {

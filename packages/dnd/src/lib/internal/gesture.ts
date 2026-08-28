@@ -16,14 +16,11 @@ export type GestureModifiers = {
 };
 
 export type GestureAdapter = {
-  /**
-   * A press activated: claim it from its delegated origin, or return `false`
-   * to ignore (not our element, already dragging, unmeasurable...).
-   */
   begin(
     origin: HTMLElement | null,
     start: { x: number; y: number },
     modifiers: GestureModifiers,
+    button?: number,
   ): boolean;
   move(point: { x: number; y: number }, modifiers: GestureModifiers): void;
   /** A real release — commit. */
@@ -79,7 +76,10 @@ export function driveGesture(
     if (g.active && g.pointerId !== null) {
       pointer.x = g.current.x;
       pointer.y = g.current.y;
-      if (!dragging && adapter.begin(g.origin, g.start, g.modifiers)) {
+      if (
+        !dragging &&
+        adapter.begin(g.origin, g.start, g.modifiers, g.button)
+      ) {
         dragging = true;
         adapter.onDragStart?.();
       }

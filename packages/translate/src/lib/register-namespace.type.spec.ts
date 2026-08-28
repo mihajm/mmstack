@@ -6,8 +6,10 @@ import type {
   inferCompiledTranslationNamespace,
 } from './compile';
 import {
+  type inferTFunction,
   type LoadedTranslation,
   registerNamespace,
+  type TFunction,
 } from './register-namespace';
 import { withParams } from './with-params';
 
@@ -216,6 +218,46 @@ const _branded_sibling_still_enforced = branded.createTranslation('de-DE', {
   // @ts-expect-error - `{n}` placeholder still required on a non-branded sibling
   normal: 'Hi without placeholder',
 });
+
+// Call-shaped assertions live in a never-invoked function — `declare const`
+// erases at runtime, so top-level calls against it would throw on import.
+function _tFunctionCallAssertions(
+  inferredT: inferTFunction<typeof ns.translation>,
+  unionT: TFunction<
+    inferCompiledTranslationMap<typeof nsA.translation> &
+      inferCompiledTranslationMap<typeof nsB.translation>
+  >,
+) {
+  const _t_void_key: string = inferredT('quote.pageTitle');
+  const _t_param_key: string = inferredT('quote.greeting', { name: 'Alice' });
+  const _t_signal = inferredT.asSignal('quote.stats', () => ({ count: 3 }));
+
+  // @ts-expect-error - unknown key
+  inferredT('quote.nope');
+
+  // @ts-expect-error - `greeting` requires its `{name}` parameter
+  inferredT('quote.greeting');
+
+  // @ts-expect-error - void keys take no parameter argument
+  inferredT('quote.pageTitle', { name: 'Alice' });
+
+  const _union_a: string = unionT('a.hello');
+  const _union_b: string = unionT('b.hello');
+
+  // @ts-expect-error - key from neither namespace
+  unionT('c.hello');
+}
+
+type _inferred_matches_injectT = Expect<
+  Equals<
+    inferTFunction<typeof ns.translation>,
+    ReturnType<
+      ReturnType<
+        typeof registerNamespace<typeof ns.translation>
+      >['injectNamespaceT']
+    >
+  >
+>;
 
 describe('register-namespace types', () => {
   it('compiles type-level assertions', () => {

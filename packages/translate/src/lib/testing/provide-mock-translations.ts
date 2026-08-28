@@ -2,7 +2,10 @@ import { computed, signal, type Provider } from '@angular/core';
 import { createIntl, createIntlCache, type IntlShape } from '@formatjs/intl';
 import { compileTranslation } from '../compile';
 import { type UnknownStringKeyObject } from '../string-key-object.type';
-import { TranslationStore } from '../translation-store';
+import {
+  type MessageFormatOpts,
+  TranslationStore,
+} from '../translation-store';
 
 /**
  * Options designed to feed into the mock translations function.
@@ -44,6 +47,12 @@ export type MockTranslationOptions = {
    * @default 'en-US'
    */
   locale?: string;
+
+  /**
+   * Forwarded to `IntlMessageFormat` when `formatValues` is true — mirror your
+   * app's `provideIntlConfig({ messageFormatOpts })` here for parity.
+   */
+  messageFormatOpts?: MessageFormatOpts;
 };
 
 /**
@@ -100,7 +109,11 @@ export function provideMockTranslations(
     }
 
     if (intl) {
-      return intl.formatMessage({ id: key, defaultMessage: message }, values);
+      return intl.formatMessage(
+        { id: key, defaultMessage: message },
+        values,
+        options?.messageFormatOpts,
+      );
     }
 
     return message;

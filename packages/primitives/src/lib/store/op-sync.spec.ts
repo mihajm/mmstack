@@ -15,6 +15,7 @@ import {
   rebaseOps,
   syncedFork,
   validateEnvelope,
+  wireValueViolation,
   type Conflicted,
   type Dot,
   type MergeFn,
@@ -30,7 +31,13 @@ type WireOp = StoreOp & { cites?: Dot[]; epoch?: number };
 
 function env(
   ops: WireOp[],
-  stamp: { p?: number; l?: number; writer?: string; origin?: string; version?: number },
+  stamp: {
+    p?: number;
+    l?: number;
+    writer?: string;
+    origin?: string;
+    version?: number;
+  },
 ): OpEnvelope {
   return {
     proto: OP_PROTO_VERSION,
@@ -39,26 +46,47 @@ function env(
     version: stamp.version ?? 1,
     hlc: { p: stamp.p ?? 1, l: stamp.l ?? 0 },
     policyVersion: 0,
-    ops: ops.map((o) => ({ cites: [], epoch: 0, ...o })) as unknown as OpEnvelope['ops'],
+    ops: ops.map((o) => ({
+      cites: [],
+      epoch: 0,
+      ...o,
+    })) as unknown as OpEnvelope['ops'],
   };
 }
 
-const dot = (origin: string, p: number, l = 0): Dot => ({ origin, hlc: { p, l } });
+const dot = (origin: string, p: number, l = 0): Dot => ({
+  origin,
+  hlc: { p, l },
+});
 
-const set = (path: (string | number)[], next: unknown, prev?: unknown): StoreOp =>
+const set = (
+  path: (string | number)[],
+  next: unknown,
+  prev?: unknown,
+): StoreOp =>
   prev === undefined
     ? { kind: 'set', path, next }
     : { kind: 'set', path, next, prev };
 
-const del = (path: (string | number)[], prev: unknown): StoreOp => ({ kind: 'delete', path, prev });
+const del = (path: (string | number)[], prev: unknown): StoreOp => ({
+  kind: 'delete',
+  path,
+  prev,
+});
 
 describe('createConvergingApply', () => {
   it('accepts a newer op at a path; an older concurrent op arriving later loses the fold', () => {
     const conv = createConvergingApply();
     let root: unknown = { a: 0 };
 
-    root = applyOps(root, conv.ingest(env([set(['a'], 2)], { p: 2, writer: 'x' })));
-    root = applyOps(root, conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a'], 2)], { p: 2, writer: 'x' })),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' })),
+    );
 
     expect(root).toEqual({ a: 2 });
   });
@@ -87,9 +115,18 @@ describe('createConvergingApply', () => {
     const conv = createConvergingApply();
     let root: unknown = { a: { b: 0 } };
 
-    root = applyOps(root, conv.ingest(env([set(['a', 'b'], 1)], { p: 1, writer: 'x' })));
-    root = applyOps(root, conv.ingest(env([set(['a'], { fresh: true })], { p: 2, writer: 'y' })));
-    root = applyOps(root, conv.ingest(env([set(['a', 'b'], 99)], { p: 1, l: 1, writer: 'x' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a', 'b'], 1)], { p: 1, writer: 'x' })),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a'], { fresh: true })], { p: 2, writer: 'y' })),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a', 'b'], 99)], { p: 1, l: 1, writer: 'x' })),
+    );
 
     expect(root).toEqual({ a: { fresh: true, b: 99 } });
   });
@@ -115,7 +152,9 @@ describe('createConvergingApply', () => {
 
     expect(conv.ingest(local, { local: true })).toEqual([]);
     // an older remote now loses to the locally-registered winner
-    expect(conv.ingest(env([set(['a'], 'theirs')], { p: 4, writer: 'them' }))).toEqual([]);
+    expect(
+      conv.ingest(env([set(['a'], 'theirs')], { p: 4, writer: 'them' })),
+    ).toEqual([]);
   });
 
   it('preserve policy yields the SAME Conflicted value regardless of arrival order', () => {
@@ -146,11 +185,17 @@ describe('createConvergingApply', () => {
     });
     let root: unknown = { note: 'base' };
 
-    root = applyOps(root, conv.ingest(env([set(['note'], 'v1', 'base')], { p: 1, writer: 'a' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['note'], 'v1', 'base')], { p: 1, writer: 'a' })),
+    );
     root = applyOps(
       root,
       conv.ingest(
-        env([{ ...set(['note'], 'v2', 'v1'), cites: [dot('a', 1)] }], { p: 2, writer: 'b' }),
+        env([{ ...set(['note'], 'v2', 'v1'), cites: [dot('a', 1)] }], {
+          p: 2,
+          writer: 'b',
+        }),
       ),
     );
 
@@ -159,8 +204,14 @@ describe('createConvergingApply', () => {
 
   it('mergeThree policy merges concurrent object edits field-wise', () => {
     const base = { name: 'n', done: false };
-    const mine = env([set(['todo'], { name: 'renamed', done: false }, base)], { p: 5, writer: 'a' });
-    const theirs = env([set(['todo'], { name: 'n', done: true }, base)], { p: 4, writer: 'b' });
+    const mine = env([set(['todo'], { name: 'renamed', done: false }, base)], {
+      p: 5,
+      writer: 'a',
+    });
+    const theirs = env([set(['todo'], { name: 'n', done: true }, base)], {
+      p: 4,
+      writer: 'b',
+    });
 
     const conv = createConvergingApply({
       policies: [{ path: 'todo', merge: mergeThree }],
@@ -176,14 +227,22 @@ describe('createConvergingApply', () => {
     const conv = createConvergingApply({
       policies: [{ path: 'todos.*.title', merge: preserve }],
     });
-    const a = env([set(['todos', 0, 'title'], 'A', 'base')], { p: 5, writer: 'a' });
-    const b = env([set(['todos', 0, 'title'], 'B', 'base')], { p: 4, writer: 'b' });
+    const a = env([set(['todos', 0, 'title'], 'A', 'base')], {
+      p: 5,
+      writer: 'a',
+    });
+    const b = env([set(['todos', 0, 'title'], 'B', 'base')], {
+      p: 4,
+      writer: 'b',
+    });
 
     let root: unknown = { todos: [{ title: 'base' }] };
     root = applyOps(root, conv.ingest(a));
     root = applyOps(root, conv.ingest(b));
 
-    expect(isConflicted((root as { todos: { title: unknown }[] }).todos[0].title)).toBe(true);
+    expect(
+      isConflicted((root as { todos: { title: unknown }[] }).todos[0].title),
+    ).toBe(true);
   });
 
   it('PROPERTY: any arrival order of the same envelope set converges to the same state', () => {
@@ -288,9 +347,12 @@ describe('createConvergingApply — policy convergence under 3+ CONCURRENT same-
   ): boolean => {
     const results: string[] = [];
     for (let s = 1; s <= 20; s++) {
-      const conv = createConvergingApply({ policies: [{ path, merge: policy }] });
+      const conv = createConvergingApply({
+        policies: [{ path, merge: policy }],
+      });
       let root: unknown = initial;
-      for (const e of shuffle(envs, s * 131)) root = applyOps(root, conv.ingest(e));
+      for (const e of shuffle(envs, s * 131))
+        root = applyOps(root, conv.ingest(e));
       results.push(JSON.stringify(root));
     }
     return results.every((r) => r === results[0]);
@@ -331,9 +393,18 @@ describe('createConvergingApply — policy convergence under 3+ CONCURRENT same-
       { id: 2, v: 0 },
     ];
     const envs = [
-      env([set(['list'], [{ id: 1, v: 1 }, anc[1]], anc)], { p: 1, writer: 'w1' }),
-      env([set(['list'], [anc[0], { id: 2, v: 2 }], anc)], { p: 2, writer: 'w2' }),
-      env([set(['list'], [...anc, { id: 3, v: 3 }], anc)], { p: 3, writer: 'w3' }),
+      env([set(['list'], [{ id: 1, v: 1 }, anc[1]], anc)], {
+        p: 1,
+        writer: 'w1',
+      }),
+      env([set(['list'], [anc[0], { id: 2, v: 2 }], anc)], {
+        p: 2,
+        writer: 'w2',
+      }),
+      env([set(['list'], [...anc, { id: 3, v: 3 }], anc)], {
+        p: 3,
+        writer: 'w3',
+      }),
     ];
     expect(converges(byId, 'list', { list: anc }, envs)).toBe(true);
   });
@@ -343,9 +414,18 @@ describe('createConvergingApply — policy convergence under 3+ CONCURRENT same-
     // degrades to lww on a leaf conflict, and the fold order is canonical, so it converges.
     const base = { a: 0, nested: { p: 0, q: 0 } };
     const envs = [
-      env([set(['o'], { a: 1, nested: { p: 1, q: 0 } }, base)], { p: 1, writer: 'w1' }),
-      env([set(['o'], { a: 2, nested: { p: 0, q: 2 } }, base)], { p: 2, writer: 'w2' }),
-      env([set(['o'], { a: 3, nested: { p: 3, q: 3 } }, base)], { p: 3, writer: 'w3' }),
+      env([set(['o'], { a: 1, nested: { p: 1, q: 0 } }, base)], {
+        p: 1,
+        writer: 'w1',
+      }),
+      env([set(['o'], { a: 2, nested: { p: 0, q: 2 } }, base)], {
+        p: 2,
+        writer: 'w2',
+      }),
+      env([set(['o'], { a: 3, nested: { p: 3, q: 3 } }, base)], {
+        p: 3,
+        writer: 'w3',
+      }),
     ];
     expect(converges(mergeThree, 'o', { o: base }, envs)).toBe(true);
   });
@@ -355,11 +435,18 @@ describe('createConvergingApply — dot-citation register semantics', () => {
   it('a CAUSAL write (cites the winner) supersedes it regardless of clocks', () => {
     const conv = createConvergingApply();
     let root: unknown = { v: 0 };
-    root = applyOps(root, conv.ingest(env([set(['v'], 'W')], { p: 5, writer: 'x', origin: 'x' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['v'], 'W')], { p: 5, writer: 'x', origin: 'x' })),
+    );
     root = applyOps(
       root,
       conv.ingest(
-        env([{ ...set(['v'], 'corrected', 'W'), cites: [dot('x', 5)] }], { p: 3, writer: 'y', origin: 'y' }),
+        env([{ ...set(['v'], 'corrected', 'W'), cites: [dot('x', 5)] }], {
+          p: 3,
+          writer: 'y',
+          origin: 'y',
+        }),
       ),
     );
     expect(root).toEqual({ v: 'corrected' }); // lower clock, but causal knowledge wins
@@ -367,7 +454,11 @@ describe('createConvergingApply — dot-citation register semantics', () => {
 
   it('a cite arriving BEFORE the op it kills leaves that op born-dead (delivery-order-robust)', () => {
     const late = env([set(['v'], 'A')], { p: 5, writer: 'a', origin: 'a' });
-    const citing = env([{ ...set(['v'], 'B', 'A'), cites: [dot('a', 5)] }], { p: 7, writer: 'b', origin: 'b' });
+    const citing = env([{ ...set(['v'], 'B', 'A'), cites: [dot('a', 5)] }], {
+      p: 7,
+      writer: 'b',
+      origin: 'b',
+    });
     const run = (order: OpEnvelope[]) => {
       const conv = createConvergingApply();
       let root: unknown = { v: 0 };
@@ -388,29 +479,67 @@ describe('createConvergingApply — dot-citation register semantics', () => {
   it('a higher EPOCH wins the fold regardless of hlc', () => {
     const conv = createConvergingApply();
     let root: unknown = { v: 0 };
-    root = applyOps(root, conv.ingest(env([{ ...set(['v'], 'fast'), epoch: 0 }], { p: 9, writer: 'x', origin: 'x' })));
     root = applyOps(
       root,
-      conv.ingest(env([{ ...set(['v'], 'authoritative'), epoch: 1 }], { p: 2, writer: 'y', origin: 'y' })),
+      conv.ingest(
+        env([{ ...set(['v'], 'fast'), epoch: 0 }], {
+          p: 9,
+          writer: 'x',
+          origin: 'x',
+        }),
+      ),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([{ ...set(['v'], 'authoritative'), epoch: 1 }], {
+          p: 2,
+          writer: 'y',
+          origin: 'y',
+        }),
+      ),
     );
     expect(root).toEqual({ v: 'authoritative' });
   });
 
   it('preserve: a concurrent set-vs-delete race surfaces Conflicted (the tombstone competes as a value)', () => {
-    const conv = createConvergingApply({ policies: [{ path: 'v', merge: preserve }] });
+    const conv = createConvergingApply({
+      policies: [{ path: 'v', merge: preserve }],
+    });
     let root: unknown = { v: 'base' };
-    root = applyOps(root, conv.ingest(env([set(['v'], 'A', 'base')], { p: 5, writer: 'a', origin: 'a' })));
-    root = applyOps(root, conv.ingest(env([del(['v'], 'base')], { p: 6, writer: 'b', origin: 'b' })));
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([set(['v'], 'A', 'base')], { p: 5, writer: 'a', origin: 'a' }),
+      ),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([del(['v'], 'base')], { p: 6, writer: 'b', origin: 'b' }),
+      ),
+    );
     const v = (root as { v: unknown }).v;
     expect(isConflicted(v)).toBe(true);
     expect((v as Conflicted).siblings).toEqual([undefined, 'A']); // the delete won the order → surfaces as undefined
   });
 
   it('preserve carries the FULL sibling set (not just two) for 3 concurrent writers, canonically ordered', () => {
-    const conv = createConvergingApply({ policies: [{ path: 'v', merge: preserve }] });
+    const conv = createConvergingApply({
+      policies: [{ path: 'v', merge: preserve }],
+    });
     let root: unknown = { v: 'base' };
-    for (const [origin, p, val] of [['a', 5, 'A'], ['b', 6, 'B'], ['c', 7, 'C']] as const) {
-      root = applyOps(root, conv.ingest(env([set(['v'], val, 'base')], { p, writer: origin, origin })));
+    for (const [origin, p, val] of [
+      ['a', 5, 'A'],
+      ['b', 6, 'B'],
+      ['c', 7, 'C'],
+    ] as const) {
+      root = applyOps(
+        root,
+        conv.ingest(
+          env([set(['v'], val, 'base')], { p, writer: origin, origin }),
+        ),
+      );
     }
     const v = (root as { v: unknown }).v as Conflicted;
     expect(isConflicted(v)).toBe(true);
@@ -420,35 +549,81 @@ describe('createConvergingApply — dot-citation register semantics', () => {
 
   it('stamp: emission cites the live dots and adopts max(observed epoch, own floor)', () => {
     const conv = createConvergingApply();
-    conv.ingest(env([{ ...set(['k'], 'X'), epoch: 3 }], { p: 5, writer: 'o', origin: 'o' }));
-    const [op] = conv.stamp([{ kind: 'set', path: ['k'], next: 'Y', prev: 'X' }]);
+    conv.ingest(
+      env([{ ...set(['k'], 'X'), epoch: 3 }], {
+        p: 5,
+        writer: 'o',
+        origin: 'o',
+      }),
+    );
+    const [op] = conv.stamp([
+      { kind: 'set', path: ['k'], next: 'Y', prev: 'X' },
+    ]);
     expect(op.cites).toEqual([dot('o', 5)]);
     expect(op.epoch).toBe(3); // carries the observed epoch forward without bumping
-    const [bumped] = conv.stamp([{ kind: 'set', path: ['k'], next: 'Z', prev: 'X' }], { bump: true });
+    const [bumped] = conv.stamp(
+      [{ kind: 'set', path: ['k'], next: 'Z', prev: 'X' }],
+      { bump: true },
+    );
     expect(bumped.epoch).toBe(4);
   });
 
   it('epoch floor survives tombstone → re-create; a stale prior-epoch straggler cannot outrank the reborn value', () => {
     const conv = createConvergingApply();
     let root: unknown = {};
-    root = applyOps(root, conv.ingest(env([{ ...set(['k'], 'SETTLED'), epoch: 3 }], { p: 5, writer: 'owner', origin: 'owner' })));
     root = applyOps(
       root,
       conv.ingest(
-        env([{ kind: 'delete', path: ['k'], prev: 'SETTLED', cites: [dot('owner', 5)], epoch: 3 }], {
-          p: 8,
-          writer: 'u',
-          origin: 'u',
+        env([{ ...set(['k'], 'SETTLED'), epoch: 3 }], {
+          p: 5,
+          writer: 'owner',
+          origin: 'owner',
         }),
+      ),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(
+        env(
+          [
+            {
+              kind: 'delete',
+              path: ['k'],
+              prev: 'SETTLED',
+              cites: [dot('owner', 5)],
+              epoch: 3,
+            },
+          ],
+          {
+            p: 8,
+            writer: 'u',
+            origin: 'u',
+          },
+        ),
       ),
     );
     expect(root).toEqual({});
     root = applyOps(
       root,
-      conv.ingest(env([{ ...set(['k'], 'REBORN'), cites: [dot('u', 8)], epoch: 3 }], { p: 10, writer: 'v', origin: 'v' })),
+      conv.ingest(
+        env([{ ...set(['k'], 'REBORN'), cites: [dot('u', 8)], epoch: 3 }], {
+          p: 10,
+          writer: 'v',
+          origin: 'v',
+        }),
+      ),
     );
     expect(root).toEqual({ k: 'REBORN' });
-    root = applyOps(root, conv.ingest(env([{ ...set(['k'], 'OLD'), epoch: 2 }], { p: 2, writer: 's', origin: 's' })));
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([{ ...set(['k'], 'OLD'), epoch: 2 }], {
+          p: 2,
+          writer: 's',
+          origin: 's',
+        }),
+      ),
+    );
     expect(root).toEqual({ k: 'REBORN' }); // epoch 3 > 2, no resurrection
   });
 
@@ -459,7 +634,13 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     root = applyOps(root, conv.ingest(A));
     root = applyOps(
       root,
-      conv.ingest(env([{ ...set(['v'], 'B', 'A'), cites: [dot('a', 5)] }], { p: 20, writer: 'b', origin: 'b' })),
+      conv.ingest(
+        env([{ ...set(['v'], 'B', 'A'), cites: [dot('a', 5)] }], {
+          p: 20,
+          writer: 'b',
+          origin: 'b',
+        }),
+      ),
     );
     expect(root).toEqual({ v: 'B' });
 
@@ -476,8 +657,16 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
   // Emission derives the group from the emitter's OWN register map: `set A` + one CLEAR per
   // observed live descendant register. A clear retires a register (fold-winning clear abstains
   // at materialization); it is NOT a delete, so an uncontended replace keeps its own fields.
-  const seedEnv = env([set(['settings'], { theme: 'old', lang: 'en' })], { p: 1, writer: 'w0', origin: 'w0' });
-  const editOldEnv = env([set(['settings', 'theme'], 'w1-old')], { p: 2, writer: 'w1', origin: 'w1' });
+  const seedEnv = env([set(['settings'], { theme: 'old', lang: 'en' })], {
+    p: 1,
+    writer: 'w0',
+    origin: 'w0',
+  });
+  const editOldEnv = env([set(['settings', 'theme'], 'w1-old')], {
+    p: 2,
+    writer: 'w1',
+    origin: 'w1',
+  });
 
   /** a replica that observed seed + editOld: the emission frontier for the replace groups */
   const observed = () => {
@@ -486,7 +675,10 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
     conv.ingest(editOldEnv);
     return conv;
   };
-  const groupEnv = (ops: SyncOp[], stamp: { p: number; writer: string }): OpEnvelope => ({
+  const groupEnv = (
+    ops: SyncOp[],
+    stamp: { p: number; writer: string },
+  ): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
     origin: stamp.writer,
     writer: stamp.writer,
@@ -503,12 +695,19 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
   };
   // w1's SECOND edit, concurrent with the replace (the replace never observed it)
   const editNewEnv = env(
-    [{ ...set(['settings', 'theme'], 'w1-new', 'w1-old'), cites: [dot('w1', 2)] }],
+    [
+      {
+        ...set(['settings', 'theme'], 'w1-new', 'w1-old'),
+        cites: [dot('w1', 2)],
+      },
+    ],
     { p: 7, writer: 'w1', origin: 'w1', version: 2 },
   );
 
   it('stamp expands a container set into per-descendant clears citing exactly the observed dots', () => {
-    const group = observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } }]);
+    const group = observed().stamp([
+      { kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } },
+    ]);
     expect(group.map((o) => o.kind)).toEqual(['set', 'clear']);
     expect(group[0].cites).toEqual([dot('w0', 1)]);
     expect(group[1].path).toEqual(['settings', 'theme']);
@@ -516,7 +715,9 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
   });
 
   it('UN-BUMPED replace: the concurrent edit survives as "new settings, your theme" (both orders)', () => {
-    const group = observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } }]);
+    const group = observed().stamp([
+      { kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } },
+    ]);
     const ge = groupEnv(group, { p: 6, writer: 'w2' });
     const forward = run([seedEnv, editOldEnv, ge, editNewEnv]); // edit arrives LATE, after the applied replace
     const reverse = run([editNewEnv, ge, editOldEnv, seedEnv]);
@@ -525,10 +726,17 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
   });
 
   it('survival is CATEGORICAL (kind), not an hlc race: a LOWER-clock concurrent edit also survives', () => {
-    const group = observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } }]);
+    const group = observed().stamp([
+      { kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } },
+    ]);
     const ge = groupEnv(group, { p: 6, writer: 'w2' });
     const editLow = env(
-      [{ ...set(['settings', 'theme'], 'w3-low', 'w1-old'), cites: [dot('w1', 2)] }],
+      [
+        {
+          ...set(['settings', 'theme'], 'w3-low', 'w1-old'),
+          cites: [dot('w1', 2)],
+        },
+      ],
       { p: 4, writer: 'w3', origin: 'w3' },
     );
     expect(run([seedEnv, editOldEnv, ge, editLow])).toEqual({
@@ -551,51 +759,87 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
   });
 
   it('an UNCONTENDED replace keeps its own fields intact (a clear abstains; nothing is erased)', () => {
-    const group = observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } }]);
+    const group = observed().stamp([
+      { kind: 'set', path: ['settings'], next: { theme: 'new', extra: 1 } },
+    ]);
     const ge = groupEnv(group, { p: 6, writer: 'w2' });
-    expect(run([seedEnv, editOldEnv, ge])).toEqual({ settings: { theme: 'new', extra: 1 } });
+    expect(run([seedEnv, editOldEnv, ge])).toEqual({
+      settings: { theme: 'new', extra: 1 },
+    });
   });
 
   it('two CONCURRENT replaces converge: the fold winner keeps its own fields (all orders)', () => {
     const g2 = groupEnv(
-      observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'from-w2' } }]),
+      observed().stamp([
+        { kind: 'set', path: ['settings'], next: { theme: 'from-w2' } },
+      ]),
       { p: 6, writer: 'w2' },
     );
     const g3 = groupEnv(
-      observed().stamp([{ kind: 'set', path: ['settings'], next: { theme: 'from-w3' } }]),
+      observed().stamp([
+        { kind: 'set', path: ['settings'], next: { theme: 'from-w3' } },
+      ]),
       { p: 8, writer: 'w3' },
     );
-    expect(run([seedEnv, editOldEnv, g2, g3])).toEqual({ settings: { theme: 'from-w3' } });
-    expect(run([g3, g2, editOldEnv, seedEnv])).toEqual({ settings: { theme: 'from-w3' } });
-    expect(run([g2, seedEnv, g3, editOldEnv])).toEqual({ settings: { theme: 'from-w3' } });
+    expect(run([seedEnv, editOldEnv, g2, g3])).toEqual({
+      settings: { theme: 'from-w3' },
+    });
+    expect(run([g3, g2, editOldEnv, seedEnv])).toEqual({
+      settings: { theme: 'from-w3' },
+    });
+    expect(run([g2, seedEnv, g3, editOldEnv])).toEqual({
+      settings: { theme: 'from-w3' },
+    });
   });
 
   it('subtree DELETE: a concurrent edit under the deleted parent drops at materialization and REVIVES on re-create', () => {
     const world = createConvergingApply();
-    const seedA = env([set(['a'], { x: 1 })], { p: 1, writer: 'w0', origin: 'w0' });
-    world.ingest(seedA);
-    const group = groupEnv(world.stamp([{ kind: 'delete', path: ['a'], prev: { x: 1 } }]), {
-      p: 5,
-      writer: 'w1',
+    const seedA = env([set(['a'], { x: 1 })], {
+      p: 1,
+      writer: 'w0',
+      origin: 'w0',
     });
-    const editUnder = env([set(['a', 'x'], 'survivor')], { p: 6, writer: 'w2', origin: 'w2' });
+    world.ingest(seedA);
+    const group = groupEnv(
+      world.stamp([{ kind: 'delete', path: ['a'], prev: { x: 1 } }]),
+      {
+        p: 5,
+        writer: 'w1',
+      },
+    );
+    const editUnder = env([set(['a', 'x'], 'survivor')], {
+      p: 6,
+      writer: 'w2',
+      origin: 'w2',
+    });
 
     const conv = createConvergingApply();
     let root: unknown = {};
-    for (const e of [seedA, group, editUnder]) root = applyOps(root, conv.ingest(e));
+    for (const e of [seedA, group, editUnder])
+      root = applyOps(root, conv.ingest(e));
     expect(root).toEqual({}); // 'a' deleted; the edit's graft has no container → dropped
 
     // re-create 'a' as a container (citing the tombstone) → the still-live edit RESURFACES
     root = applyOps(
       root,
-      conv.ingest(env([{ ...set(['a'], {}), cites: [dot('w1', 5)] }], { p: 9, writer: 'w3', origin: 'w3' })),
+      conv.ingest(
+        env([{ ...set(['a'], {}), cites: [dot('w1', 5)] }], {
+          p: 9,
+          writer: 'w3',
+          origin: 'w3',
+        }),
+      ),
     );
     expect(root).toEqual({ a: { x: 'survivor' } });
   });
 
   it('type-change graft determinism: an edit under a SCALAR parent drops the same way in every order', () => {
     const scalar = env([set(['a'], 42)], { p: 5, writer: 'w0', origin: 'w0' });
-    const under = env([set(['a', 'x'], 'lost')], { p: 6, writer: 'w1', origin: 'w1' });
+    const under = env([set(['a', 'x'], 'lost')], {
+      p: 6,
+      writer: 'w1',
+      origin: 'w1',
+    });
     expect(run([scalar, under])).toEqual(run([under, scalar]));
     expect(run([scalar, under])).toEqual({ a: 42 });
   });
@@ -609,7 +853,7 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  const shuffle = <T,>(arr: readonly T[], seed: number): T[] => {
+  const shuffle = <T>(arr: readonly T[], seed: number): T[] => {
     const r = mulberry32(seed);
     const c = [...arr];
     for (let i = c.length - 1; i > 0; i--) {
@@ -648,9 +892,13 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
           { bump: r() < 0.3 },
         );
       } else if (roll < 0.28 && path.length > 0) {
-        ops = world.stamp([{ kind: 'delete', path, prev: undefined }], { bump: r() < 0.3 });
+        ops = world.stamp([{ kind: 'delete', path, prev: undefined }], {
+          bump: r() < 0.3,
+        });
       } else {
-        const [stamped] = world.stamp([{ kind: 'set', path, next: `${writer}:${clock}` }]);
+        const [stamped] = world.stamp([
+          { kind: 'set', path, next: `${writer}:${clock}` },
+        ]);
         // 30%: the writer never saw the path → a genuinely concurrent (uncited) write
         ops = r() < 0.3 ? [{ ...stamped, cites: [] }] : [stamped];
       }
@@ -690,7 +938,9 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
     for (let seed = 1; seed <= 8; seed++) {
       const envs = genEnvs(seed * 53, 20);
       const base = run(envs, 1);
-      const split = envs.flatMap((e) => e.ops.map((op) => ({ ...e, ops: [op] })));
+      const split = envs.flatMap((e) =>
+        e.ops.map((op) => ({ ...e, ops: [op] })),
+      );
       for (let order = 2; order <= 5; order++) {
         expect(run(split, order + seed * 7)).toEqual(base);
         expect(run([...split, ...split], order + seed * 19)).toEqual(base);
@@ -713,7 +963,11 @@ describe('rebaseOps', () => {
 
   it('lww default: pending wins a direct conflict with the remote value', () => {
     const root = { v: 'local' };
-    const out = rebaseOps(root, [[set(['v'], 'local', 'orig')]], [set(['v'], 'remote', 'orig')]);
+    const out = rebaseOps(
+      root,
+      [[set(['v'], 'local', 'orig')]],
+      [set(['v'], 'remote', 'orig')],
+    );
 
     expect(out.root).toEqual({ v: 'local' });
     expect(out.pending[0][0]).toEqual(set(['v'], 'local', 'remote')); // prev refreshed to what it overwrote
@@ -743,7 +997,11 @@ describe('rebaseOps', () => {
     );
 
     expect(out.root).toEqual({ list: { x: 'mine' } });
-    expect(out.pending[0][0]).toEqual({ kind: 'set', path: ['list', 'x'], next: 'mine' });
+    expect(out.pending[0][0]).toEqual({
+      kind: 'set',
+      path: ['list', 'x'],
+      next: 'mine',
+    });
   });
 
   it('matches the sequenced order (remote then pending) for disjoint paths', () => {
@@ -835,7 +1093,9 @@ describe('keyedArray merge', () => {
 
     const ab = byId(anc, a, b, ctx) as Todo[];
     const ba = byId(anc, b, a, ctx) as Todo[];
-    expect(new Set(ab.map((t) => t.title))).toEqual(new Set(ba.map((t) => t.title)));
+    expect(new Set(ab.map((t) => t.title))).toEqual(
+      new Set(ba.map((t) => t.title)),
+    );
   });
 
   it('per-item preserve escalates a same-field conflict to Conflicted data', () => {
@@ -892,8 +1152,14 @@ describe('policyStrategy (fork reconcile from the shared rebase)', () => {
 describe('opSync', () => {
   function pair(opt?: { policies?: Parameters<typeof opSync>[1]['policies'] }) {
     return TestBed.runInInjectionContext(() => {
-      const a = signal<{ v: string; n: { x: number } }>({ v: 'init', n: { x: 0 } });
-      const b = signal<{ v: string; n: { x: number } }>({ v: 'init', n: { x: 0 } });
+      const a = signal<{ v: string; n: { x: number } }>({
+        v: 'init',
+        n: { x: 0 },
+      });
+      const b = signal<{ v: string; n: { x: number } }>({
+        v: 'init',
+        n: { x: 0 },
+      });
       const syncA = opSync(a, { writer: 'wa', policies: opt?.policies });
       const syncB = opSync(b, { writer: 'wb', policies: opt?.policies });
       return { a, b, syncA, syncB };
@@ -1004,8 +1270,12 @@ describe('opSync', () => {
       };
     });
 
-    a.receive(env([set(['v'], 1)], { p: 1, writer: 'r', origin: 'r', version: 1 }));
-    a.receive(env([set(['v'], 3)], { p: 3, writer: 'r', origin: 'r', version: 3 }));
+    a.receive(
+      env([set(['v'], 1)], { p: 1, writer: 'r', origin: 'r', version: 1 }),
+    );
+    a.receive(
+      env([set(['v'], 3)], { p: 3, writer: 'r', origin: 'r', version: 3 }),
+    );
 
     expect(gaps).toEqual([['r', 2, 3]]);
   });
@@ -1014,7 +1284,14 @@ describe('opSync', () => {
     const { a, syncA } = pair();
     a.update((s) => ({ ...s, v: 'x' }));
     syncA.flush();
-    syncA.receive(env([set(['v'], 'y', 'x')], { p: 999, writer: 'r', origin: 'r', version: 4 }));
+    syncA.receive(
+      env([set(['v'], 'y', 'x')], {
+        p: 999,
+        writer: 'r',
+        origin: 'r',
+        version: 4,
+      }),
+    );
 
     const wm = syncA.watermark();
     expect(wm[syncA.origin]).toBe(1);
@@ -1027,8 +1304,16 @@ describe('opSync — override (scoped authority bump)', () => {
     return TestBed.runInInjectionContext(() => {
       const sa = signal<{ v: string }>({ v: 'init' });
       const sb = signal<{ v: string }>({ v: 'init' });
-      const a = opSync(sa, { writer: 'wa', origin: 'oa', clock: createHlcClock(() => 1) });
-      const b = opSync(sb, { writer: 'wb', origin: 'ob', clock: createHlcClock(() => 100) });
+      const a = opSync(sa, {
+        writer: 'wa',
+        origin: 'oa',
+        clock: createHlcClock(() => 1),
+      });
+      const b = opSync(sb, {
+        writer: 'wb',
+        origin: 'ob',
+        clock: createHlcClock(() => 100),
+      });
       const aOut: OpEnvelope[] = [];
       const bOut: OpEnvelope[] = [];
       a.subscribe((e) => aOut.push(e));
@@ -1036,7 +1321,12 @@ describe('opSync — override (scoped authority bump)', () => {
       return { sa, sb, a, b, aOut, bOut };
     });
   }
-  const exchange = (x: { a: OpSync; b: OpSync; aOut: OpEnvelope[]; bOut: OpEnvelope[] }) => {
+  const exchange = (x: {
+    a: OpSync;
+    b: OpSync;
+    aOut: OpEnvelope[];
+    bOut: OpEnvelope[];
+  }) => {
     for (const e of x.bOut.splice(0)) x.a.receive(e);
     for (const e of x.aOut.splice(0)) x.b.receive(e);
   };
@@ -1084,8 +1374,16 @@ describe('opSync — override (scoped authority bump)', () => {
       TestBed.runInInjectionContext(() => {
         const sa = signal<S>({ settings: { theme: 'old' } });
         const sb = signal<S>({ settings: { theme: 'old' } });
-        const a = opSync(sa, { writer: 'wa', origin: 'oa', clock: createHlcClock(() => 10) });
-        const b = opSync(sb, { writer: 'wb', origin: 'ob', clock: createHlcClock(() => 20) });
+        const a = opSync(sa, {
+          writer: 'wa',
+          origin: 'oa',
+          clock: createHlcClock(() => 10),
+        });
+        const b = opSync(sb, {
+          writer: 'wb',
+          origin: 'ob',
+          clock: createHlcClock(() => 20),
+        });
         const aOut: OpEnvelope[] = [];
         const bOut: OpEnvelope[] = [];
         a.subscribe((e) => aOut.push(e));
@@ -1096,7 +1394,9 @@ describe('opSync — override (scoped authority bump)', () => {
         };
 
         // b edits the theme; a observes it (it is now in a's register map)
-        sb.update((s) => ({ settings: { theme: 'seen', ...(s.settings ?? {}) } }));
+        sb.update((s) => ({
+          settings: { theme: 'seen', ...(s.settings ?? {}) },
+        }));
         sb.set({ settings: { theme: 'seen' } });
         b.flush();
         deliver();
@@ -1132,14 +1432,26 @@ describe('createConvergingApply — deletes, reset, multi-op', () => {
   it('a newer delete removes the key; an older delete arriving later is dropped', () => {
     const conv = createConvergingApply();
     let root: unknown = { a: 1 };
-    root = applyOps(root, conv.ingest(env([set(['a'], 5)], { p: 1, writer: 'x' })));
-    root = applyOps(root, conv.ingest(env([del(['a'], 5)], { p: 2, writer: 'y' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set(['a'], 5)], { p: 1, writer: 'x' })),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(env([del(['a'], 5)], { p: 2, writer: 'y' })),
+    );
     expect('a' in (root as object)).toBe(false); // newer delete wins
 
     const conv2 = createConvergingApply();
     let r2: unknown = { a: 1 };
-    r2 = applyOps(r2, conv2.ingest(env([set(['a'], 9)], { p: 5, writer: 'x' })));
-    r2 = applyOps(r2, conv2.ingest(env([del(['a'], 1)], { p: 2, writer: 'y' })));
+    r2 = applyOps(
+      r2,
+      conv2.ingest(env([set(['a'], 9)], { p: 5, writer: 'x' })),
+    );
+    r2 = applyOps(
+      r2,
+      conv2.ingest(env([del(['a'], 1)], { p: 2, writer: 'y' })),
+    );
     expect(r2).toEqual({ a: 9 }); // older delete loses the fold
   });
 
@@ -1159,18 +1471,21 @@ describe('createConvergingApply — deletes, reset, multi-op', () => {
   it('reset() clears registers so a previously-losing older op applies again', () => {
     const conv = createConvergingApply();
     conv.ingest(env([set(['a'], 2)], { p: 5, writer: 'x' })); // register a newer winner
-    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual([]); // loses the fold
+    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual(
+      [],
+    ); // loses the fold
 
     conv.reset();
-    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual([set(['a'], 1)]);
+    expect(conv.ingest(env([set(['a'], 1)], { p: 1, writer: 'y' }))).toEqual([
+      set(['a'], 1),
+    ]);
   });
 
   it('applies multiple ops in one envelope', () => {
     const conv = createConvergingApply();
-    expect(conv.ingest(env([set(['a'], 1), set(['b'], 2)], { p: 1, writer: 'x' }))).toEqual([
-      set(['a'], 1),
-      set(['b'], 2),
-    ]);
+    expect(
+      conv.ingest(env([set(['a'], 1), set(['b'], 2)], { p: 1, writer: 'x' })),
+    ).toEqual([set(['a'], 1), set(['b'], 2)]);
   });
 });
 
@@ -1189,7 +1504,9 @@ describe('rebaseOps — multi-batch, empty edges, deletes', () => {
   });
 
   it('empty remote → pending re-applied unchanged', () => {
-    expect(rebaseOps({ a: 1 }, [[set(['a'], 1, 0)]], []).root).toEqual({ a: 1 });
+    expect(rebaseOps({ a: 1 }, [[set(['a'], 1, 0)]], []).root).toEqual({
+      a: 1,
+    });
   });
 
   it('a pending delete composes with a disjoint remote edit', () => {
@@ -1204,11 +1521,18 @@ describe('rebaseOps — multi-batch, empty edges, deletes', () => {
 describe('opSync — hydrate / seed / snapshot (boot & reconnect seam)', () => {
   it('hydrate adopts the remote root and re-applies uncovered local pending on top', () => {
     const out = TestBed.runInInjectionContext(() => {
-      const s = signal<{ v: string; keep: string }>({ v: 'init', keep: 'base' });
+      const s = signal<{ v: string; keep: string }>({
+        v: 'init',
+        keep: 'base',
+      });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       s.set({ v: 'offline', keep: 'base' }); // offline edit to v
       sync.flush(); // recentLocal now holds version 1
-      sync.hydrate({ root: { v: 'init', keep: 'from-room' }, registers: [], wm: {} }); // remote changed a different field
+      sync.hydrate({
+        root: { v: 'init', keep: 'from-room' },
+        registers: [],
+        wm: {},
+      }); // remote changed a different field
       return s();
     });
     expect(out).toEqual({ v: 'offline', keep: 'from-room' }); // both preserved (merge, not clobber)
@@ -1258,7 +1582,9 @@ describe('opSync — hydrate / seed / snapshot (boot & reconnect seam)', () => {
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       s.set({ v: 'edited' });
       sync.flush();
-      sync.receive(env([set(['x'], 1)], { p: 9, writer: 'r', origin: 'r', version: 3 }));
+      sync.receive(
+        env([set(['x'], 1)], { p: 9, writer: 'r', origin: 'r', version: 3 }),
+      );
       return sync.snapshot();
     });
     expect(snap.root).toMatchObject({ v: 'edited' });
@@ -1275,9 +1601,21 @@ describe('opSync — checkpoint carries register state (the seed/hydrate contrac
       const sa = signal<{ v: string }>({ v: 'init' });
       const a = opSync(sa, { writer: 'wa', origin: 'oa' });
       // r1 wrote 'A' at clock 9; r2 causally replaced it at a LOWER clock (cites r1's dot)
-      a.receive(env([set(['v'], 'A', 'init')], { p: 9, writer: 'r1', origin: 'r1', version: 1 }));
       a.receive(
-        env([{ ...set(['v'], 'B', 'A'), cites: [dot('r1', 9)] }], { p: 5, writer: 'r2', origin: 'r2', version: 1 }),
+        env([set(['v'], 'A', 'init')], {
+          p: 9,
+          writer: 'r1',
+          origin: 'r1',
+          version: 1,
+        }),
+      );
+      a.receive(
+        env([{ ...set(['v'], 'B', 'A'), cites: [dot('r1', 9)] }], {
+          p: 5,
+          writer: 'r2',
+          origin: 'r2',
+          version: 1,
+        }),
       );
       expect(sa().v).toBe('B');
 
@@ -1289,7 +1627,12 @@ describe('opSync — checkpoint carries register state (the seed/hydrate contrac
       expect(sj().v).toBe('B');
 
       // a straggler from r1 BELOW its supersession watermark: born-dead on base AND joiner
-      const straggler = env([set(['v'], 'A-again', 'init')], { p: 8, writer: 'r1', origin: 'r1', version: 2 });
+      const straggler = env([set(['v'], 'A-again', 'init')], {
+        p: 8,
+        writer: 'r1',
+        origin: 'r1',
+        version: 2,
+      });
       a.receive(straggler);
       j.receive(straggler);
       expect(sa().v).toBe('B');
@@ -1299,7 +1642,11 @@ describe('opSync — checkpoint carries register state (the seed/hydrate contrac
       // the divergence the register-state checkpoint exists to prevent
       const sn = signal<{ v: string }>({ v: 'init' });
       const naive = opSync(sn, { writer: 'wn', origin: 'on' });
-      naive.hydrate({ root: checkpoint.root, registers: [], wm: checkpoint.wm });
+      naive.hydrate({
+        root: checkpoint.root,
+        registers: [],
+        wm: checkpoint.wm,
+      });
       naive.receive(straggler);
       expect(sn().v).toBe('A-again');
     });
@@ -1309,29 +1656,47 @@ describe('opSync — checkpoint carries register state (the seed/hydrate contrac
 describe('opSync — durability & watermark invariants (locked before the branch refactor)', () => {
   it('a pending local write survives a remote that arrives first — never swallowed', () => {
     const { emitted, final } = TestBed.runInInjectionContext(() => {
-      const s = signal<{ v: string; other: string }>({ v: 'init', other: 'base' });
+      const s = signal<{ v: string; other: string }>({
+        v: 'init',
+        other: 'base',
+      });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       const emitted: OpEnvelope[] = [];
       sync.subscribe((e) => emitted.push(e));
       s.set({ v: 'init', other: 'local' }); // pending local (a different field)
-      sync.receive(env([set(['v'], 'remote', 'init')], { p: 5, writer: 'r', origin: 'r', version: 1 }));
+      sync.receive(
+        env([set(['v'], 'remote', 'init')], {
+          p: 5,
+          writer: 'r',
+          origin: 'r',
+          version: 1,
+        }),
+      );
       sync.flush();
       return { emitted, final: s() };
     });
     // durable invariant, framed to survive the local-pending-as-branch refactor:
     expect(final.other).toBe('local'); // the local write is in state
     expect(final.v).toBe('remote'); // the remote applied
-    expect(emitted.some((e) => e.ops.some((o) => o.path[0] === 'other'))).toBe(true); // and it emitted
+    expect(emitted.some((e) => e.ops.some((o) => o.path[0] === 'other'))).toBe(
+      true,
+    ); // and it emitted
   });
 
   it('version dedup: an older or duplicate envelope for a known origin is ignored (invariant 4)', () => {
     const out = TestBed.runInInjectionContext(() => {
       const s = signal<{ v: number }>({ v: 0 });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
-      sync.receive(env([set(['v'], 3)], { p: 3, writer: 'r', origin: 'r', version: 3 }));
+      sync.receive(
+        env([set(['v'], 3)], { p: 3, writer: 'r', origin: 'r', version: 3 }),
+      );
       const afterV3 = s().v;
-      sync.receive(env([set(['v'], 99)], { p: 4, writer: 'r', origin: 'r', version: 3 })); // duplicate version
-      sync.receive(env([set(['v'], 88)], { p: 5, writer: 'r', origin: 'r', version: 1 })); // older version
+      sync.receive(
+        env([set(['v'], 99)], { p: 4, writer: 'r', origin: 'r', version: 3 }),
+      ); // duplicate version
+      sync.receive(
+        env([set(['v'], 88)], { p: 5, writer: 'r', origin: 'r', version: 1 }),
+      ); // older version
       return { afterV3, finalV: s().v, wm: sync.watermark() };
     });
     expect(out.afterV3).toBe(3);
@@ -1343,9 +1708,20 @@ describe('opSync — durability & watermark invariants (locked before the branch
     const run = (localNow: number, remoteP: number) =>
       TestBed.runInInjectionContext(() => {
         const s = signal<{ v: string }>({ v: 'init' });
-        const sync = opSync(s, { writer: 'wl', origin: 'o1', clock: createHlcClock(() => localNow) });
+        const sync = opSync(s, {
+          writer: 'wl',
+          origin: 'o1',
+          clock: createHlcClock(() => localNow),
+        });
         s.set({ v: 'local' }); // pending, SAME path as the remote
-        sync.receive(env([set(['v'], 'remote', 'init')], { p: remoteP, writer: 'wr', origin: 'r', version: 1 }));
+        sync.receive(
+          env([set(['v'], 'remote', 'init')], {
+            p: remoteP,
+            writer: 'wr',
+            origin: 'r',
+            version: 1,
+          }),
+        );
         sync.flush();
         return s().v;
       });
@@ -1358,13 +1734,21 @@ describe('opSync — durability & watermark invariants (locked before the branch
 
   it('hydrate replays MULTIPLE uncovered offline writes on top of the remote root', () => {
     const out = TestBed.runInInjectionContext(() => {
-      const s = signal<{ a: string; b: string; keep: string }>({ a: '0', b: '0', keep: 'base' });
+      const s = signal<{ a: string; b: string; keep: string }>({
+        a: '0',
+        b: '0',
+        keep: 'base',
+      });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       s.set({ a: '1', b: '0', keep: 'base' });
       sync.flush(); // offline write 1
       s.set({ a: '1', b: '2', keep: 'base' });
       sync.flush(); // offline write 2
-      sync.hydrate({ root: { a: '0', b: '0', keep: 'from-room' }, registers: [], wm: {} }); // both uncovered
+      sync.hydrate({
+        root: { a: '0', b: '0', keep: 'from-room' },
+        registers: [],
+        wm: {},
+      }); // both uncovered
       return s();
     });
     expect(out).toEqual({ a: '1', b: '2', keep: 'from-room' });
@@ -1393,8 +1777,18 @@ describe('opSync — restore (durable outbox boot seam)', () => {
       const emitted: OpEnvelope[] = [];
       sync.subscribe((e) => emitted.push(e));
       const persisted: OpEnvelope[] = [
-        env([set(['v'], 'offline', 'init')], { p: 10, writer: 'w', origin: 'o1', version: 1 }),
-        env([set(['n'], 5, 0)], { p: 11, writer: 'w', origin: 'o1', version: 2 }),
+        env([set(['v'], 'offline', 'init')], {
+          p: 10,
+          writer: 'w',
+          origin: 'o1',
+          version: 1,
+        }),
+        env([set(['n'], 5, 0)], {
+          p: 11,
+          writer: 'w',
+          origin: 'o1',
+          version: 2,
+        }),
       ];
       sync.restore(persisted, 2);
       return { emitted, final: s(), wm: sync.watermark() };
@@ -1411,20 +1805,49 @@ describe('opSync — restore (durable outbox boot seam)', () => {
       const emitted: OpEnvelope[] = [];
       sync.subscribe((e) => emitted.push(e));
       // only v3 is still unacked, but v1..v5 were emitted before the reboot (highWater 5)
-      sync.restore([env([set(['v'], 'x', 'init')], { p: 1, writer: 'w', origin: 'o1', version: 3 })], 5);
+      sync.restore(
+        [
+          env([set(['v'], 'x', 'init')], {
+            p: 1,
+            writer: 'w',
+            origin: 'o1',
+            version: 3,
+          }),
+        ],
+        5,
+      );
       s.set({ v: 'y' });
       sync.flush();
-      return emitted.find((e) => e.ops.some((o) => o.kind === 'set' && o.next === 'y'));
+      return emitted.find((e) =>
+        e.ops.some((o) => o.kind === 'set' && o.next === 'y'),
+      );
     });
     expect(firstNew?.version).toBe(6); // continues past highWater(5), never re-mints 4
   });
 
   it('restored offline pending survives a reconnect hydrate and merges with room changes', () => {
     const out = TestBed.runInInjectionContext(() => {
-      const s = signal<{ v: string; keep: string }>({ v: 'init', keep: 'base' });
+      const s = signal<{ v: string; keep: string }>({
+        v: 'init',
+        keep: 'base',
+      });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
-      sync.restore([env([set(['v'], 'offline', 'init')], { p: 10, writer: 'w', origin: 'o1', version: 1 })], 1);
-      sync.hydrate({ root: { v: 'init', keep: 'from-room' }, registers: [], wm: {} }); // reconnect: room changed a different field
+      sync.restore(
+        [
+          env([set(['v'], 'offline', 'init')], {
+            p: 10,
+            writer: 'w',
+            origin: 'o1',
+            version: 1,
+          }),
+        ],
+        1,
+      );
+      sync.hydrate({
+        root: { v: 'init', keep: 'from-room' },
+        registers: [],
+        wm: {},
+      }); // reconnect: room changed a different field
       return s();
     });
     expect(out).toEqual({ v: 'offline', keep: 'from-room' }); // offline edit + room edit both survive
@@ -1448,7 +1871,9 @@ describe('opSync — restore (durable outbox boot seam)', () => {
 describe('opSync — syncedFork (fork.commit as an emission path)', () => {
   type S = { v: string };
 
-  function twoPeers(opt?: { policies?: Parameters<typeof opSync>[1]['policies'] }) {
+  function twoPeers(opt?: {
+    policies?: Parameters<typeof opSync>[1]['policies'];
+  }) {
     return TestBed.runInInjectionContext(() => {
       const sa = store<S>({ v: 'init' });
       const sb = store<S>({ v: 'init' });
@@ -1517,7 +1942,11 @@ describe('opSync — syncedFork (fork.commit as an emission path)', () => {
 
     fk.store.v.set('fork');
     fk.commit();
-    const forkEnv = x.aOut.find((e) => e.ops.some((o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork'));
+    const forkEnv = x.aOut.find((e) =>
+      e.ops.some(
+        (o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork',
+      ),
+    );
     if (!baseEnv || !midEnv || !forkEnv) throw new Error('missing an envelope');
 
     const orders: OpEnvelope[][] = [
@@ -1548,7 +1977,11 @@ describe('opSync — syncedFork (fork.commit as an emission path)', () => {
     const fk = syncedFork(x.a, x.sa);
     fk.store.v.set('fork');
     fk.commit();
-    const forkEnv = x.aOut.find((e) => e.ops.some((o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork'));
+    const forkEnv = x.aOut.find((e) =>
+      e.ops.some(
+        (o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork',
+      ),
+    );
     if (!forkEnv) throw new Error('missing fork commit envelope');
 
     const op = forkEnv.ops[0] as SyncOp;
@@ -1566,7 +1999,11 @@ describe('opSync — syncedFork (fork.commit as an emission path)', () => {
     const fk = syncedFork(x.a, x.sa); // observes the bumped write
     fk.store.v.set('fork');
     fk.commit();
-    const forkEnv = x.aOut.find((e) => e.ops.some((o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork'));
+    const forkEnv = x.aOut.find((e) =>
+      e.ops.some(
+        (o) => o.kind === 'set' && (o as { next?: unknown }).next === 'fork',
+      ),
+    );
     if (!forkEnv) throw new Error('missing fork commit envelope');
 
     expect((forkEnv.ops[0] as SyncOp).epoch).toBe(1); // carried the bumped epoch, never regressed to 0
@@ -1599,7 +2036,10 @@ describe('opSync — syncedFork (fork.commit as an emission path)', () => {
   it('WITHOUT a rebase the commit stays concurrent with the mid-flight edit (preserve → both survive)', () => {
     const v = rebaseScenario(false);
     expect(isConflicted(v)).toBe(true);
-    expect([...(v as unknown as Conflicted).siblings].sort()).toEqual(['fork', 'mid']);
+    expect([...(v as unknown as Conflicted).siblings].sort()).toEqual([
+      'fork',
+      'mid',
+    ]);
   });
 
   it('WITH a rebase the commit cites the post-rebase frontier and supersedes the once-concurrent write', () => {
@@ -1615,14 +2055,25 @@ describe('createConvergingApply — untrusted ingress (crafted origins/writers)'
     // crafted origin makes sig({C}) == sig({A,B}); the fold-skip on an equal sig then makes the
     // SAME op set converge to different values by arrival order. Origins are caller-supplied on a
     // P2P peer, so this must be robust regardless of what the string contains.
-    const A = env([set(['v'], 'VA', 'base')], { p: 1, writer: 'A', origin: 'A' });
-    const B = env([set(['v'], 'VB', 'base')], { p: 2, writer: 'B', origin: 'B' });
-    const C = env([{ ...set(['v'], 'VC', 'base'), cites: [dot('A', 1), dot('B', 2)] }], {
-      p: 2,
-      l: 0,
-      writer: 'wc',
-      origin: 'A@1.0#0s|B', // engineered so a naive `${origin}@${p}.${l}#${epoch}${kind}` sig collides
+    const A = env([set(['v'], 'VA', 'base')], {
+      p: 1,
+      writer: 'A',
+      origin: 'A',
     });
+    const B = env([set(['v'], 'VB', 'base')], {
+      p: 2,
+      writer: 'B',
+      origin: 'B',
+    });
+    const C = env(
+      [{ ...set(['v'], 'VC', 'base'), cites: [dot('A', 1), dot('B', 2)] }],
+      {
+        p: 2,
+        l: 0,
+        writer: 'wc',
+        origin: 'A@1.0#0s|B', // engineered so a naive `${origin}@${p}.${l}#${epoch}${kind}` sig collides
+      },
+    );
 
     const run = (order: OpEnvelope[]) => {
       const conv = createConvergingApply();
@@ -1642,8 +2093,18 @@ describe('createConvergingApply — path key integrity', () => {
     // keyOf must not fold ['a','b'] and ['ab'] onto one register (an empty path separator does)
     const conv = createConvergingApply();
     let root: unknown = {};
-    root = applyOps(root, conv.ingest(env([set(['a', 'b'], 'X')], { p: 1, writer: 'w1', origin: 'o1' })));
-    root = applyOps(root, conv.ingest(env([set(['ab'], 'Y')], { p: 2, writer: 'w2', origin: 'o2' })));
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([set(['a', 'b'], 'X')], { p: 1, writer: 'w1', origin: 'o1' }),
+      ),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([set(['ab'], 'Y')], { p: 2, writer: 'w2', origin: 'o2' }),
+      ),
+    );
     expect(root).toEqual({ a: { b: 'X' }, ab: 'Y' });
   });
 
@@ -1651,8 +2112,18 @@ describe('createConvergingApply — path key integrity', () => {
     // descendantsOf uses a startsWith prefix test; ['ax'] must not count as living under ['a']
     const conv = createConvergingApply();
     let root: unknown = {};
-    root = applyOps(root, conv.ingest(env([set(['a'], { x: 1 })], { p: 1, writer: 'w1', origin: 'o1' })));
-    root = applyOps(root, conv.ingest(env([set(['ax'], 'sibling')], { p: 2, writer: 'w2', origin: 'o2' })));
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([set(['a'], { x: 1 })], { p: 1, writer: 'w1', origin: 'o1' }),
+      ),
+    );
+    root = applyOps(
+      root,
+      conv.ingest(
+        env([set(['ax'], 'sibling')], { p: 2, writer: 'w2', origin: 'o2' }),
+      ),
+    );
     expect(root).toEqual({ a: { x: 1 }, ax: 'sibling' });
     expect(conv.materialize()).toEqual({ a: { x: 1 }, ax: 'sibling' });
   });
@@ -1666,7 +2137,13 @@ describe('createConvergingApply — prune bounds lone tombstones (GC finding 1)'
     for (let i = 1; i <= N; i++) {
       const h = 2 * i;
       conv.ingest(env([set(['k' + i], i)], { p: h, writer: 'w', origin: 'w' }));
-      conv.ingest(env([{ ...del(['k' + i], i), cites: [dot('w', h)] }], { p: h + 1, writer: 'w', origin: 'w' }));
+      conv.ingest(
+        env([{ ...del(['k' + i], i), cites: [dot('w', h)] }], {
+          p: h + 1,
+          writer: 'w',
+          origin: 'w',
+        }),
+      );
     }
     // each key set then cited-deleted → each ['kᵢ'] register is a lone tombstone; nothing else
     // materializes the key, so a below-frontier prune must reclaim every one of them
@@ -1679,18 +2156,39 @@ describe('createConvergingApply — malformed op robustness (finding B2/B3)', ()
   it('ignores a stray clear/delete at the ROOT path: materialize and delta peers agree', () => {
     const conv = createConvergingApply();
     let root: unknown = {};
-    root = applyOps(root, conv.ingest(env([set([], { a: 1 })], { p: 1, writer: 'x', origin: 'x' })));
+    root = applyOps(
+      root,
+      conv.ingest(env([set([], { a: 1 })], { p: 1, writer: 'x', origin: 'x' })),
+    );
     // a stray high-epoch clear at the root has no parent register to abstain to; it must not blank the doc
     root = applyOps(
       root,
-      conv.ingest(env([{ kind: 'clear', path: [], epoch: 5 } as unknown as StoreOp], { p: 2, writer: 'y', origin: 'y' })),
+      conv.ingest(
+        env([{ kind: 'clear', path: [], epoch: 5 } as unknown as StoreOp], {
+          p: 2,
+          writer: 'y',
+          origin: 'y',
+        }),
+      ),
     );
     expect(root).toEqual({ a: 1 }); // delta peer keeps the value
     expect(conv.materialize()).toEqual({ a: 1 }); // a joiner deriving via materialize agrees
     // and a root delete is equally meaningless
     root = applyOps(
       root,
-      conv.ingest(env([{ kind: 'delete', path: [], prev: undefined, epoch: 6 } as unknown as StoreOp], { p: 3, writer: 'z', origin: 'z' })),
+      conv.ingest(
+        env(
+          [
+            {
+              kind: 'delete',
+              path: [],
+              prev: undefined,
+              epoch: 6,
+            } as unknown as StoreOp,
+          ],
+          { p: 3, writer: 'z', origin: 'z' },
+        ),
+      ),
     );
     expect(root).toEqual({ a: 1 });
     expect(conv.materialize()).toEqual({ a: 1 });
@@ -1701,7 +2199,13 @@ describe('createConvergingApply — malformed op robustness (finding B2/B3)', ()
     // the op cites (origin X, hlc 5) which is its own dot; a naive watermark would born-dead it
     const root = applyOps(
       {},
-      conv.ingest(env([{ ...set(['a'], 42), cites: [dot('X', 5)] }], { p: 5, writer: 'X', origin: 'X' })),
+      conv.ingest(
+        env([{ ...set(['a'], 42), cites: [dot('X', 5)] }], {
+          p: 5,
+          writer: 'X',
+          origin: 'X',
+        }),
+      ),
     );
     expect(root).toEqual({ a: 42 }); // the write survives
     expect(conv.liveAt(['a']).length).toBe(1);
@@ -1721,7 +2225,16 @@ describe('opSync — hydrate reconciles a same-path conflict through the fold (c
         registers: [
           {
             path: ['v'],
-            siblings: [{ kind: 'set', value: 'REMOTE', writer: 'wrem', origin: 'rem', hlc: { p: 100, l: 0 }, epoch: 5 }],
+            siblings: [
+              {
+                kind: 'set',
+                value: 'REMOTE',
+                writer: 'wrem',
+                origin: 'rem',
+                hlc: { p: 100, l: 0 },
+                epoch: 5,
+              },
+            ],
             water: {},
           },
         ],
@@ -1739,7 +2252,11 @@ describe('opSync — hydrate reconciles a same-path conflict through the fold (c
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       s.set({ v: 'LOCAL', keep: 'x' });
       sync.flush();
-      sync.hydrate({ root: { v: 'init', keep: 'from-room' }, registers: [], wm: {} });
+      sync.hydrate({
+        root: { v: 'init', keep: 'from-room' },
+        registers: [],
+        wm: {},
+      });
       return s();
     });
     expect(out).toEqual({ v: 'LOCAL', keep: 'from-room' }); // local edit survives, room's other field taken
@@ -1750,10 +2267,18 @@ describe('createConvergingApply — prune reclaims nested lone tombstones (GC fi
   it('drops an ancestor tombstone even when its descendant tombstone is collected the same pass', () => {
     const conv = createConvergingApply();
     conv.ingest(env([set([], {})], { p: 1, writer: 'oa', origin: 'oa' }));
-    conv.ingest(env([set(['items'], { a: 1 })], { p: 2, writer: 'oa', origin: 'oa' }));
-    conv.ingest(env([set(['items', 'deep'], 9)], { p: 3, writer: 'oa', origin: 'oa' }));
-    conv.ingest(env([del(['items'], { a: 1 })], { p: 4, writer: 'oa', origin: 'oa' }));
-    conv.ingest(env([del(['items', 'deep'], 9)], { p: 5, writer: 'oa', origin: 'oa' }));
+    conv.ingest(
+      env([set(['items'], { a: 1 })], { p: 2, writer: 'oa', origin: 'oa' }),
+    );
+    conv.ingest(
+      env([set(['items', 'deep'], 9)], { p: 3, writer: 'oa', origin: 'oa' }),
+    );
+    conv.ingest(
+      env([del(['items'], { a: 1 })], { p: 4, writer: 'oa', origin: 'oa' }),
+    );
+    conv.ingest(
+      env([del(['items', 'deep'], 9)], { p: 5, writer: 'oa', origin: 'oa' }),
+    );
     conv.prune({ p: 100, l: 0 });
     const paths = conv.checkpoint().map((c) => c.path.join('.'));
     expect(paths).not.toContain('items'); // ancestor tombstone reclaimed, not stranded
@@ -1774,8 +2299,14 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
   // cite the dot they observed (so supersession, tombstones, and subtree replaces really happen).
   const buildStream = (seed: number) => {
     const r = rng(seed);
-    const pick = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
-    const paths: (string | number)[][] = [['a'], ['a', 'b'], ['a', 'c'], ['d'], ['d', 'e']];
+    const pick = <T>(a: readonly T[]) => a[Math.floor(r() * a.length)];
+    const paths: (string | number)[][] = [
+      ['a'],
+      ['a', 'b'],
+      ['a', 'c'],
+      ['d'],
+      ['d', 'e'],
+    ];
     const origins = ['o1', 'o2', 'o3'];
     const envs: OpEnvelope[] = [];
     let p = 1;
@@ -1793,7 +2324,15 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
         kind === 'set'
           ? { kind: 'set' as const, path, next: `v${i}`, cites, epoch: 0 }
           : { kind: 'delete' as const, path, prev: null, cites, epoch: 0 };
-      envs.push({ proto: OP_PROTO_VERSION, origin, writer: origin, version: i + 1, hlc, policyVersion: 0, ops: [op] });
+      envs.push({
+        proto: OP_PROTO_VERSION,
+        origin,
+        writer: origin,
+        version: i + 1,
+        hlc,
+        policyVersion: 0,
+        ops: [op],
+      });
       lastDotAt.set(key, { origin, hlc });
     }
     return envs;
@@ -1814,7 +2353,10 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
         const before = conv.materialize();
         conv.prune({ p: Math.floor(maxP * frac), l: 0 });
         const after = conv.materialize();
-        expect(after, `seed ${seed} frontier ${frac}: prune changed the fold`).toEqual(before);
+        expect(
+          after,
+          `seed ${seed} frontier ${frac}: prune changed the fold`,
+        ).toEqual(before);
       }
     }
   });
@@ -1823,10 +2365,18 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
     // re-derive the drop guard here so the check is independent of the implementation: a lone
     // tombstone is droppable (and so must be gone after a top-frontier prune) when nothing else
     // materializes its key — no live ancestor set holds it, and no live descendant would resurface.
-    const holdsKey = (value: unknown, rel: readonly (string | number)[]): boolean => {
+    const holdsKey = (
+      value: unknown,
+      rel: readonly (string | number)[],
+    ): boolean => {
       let cur: unknown = value;
       for (const seg of rel) {
-        if (cur === null || typeof cur !== 'object' || !Object.hasOwn(cur, String(seg))) return false;
+        if (
+          cur === null ||
+          typeof cur !== 'object' ||
+          !Object.hasOwn(cur, String(seg))
+        )
+          return false;
         cur = (cur as Record<string, unknown>)[String(seg)];
       }
       return true;
@@ -1839,25 +2389,37 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
       const regs = conv.checkpoint();
       for (const reg of regs) {
         const liveSet = conv.liveAt(reg.path);
-        expect(liveSet.length, `seed ${seed}: superseded-only register retained at ${reg.path.join('/')}`).toBeGreaterThan(0);
+        expect(
+          liveSet.length,
+          `seed ${seed}: superseded-only register retained at ${reg.path.join('/')}`,
+        ).toBeGreaterThan(0);
         const loneTomb = liveSet.length === 1 && liveSet[0].kind === 'delete';
         if (!loneTomb) continue;
         const key = reg.path.join('/');
         const hasLiveDescendant = regs.some(
-          (o) => o.path.join('/') !== key && o.path.join('/').startsWith(key + '/') && conv.liveAt(o.path).length > 0,
+          (o) =>
+            o.path.join('/') !== key &&
+            o.path.join('/').startsWith(key + '/') &&
+            conv.liveAt(o.path).length > 0,
         );
         const ancestorHoldsKey = regs.some((o) => {
           const ok = o.path.join('/');
-          if (ok === key || !key.startsWith(ok === '' ? '' : ok + '/')) return false;
+          if (ok === key || !key.startsWith(ok === '' ? '' : ok + '/'))
+            return false;
           const rel = reg.path.slice(o.path.length);
-          return conv.liveAt(o.path).some((s) => s.kind === 'set' && holdsKey(s.value, rel));
+          return conv
+            .liveAt(o.path)
+            .some((s) => s.kind === 'set' && holdsKey(s.value, rel));
         });
         expect(
           hasLiveDescendant || ancestorHoldsKey,
           `seed ${seed}: droppable lone tombstone leaked at ${key} (nothing materializes the key)`,
         ).toBe(true);
       }
-      expect(conv.materialize(), `seed ${seed}: top-frontier prune changed the fold`).toEqual(live);
+      expect(
+        conv.materialize(),
+        `seed ${seed}: top-frontier prune changed the fold`,
+      ).toEqual(live);
     }
   });
 });
@@ -1875,14 +2437,27 @@ describe('opSync — hydrate reconcile correctness (self-review oracle)', () => 
       nested: { deep: string; other: string };
       toDelete?: string;
     };
-    const init = (): S => ({ contended: 'i', roomOnly: 'i', nested: { deep: 'i', other: 'i' }, toDelete: 'i' });
+    const init = (): S => ({
+      contended: 'i',
+      roomOnly: 'i',
+      nested: { deep: 'i', other: 'i' },
+      toDelete: 'i',
+    });
 
     const out = TestBed.runInInjectionContext(() => {
       // remote peer R establishes a room state, including an AUTHORITY bump on `contended`. `nested.deep`
       // and `toDelete` stay at their init values on R, so they live in the checkpoint ROOT with NO register.
       const sr = signal<S>(init());
-      const R = opSync(sr, { writer: 'wr', origin: 'r', clock: createHlcClock(() => 100) });
-      sr.set({ ...sr(), roomOnly: 'ROOM', nested: { deep: 'i', other: 'ROOM' } });
+      const R = opSync(sr, {
+        writer: 'wr',
+        origin: 'r',
+        clock: createHlcClock(() => 100),
+      });
+      sr.set({
+        ...sr(),
+        roomOnly: 'ROOM',
+        nested: { deep: 'i', other: 'ROOM' },
+      });
       R.flush();
       R.override(() => sr.set({ ...sr(), contended: 'REMOTE' })); // epoch 1
       R.flush();
@@ -1891,14 +2466,26 @@ describe('opSync — hydrate reconcile correctness (self-review oracle)', () => 
       // local peer A edits offline (never delivered to R): loses `contended`, wins new/nested, deletes a
       // key, and writes the SAME field twice (o1's later write replaces its earlier in the register)
       const sa = signal<S>(init());
-      const A = opSync(sa, { writer: 'wa', origin: 'o1', clock: createHlcClock(() => 10) });
+      const A = opSync(sa, {
+        writer: 'wa',
+        origin: 'o1',
+        clock: createHlcClock(() => 10),
+      });
       const pending: OpEnvelope[] = [];
       A.subscribe((e) => pending.push(e));
       sa.set({ ...sa(), contended: 'local-x', newField: 'A1' });
       A.flush();
-      sa.set({ ...sa(), newField: 'A2', nested: { deep: 'A-deep', other: 'i' } }); // newField rewritten
+      sa.set({
+        ...sa(),
+        newField: 'A2',
+        nested: { deep: 'A-deep', other: 'i' },
+      }); // newField rewritten
       A.flush();
-      sa.update((s) => { const c = { ...s }; delete c.toDelete; return c; });
+      sa.update((s) => {
+        const c = { ...s };
+        delete c.toDelete;
+        return c;
+      });
       A.flush();
       A.hydrate(checkpoint);
       const storeAfter = sa();
@@ -1906,7 +2493,11 @@ describe('opSync — hydrate reconcile correctness (self-review oracle)', () => 
       // ORACLE peer B: hydrate the SAME checkpoint with no pending, then RECEIVE A's pending envelopes
       // through the ordinary fold path. Same delivered op set -> must converge to the same store.
       const sb = signal<S>(init());
-      const B = opSync(sb, { writer: 'wb', origin: 'b', clock: createHlcClock(() => 200) });
+      const B = opSync(sb, {
+        writer: 'wb',
+        origin: 'b',
+        clock: createHlcClock(() => 200),
+      });
       B.hydrate(checkpoint);
       for (const e of pending) B.receive(e);
       const oracle = sb();
@@ -1932,23 +2523,60 @@ describe('createConvergingApply — fork subtree replace only clears OBSERVED de
   it('a frontier-scoped subtree set clears descendants seen at fork time, never ones that arrived after', () => {
     const conv = createConvergingApply();
     // fork-time state: a descendant register the fork observes
-    conv.ingest(env([set(['settings', 'theme'], 'x')], { p: 1, writer: 'o1', origin: 'o1' }));
+    conv.ingest(
+      env([set(['settings', 'theme'], 'x')], {
+        p: 1,
+        writer: 'o1',
+        origin: 'o1',
+      }),
+    );
     const frontier = conv.captureFrontier();
     // AFTER the fork: a concurrent descendant the fork never saw
-    conv.ingest(env([set(['settings', 'font'], 'y')], { p: 2, writer: 'o2', origin: 'o2' }));
+    conv.ingest(
+      env([set(['settings', 'font'], 'y')], {
+        p: 2,
+        writer: 'o2',
+        origin: 'o2',
+      }),
+    );
 
     // the fork commits a subtree replace at ['settings'], stamped against the frozen frontier
-    const stamped = conv.stamp([{ kind: 'set', path: ['settings'], next: { theme: 'fresh' } }], { frontier });
-    const clears = stamped.filter((o) => o.kind === 'clear').map((o) => o.path.join('/'));
+    const stamped = conv.stamp(
+      [{ kind: 'set', path: ['settings'], next: { theme: 'fresh' } }],
+      { frontier },
+    );
+    const clears = stamped
+      .filter((o) => o.kind === 'clear')
+      .map((o) => o.path.join('/'));
     expect(clears).toContain('settings/theme'); // observed at fork time -> cleared
     expect(clears).not.toContain('settings/font'); // arrived after the fork -> NOT cleared
 
     // and it converges: applying the group, the post-fork font survives the replace as a sibling
-    const env2: OpEnvelope = { proto: OP_PROTO_VERSION, origin: 'o1', writer: 'o1', version: 1, hlc: { p: 3, l: 0 }, policyVersion: 0, ops: stamped };
+    const env2: OpEnvelope = {
+      proto: OP_PROTO_VERSION,
+      origin: 'o1',
+      writer: 'o1',
+      version: 1,
+      hlc: { p: 3, l: 0 },
+      policyVersion: 0,
+      ops: stamped,
+    };
     // fresh peer sees theme, font, then the replace group -> font must remain
     const peer = createConvergingApply();
-    peer.ingest(env([set(['settings', 'theme'], 'x')], { p: 1, writer: 'o1', origin: 'o1' }));
-    peer.ingest(env([set(['settings', 'font'], 'y')], { p: 2, writer: 'o2', origin: 'o2' }));
+    peer.ingest(
+      env([set(['settings', 'theme'], 'x')], {
+        p: 1,
+        writer: 'o1',
+        origin: 'o1',
+      }),
+    );
+    peer.ingest(
+      env([set(['settings', 'font'], 'y')], {
+        p: 2,
+        writer: 'o2',
+        origin: 'o2',
+      }),
+    );
     const root = applyOps({}, peer.ingest(env2));
     expect(root).toEqual({ settings: { theme: 'fresh', font: 'y' } }); // theme replaced, font survived
   });
@@ -1964,7 +2592,13 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
     hlc: { p: 5, l: 0 },
     policyVersion: 0,
     ops: [
-      { kind: 'set', path: ['a', 'b'], next: 1, cites: [{ origin: 'o2', hlc: { p: 2, l: 0 } }], epoch: 0 },
+      {
+        kind: 'set',
+        path: ['a', 'b'],
+        next: 1,
+        cites: [{ origin: 'o2', hlc: { p: 2, l: 0 } }],
+        epoch: 0,
+      },
     ],
   });
   // deep-clone + patch, so each case mutates an otherwise valid envelope
@@ -1976,7 +2610,16 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
 
   it('accepts a well-formed envelope (incl. a set at the root path)', () => {
     expect(validateEnvelope(valid())).toBeNull();
-    expect(validateEnvelope(mutate((e) => (e.ops = [{ kind: 'set', path: [], next: {}, cites: [], epoch: 0 }])))).toBeNull();
+    expect(
+      validateEnvelope(
+        mutate(
+          (e) =>
+            (e.ops = [
+              { kind: 'set', path: [], next: {}, cites: [], epoch: 0 },
+            ]),
+        ),
+      ),
+    ).toBeNull();
     // a subtree group (set at A + clears at descendants) is many ops on DIFFERENT paths: fine
     expect(
       validateEnvelope(
@@ -1993,32 +2636,118 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
 
   const cases: Array<[string, OpEnvelope, string]> = [
     ['empty origin', mutate((e) => (e.origin = '')), 'origin'],
-    ['control char in origin (forged separator)', mutate((e) => (e.origin = `a${CTRL}b`)), 'origin'],
+    [
+      'control char in origin (forged separator)',
+      mutate((e) => (e.origin = `a${CTRL}b`)),
+      'origin',
+    ],
     ['empty writer', mutate((e) => (e.writer = '')), 'writer'],
-    ['control char in writer', mutate((e) => (e.writer = `w${CTRL}`)), 'writer'],
+    [
+      'control char in writer',
+      mutate((e) => (e.writer = `w${CTRL}`)),
+      'writer',
+    ],
     ['non-finite hlc.p', mutate((e) => (e.hlc = { p: Infinity, l: 0 })), 'hlc'],
     ['missing hlc.l', mutate((e) => (e.hlc = { p: 1 } as any)), 'hlc'],
     ['version zero', mutate((e) => (e.version = 0)), 'version'],
     ['version non-integer', mutate((e) => (e.version = 1.5)), 'version'],
     ['version negative', mutate((e) => (e.version = -3)), 'version'],
     ['ops not an array', mutate((e) => (e.ops = null as any)), 'ops'],
-    ['a null op element (totality: reject, never throw)', mutate((e) => (e.ops = [null as any])), 'op'],
+    [
+      'a null op element (totality: reject, never throw)',
+      mutate((e) => (e.ops = [null as any])),
+      'op',
+    ],
     ['a non-object op element', mutate((e) => (e.ops = ['nope' as any])), 'op'],
-    ['unknown op kind', mutate((e) => (e.ops = [{ kind: 'weird', path: ['a'], cites: [], epoch: 0 } as any])), 'kind'],
-    ['path not an array', mutate((e) => (e.ops[0] = { ...e.ops[0], path: 'a' as any })), 'path'],
-    ['control char in a path segment', mutate((e) => (e.ops[0] = { ...e.ops[0], path: [`a${CTRL}`] })), 'path-control'],
-    ['delete at root', mutate((e) => (e.ops = [{ kind: 'delete', path: [], prev: 0, cites: [], epoch: 0 }])), 'root-op'],
-    ['clear at root', mutate((e) => (e.ops = [{ kind: 'clear', path: [], cites: [], epoch: 0 }])), 'root-op'],
-    ['negative epoch', mutate((e) => (e.ops[0] = { ...e.ops[0], epoch: -1 })), 'epoch'],
-    ['non-finite epoch', mutate((e) => (e.ops[0] = { ...e.ops[0], epoch: NaN })), 'epoch'],
-    ['missing epoch', mutate((e) => (e.ops[0] = { kind: 'set', path: ['a'], next: 1, cites: [] } as any)), 'epoch'],
-    ['cites not an array', mutate((e) => (e.ops[0] = { ...e.ops[0], cites: 'x' as any })), 'cites'],
-    ['cite with empty origin', mutate((e) => (e.ops[0] = { ...e.ops[0], cites: [{ origin: '', hlc: { p: 1, l: 0 } }] })), 'cites'],
-    ['cite missing hlc', mutate((e) => (e.ops[0] = { ...e.ops[0], cites: [{ origin: 'o' } as any] })), 'cites'],
-    ['two ops on one path', mutate((e) => (e.ops = [
-      { kind: 'set', path: ['a'], next: 1, cites: [], epoch: 0 },
-      { kind: 'set', path: ['a'], next: 2, cites: [], epoch: 0 },
-    ])), 'dup-path'],
+    [
+      'unknown op kind',
+      mutate(
+        (e) =>
+          (e.ops = [
+            { kind: 'weird', path: ['a'], cites: [], epoch: 0 } as any,
+          ]),
+      ),
+      'kind',
+    ],
+    [
+      'path not an array',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], path: 'a' as any })),
+      'path',
+    ],
+    [
+      'control char in a path segment',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], path: [`a${CTRL}`] })),
+      'path-control',
+    ],
+    [
+      'delete at root',
+      mutate(
+        (e) =>
+          (e.ops = [
+            { kind: 'delete', path: [], prev: 0, cites: [], epoch: 0 },
+          ]),
+      ),
+      'root-op',
+    ],
+    [
+      'clear at root',
+      mutate(
+        (e) => (e.ops = [{ kind: 'clear', path: [], cites: [], epoch: 0 }]),
+      ),
+      'root-op',
+    ],
+    [
+      'negative epoch',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], epoch: -1 })),
+      'epoch',
+    ],
+    [
+      'non-finite epoch',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], epoch: NaN })),
+      'epoch',
+    ],
+    [
+      'missing epoch',
+      mutate(
+        (e) =>
+          (e.ops[0] = { kind: 'set', path: ['a'], next: 1, cites: [] } as any),
+      ),
+      'epoch',
+    ],
+    [
+      'cites not an array',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], cites: 'x' as any })),
+      'cites',
+    ],
+    [
+      'cite with empty origin',
+      mutate(
+        (e) =>
+          (e.ops[0] = {
+            ...e.ops[0],
+            cites: [{ origin: '', hlc: { p: 1, l: 0 } }],
+          }),
+      ),
+      'cites',
+    ],
+    [
+      'cite missing hlc',
+      mutate(
+        (e) => (e.ops[0] = { ...e.ops[0], cites: [{ origin: 'o' } as any] }),
+      ),
+      'cites',
+    ],
+    [
+      'two ops on one path',
+      mutate(
+        (e) =>
+          (e.ops = [
+            { kind: 'set', path: ['a'], next: 1, cites: [], epoch: 0 },
+            { kind: 'set', path: ['a'], next: 2, cites: [], epoch: 0 },
+          ]),
+      ),
+      'dup-path',
+    ],
   ];
 
   it.each(cases)('rejects: %s', (_desc, env, reason) => {
@@ -2037,7 +2766,17 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
     expect(validateEnvelope(null as any)).toBe('envelope');
     expect(validateEnvelope(undefined as any)).toBe('envelope');
     expect(validateEnvelope('nope' as any)).toBe('envelope');
-    expect(() => validateEnvelope({ origin: 'o', writer: 'w', version: 1, hlc: { p: 1, l: 0 }, proto: 2, policyVersion: 0, ops: [null] } as any)).not.toThrow();
+    expect(() =>
+      validateEnvelope({
+        origin: 'o',
+        writer: 'w',
+        version: 1,
+        hlc: { p: 1, l: 0 },
+        proto: 2,
+        policyVersion: 0,
+        ops: [null],
+      } as any),
+    ).not.toThrow();
   });
 });
 
@@ -2046,8 +2785,13 @@ describe('opSync.receive — rejects malformed envelopes whole', () => {
     TestBed.runInInjectionContext(() => {
       const s = signal<{ v: string }>({ v: 'init' });
       const rejects: Array<{ origin: string; reason: string }> = [];
-      const sync = opSync(s, { writer: 'w', onReject: (e, reason) => rejects.push({ origin: e.origin, reason }) });
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const sync = opSync(s, {
+        writer: 'w',
+        onReject: (e, reason) => rejects.push({ origin: e.origin, reason }),
+      });
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       sync.receive({
         proto: OP_PROTO_VERSION,
         origin: `evil${String.fromCharCode(0x1f)}peer`,
@@ -2058,7 +2802,9 @@ describe('opSync.receive — rejects malformed envelopes whole', () => {
         ops: [{ kind: 'set', path: ['v'], next: 'HACK', cites: [], epoch: 0 }],
       });
       expect(s()).toEqual({ v: 'init' }); // store untouched
-      expect(rejects).toEqual([{ origin: `evil${String.fromCharCode(0x1f)}peer`, reason: 'origin' }]);
+      expect(rejects).toEqual([
+        { origin: `evil${String.fromCharCode(0x1f)}peer`, reason: 'origin' },
+      ]);
       warn.mockRestore();
       sync.destroy();
     });
@@ -2067,9 +2813,12 @@ describe('opSync.receive — rejects malformed envelopes whole', () => {
 
 describe('release-review fixes', () => {
   it('rejects a __proto__ path segment at ingress and never lets it reach the object graph', () => {
-    const forged = env([{ kind: 'set', path: ['__proto__'], next: { polluted: true } }], {
-      writer: 'evil',
-    });
+    const forged = env(
+      [{ kind: 'set', path: ['__proto__'], next: { polluted: true } }],
+      {
+        writer: 'evil',
+      },
+    );
     expect(validateEnvelope(forged)).toBe('path-proto');
 
     // even if such an op is constructed past validation, apply drops it (no prototype swap)
@@ -2087,10 +2836,20 @@ describe('release-review fixes', () => {
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       // two concurrent writes to one path: the older is superseded and prunable below the frontier
       sync.receive(
-        env([set(['k'], 'A')], { p: 5, writer: 'wx', origin: 'ox', version: 1 }),
+        env([set(['k'], 'A')], {
+          p: 5,
+          writer: 'wx',
+          origin: 'ox',
+          version: 1,
+        }),
       );
       sync.receive(
-        env([set(['k'], 'B', 'A')], { p: 20, writer: 'wy', origin: 'oy', version: 1 }),
+        env([set(['k'], 'B', 'A')], {
+          p: 20,
+          writer: 'wy',
+          origin: 'oy',
+          version: 1,
+        }),
       );
       const before = s().k;
       sync.prune({ p: 10, l: 0 }); // frontier above the superseded 'A' write
@@ -2108,12 +2867,22 @@ describe('release-review fixes', () => {
       // a never-seen origin's straggler BELOW the frontier: first-contact, so version dedup (no prior
       // entry) cannot catch it; the frontier gate must reject it or a settled value could resurrect
       sync.receive(
-        env([set(['stale'], 'x')], { p: 5, writer: 'wz', origin: 'oz', version: 1 }),
+        env([set(['stale'], 'x')], {
+          p: 5,
+          writer: 'wz',
+          origin: 'oz',
+          version: 1,
+        }),
       );
       expect(s()['stale']).toBeUndefined();
       // control: an above-frontier write from a fresh origin still lands
       sync.receive(
-        env([set(['fresh'], 'y')], { p: 20, writer: 'wq', origin: 'oq', version: 1 }),
+        env([set(['fresh'], 'y')], {
+          p: 20,
+          writer: 'wq',
+          origin: 'oq',
+          version: 1,
+        }),
       );
       expect(s()['fresh']).toBe('y');
       sync.destroy();
@@ -2132,7 +2901,9 @@ describe('release-review fixes', () => {
         origin: 'o1',
         version: 5,
       });
-      sync.hydrate({ root: { k: 'remote' }, registers: [], wm: {} }, [pendingEnv]);
+      sync.hydrate({ root: { k: 'remote' }, registers: [], wm: {} }, [
+        pendingEnv,
+      ]);
       expect(s().k).toBe('local');
       sync.destroy();
     });
@@ -2141,12 +2912,86 @@ describe('release-review fixes', () => {
   it('a checkpoint-seeded joiner materializes an orphan grandchild identically to an incremental peer', () => {
     // a set at a grandchild whose parent has no register: the incremental peer vivifies the parent
     const peer = createConvergingApply();
-    const incremental = applyOps({}, peer.ingest(env([set(['b', 'x'], 1)], { writer: 'o1' })));
+    const incremental = applyOps(
+      {},
+      peer.ingest(env([set(['b', 'x'], 1)], { writer: 'o1' })),
+    );
     expect(incremental).toEqual({ b: { x: 1 } });
 
     // a joiner seeded from register state alone must fold to the SAME tree (invariant: no orphan drop)
     const joiner = createConvergingApply();
     joiner.load(peer.checkpoint());
     expect(joiner.materialize()).toEqual({ b: { x: 1 } });
+  });
+});
+
+describe('the wire-fidelity law (wireValueViolation + the emit-side dev lint)', () => {
+  it('accepts the JSON-faithful domain, including falsy values and root-level undefined', () => {
+    expect(wireValueViolation(undefined)).toBeNull();
+    expect(wireValueViolation(null)).toBeNull();
+    expect(wireValueViolation('')).toBeNull();
+    expect(wireValueViolation(0)).toBeNull();
+    expect(wireValueViolation(false)).toBeNull();
+    expect(wireValueViolation({ a: [1, 'x', null, { b: true }] })).toBeNull();
+    expect(wireValueViolation(Object.create(null))).toBeNull();
+  });
+
+  it('names each value shape JSON silently mutates', () => {
+    expect(wireValueViolation(-0)).toBe('negative-zero');
+    expect(wireValueViolation(Number.NaN)).toBe('non-finite-number');
+    expect(wireValueViolation(Infinity)).toBe('non-finite-number');
+    expect(wireValueViolation({ a: undefined })).toBe('undefined-in-container');
+    expect(wireValueViolation([1, undefined])).toBe('undefined-in-container');
+    // eslint-disable-next-line no-sparse-arrays
+    expect(wireValueViolation([1, , 2])).toBe('sparse-array');
+    expect(wireValueViolation(Object.assign([1], { extra: 2 }))).toBe(
+      'array-named-property',
+    );
+    expect(wireValueViolation({ deep: Object.assign([], { x: 1 }) })).toBe(
+      'array-named-property',
+    );
+    const balanced: unknown[] & { extra?: number } = [];
+    Object.defineProperty(balanced, '0', { value: 1, enumerable: false });
+    balanced.extra = 2;
+    expect(wireValueViolation(balanced)).toBe('array-named-property');
+    const hiddenIndex: unknown[] = [];
+    Object.defineProperty(hiddenIndex, '0', { value: 1, enumerable: false });
+    expect(wireValueViolation(hiddenIndex)).toBe('array-named-property');
+    expect(wireValueViolation(new Date())).toBe('non-plain-object');
+    expect(wireValueViolation(new Map())).toBe('non-plain-object');
+    expect(wireValueViolation({ f: () => 0 })).toBe('function');
+    expect(wireValueViolation({ b: 1n })).toBe('bigint');
+    expect(wireValueViolation({ s: Symbol('x') })).toBe('symbol');
+    expect(wireValueViolation({ deep: { deeper: [-0] } })).toBe(
+      'negative-zero',
+    );
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    expect(wireValueViolation(cyclic)).toBe('cycle');
+  });
+
+  it('a shared sibling reference is not a cycle (JSON duplicates it faithfully)', () => {
+    const shared = { k: 1 };
+    expect(wireValueViolation({ a: shared, b: shared })).toBeNull();
+  });
+
+  it('warns at emission for a JSON-infidel local write, and stays silent for a clean one', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { s, sync } = TestBed.runInInjectionContext(() => {
+        const src = signal<{ v: unknown }>({ v: 'init' });
+        return { s: src, sync: opSync(src, { writer: 'w' }) };
+      });
+      s.set({ v: 'clean' });
+      sync.flush();
+      expect(warn).not.toHaveBeenCalled();
+      s.set({ v: Number.NaN });
+      sync.flush();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('non-finite-number');
+      expect(String(warn.mock.calls[0][0])).toContain('"v"');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

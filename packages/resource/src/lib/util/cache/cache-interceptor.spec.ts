@@ -13,7 +13,7 @@ import {
 } from '@angular/common/http';
 import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { delay, firstValueFrom, of, throwError } from 'rxjs';
+import { delay, firstValueFrom, Observable, of, throwError } from 'rxjs';
 import { injectQueryCache, provideQueryCache, type Cache } from './cache';
 import { createCacheInterceptor, setCacheContext } from './cache-interceptor';
 
@@ -381,5 +381,69 @@ describe('createCacheInterceptor (server platform)', () => {
     expect(response.body).toEqual({ id: 1 });
     expect(backendCalls).toBe(1);
     expect(cache.getUntracked('ssr-1')).toBeNull();
+  });
+});
+
+describe('createCacheInterceptor: a transport that ignores teardown cannot publish (characterization)', () => {
+  let cache: Cache<HttpResponse<unknown>>;
+  let client: HttpClient;
+  let emitLate: (() => void) | undefined;
+
+  const abortIgnoringStub: HttpInterceptorFn = () =>
+    new Observable((sub) => {
+      emitLate = () => {
+        sub.next(new HttpResponse({ status: 200, body: 'late' }));
+        sub.complete();
+      };
+      return () => {
+        // deliberately ignore teardown: this "transport" keeps running after the abort
+      };
+    });
+
+  beforeEach(() => {
+    emitLate = undefined;
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideQueryCache(),
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([createCacheInterceptor(), abortIgnoringStub]),
+        ),
+      ],
+    });
+    cache = TestBed.runInInjectionContext(() => injectQueryCache());
+    client = TestBed.inject(HttpClient);
+  });
+
+  it('a late response after unsubscribe reaches neither the cache nor the subscriber', () => {
+    const context = setCacheContext(new HttpContext(), {
+      key: 'pin',
+      staleTime: 5_000,
+      ttl: 60_000,
+    });
+    let received: unknown;
+    const sub = client
+      .get('https://example.com/slow', { context })
+      .subscribe((v) => (received = v));
+    sub.unsubscribe();
+    emitLate?.();
+    expect(received).toBeUndefined();
+    expect(cache.getUntracked('pin')).toBeNull();
+  });
+
+  it('oracle: the same late response while still subscribed does publish and cache', () => {
+    const context = setCacheContext(new HttpContext(), {
+      key: 'pin',
+      staleTime: 5_000,
+      ttl: 60_000,
+    });
+    let received: unknown;
+    client
+      .get('https://example.com/slow', { context })
+      .subscribe((v) => (received = v));
+    emitLate?.();
+    expect(received).toBe('late');
+    expect(cache.getUntracked('pin')?.value.body).toBe('late');
   });
 });

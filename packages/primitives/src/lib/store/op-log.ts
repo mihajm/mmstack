@@ -18,7 +18,10 @@ type Key = string | number;
 /**
  * One structural operation. `set` on a key that did not previously exist carries NO `prev`
  * property (an absent key is not the same as a key holding `undefined` — the merge3 lesson),
- * which is what lets {@link invertBatch} invert an add into a delete.
+ * which is what lets {@link invertBatch} invert an add into a delete. A JSON text transport
+ * collapses an own `prev: undefined` into an absent `prev` (structured-clone and in-process
+ * channels preserve the distinction) — wire-serialized batches were already not invertible,
+ * see {@link invertBatch}.
  *
  * `clear` is a sync-layer intent, not a value change: it retires a per-path register (the
  * observed-remove half of a subtree replace) and contributes NOTHING to a value: {@link applyOps}

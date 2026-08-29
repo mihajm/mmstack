@@ -79,7 +79,8 @@ export type SyncOp = StoreOp & {
  * The wire/journal record. `writer` is an opaque principal pseudonym (natural identity never
  * enters the envelope); `origin` identifies the emitting replica. All ops in one envelope share
  * the envelope stamp, and an envelope carries at most one op per path, so `(origin, hlc)` is a
- * unique dot per path register.
+ * unique dot per path register. Op VALUES are wire data under the JSON-fidelity law — see
+ * {@link wireValueViolation}; emission lints them in dev mode.
  */
 export type OpEnvelope = {
   readonly proto: number;
@@ -178,6 +179,83 @@ export function validateEnvelope(env: OpEnvelope): string | null {
   }
   return null;
 }
+
+export function wireValueViolation(value: unknown): string | null {
+  return violationAt(value, false, []);
+}
+
+function violationAt(
+  value: unknown,
+  nested: boolean,
+  ancestors: unknown[],
+): string | null {
+  if (value === undefined) return nested ? 'undefined-in-container' : null;
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === 'boolean' || t === 'string') return null;
+  if (t === 'number') {
+    if (!Number.isFinite(value)) return 'non-finite-number';
+    return Object.is(value, -0) ? 'negative-zero' : null;
+  }
+  if (t === 'bigint') return 'bigint';
+  if (t === 'function') return 'function';
+  if (t === 'symbol') return 'symbol';
+  if (ancestors.includes(value)) return 'cycle';
+  ancestors.push(value);
+  try {
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        if (!Object.hasOwn(value, i)) return 'sparse-array';
+        const reason = violationAt(value[i], true, ancestors);
+        if (reason) return reason;
+      }
+
+      const keys = Object.keys(value);
+      if (keys.length !== value.length) return 'array-named-property';
+      for (const key of keys) {
+        const idx = Number(key);
+        if (
+          String(idx) !== key ||
+          !Number.isInteger(idx) ||
+          idx < 0 ||
+          idx >= value.length
+        ) {
+          return 'array-named-property';
+        }
+      }
+      return null;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return 'non-plain-object';
+    for (const key of Object.keys(value)) {
+      const reason = violationAt(
+        (value as Record<string, unknown>)[key],
+        true,
+        ancestors,
+      );
+      if (reason) return reason;
+    }
+    return null;
+  } finally {
+    ancestors.pop();
+  }
+}
+
+// dev-only: one warning per offending batch names the first violating op, then stops
+const lintWireValues = (ops: readonly SyncOp[]): void => {
+  for (const op of ops) {
+    const reason =
+      (op.kind === 'set' ? wireValueViolation(op.next) : null) ??
+      (op.kind !== 'clear' && Object.hasOwn(op, 'prev')
+        ? wireValueViolation((op as { prev?: unknown }).prev)
+        : null);
+    if (!reason) continue;
+    console.warn(
+      `[@mmstack/primitives] op value at "${op.path.join('.')}" will not survive a JSON transport (${reason}): peers materialize a different value than this emitter, and the room can diverge. Op values must round-trip JSON unchanged; encode rich leaves as strings.`,
+    );
+    return;
+  }
+};
 
 export type MergeContext = {
   readonly path: readonly Key[];
@@ -1298,6 +1376,7 @@ export function opSync<T extends object>(
   const emitLocal = (ops: readonly StoreOp[]): void => {
     const frontier = scopeFrontier;
     const stamped = conv.stamp(ops, { bump: bumping, frontier });
+    if (isDevMode()) lintWireValues(stamped);
     const nextVersion = (versions.get(origin) ?? 0) + 1;
     const env: OpEnvelope = {
       proto: OP_PROTO_VERSION,

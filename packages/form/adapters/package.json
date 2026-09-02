@@ -18,7 +18,7 @@
   "dependencies": {
     "@mmstack/form-core": "^22.0.0",
     "@mmstack/form-validation": "^22.0.0",
-    "@mmstack/primitives": "^22.0.0"
+    "@mmstack/primitives": "^22.10.4"
   },
   "peerDependencies": {
     "@angular/core": ">=22 <23",

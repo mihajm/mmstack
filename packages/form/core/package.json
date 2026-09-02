@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/core",
   "dependencies": {
-    "@mmstack/primitives": "^22.0.0"
+    "@mmstack/primitives": "^22.10.4"
   },
   "peerDependencies": {
     "@angular/core": ">=22 <23"

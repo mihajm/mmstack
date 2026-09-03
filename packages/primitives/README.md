@@ -369,7 +369,10 @@ The foundation of stale-while-revalidate. Wraps a signal so it **holds its last 
 import { keepPrevious } from '@mmstack/primitives';
 
 const held = keepPrevious(resource.value); // drops to undefined mid-reload → keeps last value
+const rows = keepPrevious(resource.value, { fallback: [] }); // [] only until the first value lands
 ```
+
+`fallback` is yielded only while nothing has ever been defined; after the first defined value the previous value covers every gap, never the fallback. Like any linked signal the hold is lazy: it carries a value it has computed with, so place it over the value your readers read — reading is what feeds it. `@mmstack/resource` does exactly that for its `keepPrevious` option.
 
 If the source is writable, `set` / `update` / `asReadonly` (and `mutate` / `inline` / `from` for mutable / derived sources) are forwarded through, so it stays a drop-in replacement. `@mmstack/resource` uses it under the hood for its `keepPrevious` option.
 

@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/resource",
-  "version": "20.13.3",
+  "version": "20.14.0",
   "keywords": [
     "angular",
     "signals",
@@ -20,7 +20,7 @@
   "peerDependencies": {
     "@angular/common": ">=20 <21",
     "@angular/core": ">=20 <21",
-    "@mmstack/primitives": ">=20.11 <21",
+    "@mmstack/primitives": ">=20.16 <21",
     "rxjs": "~7.8.2"
   },
   "sideEffects": false

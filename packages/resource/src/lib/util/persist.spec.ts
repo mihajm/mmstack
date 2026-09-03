@@ -57,6 +57,45 @@ describe('persistResourceValues', () => {
     });
   });
 
+  it('yields the fallback before anything is held, then the previous value across a gap', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource<string[] | undefined>(undefined, {
+        status: 'loading',
+      });
+      const persisted = persistResourceValues(mock, true, undefined, []);
+
+      expect(persisted.value()).toEqual([]);
+
+      mock.value.set(['a']);
+      expect(persisted.value()).toEqual(['a']);
+
+      mock.value.set(undefined);
+      expect(persisted.value()).toEqual(['a']);
+    });
+  });
+
+  it('hasValue follows the held value: true through a gap, false in error', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource<string | undefined>(undefined, {
+        status: 'loading',
+      });
+      const persisted = persistResourceValues(mock, true);
+      expect(persisted.hasValue()).toBe(false);
+
+      mock.value.set('first');
+      mock._status.set('resolved');
+      expect(persisted.hasValue()).toBe(true);
+
+      mock.value.set(undefined);
+      mock._status.set('loading');
+      expect(persisted.hasValue()).toBe(true);
+
+      mock._status.set('error');
+      expect(persisted.hasValue()).toBe(false);
+      expect(persisted.value()).toBe('first');
+    });
+  });
+
   it('should forward set/update back to original when source is writable', () => {
     TestBed.runInInjectionContext(() => {
       const mock = createMockResource('original');

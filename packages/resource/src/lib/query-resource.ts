@@ -579,14 +579,22 @@ function createQueryResource<TResult, TRaw = TResult>(
           : httpResource
   ) as typeof httpResource;
 
+  // Under `keepPrevious` the default is the hold's fallback, not Angular's: Angular answers with
+  // its defaultValue in every gap (a new request identity included), which would fill the gap
+  // before the hold could carry the previous value across it.
+  const defaultValue = (
+    options?.keepPrevious ? undefined : options?.defaultValue
+  ) as TResult;
+
   let resource = toResourceObject(
     httpResourceFn<TResult>(cachedRequest, {
       ...options,
+      defaultValue,
       parse: (options?.cache ? undefined : options?.parse) as any,
     }) as HttpResourceRef<TResult>,
   );
 
-  resource = catchValueError(resource, options?.defaultValue as TResult);
+  resource = catchValueError(resource, defaultValue);
 
   const cachedEvent = cache.getEntryOrKey(cacheKey);
 
@@ -651,18 +659,15 @@ function createQueryResource<TResult, TRaw = TResult>(
     options.injector,
   );
 
-  resource = persistResourceValues<TResult>(
-    resource,
-    options?.keepPrevious,
-    options?.equal,
-  );
+  // Writes land on the transport value; the hold and the cache composition sit above it.
+  const rawValue = resource.value;
 
   const writeValue = (
     value: TResult,
     persistEntry: boolean,
     broadcastEntry: boolean,
   ) => {
-    resource.value.set(value);
+    rawValue.set(value);
     const k = untracked(cacheKey);
     if (options?.cache && k)
       cache.store(
@@ -684,10 +689,10 @@ function createQueryResource<TResult, TRaw = TResult>(
 
   const valueEq = options.equal;
 
-  const value = options?.cache
+  const composed = options?.cache
     ? toWritable(
         computed(
-          (): TResult => (cacheEntry()?.value ?? resource.value()) as TResult,
+          (): TResult => (cacheEntry()?.value ?? rawValue()) as TResult,
           {
             equal: valueEq
               ? (a, b) => {
@@ -701,7 +706,17 @@ function createQueryResource<TResult, TRaw = TResult>(
         set,
         update,
       )
-    : resource.value;
+    : rawValue;
+
+  // The hold goes over the value readers read — the cache-composed one — so a reader keeps it
+  // fed by reading: a hold beneath the composition could miss a value the cache served first.
+  resource = persistResourceValues<TResult>(
+    { ...resource, value: composed },
+    options?.keepPrevious,
+    options?.equal,
+    options?.defaultValue as TResult,
+  );
+  const value = resource.value;
 
   const cbEffectRef = effect(
     () => {
@@ -735,8 +750,9 @@ function createQueryResource<TResult, TRaw = TResult>(
     abort: () => {
       const s = untracked(resource.status);
       if (s !== 'loading' && s !== 'reloading') return;
-      // self-set aborts the load; NOT writeValue, so the cache is untouched
-      resource.value.set(untracked(resource.value));
+      // self-set on the transport value aborts the load; NOT writeValue, so the cache is
+      // untouched — and not the held value, whose set forwards into writeValue.
+      rawValue.set(untracked(rawValue));
     },
     destroy: () => {
       cbEffectRef.destroy();

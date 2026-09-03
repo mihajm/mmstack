@@ -10,6 +10,16 @@ import { isDerivation, type DerivedSignal } from './derived';
 import { isMutable, type MutableSignal } from './mutable';
 
 /**
+ * Options for {@link keepPrevious}: the signal options of the held value, plus
+ * `fallback` — what to yield while there is nothing to hold yet (the source has
+ * never been defined). Once a defined value has been seen the fallback is never
+ * yielded again; the previous value is.
+ */
+export type KeepPreviousOptions<T> = CreateSignalOptions<T> & {
+  readonly fallback?: T;
+};
+
+/**
  * Wraps a signal so it HOLDS its last defined value whenever the source becomes
  * `undefined`, yielding that value instead of the gap. This is the foundation of
  * stale-while-revalidate: a source that drops to `undefined` mid-reload keeps
@@ -24,25 +34,26 @@ import { isMutable, type MutableSignal } from './mutable';
  */
 export function keepPrevious<T>(
   value: MutableSignal<T>,
-  opt?: CreateSignalOptions<T>,
+  opt?: KeepPreviousOptions<T>,
 ): MutableSignal<T>;
 export function keepPrevious<T, U>(
   value: DerivedSignal<T, U>,
-  opt?: CreateSignalOptions<U>,
+  opt?: KeepPreviousOptions<U>,
 ): DerivedSignal<T, U>;
 export function keepPrevious<T>(
   value: WritableSignal<T>,
-  opt?: CreateSignalOptions<T>,
+  opt?: KeepPreviousOptions<T>,
 ): WritableSignal<T>;
 export function keepPrevious<T>(
   value: Signal<T>,
-  opt?: CreateSignalOptions<T>,
+  opt?: KeepPreviousOptions<T>,
 ): Signal<T>;
 export function keepPrevious<T, P>(
   src: WritableSignal<T> | Signal<T> | MutableSignal<T> | DerivedSignal<P, T>,
-  opt?: CreateSignalOptions<T>,
+  opt?: KeepPreviousOptions<T>,
 ): WritableSignal<T> | Signal<T> {
   const mutableSrc = isWritableSignal(src) && isMutable(src);
+  const { fallback, ...signalOpt } = opt ?? {};
 
   let cnt = 0;
   const baseEqual = opt?.equal;
@@ -52,10 +63,12 @@ export function keepPrevious<T, P>(
     : baseEqual;
 
   const persisted = linkedSignal<T, T>({
-    ...opt,
+    ...signalOpt,
     source: () => src(),
-    computation: (next, prev) =>
-      next === undefined && prev !== undefined ? prev.value : next,
+    computation: (next, prev) => {
+      if (next !== undefined) return next;
+      return prev !== undefined ? prev.value : (fallback as T);
+    },
     equal,
   });
 

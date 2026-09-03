@@ -419,6 +419,53 @@ describe('queryResource', () => {
     expect(requests).toBe(3);
   });
 
+  it('keepPrevious + defaultValue: a user equal written for the declared type never sees undefined, and parse only sees bodies', async () => {
+    const equalCalls: unknown[][] = [];
+    const parsed: unknown[] = [];
+    const url = signal('https://example.com/keep-prev-equal/1');
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ id: string }[], { id: string }[]>(
+        () => ({
+          url: url(),
+          context: createTestContext(() => {
+            /* noop */
+          }, [{ id: 'a' }, { id: 'b' }]),
+        }),
+        {
+          keepPrevious: true,
+          defaultValue: [],
+          equal: (a, b) => {
+            equalCalls.push([a, b]);
+            return a.length === b.length;
+          },
+          parse: (raw) => {
+            parsed.push(raw);
+            return raw.map((row) => ({ id: row.id.toUpperCase() }));
+          },
+        },
+      ),
+    );
+
+    expect(res.value()).toEqual([]);
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v.length > 0),
+    );
+    expect(res.value()).toEqual([{ id: 'A' }, { id: 'B' }]);
+
+    url.set('https://example.com/keep-prev-equal/2');
+    expect(res.value()).toEqual([{ id: 'A' }, { id: 'B' }]);
+    await TestBed.runInInjectionContext(() =>
+      until(res.status, (s) => s === 'resolved'),
+    );
+
+    expect(equalCalls.length).toBeGreaterThan(0);
+    for (const [a, b] of equalCalls) {
+      expect(a).toBeDefined();
+      expect(b).toBeDefined();
+    }
+    expect(parsed.every((raw) => Array.isArray(raw))).toBe(true);
+  });
+
   it('should fetch again with new identical request objects if triggerOnSameRequest is true', async () => {
     let requests = 0;
     const url = 'https://example.com/trigger-same';

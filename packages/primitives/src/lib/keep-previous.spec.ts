@@ -32,6 +32,20 @@ describe('keepPrevious', () => {
     });
   });
 
+  it('yields the fallback only while nothing has ever been defined, then holds the previous value', () => {
+    TestBed.runInInjectionContext(() => {
+      const src = signal<number[] | undefined>(undefined);
+      const held = keepPrevious(src, { fallback: [] });
+      expect(held()).toEqual([]);
+
+      src.set([1]);
+      expect(held()).toEqual([1]);
+
+      src.set(undefined); // the gap after a defined value → previous, never the fallback again
+      expect(held()).toEqual([1]);
+    });
+  });
+
   it('forwards set/update to a writable source (stays a drop-in replacement)', () => {
     TestBed.runInInjectionContext(() => {
       const src = signal<number | undefined>(1);

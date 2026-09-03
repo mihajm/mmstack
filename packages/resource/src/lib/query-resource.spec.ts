@@ -317,6 +317,108 @@ describe('queryResource', () => {
     expect(res.value()).toEqual({ data: 'second' });
   });
 
+  it('keepPrevious + defaultValue: the default only until the first value, then the previous page holds across a request change', async () => {
+    const page = signal(1);
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ page: number }[]>(
+        () => ({
+          url: `https://example.com/keep-prev-default/${page()}`,
+          context: createTestContext(() => {
+            /* noop */
+          }, [{ page: page() }]),
+        }),
+        { keepPrevious: true, defaultValue: [] },
+      ),
+    );
+
+    expect(res.value()).toEqual([]);
+    expect(res.hasValue()).toBe(true);
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v.length > 0),
+    );
+    expect(res.value()).toEqual([{ page: 1 }]);
+
+    page.set(2);
+    expect(res.status()).toBe('loading');
+    expect(res.value()).toEqual([{ page: 1 }]);
+    expect(res.hasValue()).toBe(true);
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v[0]?.page === 2),
+    );
+    expect(res.value()).toEqual([{ page: 2 }]);
+  });
+
+  it('keepPrevious + defaultValue: a fault after a held value keeps the value visible, reports the error, and hasValue false', async () => {
+    const fail = signal(false);
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ ok: boolean }[]>(
+        () => ({
+          url: `https://example.com/keep-prev-fault/${fail() ? 'b' : 'a'}`,
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            [{ ok: true }],
+            fail(),
+          ),
+        }),
+        { keepPrevious: true, defaultValue: [] },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v.length > 0),
+    );
+
+    fail.set(true);
+    await TestBed.runInInjectionContext(() =>
+      until(res.status, (s) => s === 'error'),
+    );
+    expect(res.error()).toBeDefined();
+    expect(res.value()).toEqual([{ ok: true }]);
+    expect(res.hasValue()).toBe(false);
+  });
+
+  it('keepPrevious + defaultValue + cache: a cached identity serves from cache, an uncached one holds the previous value', async () => {
+    let requests = 0;
+    const page = signal(1);
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource<{ page: number }[]>(
+        () => ({
+          url: `https://example.com/keep-prev-cache/${page()}`,
+          context: createTestContext(() => requests++, [{ page: page() }]),
+        }),
+        { keepPrevious: true, defaultValue: [], cache: { staleTime: 10000 } },
+      ),
+    );
+
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v.length > 0),
+    );
+    page.set(2);
+    expect(res.value()).toEqual([{ page: 1 }]);
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v[0]?.page === 2),
+    );
+    expect(requests).toBe(2);
+
+    page.set(1); // cached: served immediately, no request
+    TestBed.tick();
+    expect(res.value()).toEqual([{ page: 1 }]);
+    await Promise.resolve();
+    TestBed.tick();
+    expect(requests).toBe(2);
+
+    page.set(3); // uncached: the previous page holds while it loads
+    expect(res.value()).toEqual([{ page: 1 }]);
+    await TestBed.runInInjectionContext(() =>
+      until(res.value, (v) => v[0]?.page === 3),
+    );
+    expect(requests).toBe(3);
+  });
+
   it('should fetch again with new identical request objects if triggerOnSameRequest is true', async () => {
     let requests = 0;
     const url = 'https://example.com/trigger-same';

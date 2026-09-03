@@ -112,6 +112,30 @@ describe('manualQueryResource', () => {
     expect(requests).toBe(1);
   });
 
+  it('keepPrevious + defaultValue: a re-trigger holds the previous result instead of the default', async () => {
+    let n = 0;
+    const res = TestBed.runInInjectionContext(() =>
+      manualQueryResource<number[]>(
+        () => ({
+          url: 'https://example.com/keep-prev',
+          context: createTestContext(() => {
+            /* noop */
+          }, [++n]),
+        }),
+        { keepPrevious: true, defaultValue: [] },
+      ),
+    );
+    expect(res.value()).toEqual([]);
+
+    await res.trigger();
+    expect(res.value()).toEqual([1]);
+
+    const next = res.trigger();
+    expect(res.value()).toEqual([1]);
+    await next;
+    expect(res.value()).toEqual([2]);
+  });
+
   it('should use override url if provided in trigger', async () => {
     let requests = 0;
     const overrideUrl = 'https://example.com/override';

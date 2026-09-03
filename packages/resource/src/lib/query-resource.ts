@@ -579,17 +579,21 @@ function createQueryResource<TResult, TRaw = TResult>(
           : httpResource
   ) as typeof httpResource;
 
-  // Under `keepPrevious` the default is the hold's fallback, not Angular's: Angular answers with
-  // its defaultValue in every gap (a new request identity included), which would fill the gap
-  // before the hold could carry the previous value across it.
   const defaultValue = (
     options?.keepPrevious ? undefined : options?.defaultValue
   ) as TResult;
+
+  const userEqual = options?.equal;
+  const valueEqual = userEqual
+    ? (a: TResult, b: TResult) =>
+        a === undefined || b === undefined ? a === b : userEqual(a, b)
+    : undefined;
 
   let resource = toResourceObject(
     httpResourceFn<TResult>(cachedRequest, {
       ...options,
       defaultValue,
+      equal: valueEqual,
       parse: (options?.cache ? undefined : options?.parse) as any,
     }) as HttpResourceRef<TResult>,
   );
@@ -687,21 +691,11 @@ function createQueryResource<TResult, TRaw = TResult>(
     set(updater(untracked(value)));
   };
 
-  const valueEq = options.equal;
-
   const composed = options?.cache
     ? toWritable(
         computed(
           (): TResult => (cacheEntry()?.value ?? rawValue()) as TResult,
-          {
-            equal: valueEq
-              ? (a, b) => {
-                  if (a === undefined && b === undefined) return true;
-                  if (a === undefined || b === undefined) return false;
-                  return valueEq(a, b);
-                }
-              : undefined,
-          },
+          { equal: valueEqual },
         ),
         set,
         update,
@@ -713,7 +707,7 @@ function createQueryResource<TResult, TRaw = TResult>(
   resource = persistResourceValues<TResult>(
     { ...resource, value: composed },
     options?.keepPrevious,
-    options?.equal,
+    valueEqual,
     options?.defaultValue as TResult,
   );
   const value = resource.value;
@@ -787,8 +781,7 @@ function createQueryResource<TResult, TRaw = TResult>(
             ...prefetchRequest,
             responseType,
             credentials: prefetchRequest.credentials as
-              | RequestCredentials
-              | undefined,
+              RequestCredentials | undefined,
             priority: prefetchRequest.priority as RequestPriority | undefined,
             cache: prefetchRequest.cache as RequestCache | undefined,
             mode: prefetchRequest.mode as RequestMode | undefined,

@@ -514,6 +514,181 @@ describe('agentSeat schema honesty (scripted relay)', () => {
     a.close();
   });
 
+  it('a newer-schema envelope on a LIVE, settled seat ejects without stamping its seq on the old document', () => {
+    const wire = scripted();
+    let ejectedFor: string | undefined;
+    const a = agentSeat<Doc>(initial(), {
+      room: 'case-1',
+      writer: 'agent-a',
+      transport: wire.factory,
+      schemaVersion: 1,
+      onEject: (reason) => (ejectedFor = reason),
+    });
+    const settled: SeqEnvelope = {
+      proto: OP_PROTO_VERSION,
+      origin: 'peer-b',
+      writer: 'agent-b',
+      version: 1,
+      hlc: { p: 1, l: 0 },
+      policyVersion: 0,
+      schemaVersion: 1,
+      ops: [{ kind: 'set', path: ['title'], next: 'v1', cites: [], epoch: 0 }],
+      seq: 2,
+    };
+    wire.push({
+      t: 'welcome',
+      room: 'case-1',
+      seq: 2,
+      instance: 'i1',
+      schemaVersion: 1,
+      peers: [],
+      members: [],
+      mode: 'delta',
+      envs: [settled],
+    });
+    expect(a.status()).toBe('live');
+    const before = a.stableSnapshot();
+    expect(before).toEqual({ seq: 2, doc: { ...initial(), title: 'v1' } });
+
+    // the migration lands as a live envelope: rejected by schema, never applied
+    wire.push({
+      t: 'env',
+      room: 'case-1',
+      env: {
+        proto: OP_PROTO_VERSION,
+        origin: 'migrator',
+        writer: 'deploy-job',
+        version: 1,
+        hlc: { p: 2, l: 0 },
+        policyVersion: 0,
+        schemaVersion: 2,
+        ops: [{ kind: 'set', path: ['title'], next: 'v2', cites: [], epoch: 0 }],
+        seq: 3,
+      },
+    });
+    expect(a.status()).toBe('ejected');
+    expect(ejectedFor).toBe('schema');
+    // a snapshot never carries a seq the seat did not fold: still seq 2, still the v1 doc
+    const after = a.stableSnapshot();
+    expect(after === null || after.seq === 2).toBe(true);
+    expect(after?.doc.title ?? 'v1').toBe('v1');
+    expect(after?.seq).not.toBe(3);
+    a.close();
+  });
+
+  function liveSettledSeat(wire: ReturnType<typeof scripted>, instance = 'i1') {
+    let ejectedFor: string | undefined;
+    const a = agentSeat<Doc>(initial(), {
+      room: 'case-1',
+      writer: 'agent-a',
+      transport: wire.factory,
+      schemaVersion: 1,
+      onEject: (reason) => (ejectedFor = reason),
+    });
+    wire.push({
+      t: 'welcome',
+      room: 'case-1',
+      seq: 2,
+      instance,
+      schemaVersion: 1,
+      peers: [],
+      members: [],
+      mode: 'delta',
+      envs: [remoteEnv('peer-b', 'agent-b', 1, 2, 'v1', 1)],
+    });
+    expect(a.status()).toBe('live');
+    expect(a.stableSnapshot()).toEqual({ seq: 2, doc: { ...initial(), title: 'v1' } });
+    return { a, ejected: () => ejectedFor };
+  }
+
+  function remoteEnv(
+    origin: string,
+    writer: string,
+    version: number,
+    seq: number,
+    title: string,
+    schemaVersion: number,
+  ): SeqEnvelope {
+    return {
+      proto: OP_PROTO_VERSION,
+      origin,
+      writer,
+      version,
+      hlc: { p: seq, l: 0 },
+      policyVersion: 0,
+      schemaVersion,
+      ops: [{ kind: 'set', path: ['title'], next: title, cites: [], epoch: 0 }],
+      seq,
+    };
+  }
+
+  it('a delta welcome that ejects mid-list applies nothing after the eject', () => {
+    const wire = scripted();
+    const { a, ejected } = liveSettledSeat(wire);
+    wire.push({
+      t: 'welcome',
+      room: 'case-1',
+      seq: 4,
+      instance: 'i1',
+      schemaVersion: 2,
+      peers: [],
+      members: [],
+      mode: 'delta',
+      envs: [
+        remoteEnv('migrator', 'deploy-job', 1, 3, 'v2', 2),
+        remoteEnv('peer-b', 'agent-b', 2, 4, 'after', 1),
+      ],
+    });
+    expect(a.status()).toBe('ejected');
+    expect(ejected()).toBe('schema');
+    expect(a.snapshot().title).toBe('v1'); // seq 4 never landed
+    const after = a.stableSnapshot();
+    expect(after === null || after.seq === 2).toBe(true);
+    a.close();
+  });
+
+  it('an instance change whose first delta envelope ejects keeps the old seq, not zero', () => {
+    const wire = scripted();
+    const { a } = liveSettledSeat(wire);
+    wire.push({
+      t: 'welcome',
+      room: 'case-1',
+      seq: 1,
+      instance: 'i2',
+      schemaVersion: 2,
+      peers: [],
+      members: [],
+      mode: 'delta',
+      envs: [remoteEnv('migrator', 'deploy-job', 1, 1, 'v2', 2)],
+    });
+    expect(a.status()).toBe('ejected');
+    const after = a.stableSnapshot();
+    expect(after === null || after.seq === 2).toBe(true);
+    expect(after?.seq).not.toBe(0);
+    a.close();
+  });
+
+  it('a local write after the eject latches divergence: no stable snapshot over changed content', () => {
+    const wire = scripted();
+    const { a } = liveSettledSeat(wire);
+    wire.push({ t: 'env', room: 'case-1', env: remoteEnv('migrator', 'deploy-job', 1, 3, 'v2', 2) });
+    expect(a.status()).toBe('ejected');
+    a.setAtPath('title', 'orphaned');
+    expect(a.snapshot().title).toBe('orphaned'); // kept locally for post-mortem
+    expect(a.stableSnapshot()).toBeNull(); // never labelled with seq 2
+    a.close();
+  });
+
+  it('close() ends the stable-snapshot claim: an unwatched write after close is never labelled', () => {
+    const wire = scripted();
+    const { a } = liveSettledSeat(wire);
+    expect(a.stableSnapshot()?.seq).toBe(2);
+    a.close();
+    a.setAtPath('title', 'after-close');
+    expect(a.snapshot().title).toBe('after-close');
+    expect(a.stableSnapshot()).toBeNull();
+  });
+
   it('a malformed remote envelope never enters the change stream; the next valid batch still lands', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {

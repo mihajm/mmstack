@@ -1,6 +1,6 @@
 import { pathPrefixAcl, type PolicyViolation, type PrincipalCtx } from './policy';
-import { createRegisterStore } from './register';
 import { createRelay, type RelaySocket } from './relay';
+import { createRegisterStore } from './register';
 import {
   MESH_PROTO_VERSION,
   type Dot,
@@ -223,11 +223,7 @@ describe('createRelay', () => {
     a.env([set([], {})]); // seed: the root value never contained the key
     a.env([set(['items', 'a'], 1)]);
     // the delete cites the set's dot (causal succession), so the set is superseded
-    a.env([
-      del(['items', 'a'], 1, {
-        cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
-      }),
-    ]);
+    a.env([del(['items', 'a'], 1, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })]);
     a.env([set(['other'], 1)]);
     a.env([set(['other'], 2)]); // pushes the delete envelope past the journal window
 

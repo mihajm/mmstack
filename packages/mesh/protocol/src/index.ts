@@ -16,6 +16,8 @@ export {
   type RelayOptions,
   type RelaySocket,
   type RoomInfo,
+  type RoomSnapshot,
+  type RoomState,
 } from './lib/relay';
 export {
   MESH_PROTO_VERSION,

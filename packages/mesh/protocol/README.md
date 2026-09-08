@@ -35,10 +35,10 @@ register state with its own rules.
 
 ```ts
 type OpEnvelope = {
-  proto: number; // wire format version
-  origin: string; // the emitting log instance (one per tab or device)
-  writer: string; // the authenticated principal (a person or an agent)
-  version: number; // per-origin counter, for gap detection
+  proto: number;         // wire format version
+  origin: string;        // the emitting log instance (one per tab or device)
+  writer: string;        // the authenticated principal (a person or an agent)
+  version: number;       // per-origin counter, for gap detection
   hlc: { p: number; l: number }; // hybrid logical clock, for last-writer-wins ordering
   policyVersion: number; // the room policy this writer validated against
   ops: readonly SyncOp[];
@@ -64,9 +64,9 @@ import { createRelay } from '@mmstack/mesh-protocol';
 
 const relay = createRelay({
   policyVersion: 1,
-  policy: myOpPolicy, // optional, see below
+  policy: myOpPolicy,           // optional, see below
   limits: { maxOpsPerEnvelope: 1024, maxEnvelopesPerSecond: 50 },
-  journalLimit: 1000, // envelopes kept for delta catch-up before compacting into register state
+  journalLimit: 1000,           // envelopes kept for delta catch-up before compacting into register state
 });
 ```
 
@@ -151,15 +151,10 @@ export class MeshRoom {
     server.accept();
     const writer = await authenticate(request);
     const conn = this.relay.connect(
-      {
-        send: (m) => server.send(JSON.stringify(m)),
-        close: () => server.close(),
-      },
+      { send: (m) => server.send(JSON.stringify(m)), close: () => server.close() },
       { writer },
     );
-    server.addEventListener('message', (e) =>
-      conn.receive(JSON.parse(String(e.data))),
-    );
+    server.addEventListener('message', (e) => conn.receive(JSON.parse(String(e.data))));
     server.addEventListener('close', () => conn.disconnect());
     return new Response(null, { status: 101, webSocket: client });
   }

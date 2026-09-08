@@ -106,13 +106,8 @@ export type AgentSeat<T extends object> = {
   /** The current document value — plain JSON-serializable data, for context assembly. */
   snapshot(): T;
   /**
-   * The current document, stamped with the relay seq it is provably the pure fold of — or
-   * `null` whenever that proof does not hold: before the first welcome, while any local
-   * write is still unacknowledged, and permanently once the doc holds a write the room will
-   * never sequence (a write the emit-side `policy` refused, or one orphaned by an eject or
-   * close). A non-null result is byte-stable for its seq: re-deriving the room at that seq
-   * yields exactly this document, which is what makes it safe to place in a prompt cache or
-   * any other content-addressed store. Pair with `changes` to append everything after `seq`.
+   * The current document, stamped with the relay seq it is provably the pure fold of
+   * or null when stability cannot be guaranteed
    */
   stableSnapshot(): StableSnapshot<T> | null;
   /** Run local writes and emit them to the room as one envelope, like any peer's edit. */
@@ -182,6 +177,7 @@ export function agentSeat<T extends object>(
   };
   let welcomed = false;
   let diverged = false;
+  let terminated = false;
 
   const session = meshSession({
     room: opt.room,
@@ -216,8 +212,14 @@ export function agentSeat<T extends object>(
       },
       onTerminal: () => {
         if (session.hasUnacked()) diverged = true;
+        terminated = true;
       },
     },
+  });
+  // a write after the terminal state is one the room will never sequence: the doc keeps it
+  // (post-mortem), but the seat stops claiming provable folds — same latch as a refused write
+  sync.subscribe(() => {
+    if (terminated) diverged = true;
   });
   session.connect();
 
@@ -265,6 +267,7 @@ export function agentSeat<T extends object>(
     },
     setPresence: (data) => session.setPresence(data),
     close: () => {
+      diverged = true; // sync is destroyed below: later writes are unwatched, so no more proofs
       session.close();
       sync.destroy();
     },

@@ -18,11 +18,7 @@ import {
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
 export type MeshStatus =
-  | 'connecting'
-  | 'live'
-  | 'reconnecting'
-  | 'ejected'
-  | 'closed';
+  'connecting' | 'live' | 'reconnecting' | 'ejected' | 'closed';
 
 /** One sequenced remote envelope's ops, attributed to the writer that made them. */
 export type RemoteBatch = {
@@ -163,19 +159,13 @@ export function meshSession<T extends object>(
     transport?.send({ t: 'env', room: opt.room, env });
   };
 
-  // Flushed in insertion order — emission order. An envelope only cites dots that existed
-  // in its store when it was emitted, so any cited own-dot is either already acked or sits
-  // EARLIER in this map; that holds across boots because the outbox persists and restores
-  // the tail in this same order. Sorting across origins (a multi-boot tail spans several)
-  // can send a citing envelope before its cited one — an honest writer ejected by a
-  // citation-verifying relay.
   const flushUnacked = (): void => {
     for (const env of unacked.values()) sendEnv(env);
   };
 
   const applyRemote = (env: SeqEnvelope): void => {
-    lastSeq = Math.max(lastSeq, env.seq);
-    hooks.onSynced?.();
+    if (closed) return; // a delta welcome keeps iterating after an eject — nothing lands past it
+
     if (
       opt.schemaVersion !== undefined &&
       env.schemaVersion !== undefined &&
@@ -184,6 +174,8 @@ export function meshSession<T extends object>(
       terminal('ejected', 'schema');
       return;
     }
+    lastSeq = Math.max(lastSeq, env.seq);
+    hooks.onSynced?.();
     if (ownOrigins.has(env.origin)) {
       unacked.delete(unackedKey(env));
       acked.set(env.origin, Math.max(acked.get(env.origin) ?? 0, env.version));
@@ -200,6 +192,8 @@ export function meshSession<T extends object>(
       case 'welcome': {
         const instanceChanged =
           instance !== undefined && msg.instance !== instance;
+
+        const prevSeq = lastSeq;
         if (instanceChanged) lastSeq = 0;
         instance = msg.instance;
         peers = new Map(msg.peers.map((p) => [p.origin, p]));
@@ -226,7 +220,10 @@ export function meshSession<T extends object>(
         }
         // every branch can end terminal (schema eject in a delta env, a seed or rebase
         // emission tripping the emit-side policy) — never revive to live
-        if (closed) return;
+        if (closed) {
+          if (instanceChanged && lastSeq === 0) lastSeq = prevSeq;
+          return;
+        }
         lastSeq = Math.max(lastSeq, msg.seq);
         attempts = 0;
         hooks.onSynced?.();

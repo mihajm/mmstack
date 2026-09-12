@@ -547,6 +547,12 @@ export type RegisterCheckpoint = {
   readonly water: Readonly<Record<string, Hlc>>;
 };
 
+/** One register's live siblings, as {@link ConvergingApply.liveUnder} reports them. */
+export type LiveRegister = {
+  readonly path: readonly Key[];
+  readonly siblings: readonly SyncSibling[];
+};
+
 export type ConvergingApply = {
   /**
    * Fold an envelope into the per-path registers and return the materialization deltas the
@@ -578,6 +584,12 @@ export type ConvergingApply = {
   captureFrontier(): DotFrontier;
   /** The live (causally-maximal) siblings at a path: the emission-frontier read. */
   liveAt(path: readonly Key[]): readonly SyncSibling[];
+  /**
+   * The live registers at and under a path, shallow-first: what a reader compares its own
+   * observation frontier against to tell "someone wrote here since I looked" for a whole
+   * subtree (a fork's conflict projection). Registers with no live sibling are omitted.
+   */
+  liveUnder(path: readonly Key[]): readonly LiveRegister[];
   /**
    * Deepest-live-wins materialization of the whole tree from the current register state: the
    * root register's fold value with every live descendant fold grafted on. This is what a
@@ -1014,6 +1026,17 @@ export function createConvergingApply(opt?: {
       return reg ? liveOf(reg) : [];
     },
 
+    liveUnder: (path) => {
+      const key = keyOf(path);
+      const out: LiveRegister[] = [];
+      const at = registers.get(key);
+      for (const reg of at ? [at, ...descendantsOf(key)] : descendantsOf(key)) {
+        const siblings = liveOf(reg);
+        if (siblings.length) out.push({ path: reg.path, siblings });
+      }
+      return out;
+    },
+
     materialize: () => {
       const root = registers.get('');
       const res = root?.result;
@@ -1270,6 +1293,11 @@ export type OpSync<T = unknown> = {
    * never saw. Scoped and synchronous, like {@link override}.
    */
   commitScope(frontier: DotFrontier, fn: () => void): void;
+  /**
+   * Read the live registers at and under a path (see {@link ConvergingApply.liveUnder}). A pure
+   * read of what this peer has applied: pending local writes are not in it until they flush.
+   */
+  liveUnder(path: readonly Key[]): readonly LiveRegister[];
   /** Per-origin latest versions — the handshake watermark. */
   watermark(): Record<string, number>;
   /** The full checkpoint (root + register state + watermark), for answering a peer's hello. */
@@ -1480,6 +1508,7 @@ export function opSync<T extends object>(
       log.flush(); // fold pending base writes in first, so they count as observed
       return conv.captureFrontier();
     },
+    liveUnder: (path) => conv.liveUnder(path),
     commitScope: (frontier, fn) => {
       log.flush(); // earlier pending writes emit against the live frontier, not this one
       scopeFrontier = frontier;

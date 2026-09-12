@@ -147,13 +147,19 @@ type PersistedOutbox = {
  * The authority surface of a peer's op-sync, for callers that compose over a seat rather than
  * inside it: `override` for authority-bumped writes (`rebalanceContainer`, an owner's
  * authoritative commit), `captureFrontier` + `commitScope` for a commit that cites what was
- * observed earlier (a fork whose base is kept elsewhere), `liveUnder` to read the live registers
- * of a subtree (a conflict projection compares them against an observation frontier).
+ * observed earlier (a fork whose base is kept elsewhere), `liveUnder` / `liveAt` to read live
+ * registers and `appliedFrontier` for the observation vector they are compared against (a
+ * conflict projection: "did the writer see this sibling", answered by causality, never by order).
  * Deliberately narrow: no `receive`, `flush`, or `destroy` — those stay the seat's own.
  */
 export type SeatSync<T = unknown> = Pick<
   OpSync<T>,
-  'override' | 'captureFrontier' | 'commitScope' | 'liveUnder'
+  | 'override'
+  | 'captureFrontier'
+  | 'commitScope'
+  | 'liveUnder'
+  | 'liveAt'
+  | 'appliedFrontier'
 >;
 
 export type MeshSyncRef<T extends object = Record<string, unknown>> = {
@@ -497,6 +503,8 @@ export function meshSync<T extends object>(
       commitScope: (frontier, fn) =>
         started ? sync.commitScope(frontier, fn) : fn(),
       liveUnder: (path) => (started ? sync.liveUnder(path) : []),
+      liveAt: (path) => (started ? sync.liveAt(path) : []),
+      appliedFrontier: () => (started ? sync.appliedFrontier() : {}),
     },
     close: teardown,
   };

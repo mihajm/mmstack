@@ -273,6 +273,7 @@ export function agentSeat<T extends object>(
       override: (fn) => sync.override(fn),
       captureFrontier: () => sync.captureFrontier(),
       commitScope: (frontier, fn) => sync.commitScope(frontier, fn),
+      liveUnder: (path) => sync.liveUnder(path),
     },
     close: () => {
       diverged = true; // sync is destroyed below: later writes are unwatched, so no more proofs

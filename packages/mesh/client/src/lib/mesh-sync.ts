@@ -147,12 +147,13 @@ type PersistedOutbox = {
  * The authority surface of a peer's op-sync, for callers that compose over a seat rather than
  * inside it: `override` for authority-bumped writes (`rebalanceContainer`, an owner's
  * authoritative commit), `captureFrontier` + `commitScope` for a commit that cites what was
- * observed earlier (a fork whose base is kept elsewhere). Deliberately narrow: no `receive`,
- * `flush`, or `destroy` — those stay the seat's own.
+ * observed earlier (a fork whose base is kept elsewhere), `liveUnder` to read the live registers
+ * of a subtree (a conflict projection compares them against an observation frontier).
+ * Deliberately narrow: no `receive`, `flush`, or `destroy` — those stay the seat's own.
  */
 export type SeatSync<T = unknown> = Pick<
   OpSync<T>,
-  'override' | 'captureFrontier' | 'commitScope'
+  'override' | 'captureFrontier' | 'commitScope' | 'liveUnder'
 >;
 
 export type MeshSyncRef<T extends object = Record<string, unknown>> = {
@@ -495,6 +496,7 @@ export function meshSync<T extends object>(
       captureFrontier: () => (started ? sync.captureFrontier() : { seq: 0 }),
       commitScope: (frontier, fn) =>
         started ? sync.commitScope(frontier, fn) : fn(),
+      liveUnder: (path) => (started ? sync.liveUnder(path) : []),
     },
     close: teardown,
   };

@@ -954,4 +954,42 @@ describe('seat.sync — the authority surface', () => {
     a.close();
     b.close();
   });
+
+  it('liveUnder reads the live registers of a subtree, own and remote alike, from a seat and from a browser ref', async () => {
+    const relay = createRelay();
+    const { s: a } = seat(relay, 'a');
+    const { s: b } = seat(relay, 'b');
+    await Promise.resolve();
+    a.setAtPath('nested.a', 1);
+    await Promise.resolve();
+    b.setAtPath('title', 'from-b');
+    await Promise.resolve();
+    const nested = a.sync.liveUnder(['nested']);
+    expect(nested.map((r) => r.path)).toEqual([['nested', 'a']]);
+    expect(nested[0].siblings.map((s) => s.writer)).toEqual(['a']);
+    expect(
+      a.sync.liveUnder(['title'])[0].siblings.map((s) => s.writer),
+    ).toEqual(['b']);
+    expect(
+      b.sync.liveUnder(['nested'])[0].siblings.map((s) => s.writer),
+    ).toEqual(['a']);
+
+    const human = TestBed.runInInjectionContext(() => {
+      const src = store<Doc>(initial());
+      const mesh = meshSync(src, {
+        room: 'case-1',
+        writer: 'human',
+        transport: directTransport(relay, { writer: 'human' }),
+      });
+      return { src, mesh };
+    });
+    await Promise.resolve();
+    expect(human.mesh.status()).toBe('live');
+    expect(
+      human.mesh.sync.liveUnder(['title'])[0].siblings.map((s) => s.writer),
+    ).toEqual(['b']);
+    human.mesh.close();
+    a.close();
+    b.close();
+  });
 });

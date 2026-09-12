@@ -651,6 +651,45 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     expect(conv.ingest(A, { frontier: { p: 10, l: 0 } })).toEqual([]);
     expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['b']);
   });
+
+  it('liveUnder reads the live registers at and under a path, shallow-first, prefix-safe, superseded excluded', () => {
+    const conv = createConvergingApply();
+    conv.ingest(
+      env(
+        [
+          set(['a'], {}),
+          set(['a', 'x'], 1),
+          set(['ab'], 2),
+          set(['a', 'x', 'deep'], 3),
+        ],
+        { p: 5, writer: 'a', origin: 'a' },
+      ),
+    );
+    conv.ingest(
+      env([{ ...set(['a', 'x'], 9, 1), cites: [dot('a', 5)] }], {
+        p: 20,
+        writer: 'b',
+        origin: 'b',
+      }),
+    );
+    const rows = conv.liveUnder(['a']);
+    expect(rows.map((r) => r.path)).toEqual([
+      ['a'],
+      ['a', 'x'],
+      ['a', 'x', 'deep'],
+    ]);
+    expect(rows[1].siblings.map((s) => s.origin)).toEqual(['b']); // a's sibling at a.x is superseded
+    expect(conv.liveUnder(['a', 'x', 'deep']).map((r) => r.path)).toEqual([
+      ['a', 'x', 'deep'],
+    ]);
+    expect(conv.liveUnder(['zz'])).toEqual([]);
+    expect(conv.liveUnder([]).map((r) => r.path)).toEqual([
+      ['a'],
+      ['ab'],
+      ['a', 'x'],
+      ['a', 'x', 'deep'],
+    ]);
+  });
 });
 
 describe('createConvergingApply — subtree replace/delete groups (clear)', () => {

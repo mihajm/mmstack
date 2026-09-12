@@ -562,7 +562,9 @@ describe('agentSeat schema honesty (scripted relay)', () => {
         hlc: { p: 2, l: 0 },
         policyVersion: 0,
         schemaVersion: 2,
-        ops: [{ kind: 'set', path: ['title'], next: 'v2', cites: [], epoch: 0 }],
+        ops: [
+          { kind: 'set', path: ['title'], next: 'v2', cites: [], epoch: 0 },
+        ],
         seq: 3,
       },
     });
@@ -597,7 +599,10 @@ describe('agentSeat schema honesty (scripted relay)', () => {
       envs: [remoteEnv('peer-b', 'agent-b', 1, 2, 'v1', 1)],
     });
     expect(a.status()).toBe('live');
-    expect(a.stableSnapshot()).toEqual({ seq: 2, doc: { ...initial(), title: 'v1' } });
+    expect(a.stableSnapshot()).toEqual({
+      seq: 2,
+      doc: { ...initial(), title: 'v1' },
+    });
     return { a, ejected: () => ejectedFor };
   }
 
@@ -671,7 +676,11 @@ describe('agentSeat schema honesty (scripted relay)', () => {
   it('a local write after the eject latches divergence: no stable snapshot over changed content', () => {
     const wire = scripted();
     const { a } = liveSettledSeat(wire);
-    wire.push({ t: 'env', room: 'case-1', env: remoteEnv('migrator', 'deploy-job', 1, 3, 'v2', 2) });
+    wire.push({
+      t: 'env',
+      room: 'case-1',
+      env: remoteEnv('migrator', 'deploy-job', 1, 3, 'v2', 2),
+    });
     expect(a.status()).toBe('ejected');
     a.setAtPath('title', 'orphaned');
     expect(a.snapshot().title).toBe('orphaned'); // kept locally for post-mortem
@@ -730,7 +739,9 @@ describe('agentSeat schema honesty (scripted relay)', () => {
           origin: `x${CTRL}y`,
           writer: 'forger',
           seq: 1,
-          ops: [{ kind: 'set', path: ['title'], next: 'HACK', cites: [], epoch: 0 }],
+          ops: [
+            { kind: 'set', path: ['title'], next: 'HACK', cites: [], epoch: 0 },
+          ],
         }),
       );
       wire.push(
@@ -738,7 +749,15 @@ describe('agentSeat schema honesty (scripted relay)', () => {
           origin: 'peer-ok',
           writer: 'honest',
           seq: 2,
-          ops: [{ kind: 'set', path: ['title'], next: 'legit', cites: [], epoch: 0 }],
+          ops: [
+            {
+              kind: 'set',
+              path: ['title'],
+              next: 'legit',
+              cites: [],
+              epoch: 0,
+            },
+          ],
         }),
       );
 
@@ -878,5 +897,61 @@ describe('describeOp', () => {
     );
     expect(long.length).toBeLessThan(160);
     expect(long.endsWith('…')).toBe(true);
+  });
+});
+
+describe('seat.sync — the authority surface', () => {
+  it('override emits an epoch-bumped op, from a seat and from a browser ref alike', async () => {
+    const envs: SeqEnvelope[] = [];
+    const relay = createRelay({ onCommit: (_room, env) => envs.push(env) });
+    const { s } = seat(relay, 'agent');
+    await Promise.resolve();
+    s.sync.override(() => setAtPath(s.doc, 'title', 'authoritative'));
+    await Promise.resolve();
+    const seatOp = envs.at(-1)!.ops[0];
+    expect(seatOp.path).toEqual(['title']);
+    expect(seatOp.epoch).toBe(1);
+
+    const human = TestBed.runInInjectionContext(() => {
+      const src = store<Doc>(initial());
+      const mesh = meshSync(src, {
+        room: 'case-1',
+        writer: 'human',
+        transport: directTransport(relay, { writer: 'human' }),
+      });
+      return { src, mesh };
+    });
+    await Promise.resolve();
+    expect(human.mesh.status()).toBe('live');
+    human.mesh.sync.override(() => setAtPath(human.src, 'title', 'louder'));
+    await new Promise((r) => setTimeout(r, 0));
+    const refOp = envs.at(-1)!.ops[0];
+    expect(refOp.epoch).toBe(2);
+    human.mesh.close();
+    s.close();
+  });
+
+  it('commitScope cites what the captured frontier observed, not what landed since', async () => {
+    const envs: SeqEnvelope[] = [];
+    const relay = createRelay({ onCommit: (_room, env) => envs.push(env) });
+    const { s: a } = seat(relay, 'a');
+    const { s: b } = seat(relay, 'b');
+    await Promise.resolve();
+    const frontier = a.sync.captureFrontier();
+    b.setAtPath('title', 'from-b');
+    await Promise.resolve();
+    a.setAtPath('nested.a', 1);
+    await Promise.resolve();
+    a.sync.commitScope(frontier, () => setAtPath(a.doc, 'title', 'from-a'));
+    a.write(() => undefined);
+    await Promise.resolve();
+    const scoped = envs.at(-1)!.ops.find((op) => op.path[0] === 'title')!;
+    expect(scoped.cites).toEqual([]);
+    a.setAtPath('title', 'plain');
+    await Promise.resolve();
+    const plain = envs.at(-1)!.ops.find((op) => op.path[0] === 'title')!;
+    expect(plain.cites.length).toBeGreaterThan(0);
+    a.close();
+    b.close();
   });
 });

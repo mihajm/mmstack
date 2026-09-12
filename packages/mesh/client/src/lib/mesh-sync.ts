@@ -42,22 +42,13 @@ export type MeshPeer = PresenceState;
  * turns a versioned reject from a dead socket into a speakable 'outdated' banner.
  */
 export type SyncHealthStatus =
-  | 'live'
-  | 'offline'
-  | 'outdated'
-  | 'ejected'
-  | 'degraded';
+  'live' | 'offline' | 'outdated' | 'ejected' | 'degraded';
 
 export type SyncHealth = {
   readonly status: SyncHealthStatus;
   /** Why, when the status is `outdated`/`ejected`/`degraded`. */
   readonly reason?:
-    | 'proto'
-    | 'policy-version'
-    | 'schema'
-    | 'quota'
-    | 'worker'
-    | (string & {});
+    'proto' | 'policy-version' | 'schema' | 'quota' | 'worker' | (string & {});
   /** `Date.now()` of the last successful sync (welcome or applied env). */
   readonly lastSyncedAt?: number;
   /**
@@ -152,6 +143,18 @@ type PersistedOutbox = {
   readonly envs: readonly OpEnvelope[];
 };
 
+/**
+ * The authority surface of a peer's op-sync, for callers that compose over a seat rather than
+ * inside it: `override` for authority-bumped writes (`rebalanceContainer`, an owner's
+ * authoritative commit), `captureFrontier` + `commitScope` for a commit that cites what was
+ * observed earlier (a fork whose base is kept elsewhere). Deliberately narrow: no `receive`,
+ * `flush`, or `destroy` — those stay the seat's own.
+ */
+export type SeatSync<T = unknown> = Pick<
+  OpSync<T>,
+  'override' | 'captureFrontier' | 'commitScope'
+>;
+
 export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   readonly status: Signal<MeshStatus>;
   /** Composed sync-health for a user-facing surface. */
@@ -169,6 +172,8 @@ export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   fork(
     opt?: ForkStoreOptions<T & Record<string, any>>,
   ): SyncedFork<T & Record<string, any>>;
+  /** Authority surface over the CURRENT op-sync (it is rebuilt on restore); see {@link SeatSync}. */
+  readonly sync: SeatSync<T>;
   close(): void;
 };
 
@@ -484,6 +489,12 @@ export function meshSync<T extends object>(
         },
         rebase: recapture,
       };
+    },
+    sync: {
+      override: (fn) => (started ? sync.override(fn) : fn()),
+      captureFrontier: () => (started ? sync.captureFrontier() : { seq: 0 }),
+      commitScope: (frontier, fn) =>
+        started ? sync.commitScope(frontier, fn) : fn(),
     },
     close: teardown,
   };

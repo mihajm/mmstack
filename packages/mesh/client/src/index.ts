@@ -15,6 +15,7 @@ export {
   type MeshStatus,
   type MeshSyncOptions,
   type MeshSyncRef,
+  type SeatSync,
   type SyncHealth,
   type SyncHealthStatus,
 } from './lib/mesh-sync';

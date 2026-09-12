@@ -19,6 +19,7 @@ import {
   type toStoreOptions,
   type WritableSignalStore,
 } from '@mmstack/primitives';
+import type { SeatSync } from './mesh-sync';
 import { meshSession, type MeshStatus } from './session';
 import type { MeshTransportFactory } from './transport';
 
@@ -134,6 +135,8 @@ export type AgentSeat<T extends object> = {
   ): SyncedFork<T & Record<string, any>>;
   /** Publish this seat's ephemeral presence payload (e.g. `{ name, kind: 'agent' }`). */
   setPresence(data: unknown): void;
+  /** Authority surface over this seat's op-sync; see {@link SeatSync}. */
+  readonly sync: SeatSync<T>;
   close(): void;
 };
 
@@ -266,6 +269,11 @@ export function agentSeat<T extends object>(
       };
     },
     setPresence: (data) => session.setPresence(data),
+    sync: {
+      override: (fn) => sync.override(fn),
+      captureFrontier: () => sync.captureFrontier(),
+      commitScope: (frontier, fn) => sync.commitScope(frontier, fn),
+    },
     close: () => {
       diverged = true; // sync is destroyed below: later writes are unwatched, so no more proofs
       session.close();

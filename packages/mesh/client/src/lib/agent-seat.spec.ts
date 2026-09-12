@@ -10,6 +10,7 @@ import {
   type ServerMsg,
 } from '@mmstack/mesh-protocol';
 import {
+  compareHlc,
   createStoreContext,
   OP_PROTO_VERSION,
   store,
@@ -988,6 +989,20 @@ describe('seat.sync — the authority surface', () => {
     expect(
       human.mesh.sync.liveUnder(['title'])[0].siblings.map((s) => s.writer),
     ).toEqual(['b']);
+
+    // liveAt + appliedFrontier: every live sibling a replica holds is covered by its own vector
+    expect(a.sync.liveAt(['title']).map((s) => s.writer)).toEqual(['b']);
+    for (const peer of [a.sync, b.sync, human.mesh.sync]) {
+      const frontier = peer.appliedFrontier();
+      const rows = peer.liveUnder([]);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        for (const s of row.siblings) {
+          expect(frontier[s.origin]).toBeDefined();
+          expect(compareHlc(s.hlc, frontier[s.origin])).toBeLessThanOrEqual(0);
+        }
+      }
+    }
     human.mesh.close();
     a.close();
     b.close();

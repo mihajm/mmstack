@@ -69,6 +69,7 @@ export {
   type RegisterCheckpoint,
   type SyncedFork,
   type SyncOp,
+  type AppliedFrontier,
   type LiveRegister,
   type SyncSibling,
 } from './op-sync';

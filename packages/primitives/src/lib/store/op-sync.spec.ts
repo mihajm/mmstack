@@ -690,6 +690,40 @@ describe('createConvergingApply — dot-citation register semantics', () => {
       ['a', 'x', 'deep'],
     ]);
   });
+
+  it('appliedFrontier is the per-origin max HLC applied: raised by ingest and load, never lowered by prune, reset or a stale envelope', () => {
+    const conv = createConvergingApply();
+    conv.ingest(env([set(['v'], 'A')], { p: 5, writer: 'a', origin: 'a' }));
+    conv.ingest(
+      env([{ ...set(['v'], 'B', 'A'), cites: [dot('a', 5)] }], {
+        p: 20,
+        writer: 'b',
+        origin: 'b',
+      }),
+    );
+    conv.ingest(env([set(['w'], 'C')], { p: 7, writer: 'c', origin: 'c' }));
+    expect(conv.appliedFrontier()).toEqual({
+      a: { p: 5, l: 0 },
+      b: { p: 20, l: 0 },
+      c: { p: 7, l: 0 },
+    });
+    conv.ingest(env([set(['v'], 'A0')], { p: 2, writer: 'a', origin: 'a' })); // older: vector unchanged
+    expect(conv.appliedFrontier()['a']).toEqual({ p: 5, l: 0 });
+    conv.prune({ p: 10, l: 0 }); // a's superseded sibling is gone; what was observed is not
+    expect(conv.appliedFrontier()['a']).toEqual({ p: 5, l: 0 });
+    expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['b']);
+
+    const other = createConvergingApply();
+    other.ingest(env([set(['z'], 'D')], { p: 3, writer: 'd', origin: 'd' }));
+    conv.reset();
+    conv.load(other.checkpoint());
+    expect(conv.appliedFrontier()).toEqual({
+      a: { p: 5, l: 0 },
+      b: { p: 20, l: 0 },
+      c: { p: 7, l: 0 },
+      d: { p: 3, l: 0 },
+    });
+  });
 });
 
 describe('createConvergingApply — subtree replace/delete groups (clear)', () => {

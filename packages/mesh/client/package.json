@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/mesh",
-  "version": "21.4.1",
+  "version": "21.5.0",
   "keywords": [
     "angular",
     "signals",
@@ -20,7 +20,7 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/mesh/client",
   "peerDependencies": {
     "@angular/core": ">=21 <22",
-    "@mmstack/primitives": ">=21.11 <22",
+    "@mmstack/primitives": ">=21.12 <22",
     "@mmstack/mesh-protocol": ">=0.5 <1"
   },
   "sideEffects": false

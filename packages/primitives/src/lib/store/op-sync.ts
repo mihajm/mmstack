@@ -553,6 +553,14 @@ export type LiveRegister = {
   readonly siblings: readonly SyncSibling[];
 };
 
+/**
+ * The highest HLC this replica has applied from each origin: what it has observed, as a version
+ * vector. A sibling whose `hlc` is at or below the vector's entry for its origin was observed by
+ * this replica (one writer per origin, applied in that writer's order). Monotone: maintained on
+ * every ingest and checkpoint load, never lowered by pruning or reset.
+ */
+export type AppliedFrontier = Readonly<Record<string, Hlc>>;
+
 export type ConvergingApply = {
   /**
    * Fold an envelope into the per-path registers and return the materialization deltas the
@@ -590,6 +598,8 @@ export type ConvergingApply = {
    * subtree (a fork's conflict projection). Registers with no live sibling are omitted.
    */
   liveUnder(path: readonly Key[]): readonly LiveRegister[];
+  /** The per-origin observation vector; see {@link AppliedFrontier}. */
+  appliedFrontier(): AppliedFrontier;
   /**
    * Deepest-live-wins materialization of the whole tree from the current register state: the
    * root register's fold value with every live descendant fold grafted on. This is what a
@@ -658,6 +668,12 @@ export function createConvergingApply(opt?: {
   // below the captured seq. Side-mapped so the public sibling/checkpoint shapes stay unchanged.
   let ingestSeq = 0;
   const seqs = new Map<string, Map<string, number>>();
+  // per-origin highest HLC applied: the observation vector (survives reset — knowledge, not state)
+  const applied = new Map<string, Hlc>();
+  const observeApplied = (origin: string, hlc: Hlc): void => {
+    const cur = applied.get(origin);
+    if (!cur || compareHlc(hlc, cur) > 0) applied.set(origin, hlc);
+  };
   const setSeq = (key: string, origin: string, seq: number): void => {
     let sm = seqs.get(key);
     if (!sm) seqs.set(key, (sm = new Map()));
@@ -935,6 +951,7 @@ export function createConvergingApply(opt?: {
     ingest: (env, o) => {
       const touched = new Map<string, Changed>();
       const seq = ++ingestSeq;
+      observeApplied(env.origin, env.hlc);
 
       for (const op of env.ops) {
         if (o?.frontier && compareHlc(env.hlc, o.frontier) <= 0) continue;
@@ -1021,6 +1038,8 @@ export function createConvergingApply(opt?: {
 
     captureFrontier: () => ({ seq: ingestSeq }),
 
+    appliedFrontier: () => Object.fromEntries(applied),
+
     liveAt: (path) => {
       const reg = registers.get(keyOf(path));
       return reg ? liveOf(reg) : [];
@@ -1069,6 +1088,7 @@ export function createConvergingApply(opt?: {
         const reg = regAt(r.path);
         const key = keyOf(r.path);
         for (const s of r.siblings) {
+          observeApplied(s.origin, s.hlc);
           const cur = reg.siblings.get(s.origin);
           if (!cur || compareHlc(s.hlc, cur.hlc) > 0) {
             reg.siblings.set(s.origin, s);
@@ -1076,6 +1096,7 @@ export function createConvergingApply(opt?: {
           }
         }
         for (const [o, h] of Object.entries(r.water)) {
+          observeApplied(o, h); // a cited write was applied by the room this state came from
           const cur = reg.water.get(o);
           if (!cur || compareHlc(h, cur) > 0) reg.water.set(o, h);
         }
@@ -1298,6 +1319,14 @@ export type OpSync<T = unknown> = {
    * read of what this peer has applied: pending local writes are not in it until they flush.
    */
   liveUnder(path: readonly Key[]): readonly LiveRegister[];
+  /** The live siblings at one path (see {@link ConvergingApply.liveAt}); a pure read like `liveUnder`. */
+  liveAt(path: readonly Key[]): readonly SyncSibling[];
+  /**
+   * What this replica has observed, per origin (see {@link AppliedFrontier}). A pure read: pending
+   * local writes are not in it until they flush. The comparable form for "did the writer of this
+   * sibling's register see that write" questions, which relay order can never answer.
+   */
+  appliedFrontier(): AppliedFrontier;
   /** Per-origin latest versions — the handshake watermark. */
   watermark(): Record<string, number>;
   /** The full checkpoint (root + register state + watermark), for answering a peer's hello. */
@@ -1509,6 +1538,8 @@ export function opSync<T extends object>(
       return conv.captureFrontier();
     },
     liveUnder: (path) => conv.liveUnder(path),
+    liveAt: (path) => conv.liveAt(path),
+    appliedFrontier: () => conv.appliedFrontier(),
     commitScope: (frontier, fn) => {
       log.flush(); // earlier pending writes emit against the live frontier, not this one
       scopeFrontier = frontier;

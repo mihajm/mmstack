@@ -3,7 +3,7 @@ import {
   injectTransitionScope,
   provideTransitionScope,
   type SuspendType,
-} from './transition-scope';
+} from '@mmstack/primitives/core';
 
 /**
  * Shared **suspense** (readiness) boundary behaviour: reads the *nearest* transition scope and exposes

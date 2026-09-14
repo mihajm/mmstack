@@ -21,7 +21,8 @@
     "serve:playground": "nx serve playground --port=4201",
     "serve:docs": "nx serve docs",
     "build": "nx run-many --target=build",
-    "test": "nx run-many --target=test"
+    "test": "nx run-many --target=test",
+    "check:node": "node scripts/check-node-load.mjs @mmstack/primitives/core @mmstack/di @mmstack/worker/host @mmstack/worker/protocol @mmstack/mesh-protocol @mmstack/mesh"
   },
   "private": true,
   "dependencies": {

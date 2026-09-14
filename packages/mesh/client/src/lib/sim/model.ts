@@ -1,4 +1,4 @@
-import { store } from '@mmstack/primitives';
+import { store } from '@mmstack/primitives/core';
 import { v4 as uuidv4 } from 'uuid';
 import { bytes16, type Prng } from './prng';
 

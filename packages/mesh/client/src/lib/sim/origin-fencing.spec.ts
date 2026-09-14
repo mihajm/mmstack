@@ -7,7 +7,7 @@ import {
   type AsyncStore,
   type OpEnvelope,
   type TabSyncBus,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import { vi } from 'vitest';
 import { meshSync, type MeshSyncOptions } from '../mesh-sync';
 import { directTransport } from '../transport';

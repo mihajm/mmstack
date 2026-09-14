@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { render } from '@testing-library/angular';
 import { MmTransition } from './transition';
-import { registerResource } from './transition-scope';
+import { registerResource } from '@mmstack/primitives/core';
 
 type FakeRef = ResourceRef<unknown> & {
   status: WritableSignal<ResourceStatus>;

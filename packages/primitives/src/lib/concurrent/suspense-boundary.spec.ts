@@ -17,7 +17,7 @@ import {
   provideTransitionScope,
   registerResource,
   type TransitionScope,
-} from './transition-scope';
+} from '@mmstack/primitives/core';
 
 type FakeRef = ResourceRef<unknown> & {
   status: WritableSignal<ResourceStatus>;

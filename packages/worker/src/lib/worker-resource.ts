@@ -12,7 +12,7 @@ import {
   type Signal,
   type ValueEqualityFn,
 } from '@angular/core';
-import { injectTransitionScope } from '@mmstack/primitives';
+import { injectTransitionScope } from '@mmstack/primitives/core';
 import { WorkerAbortError, type WorkerRef } from './connect-worker';
 
 /** Returned from a paused `params` fn to HOLD (keep the current value/status, run nothing). */

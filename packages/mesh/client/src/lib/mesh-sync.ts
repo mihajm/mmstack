@@ -29,7 +29,7 @@ import {
   type SyncedFork,
   type SyncOp,
   type WritableSignalStore,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import { meshSession, type MeshSession, type MeshStatus } from './session';
 import type { MeshTransportFactory } from './transport';
 

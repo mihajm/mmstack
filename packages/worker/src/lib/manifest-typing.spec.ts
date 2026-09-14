@@ -1,5 +1,5 @@
 import { computed } from '@angular/core';
-import { createStoreContext, store } from '@mmstack/primitives';
+import { createStoreContext, store } from '@mmstack/primitives/core';
 import { createWorkerHost } from '@mmstack/worker/host';
 import type { SchemaOf } from '@mmstack/worker/protocol';
 import { describe, expect, it } from 'vitest';

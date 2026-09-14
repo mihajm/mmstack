@@ -2,7 +2,7 @@
 import { Component, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
-import { PAUSED_CONTEXT } from './activity';
+import { PAUSED_CONTEXT } from './paused';
 import {
   pausableComputed,
   pausableEffect,

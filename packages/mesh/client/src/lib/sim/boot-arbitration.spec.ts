@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { isConflicted, opSync, policyStrategy, preserve, store } from '@mmstack/primitives';
+import { isConflicted, opSync, policyStrategy, preserve, store } from '@mmstack/primitives/core';
 import { initialDoc, type SimDoc } from './model';
 
 /**

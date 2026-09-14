@@ -6,7 +6,7 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { mutableStore, store } from './store';
-import { MessageBus, tabSync } from './tab-sync';
+import { MESSAGE_BUS, MessageBus, tabSync } from './tab-sync';
 
 /**
  * A synchronous cross-"tab" bus network for deterministic store-mode tests: `post` from one tab's
@@ -71,16 +71,20 @@ describe('tabSync', () => {
   }
 
   /** Poll until a condition holds — BroadcastChannel delivery is async, so a fixed sleep flakes. */
-  async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  async function waitFor(
+    predicate: () => boolean,
+    timeoutMs = 1000,
+  ): Promise<void> {
     const start = Date.now();
     while (!predicate()) {
-      if (Date.now() - start > timeoutMs) throw new Error('waitFor: condition not met in time');
+      if (Date.now() - start > timeoutMs)
+        throw new Error('waitFor: condition not met in time');
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
   }
 
   it('should sync signal across tabs and broadcast changes', async () => {
-    const bus = TestBed.inject(MessageBus);
+    const bus = TestBed.inject(MESSAGE_BUS);
     const subscribeSpy = vi.spyOn(bus, 'subscribe');
 
     // Listen on the parallel channel to catch outbound broadcasts from the bus
@@ -159,7 +163,7 @@ describe('tabSync', () => {
   });
 
   it('supports multiple subscribers on the same id', async () => {
-    const bus = TestBed.inject(MessageBus);
+    const bus = TestBed.inject(MESSAGE_BUS);
     const a: unknown[] = [];
     const b: unknown[] = [];
 
@@ -210,7 +214,7 @@ describe('tabSync — store mode (op sync across tabs)', () => {
   function storeTab<T extends object>(net: FakeBusNet, id: string, initial: T) {
     const parent = TestBed.inject(EnvironmentInjector);
     const injector = createEnvironmentInjector(
-      [{ provide: MessageBus, useValue: new FakeBus(net) as unknown as MessageBus }],
+      [{ provide: MESSAGE_BUS, useValue: new FakeBus(net) }],
       parent,
     );
     const s = injector.runInContext(() => tabSync(store(initial), { id }));
@@ -258,7 +262,9 @@ describe('tabSync — store mode (op sync across tabs)', () => {
 describe('tabSync — mode detection', () => {
   it('warns that a mutable store falls back to whole-value sync', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    TestBed.runInInjectionContext(() => tabSync(mutableStore({ a: 1 }), { id: 'mut' }));
+    TestBed.runInInjectionContext(() =>
+      tabSync(mutableStore({ a: 1 }), { id: 'mut' }),
+    );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('mutable'));
     warn.mockRestore();
   });

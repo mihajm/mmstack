@@ -14,7 +14,7 @@ import {
   createStoreContext,
   OP_PROTO_VERSION,
   store,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import { agentSeat, describeOp, setAtPath, type SeatEvent } from './agent-seat';
 import { meshSync } from './mesh-sync';
 import { directTransport, type MeshTransportFactory } from './transport';

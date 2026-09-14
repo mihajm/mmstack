@@ -1,7 +1,8 @@
 /* eslint-disable @angular-eslint/component-selector   */
 import { Component, computed, inject, PLATFORM_ID, signal } from '@angular/core';
 import { render } from '@testing-library/angular';
-import { MmActivity, PAUSED_CONTEXT } from './activity';
+import { PAUSED_CONTEXT } from '../../../core/src/lib/concurrent/paused';
+import { MmActivity } from './activity';
 
 @Component({ selector: 'ab-ka-child', template: `{{ tmpl() }}|{{ vis() }}` })
 class Child {

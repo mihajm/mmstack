@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { createRelay } from '@mmstack/mesh-protocol';
-import { persist, type AsyncStore } from '@mmstack/primitives';
+import { persist, type AsyncStore } from '@mmstack/primitives/core';
 import { meshSync } from '../mesh-sync';
 import { directTransport } from '../transport';
 import { prng } from './prng';

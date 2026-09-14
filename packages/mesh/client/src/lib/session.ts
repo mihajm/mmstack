@@ -14,7 +14,7 @@ import {
   type OpEnvelope,
   type OpSync,
   type StoreOp,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
 export type MeshStatus =

@@ -1,4 +1,3 @@
-import { isServer } from '../platform';
 import {
   afterNextRender,
   DestroyRef,
@@ -17,9 +16,10 @@ import {
 } from '@angular/core';
 import {
   getTransitionScope,
+  isServer,
   provideTransitionScope,
   type TransitionScope,
-} from './transition-scope';
+} from '@mmstack/primitives/core';
 
 export type MmTransitionContext<T> = {
   readonly $implicit: T;

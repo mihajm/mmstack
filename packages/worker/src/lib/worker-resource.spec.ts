@@ -1,6 +1,6 @@
 import { Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { injectTransitionScope, provideTransitionScope } from '@mmstack/primitives';
+import { injectTransitionScope, provideTransitionScope } from '@mmstack/primitives/core';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectWorker, type WorkerRef } from './connect-worker';

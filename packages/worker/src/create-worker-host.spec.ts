@@ -3,7 +3,7 @@ import {
   OP_PROTO_VERSION,
   store,
   type OpEnvelope,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import {
   createWorkerHost,
   PROTO_VERSION,

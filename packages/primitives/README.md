@@ -13,6 +13,8 @@
 npm install @mmstack/primitives
 ```
 
+Everything that is not a directive or component is also exported from `@mmstack/primitives/core`. That entry has no Angular templates, so it loads in plain Node without the Angular compiler or linker. Reach for it in a worker, a relay, an agent process or any other headless consumer; `@mmstack/mesh` and `@mmstack/worker/host` already do. The root entry re-exports all of it, so browser code keeps importing `@mmstack/primitives`.
+
 ## Contents
 
 - [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `forkStore`, `toWritable`

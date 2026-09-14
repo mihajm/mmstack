@@ -1,13 +1,11 @@
 import {
   inject,
-  Injectable,
   InjectionToken,
   Injector,
   runInInjectionContext,
   type Provider,
 } from '@angular/core';
 
-@Injectable()
 class ScopeRegistry {
   private readonly injector = inject(Injector);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type

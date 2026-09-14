@@ -18,7 +18,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { nestedEffect } from '../effect';
-import { PAUSED_CONTEXT } from './activity';
+import { PAUSED_CONTEXT } from './paused';
 
 /**
  * How a pausable primitive decides whether it is currently paused:

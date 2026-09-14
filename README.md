@@ -39,7 +39,7 @@ Within a major version, minor and patch versions follow Semantic Versioning (Sem
 
 The exceptions are `@mmstack/translate-tools` & `@mmstack/mesh-protocol`, which are framework-agnostic and versioned independently - normal semver applies.
 
-Bugfixes are guaranteed for 1 major version back, though most new features/fixes have been backported already to v20.
+Bugfixes are guaranteed for 1 major version back, though most new features/fixes have been backported already to v21.
 
 ## Contributing
 

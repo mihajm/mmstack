@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-material",
-  "version": "22.0.1",
+  "version": "22.1.0",
   "keywords": [
     "angular",
     "signals",
@@ -16,11 +16,11 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/material",
   "dependencies": {
-    "@mmstack/form-adapters": "^22.0.1",
-    "@mmstack/form-core": "^22.0.0",
-    "@mmstack/form-validation": "^22.0.0",
-    "@mmstack/primitives": "^22.10.4",
-    "@mmstack/resource": "^22.6.3"
+    "@mmstack/form-adapters": "^22.1.0",
+    "@mmstack/form-core": "^22.1.0",
+    "@mmstack/form-validation": "^22.1.0",
+    "@mmstack/primitives": "^22.13.0",
+    "@mmstack/resource": "^22.8.0"
   },
   "peerDependencies": {
     "@angular/core": ">=22 <23",

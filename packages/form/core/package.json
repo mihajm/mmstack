@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/form-core",
-  "version": "22.0.0",
+  "version": "22.1.0",
   "keywords": [
     "angular",
     "signals",
@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/form/core",
   "dependencies": {
-    "@mmstack/primitives": "^22.10.4"
+    "@mmstack/primitives": "^22.13.0"
   },
   "peerDependencies": {
     "@angular/core": ">=22 <23"

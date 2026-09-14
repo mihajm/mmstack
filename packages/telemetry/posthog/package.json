@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/telemetry-posthog",
-  "version": "22.0.0",
+  "version": "22.1.0",
   "keywords": [
     "angular",
     "signals",
@@ -19,7 +19,7 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/telemetry/posthog",
   "peerDependencies": {
     "@angular/core": ">=22 <23",
-    "@mmstack/telemetry-core": ">=22 <23"
+    "@mmstack/telemetry-core": ">=22.2 <23"
   },
   "sideEffects": false
 }

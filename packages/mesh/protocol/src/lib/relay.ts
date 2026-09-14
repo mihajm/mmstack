@@ -36,8 +36,16 @@ export type RelayLimits = {
 };
 
 export type RelayOptions = {
-  /** Validation/ACL applied to every envelope; violations eject the writer (tripwire). */
+  /** Validation/ACL applied to every envelope; a violation ejects the offender (tripwire). */
   readonly policy?: OpPolicy;
+  /**
+   * How far a tripwire ejection reaches. `'writer'` (the default) blacklists the writer in that
+   * room for the relay's lifetime: every connection it holds is closed and every later hello
+   * is refused `'unauthorized'`. `'connection'` closes only the offending connection.
+   * Neither scope prevents flooding: adapters must enforce ingress and connection limits,
+   * with principal-level budgets that survive reconnects, even when every connection is authenticated.
+   */
+  readonly ejection?: 'writer' | 'connection';
   readonly policyVersion?: number;
   readonly limits?: RelayLimits;
   /** Seq-envelopes retained per room for delta answers; older compact into register state (default 1000). */
@@ -145,6 +153,8 @@ type Member = {
   readonly socket: RelaySocket;
   readonly ctx: PrincipalCtx;
   origin: string;
+  /** Set by a `'connection'`-scoped ejection: this connection is done in this room. */
+  ejected: boolean;
 };
 
 type Bucket = { tokens: number; last: number };
@@ -189,6 +199,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const maxOps = opt.limits?.maxOpsPerEnvelope ?? 1024;
   const rate = opt.limits?.maxEnvelopesPerSecond;
   const now = opt.now ?? Date.now;
+  const ejection = opt.ejection ?? 'writer';
 
   const mintInstance = (): string =>
     `${now().toString(36)}-${(++instanceCounter).toString(36)}`;
@@ -232,32 +243,45 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     }
   };
 
+  const drop = (name: string, room: Room, member: Member): void => {
+    room.members.delete(member);
+    dropPresence(name, room, member);
+    broadcast(room, {
+      t: 'member',
+      room: name,
+      origin: member.origin,
+      gone: true,
+    });
+    member.socket.close?.();
+  };
+
   const eject = (
     name: string,
     room: Room,
-    writer: string,
+    member: Member,
     violation: PolicyViolation,
   ): void => {
-    room.ejected.add(writer);
-    opt.onViolation?.(name, violation);
-    broadcast(room, {
+    const writer = member.ctx.writer;
+    const notice = {
       t: 'eject',
       room: name,
       writer,
       reason: violation.reason,
-    });
-    for (const member of [...room.members]) {
-      if (member.ctx.writer !== writer) continue;
-      room.members.delete(member);
-      dropPresence(name, room, member);
-      broadcast(room, {
-        t: 'member',
-        room: name,
-        origin: member.origin,
-        gone: true,
-      });
-      member.socket.close?.();
+    } as const;
+    opt.onViolation?.(name, violation);
+    if (ejection === 'writer') {
+      room.ejected.add(writer);
+      broadcast(room, notice);
+      for (const held of [...room.members]) {
+        if (held.ctx.writer === writer) drop(name, room, held);
+      }
+      return;
     }
+    // Only the offender learns of the ejection: the same writer's other connections would read
+    // a broadcast `eject` naming their writer as their own and go terminal with it.
+    member.ejected = true;
+    member.socket.send(notice);
+    drop(name, room, member);
   };
 
   const dropPresence = (name: string, room: Room, member: Member): void => {
@@ -399,7 +423,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           const room = roomOf(msg.room);
 
           if (msg.t === 'hello') {
-            if (room.ejected.has(ctx.writer)) {
+            if (room.ejected.has(ctx.writer) || joined.get(msg.room)?.ejected) {
               socket.send({
                 t: 'reject',
                 room: msg.room,
@@ -452,7 +476,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               if (prior.socket !== socket) prior.socket.close?.();
             }
 
-            const member: Member = { socket, ctx, origin: msg.origin };
+            const member: Member = {
+              socket,
+              ctx,
+              origin: msg.origin,
+              ejected: false,
+            };
             joined.set(msg.room, member);
             room.members.add(member);
             opt.onJoin?.(msg.room, ctx, msg.origin);
@@ -499,7 +528,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
 
           const member = joined.get(msg.room);
-          if (!member || room.ejected.has(ctx.writer)) return;
+          if (!member || member.ejected || room.ejected.has(ctx.writer)) return;
 
           if (msg.t === 'signal') {
             for (const target of room.members) {
@@ -541,7 +570,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                     ? { writer: ctx.writer, reason: 'rate' }
                     : checkEnvelope(opt.policy, env, ctx, msg.room);
           if (violation) {
-            eject(msg.room, room, ctx.writer, violation);
+            eject(msg.room, room, member, violation);
             return;
           }
 
@@ -557,7 +586,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // epochs and cites gate nothing (an outdated client stays 'outdated', not ejected)
           const admission = checkAdmission(msg.room, room, env, ctx);
           if (admission) {
-            eject(msg.room, room, ctx.writer, admission);
+            eject(msg.room, room, member, admission);
             return;
           }
 

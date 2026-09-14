@@ -93,8 +93,27 @@ When a client joins, the relay answers with one of three shapes:
 
 Validation is a pure, versioned function, run the same way on the client (before it emits) and
 on the relay (before it accepts). Because an honest client never emits an invalid op, any
-invalid op the relay sees is a broken or hostile peer, so the relay ejects that writer for the
-rest of the session rather than trying to repair the stream.
+invalid op the relay sees is a broken or hostile peer, so the relay ejects the offender rather
+than trying to repair the stream. How far that reaches is the relay's `ejection` option:
+`'writer'` (the default) blacklists the writer in that room for the relay's lifetime, closing
+every connection it holds and refusing every later hello; `'connection'` closes only the
+offending connection, leaves the writer's other connections live, and admits a fresh,
+re-authenticated one. Use `'connection'` so one bug in one tab cannot lock a human out until
+a restart. Authentication alone does not prevent abuse: a hostile authenticated writer can
+obtain fresh connections after each ejection.
+
+Neither ejection scope provides denial-of-service protection. The adapter must limit connection
+attempts, concurrent connections, payload sizes, and incoming messages of every type before
+expensive parsing or relay processing. Keep principal-level budgets and temporary abuse
+cooldowns across reconnects; apply pre-authentication limits at the HTTP/transport boundary,
+including any endpoint that issues connection tickets. Bound outgoing buffers for slow readers.
+Distributed deployments need shared enforcement or coordinated quotas, and upstream protection
+for floods that exceed the application's capacity.
+
+`limits.maxEnvelopesPerSecond` is an optional token bucket per writer **per room**, with a burst
+of twice the configured rate. It survives reconnects while the room is retained, but is not a
+connection or ingress limit: hello, presence, and signaling messages bypass it, and envelope
+validation runs before it. Configure it as an operation budget alongside adapter protections.
 
 ```ts
 import { pathPrefixAcl } from '@mmstack/mesh-protocol';
@@ -121,7 +140,8 @@ the stored data, but treat the relay as inside the trust boundary.
 
 ## Adapter recipes
 
-The relay is pure over injected sockets, so an adapter is a few lines of glue.
+The relay is pure over injected sockets. These minimal recipes show transport wiring; production
+adapters also need the authentication, input validation, and resource limits described above.
 
 Node (`ws`):
 

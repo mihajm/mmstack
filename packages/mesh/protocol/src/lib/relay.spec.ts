@@ -1,4 +1,8 @@
-import { pathPrefixAcl, type PolicyViolation, type PrincipalCtx } from './policy';
+import {
+  pathPrefixAcl,
+  type PolicyViolation,
+  type PrincipalCtx,
+} from './policy';
 import { createRelay, type RelaySocket } from './relay';
 import { createRegisterStore } from './register';
 import {
@@ -223,7 +227,11 @@ describe('createRelay', () => {
     a.env([set([], {})]); // seed: the root value never contained the key
     a.env([set(['items', 'a'], 1)]);
     // the delete cites the set's dot (causal succession), so the set is superseded
-    a.env([del(['items', 'a'], 1, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })]);
+    a.env([
+      del(['items', 'a'], 1, {
+        cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
+      }),
+    ]);
     a.env([set(['other'], 1)]);
     a.env([set(['other'], 2)]); // pushes the delete envelope past the journal window
 
@@ -308,6 +316,49 @@ describe('createRelay', () => {
       t: 'reject',
       reason: 'unauthorized',
     });
+  });
+
+  it("ejection: 'connection' drops only the offending connection; the writer's other tab stays live and a fresh connection is admitted", () => {
+    const relay = createRelay({
+      policy: { canWrite: (_ctx, path) => path[0] !== 'admin' },
+      ejection: 'connection',
+    });
+    const good = client(relay, 'wg', 'og');
+    const bad = client(relay, 'wb', 'ob1');
+    const tab = client(relay, 'wb', 'ob2');
+    good.hello();
+    bad.hello();
+    tab.hello();
+
+    bad.env([set(['admin', 'x'], 1)]);
+
+    expect(bad.sock.closed).toBe(true);
+    expect(bad.sock.sent.some((m) => m.t === 'eject')).toBe(true);
+    expect(tab.sock.closed).toBe(false);
+    expect(tab.sock.sent.some((m) => m.t === 'eject')).toBe(false);
+    expect(good.sock.sent.some((m) => m.t === 'eject')).toBe(false);
+    expect(
+      good.sock.sent.some(
+        (m) => m.t === 'member' && m.origin === 'ob1' && m.gone,
+      ),
+    ).toBe(true);
+
+    bad.env([set(['ok'], 1)]);
+    expect(good.sock.sent.filter((m) => m.t === 'env')).toEqual([]);
+    bad.hello();
+    expect(last(bad.sock)).toMatchObject({
+      t: 'reject',
+      reason: 'unauthorized',
+    });
+
+    tab.env([set(['tab'], 1)]);
+    expect(good.sock.sent.filter((m) => m.t === 'env')).toHaveLength(1);
+
+    const again = client(relay, 'wb', 'ob3');
+    again.hello();
+    expect(last(again.sock)).toMatchObject({ t: 'welcome' });
+    again.env([set(['again'], 1)]);
+    expect(good.sock.sent.filter((m) => m.t === 'env')).toHaveLength(2);
   });
 
   it('a clear IS a write at its path for ACL purposes', () => {
@@ -746,8 +797,7 @@ describe('pathPrefixAcl', () => {
 describe('createRelay — schemaVersion + migration', () => {
   const welcomeOf = (sock: ReturnType<typeof socket>) =>
     sock.sent.find((m) => m.t === 'welcome') as
-      | Extract<ServerMsg, { t: 'welcome' }>
-      | undefined;
+      Extract<ServerMsg, { t: 'welcome' }> | undefined;
 
   const migrate = (
     relay: ReturnType<typeof createRelay>,
@@ -842,8 +892,7 @@ describe('createRelay — schemaVersion + migration', () => {
       schemaVersion: 1, // older than the room's 2
     });
     const rej = old.sock.sent.find((m) => m.t === 'reject') as
-      | Extract<ServerMsg, { t: 'reject' }>
-      | undefined;
+      Extract<ServerMsg, { t: 'reject' }> | undefined;
     expect(rej?.reason).toBe('schema');
     expect(rej?.expected).toBe(2);
   });
@@ -1092,7 +1141,11 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     a.hello();
     a.env([set([], {})]);
     a.env([set(['items', 'a'], 1)]); // (oa, 2.0)
-    a.env([del(['items', 'a'], 1, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })]);
+    a.env([
+      del(['items', 'a'], 1, {
+        cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
+      }),
+    ]);
     a.env([set(['other'], 1)]);
     a.env([set(['other'], 2)]); // journal trims past the delete; ['items','a'] compacts away entirely
 
@@ -1101,7 +1154,11 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     const b = client(relay, 'wb', 'ob');
     b.hello();
     b.env(
-      [set(['items', 'a'], 7, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })],
+      [
+        set(['items', 'a'], 7, {
+          cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
+        }),
+      ],
       { hlc: { p: 50, l: 0 } },
     );
     expect(b.sock.closed).toBe(false);
@@ -1136,7 +1193,11 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     // longer knows; it is outdated, not malicious — the schema floor drops it before authority
     // is consulted
     a.env(
-      [set(['old'], 'stale', { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })],
+      [
+        set(['old'], 'stale', {
+          cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
+        }),
+      ],
       { schemaVersion: 0 },
     );
     expect(a.sock.closed).toBe(false);
@@ -1200,12 +1261,24 @@ describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
       ),
     );
 
-    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 2, l: 0 } })).toBe(true);
-    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(true);
-    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 3, l: 0 } })).toBe(false); // oa never minted it
-    expect(store.covers(['doc'], { origin: 'oc', hlc: { p: 9, l: 0 } })).toBe(true); // watermark trace
-    expect(store.covers(['doc'], { origin: 'ghost', hlc: { p: 1, l: 0 } })).toBe(false);
-    expect(store.covers(['nope'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(false);
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 2, l: 0 } })).toBe(
+      true,
+    );
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(
+      true,
+    );
+    expect(store.covers(['doc'], { origin: 'oa', hlc: { p: 3, l: 0 } })).toBe(
+      false,
+    ); // oa never minted it
+    expect(store.covers(['doc'], { origin: 'oc', hlc: { p: 9, l: 0 } })).toBe(
+      true,
+    ); // watermark trace
+    expect(
+      store.covers(['doc'], { origin: 'ghost', hlc: { p: 1, l: 0 } }),
+    ).toBe(false);
+    expect(store.covers(['nope'], { origin: 'oa', hlc: { p: 1, l: 0 } })).toBe(
+      false,
+    );
   });
 });
 
@@ -1288,14 +1361,24 @@ describe('createRelay: observational hooks (onDrop / onReject)', () => {
     bad.hello(); // the banned writer knocking again
 
     expect(rejects).toEqual([
-      { room: 'r', writer: 'ws', reason: 'proto', expected: MESH_PROTO_VERSION },
+      {
+        room: 'r',
+        writer: 'ws',
+        reason: 'proto',
+        expected: MESH_PROTO_VERSION,
+      },
       { room: 'r', writer: 'ws', reason: 'policy-version', expected: 3 },
       { room: 'r', writer: 'wb', reason: 'unauthorized', expected: undefined },
     ]);
   });
 
   it('onJoin fires per accepted hello with the origin-principal binding; never for a denied hello', () => {
-    const joins: { room: string; writer: string; kind?: string; origin: string }[] = [];
+    const joins: {
+      room: string;
+      writer: string;
+      kind?: string;
+      origin: string;
+    }[] = [];
     const relay = createRelay({
       policyVersion: 1,
       onJoin: (room, ctx, origin) =>
@@ -1390,11 +1473,19 @@ describe('createRelay: per-room policy authority', () => {
     };
 
     // the SAME write by the same principal shape: admitted in one room, tripwired in another
-    expect(writeTo('w1', 'o1', 'open-room', [set(['x'], 1)]).closed).toBe(false);
-    expect(writeTo('w2', 'o2', 'readonly-room', [set(['x'], 1)]).closed).toBe(true);
+    expect(writeTo('w1', 'o1', 'open-room', [set(['x'], 1)]).closed).toBe(
+      false,
+    );
+    expect(writeTo('w2', 'o2', 'readonly-room', [set(['x'], 1)]).closed).toBe(
+      true,
+    );
     // the SAME epoch raise: granted only in the room whose authority allows it
-    expect(writeTo('w3', 'o3', 'owned-room', [set(['x'], 1, { epoch: 1 })]).closed).toBe(false);
-    expect(writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]).closed).toBe(true);
+    expect(
+      writeTo('w3', 'o3', 'owned-room', [set(['x'], 1, { epoch: 1 })]).closed,
+    ).toBe(false);
+    expect(
+      writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]).closed,
+    ).toBe(true);
   });
 });
 

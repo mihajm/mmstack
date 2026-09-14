@@ -7,7 +7,7 @@ import {
 import { TestBed } from '@angular/core/testing';
 import { store } from './store';
 import { OP_PROTO_VERSION } from './store/op-sync';
-import { MessageBus, tabSync } from './tab-sync';
+import { MESSAGE_BUS, MessageBus, tabSync } from './tab-sync';
 
 // The join-lane protocol fence: hydration ingests register STATE, so a version mismatch on the
 // join messages must refuse to PAIR — not hydrate-then-drop-traffic, which would leave a joiner
@@ -28,7 +28,7 @@ describe('tabSync (store mode) — join-lane protocol fence', () => {
 
   const child = () => {
     const env = createEnvironmentInjector(
-      [MessageBus],
+      [{ provide: MESSAGE_BUS, useFactory: () => new MessageBus() }],
       TestBed.inject(EnvironmentInjector),
     );
     injectors.push(env);
@@ -49,7 +49,7 @@ describe('tabSync (store mode) — join-lane protocol fence', () => {
 
   function rawPeer(onMessage: (msg: RawMsg) => void) {
     const env = child();
-    const bus = env.get(MessageBus);
+    const bus = env.get(MESSAGE_BUS);
     const handle = bus.subscribe<RawMsg>('proto', (msg) => onMessage(msg));
     return handle;
   }
@@ -73,12 +73,24 @@ describe('tabSync (store mode) — join-lane protocol fence', () => {
     const seen: RawMsg[] = [];
     const peer = rawPeer((msg) => seen.push(msg));
 
-    peer.post({ t: 'hello', proto: OP_PROTO_VERSION - 1, from: 'old-tab', wm: {} });
+    peer.post({
+      t: 'hello',
+      proto: OP_PROTO_VERSION - 1,
+      from: 'old-tab',
+      wm: {},
+    });
     peer.post({ t: 'hello', from: 'ancient-tab', wm: {} });
     await settle(30);
-    expect(seen.filter((m) => m.t === 'state' || m.t === 'uptodate')).toEqual([]);
+    expect(seen.filter((m) => m.t === 'state' || m.t === 'uptodate')).toEqual(
+      [],
+    );
 
-    peer.post({ t: 'hello', proto: OP_PROTO_VERSION, from: 'current-tab', wm: {} });
+    peer.post({
+      t: 'hello',
+      proto: OP_PROTO_VERSION,
+      from: 'current-tab',
+      wm: {},
+    });
     await settle(30);
     expect(seen.some((m) => m.t === 'state' || m.t === 'uptodate')).toBe(true);
   });

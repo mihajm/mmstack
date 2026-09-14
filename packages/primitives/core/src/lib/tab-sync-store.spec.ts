@@ -7,7 +7,7 @@ import {
 import { TestBed } from '@angular/core/testing';
 import { store } from './store';
 import { isConflicted, preserve } from './store/op-sync';
-import { MessageBus, tabSync, type TabSyncBus } from './tab-sync';
+import { MESSAGE_BUS, MessageBus, tabSync, type TabSyncBus } from './tab-sync';
 
 type State = { v: string; nested: { a: number; b: number } };
 const initial = (): State => ({ v: 'init', nested: { a: 0, b: 0 } });
@@ -20,7 +20,7 @@ describe('tabSync (store mode)', () => {
   // each simulated tab gets its own injector and therefore its own MessageBus/channel
   function tab(opt?: { policies?: Parameters<typeof preserve>[] }) {
     const env = createEnvironmentInjector(
-      [MessageBus],
+      [{ provide: MESSAGE_BUS, useFactory: () => new MessageBus() }],
       TestBed.inject(EnvironmentInjector),
     );
     injectors.push(env);
@@ -84,13 +84,17 @@ describe('tabSync (store mode)', () => {
         return {
           unsub: () => set.delete(mine),
           post: (value) => {
-            for (const listener of [...set]) if (listener !== mine) listener(value);
+            for (const listener of [...set])
+              if (listener !== mine) listener(value);
           },
         };
       },
     };
     const syncTab = (jitterMs: number) => {
-      const env = createEnvironmentInjector([MessageBus], TestBed.inject(EnvironmentInjector));
+      const env = createEnvironmentInjector(
+        [{ provide: MESSAGE_BUS, useFactory: () => new MessageBus() }],
+        TestBed.inject(EnvironmentInjector),
+      );
       injectors.push(env);
       return runInInjectionContext(env, () =>
         tabSync(store<State>(initial()), {

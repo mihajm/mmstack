@@ -1,5 +1,5 @@
 import { createWatch } from '@angular/core/primitives/signals';
-import type { OpLogDriver } from '@mmstack/primitives';
+import type { OpLogDriver } from '@mmstack/primitives/core';
 
 /**
  * An injector-free {@link OpLogDriver} for `@mmstack/primitives` `opLog`. Schedules the emission

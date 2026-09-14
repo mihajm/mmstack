@@ -8,7 +8,9 @@
   "targets": {
     "build": {
       "executor": "@nx/angular:package",
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}"
+      ],
       "options": {
         "project": "packages/primitives/ng-package.json"
       },
@@ -23,7 +25,15 @@
       "defaultConfiguration": "production"
     },
     "test": {
-      "executor": "@nx/angular:unit-test"
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": [
+          "**/*.spec.ts",
+          "**/*.test.ts",
+          "../core/**/*.spec.ts",
+          "../core/**/*.test.ts"
+        ]
+      }
     }
   }
 }

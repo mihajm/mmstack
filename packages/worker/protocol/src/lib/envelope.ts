@@ -1,4 +1,4 @@
-import type { OpEnvelope, OpSyncCheckpoint } from '@mmstack/primitives';
+import type { OpEnvelope, OpSyncCheckpoint } from '@mmstack/primitives/core';
 import type { SerializedError } from './error';
 
 /** Wire-protocol version, negotiated in the hello/ready handshake. Bump on breaking envelope change. */

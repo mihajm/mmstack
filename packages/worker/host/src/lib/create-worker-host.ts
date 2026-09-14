@@ -6,7 +6,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
-import { createHlcClock, opSync, type OpSync } from '@mmstack/primitives';
+import { createHlcClock, opSync, type OpSync } from '@mmstack/primitives/core';
 import {
   generateId,
   PROTO_VERSION,

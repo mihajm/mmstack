@@ -27,7 +27,7 @@ import {
   type RegisterCheckpoint,
   type SyncOp,
   type SyncSibling,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import { meshSync, type MeshSyncOptions } from './mesh-sync';
 import { directTransport, type MeshTransportFactory } from './transport';
 

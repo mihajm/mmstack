@@ -6,7 +6,7 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { store } from './store';
-import { MessageBus, tabSync } from './tab-sync';
+import { MESSAGE_BUS, MessageBus, tabSync } from './tab-sync';
 
 // A same-length array write travels as PER-INDEX ops (`diffOps` descends), so it lands under an
 // ancestor register holding the whole array. These are the transport-level witnesses that such a
@@ -23,7 +23,7 @@ describe('tabSync (store mode) — array element writes', () => {
 
   function tab() {
     const env = createEnvironmentInjector(
-      [MessageBus],
+      [{ provide: MESSAGE_BUS, useFactory: () => new MessageBus() }],
       TestBed.inject(EnvironmentInjector),
     );
     injectors.push(env);

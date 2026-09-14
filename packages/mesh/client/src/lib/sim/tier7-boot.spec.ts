@@ -14,7 +14,7 @@ import {
   opSync,
   store,
   type OpEnvelope,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 
 /**
  * Tier 7 (crash / session / consumer correctness) CHARACTERIZATIONS. These pin the CURRENT boot and

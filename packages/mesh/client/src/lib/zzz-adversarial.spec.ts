@@ -6,7 +6,7 @@ import {
   type OpEnvelope,
   type RegisterCheckpoint,
   type SyncOp,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 
 const hlc = (p: number, l = 0) => ({ p, l });
 const env = (origin: string, version: number, h: any, ops: SyncOp[]): OpEnvelope => ({

@@ -4,7 +4,7 @@ import {
   MESH_PROTO_VERSION,
   type Relay,
 } from '@mmstack/mesh-protocol';
-import { store } from '@mmstack/primitives';
+import { store } from '@mmstack/primitives/core';
 import { meshSync, type MeshSyncOptions } from './mesh-sync';
 import { directTransport } from './transport';
 

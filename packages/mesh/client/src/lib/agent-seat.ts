@@ -18,7 +18,7 @@ import {
   type SyncedFork,
   type toStoreOptions,
   type WritableSignalStore,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import type { SeatSync } from './mesh-sync';
 import { meshSession, type MeshStatus } from './session';
 import type { MeshTransportFactory } from './transport';

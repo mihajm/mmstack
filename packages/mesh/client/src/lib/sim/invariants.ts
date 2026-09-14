@@ -7,7 +7,7 @@ import {
   createConvergingApply,
   type MergePolicyEntry,
   type OpEnvelope,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 
 /** A checked invariant: `ok`, plus a human-readable reason when it fails. */
 export type Verdict = { readonly ok: boolean; readonly message: string };

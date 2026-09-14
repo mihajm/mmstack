@@ -19,7 +19,7 @@ import {
   type OpLogDriver,
   type SignalStore,
   type WritableSignalStore,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import {
   deserializeError,
   type IsWritableKey,

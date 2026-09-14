@@ -13,7 +13,7 @@ import {
   type MergePolicyEntry,
   type OpEnvelope,
   type OpSyncCheckpoint,
-} from '@mmstack/primitives';
+} from '@mmstack/primitives/core';
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
 /** A data channel as the P2P engine needs it; opens later, buffers nothing itself. */

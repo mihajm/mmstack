@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { createRelay, type ClientMsg, type ServerMsg } from '@mmstack/mesh-protocol';
-import { store } from '@mmstack/primitives';
+import { store } from '@mmstack/primitives/core';
 import { WebSocket as NodeWebSocket, WebSocketServer, type WebSocket as WsSocket } from 'ws';
 import { meshSync, type MeshSyncRef } from './mesh-sync';
 import type { MeshTransport, MeshTransportFactory } from './transport';

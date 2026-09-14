@@ -1,6 +1,6 @@
 import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createStoreContext, store } from '@mmstack/primitives';
+import { createStoreContext, store } from '@mmstack/primitives/core';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 import { crashablePort, droppingPort, type CrashablePort } from '../testing/harness';

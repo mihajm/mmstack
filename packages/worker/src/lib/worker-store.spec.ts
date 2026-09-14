@@ -1,6 +1,6 @@
 import { computed, Injector, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createStoreContext, opLog, store } from '@mmstack/primitives';
+import { createStoreContext, opLog, store } from '@mmstack/primitives/core';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';

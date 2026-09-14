@@ -24,6 +24,7 @@
     "serve:docs": "nx serve docs",
     "build": "nx run-many --target=build",
     "test": "nx run-many --target=test",
+  "check:node": "node scripts/check-node-load.mjs @mmstack/primitives/core @mmstack/di @mmstack/worker/host @mmstack/worker/protocol @mmstack/mesh-protocol @mmstack/mesh",
     "idea:backup": "git add -f idea/ && git update-ref refs/heads/idea-vault $(git commit-tree $(git write-tree) $(git rev-parse -q --verify idea-vault >/dev/null 2>&1 && printf -- '-p idea-vault') -m \"backup: refresh idea $(date +%F)\") && git restore --staged idea/"
   },
   "dependencies": {

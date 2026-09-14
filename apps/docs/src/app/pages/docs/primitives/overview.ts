@@ -16,6 +16,14 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Install" id="install">
         <docs-code [code]="install" lang="bash" />
         <p>
+          Everything that is not a directive or component is also exported from
+          <code>@mmstack/primitives/core</code>. That entry carries no
+          templates, so it loads in plain Node without the Angular compiler or
+          linker. Use it from a worker, a relay or an agent process; the root
+          entry re-exports it, so browser code keeps importing
+          <code>@mmstack/primitives</code>.
+        </p>
+        <p>
           Every value-producing helper here is a pure derivation. There is no
           <code>effect()</code> inside, no RxJS bridge, and no zone churn, so
           you can compose them in <code>computed()</code> graphs without

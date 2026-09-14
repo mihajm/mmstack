@@ -1,4 +1,4 @@
-import { createStoreContext, opLog, store, type OpBatch } from '@mmstack/primitives';
+import { createStoreContext, opLog, store, type OpBatch } from '@mmstack/primitives/core';
 import { microtaskOpLogDriver } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 

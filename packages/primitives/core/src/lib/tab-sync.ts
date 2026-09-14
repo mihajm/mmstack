@@ -3,11 +3,11 @@ import {
   DestroyRef,
   effect,
   inject,
-  Injectable,
   Injector,
   isDevMode,
   untracked,
   type WritableSignal,
+  InjectionToken,
 } from '@angular/core';
 import { STORE_KIND, type StoreKind } from './store/internals';
 import {
@@ -154,9 +154,6 @@ export type TabSyncBus = {
   ): { unsub: () => void; post: (value: T) => void };
 };
 
-@Injectable({
-  providedIn: 'root',
-})
 export class MessageBus implements TabSyncBus {
   private readonly channel = new BroadcastChannel('mmstack-tab-sync-bus');
   private readonly listeners = new Map<
@@ -199,6 +196,12 @@ export class MessageBus implements TabSyncBus {
     };
   }
 }
+
+/** The bus `tabSync` falls back to: one `BroadcastChannel` per environment injector. */
+export const MESSAGE_BUS = new InjectionToken<TabSyncBus>(
+  '@mmstack/primitives:message-bus',
+  { providedIn: 'root', factory: () => new MessageBus() },
+);
 
 /**
  * @deprecated The generated id hashes the call-site stack line, which collides when a shared
@@ -249,7 +252,7 @@ export type SyncSignalOptions = {
    * it — a cross-tab consistency gap not worth the negligible saving. The channel stays live.
    */
   injector?: Injector;
-  /** Cross-tab transport. Defaults to the injected {@link MessageBus} (a `BroadcastChannel`). */
+  /** Cross-tab transport. Defaults to the injected {@link MESSAGE_BUS} (a `BroadcastChannel`). */
   bus?: TabSyncBus;
 };
 
@@ -332,7 +335,7 @@ export function tabSync<T extends WritableSignal<any>>(
   const id =
     typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());
 
-  const bus = optObj?.bus ?? injector.get(MessageBus);
+  const bus = optObj?.bus ?? injector.get(MESSAGE_BUS);
 
   const storeKind = (sig as { [STORE_KIND]?: StoreKind })[STORE_KIND];
   if (storeKind === 'writable') {

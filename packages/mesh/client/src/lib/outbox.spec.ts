@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { createRelay, type Relay, type SeqEnvelope } from '@mmstack/mesh-protocol';
-import { OP_PROTO_VERSION, store, type AsyncStore, type OpEnvelope } from '@mmstack/primitives';
+import { OP_PROTO_VERSION, store, type AsyncStore, type OpEnvelope } from '@mmstack/primitives/core';
 import { meshSync, type MeshSyncOptions } from './mesh-sync';
 import { directTransport } from './transport';
 

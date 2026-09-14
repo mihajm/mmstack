@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   computed,
   DestroyRef,
@@ -6,7 +5,6 @@ import {
   inject,
   Injectable,
   Injector,
-  PLATFORM_ID,
   runInInjectionContext,
   signal,
   untracked,
@@ -21,7 +19,7 @@ import {
   getFiles,
 } from '@atlaskit/pragmatic-drag-and-drop/external/file';
 
-import { toWritable } from '@mmstack/primitives';
+import { toWritable, isServer } from '@mmstack/primitives';
 import { deriveHit } from '../internal/hit';
 import { boxData, mapDropTargets } from '../internal/payload';
 import { resolveSignal } from '../internal/resolve';
@@ -101,7 +99,7 @@ export class DndExternalSession {
   );
 
   constructor() {
-    if (isPlatformServer(inject(PLATFORM_ID))) return;
+    if (isServer()) return;
     const cleanup = monitorForExternal({
       // File-centric: gate on containsFiles so text/links/images don't activate.
       onDragStart: (a) => {
@@ -175,7 +173,7 @@ export function fileDropTarget<TSelf = void>(
 ): FileDropTargetRef {
   const injector = opts.injector ?? inject(Injector);
   return runInInjectionContext(injector, () => {
-    if (isPlatformServer(inject(PLATFORM_ID))) return NOOP;
+    if (isServer()) return NOOP;
 
     const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const ext = inject(DndExternalSession);
@@ -234,7 +232,7 @@ export function monitorExternal(
 ): MonitorExternalRef {
   const injector = opts.injector ?? inject(Injector);
   return runInInjectionContext(injector, () => {
-    if (isPlatformServer(inject(PLATFORM_ID))) {
+    if (isServer()) {
       return { isDragging: computed(() => false) };
     }
 

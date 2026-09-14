@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
@@ -7,7 +7,6 @@ import {
   inject,
   isDevMode,
   isSignal,
-  PLATFORM_ID,
   type Signal,
 } from '@angular/core';
 import { throttled } from '../throttled';
@@ -163,7 +162,7 @@ export function pointerDrag(opt?: PointerDragOptions): PointerDragSignal {
 }
 
 function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     const base = computed(() => IDLE, {
       debugName: opt?.debugName ?? 'pointerDrag',
     }) as InternalPointerDragSignal;
@@ -193,7 +192,9 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   if (!isSignal(target) && !resolve(target)) {
     if (isDevMode())
       console.warn('pointerDrag: no target element (host ElementRef missing).');
-    const base = computed(() => IDLE, { debugName }) as InternalPointerDragSignal;
+    const base = computed(() => IDLE, {
+      debugName,
+    }) as InternalPointerDragSignal;
     base.unthrottled = base;
     base.cancel = () => undefined;
     return base;
@@ -274,47 +275,53 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     if (e.key === 'Escape' && activePointerId !== null) end(true);
   };
 
-  const onDown = (el: HTMLElement) => (e: PointerEvent): void => {
-    if (activePointerId !== null) return;
-    if (!buttons.includes(e.button)) return;
-    const matched = handleSelector
-      ? ((e.target as Element)?.closest?.(handleSelector) as HTMLElement | null)
-      : ((e.target as HTMLElement | null) ?? el); // no selector: the pressed element itself
-    if (!matched) return; // handleSelector set but pointerdown landed outside a handle
-    if (stopPropagation) e.stopPropagation(); // claim it: an outer sensor won't also start
-    activePointerId = e.pointerId;
-    activeButton = e.button;
-    activePointerType = e.pointerType;
-    activeOrigin = matched;
-    activated = false;
-    startPoint = coord(e);
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      // capture unsupported (older browsers / test env) — listeners still work
-    }
-    gesture = new AbortController();
-    const signal = gesture.signal;
-    el.addEventListener('pointermove', onMove as EventListener, { signal });
-    el.addEventListener('pointerup', onUp as EventListener, { signal });
-    el.addEventListener('pointercancel', onCancel as EventListener, { signal });
-    el.addEventListener('lostpointercapture', onCancel as EventListener, {
-      signal,
-    });
-    window.addEventListener('keydown', onKey, { signal });
-    state.set({
-      active: false,
-      start: startPoint,
-      current: startPoint,
-      delta: { x: 0, y: 0 },
-      pointerId: e.pointerId,
-      modifiers: mods(e),
-      button: e.button,
-      pointerType: activePointerType,
-      origin: activeOrigin,
-      cancelled: false,
-    });
-  };
+  const onDown =
+    (el: HTMLElement) =>
+    (e: PointerEvent): void => {
+      if (activePointerId !== null) return;
+      if (!buttons.includes(e.button)) return;
+      const matched = handleSelector
+        ? ((e.target as Element)?.closest?.(
+            handleSelector,
+          ) as HTMLElement | null)
+        : ((e.target as HTMLElement | null) ?? el); // no selector: the pressed element itself
+      if (!matched) return; // handleSelector set but pointerdown landed outside a handle
+      if (stopPropagation) e.stopPropagation(); // claim it: an outer sensor won't also start
+      activePointerId = e.pointerId;
+      activeButton = e.button;
+      activePointerType = e.pointerType;
+      activeOrigin = matched;
+      activated = false;
+      startPoint = coord(e);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        // capture unsupported (older browsers / test env) — listeners still work
+      }
+      gesture = new AbortController();
+      const signal = gesture.signal;
+      el.addEventListener('pointermove', onMove as EventListener, { signal });
+      el.addEventListener('pointerup', onUp as EventListener, { signal });
+      el.addEventListener('pointercancel', onCancel as EventListener, {
+        signal,
+      });
+      el.addEventListener('lostpointercapture', onCancel as EventListener, {
+        signal,
+      });
+      window.addEventListener('keydown', onKey, { signal });
+      state.set({
+        active: false,
+        start: startPoint,
+        current: startPoint,
+        delta: { x: 0, y: 0 },
+        pointerId: e.pointerId,
+        modifiers: mods(e),
+        button: e.button,
+        pointerType: activePointerType,
+        origin: activeOrigin,
+        cancelled: false,
+      });
+    };
 
   const attach = (el: HTMLElement): (() => void) => {
     const controller = new AbortController();

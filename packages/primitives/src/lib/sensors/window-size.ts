@@ -1,11 +1,5 @@
-import { isPlatformServer } from '@angular/common';
-import {
-  computed,
-  DestroyRef,
-  inject,
-  PLATFORM_ID,
-  type Signal,
-} from '@angular/core';
+import { isServer } from '../platform';
+import { computed, DestroyRef, inject, type Signal } from '@angular/core';
 import { throttled } from '../throttled';
 import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
@@ -93,7 +87,7 @@ export function windowSize(opt?: WindowSizeOptions): WindowSizeSignal {
 }
 
 function createWindowSize(opt?: WindowSizeOptions): WindowSizeSignal {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     const base = computed(
       () => ({
         width: 1024,

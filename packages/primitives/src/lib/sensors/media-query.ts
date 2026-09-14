@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -67,7 +66,7 @@ export function mediaQuery(
 
 function createMediaQuery(query: string, debugName: string): Signal<boolean> {
   if (
-    isPlatformServer(inject(PLATFORM_ID)) ||
+    isServer() ||
     typeof window === 'undefined' ||
     typeof window.matchMedia !== 'function' // jsdom doesn't implement matchMedia
   )

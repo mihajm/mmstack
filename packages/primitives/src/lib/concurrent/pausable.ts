@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   type CreateComputedOptions,
@@ -11,7 +11,6 @@ import {
   type Injector,
   isDevMode,
   linkedSignal,
-  PLATFORM_ID,
   type Provider,
   runInInjectionContext,
   signal,
@@ -114,22 +113,13 @@ export function resolvePause(
   const onServer = (): boolean =>
     typeof pause === 'function' && !opt?.injector
       ? typeof globalThis.window === 'undefined'
-      : tryRun(
-          () =>
-            isPlatformServer(
-              inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-            ),
-          typeof globalThis.window === 'undefined',
-        );
+      : tryRun(() => isServer(), typeof globalThis.window === 'undefined');
 
   if (typeof pause === 'function') return onServer() ? null : pause;
 
   if (onServer()) return null;
 
-  const paused = tryRun(
-    () => inject(PAUSED_CONTEXT, { optional: true }),
-    null,
-  );
+  const paused = tryRun(() => inject(PAUSED_CONTEXT, { optional: true }), null);
   if (!paused) {
     if (opt?.pause === true && isDevMode())
       console.warn(

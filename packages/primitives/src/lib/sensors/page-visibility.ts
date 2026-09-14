@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   type Signal,
   signal,
 } from '@angular/core';
@@ -60,7 +59,7 @@ export function pageVisibility(
 function createPageVisibility(
   debugName: string,
 ): Signal<DocumentVisibilityState> {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return computed(() => 'visible', { debugName });
   }
 

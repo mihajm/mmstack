@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   afterRenderEffect,
   ApplicationRef,
@@ -12,13 +11,12 @@ import {
   input,
   isSignal,
   output,
-  PLATFORM_ID,
   runInInjectionContext,
   untracked,
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-import { nestedEffect, pointerDrag } from '@mmstack/primitives';
+import { nestedEffect, pointerDrag, isServer } from '@mmstack/primitives';
 
 import { boxData, extractEdge, mapDropTargets } from '../internal/payload';
 import { resolveElement, resolveSignal } from '../internal/resolve';
@@ -61,8 +59,7 @@ type DraggableSharedOptions<TData, TMeta extends DragMeta> = {
    * which isn't available at composable-setup time).
    */
   preview?:
-    | PreviewConfig<TData>
-    | (() => PreviewConfig<TData> | undefined | null);
+    PreviewConfig<TData> | (() => PreviewConfig<TData> | undefined | null);
   /** Injector to run in; defaults to the current injection context. */
   injector?: Injector;
   /** Fires when this element starts being dragged. */
@@ -171,8 +168,7 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
   return runInInjectionContext(injector, () => {
     const data = resolveSignal(opts.data);
 
-    if (isPlatformServer(inject(PLATFORM_ID)))
-      return { dragging: computed(() => false), data };
+    if (isServer()) return { dragging: computed(() => false), data };
 
     const meta = opts.meta ? resolveSignal(opts.meta) : undefined;
 
@@ -186,8 +182,7 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
     const readMeta = (): TMeta => (meta ? untracked(meta) : ({} as TMeta));
 
     const previewResolver:
-      | (() => PreviewConfig<TData> | undefined | null)
-      | null =
+      (() => PreviewConfig<TData> | undefined | null) | null =
       opts.preview === undefined
         ? null
         : typeof opts.preview === 'function'
@@ -287,8 +282,7 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
               nativeSetDragImage,
             }: {
               nativeSetDragImage:
-                | ((image: Element, x: number, y: number) => void)
-                | null;
+                ((image: Element, x: number, y: number) => void) | null;
             }) => {
               const cfg = previewResolver();
               if (!cfg) return;

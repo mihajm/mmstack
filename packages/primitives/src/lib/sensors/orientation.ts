@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -55,11 +54,7 @@ export function orientation(
 }
 
 function createOrientation(debugName: string): Signal<ScreenOrientationState> {
-  if (
-    isPlatformServer(inject(PLATFORM_ID)) ||
-    typeof screen === 'undefined' ||
-    !screen.orientation
-  ) {
+  if (isServer() || typeof screen === 'undefined' || !screen.orientation) {
     return computed(() => SSR_FALLBACK, { debugName });
   }
 

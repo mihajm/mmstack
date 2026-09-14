@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
   booleanAttribute,
@@ -9,14 +8,13 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   runInInjectionContext,
   signal,
   untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { pointerDrag } from '@mmstack/primitives';
+import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { resolveSignal } from '../internal/resolve';
 import type { Resolvable } from '../internal/types';
@@ -67,7 +65,7 @@ export function resizeHandle(
 ): ResizeHandleRef {
   const guides = signal<readonly Guide[]>([]);
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return {
       resizing: computed(() => false),
       box: box.asReadonly(),

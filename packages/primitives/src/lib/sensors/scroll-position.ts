@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common'; // Corrected import
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
@@ -6,7 +6,6 @@ import {
   ElementRef,
   inject,
   isSignal,
-  PLATFORM_ID, // Used for SSR fallback
   type Signal,
   untracked,
 } from '@angular/core';
@@ -108,7 +107,7 @@ export function scrollPosition(
 function createScrollPosition(
   opt?: ScrollPositionOptions,
 ): ScrollPositionSignal {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     const base = computed(
       () => ({
         x: 0,

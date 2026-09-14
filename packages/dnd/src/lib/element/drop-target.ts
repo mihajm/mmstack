@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   booleanAttribute,
   computed,
@@ -9,7 +9,6 @@ import {
   Injector,
   input,
   output,
-  PLATFORM_ID,
   runInInjectionContext,
   untracked,
   type Signal,
@@ -206,7 +205,7 @@ export function dropTarget<
   const injector = raw.injector ?? inject(Injector);
   const opts = withDefaults(raw, injectDropTargetDefaults(injector));
   return runInInjectionContext(injector, () => {
-    if (isPlatformServer(inject(PLATFORM_ID))) {
+    if (isServer()) {
       return NOOP as DropTargetRef<TAccept>;
     }
 

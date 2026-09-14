@@ -1,10 +1,9 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   computed,
   DestroyRef,
   inject,
   Injector,
-  PLATFORM_ID,
   runInInjectionContext,
   untracked,
   type Signal,
@@ -58,7 +57,7 @@ export function monitor<TAccept = unknown, TMeta extends DragMeta = DragMeta>(
 ): MonitorRef<TAccept, TMeta> {
   const injector = opts.injector ?? inject(Injector);
   return runInInjectionContext(injector, () => {
-    if (isPlatformServer(inject(PLATFORM_ID)))
+    if (isServer())
       return {
         isDragging: computed(() => false),
         source: computed(() => undefined),

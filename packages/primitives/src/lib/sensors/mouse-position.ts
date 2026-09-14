@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
@@ -7,7 +7,6 @@ import {
   inject,
   isDevMode,
   isSignal,
-  PLATFORM_ID,
   type Signal,
 } from '@angular/core';
 import { throttled } from '../throttled';
@@ -108,7 +107,7 @@ export function mousePosition(opt?: MousePositionOptions): MousePositionSignal {
 }
 
 function createMousePosition(opt?: MousePositionOptions): MousePositionSignal {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     const base = computed(
       () => ({
         x: 0,

@@ -1,15 +1,13 @@
-import { isPlatformServer } from '@angular/common';
 import {
   computed,
   effect,
   ElementRef,
-  inject,
-  PLATFORM_ID,
   signal,
   untracked,
   type Signal,
+  inject,
 } from '@angular/core';
-import { pointerDrag } from '@mmstack/primitives';
+import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { resolveElement, resolveSignal } from '../internal/resolve';
 import type { DragHandleLike, Resolvable } from '../internal/types';
@@ -54,7 +52,7 @@ export function panZoom(
   const transform = signal<CanvasSpaceTransform>({ x: 0, y: 0, scale: 1 });
   const reset = () => transform.set({ x: 0, y: 0, scale: 1 });
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return {
       transform: transform.asReadonly(),
       panning: computed(() => false),

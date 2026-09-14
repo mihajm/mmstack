@@ -1,10 +1,10 @@
-import { DOCUMENT, isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   DestroyRef,
   inject,
   Injectable,
   Injector,
-  PLATFORM_ID,
+  DOCUMENT,
 } from '@angular/core';
 
 import { resolveAnnounce, type AnnouncePlugin } from '../provide';
@@ -24,7 +24,7 @@ export class DndAnnouncer {
   private assertive: HTMLElement | null = null;
 
   constructor() {
-    if (isPlatformServer(inject(PLATFORM_ID))) return;
+    if (isServer()) return;
     const doc = inject(DOCUMENT);
     this.polite = this.createRegion(doc, 'polite');
     this.assertive = this.createRegion(doc, 'assertive');

@@ -1,11 +1,10 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   computed,
   DestroyRef,
   ElementRef,
   inject,
   Injectable,
-  PLATFORM_ID,
   signal,
   type Provider,
   type Signal,
@@ -177,11 +176,10 @@ export class DndSession {
     { equal: elsEqual },
   );
 
-  private readonly server = isPlatformServer(inject(PLATFORM_ID));
+  private readonly server = isServer();
   // Scoped sessions only track drags inside their host subtree; root has no el → tracks everything.
-  private readonly rootEl = inject(ElementRef, { optional: true })?.nativeElement as
-    | HTMLElement
-    | undefined;
+  private readonly rootEl = inject(ElementRef, { optional: true })
+    ?.nativeElement as HTMLElement | undefined;
   private readonly destroyRef = inject(DestroyRef);
   private monitorAttached = false;
 

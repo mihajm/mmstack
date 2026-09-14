@@ -1,11 +1,10 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   afterNextRender,
   DestroyRef,
   effect,
   inject,
   Injector,
-  PLATFORM_ID,
   type Signal,
   untracked,
 } from '@angular/core';
@@ -43,9 +42,7 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
   const destroyRef = inject(DestroyRef);
-  const onServer = isPlatformServer(
-    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-  );
+  const onServer = isServer();
 
   return (fn: () => void): TransitionRef => {
     // attributed: loads already in flight when the transition starts are not ours

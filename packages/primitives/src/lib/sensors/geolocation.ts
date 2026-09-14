@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -47,7 +46,11 @@ export function geolocation(opt?: GeolocationOptions): GeolocationSignal {
 }
 
 function createGeolocation(opt?: GeolocationOptions): GeolocationSignal {
-  if (isPlatformServer(inject(PLATFORM_ID)) || typeof navigator === 'undefined' || !navigator.geolocation) {
+  if (
+    isServer() ||
+    typeof navigator === 'undefined' ||
+    !navigator.geolocation
+  ) {
     const sig = computed(() => null, {
       debugName: opt?.debugName ?? 'geolocation',
     }) as InternalGeolocationSignal;
@@ -73,7 +76,11 @@ function createGeolocation(opt?: GeolocationOptions): GeolocationSignal {
   };
 
   if (opt?.watch) {
-    const watchId = navigator.geolocation.watchPosition(onSuccess, onError, opt);
+    const watchId = navigator.geolocation.watchPosition(
+      onSuccess,
+      onError,
+      opt,
+    );
     inject(DestroyRef).onDestroy(() =>
       navigator.geolocation.clearWatch(watchId),
     );

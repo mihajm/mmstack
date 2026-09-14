@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -60,7 +59,7 @@ export function batteryStatus(
 
 function createBatteryStatus(debugName: string): Signal<BatteryStatus | null> {
   if (
-    isPlatformServer(inject(PLATFORM_ID)) ||
+    isServer() ||
     typeof navigator === 'undefined' ||
     typeof (navigator as any).getBattery !== 'function'
   ) {

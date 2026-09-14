@@ -1,11 +1,10 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   afterNextRender,
   DestroyRef,
   effect,
   inject,
   Injector,
-  PLATFORM_ID,
   type Signal,
   untracked,
   type WritableSignal,
@@ -90,9 +89,7 @@ export function injectStartTransaction(): (fn: () => void) => TransactionRef {
   const scope = injectTransitionScope();
   const injector = inject(Injector);
   const destroyRef = inject(DestroyRef);
-  const onServer = isPlatformServer(
-    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-  );
+  const onServer = isServer();
 
   return (fn: () => void): TransactionRef => {
     const txn = createTransaction();

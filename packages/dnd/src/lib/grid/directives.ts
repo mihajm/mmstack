@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   afterNextRender,
   computed,
@@ -8,7 +8,6 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   runInInjectionContext,
   signal,
   type Signal,
@@ -54,7 +53,7 @@ export function connectPlacementGrid<T extends GridPlacement, K = unknown>(
 ): PlacementGridBinding {
   const el =
     element ?? inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  const server = isPlatformServer(inject(PLATFORM_ID));
+  const server = isServer();
 
   const width = signal(0);
   if (!server && typeof ResizeObserver === 'function') {
@@ -183,14 +182,15 @@ export function connectPlacementGrid<T extends GridPlacement, K = unknown>(
 }
 
 /** Per-item binding: preview-projected px styles + keyboard. */
-export type PlacementGridItemBinding<K = unknown> = PlacementGridItemState<K> & {
-  /** `translate(xPx, yPx)` — preview position, or free-follow while dragged. */
-  readonly transformCss: Signal<string>;
-  readonly widthPx: Signal<number>;
-  readonly heightPx: Signal<number>;
-  readonly tabIndex: Signal<number | null>;
-  onKeydown(event: KeyboardEvent): void;
-};
+export type PlacementGridItemBinding<K = unknown> =
+  PlacementGridItemState<K> & {
+    /** `translate(xPx, yPx)` — preview position, or free-follow while dragged. */
+    readonly transformCss: Signal<string>;
+    readonly widthPx: Signal<number>;
+    readonly heightPx: Signal<number>;
+    readonly tabIndex: Signal<number | null>;
+    onKeydown(event: KeyboardEvent): void;
+  };
 
 const ARROWS: Record<string, { x: number; y: number }> = {
   ArrowLeft: { x: -1, y: 0 },
@@ -280,7 +280,13 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
       const placed = c.items().find((i) => c.key(i) === k);
       if (placed) {
         getAnnounce()?.(
-          message({ item: it, x: placed.x, y: placed.y, w: placed.w, h: placed.h }),
+          message({
+            item: it,
+            x: placed.x,
+            y: placed.y,
+            w: placed.w,
+            h: placed.h,
+          }),
         );
       }
     }

@@ -1,4 +1,5 @@
-import { isPlatformServer, NgTemplateOutlet } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
+import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   computed,
@@ -7,7 +8,6 @@ import {
   inject,
   InjectionToken,
   input,
-  PLATFORM_ID,
   type Provider,
   viewChild,
   ViewEncapsulation,
@@ -322,16 +322,16 @@ export class SearchField<T, TParent = undefined> {
     });
   }
 
-  private readonly isServer = isPlatformServer(inject(PLATFORM_ID));
+  private readonly onServer = isServer();
   private focusTimeout: ReturnType<typeof setTimeout> | undefined;
   protected focus(el?: HTMLInputElement) {
-    if (this.isServer) return;
+    if (this.onServer) return;
     if (this.focusTimeout) clearTimeout(this.focusTimeout);
     this.focusTimeout = setTimeout(() => el?.focus());
   }
 
   protected cancelFocus() {
-    if (this.isServer) return;
+    if (this.onServer) return;
     if (this.focusTimeout) clearTimeout(this.focusTimeout);
   }
 }

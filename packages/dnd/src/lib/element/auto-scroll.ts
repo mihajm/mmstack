@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   afterNextRender,
   DestroyRef,
@@ -6,7 +6,6 @@ import {
   ElementRef,
   inject,
   Injector,
-  PLATFORM_ID,
   runInInjectionContext,
 } from '@angular/core';
 
@@ -40,7 +39,7 @@ export type AutoScrollOptions = {
 export function autoScroll(opts: AutoScrollOptions = {}): void {
   const injector = opts.injector ?? inject(Injector);
   runInInjectionContext(injector, () => {
-    if (isPlatformServer(inject(PLATFORM_ID))) return;
+    if (isServer()) return;
 
     // Resolve inside the injection context (the getter can be called later, outside one).
     const plugin = resolveAutoScroll(injector, opts.autoScroll)();

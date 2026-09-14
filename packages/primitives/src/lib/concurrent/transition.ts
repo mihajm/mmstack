@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   afterNextRender,
   DestroyRef,
@@ -9,7 +9,6 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   signal,
   type Signal,
   TemplateRef,
@@ -68,9 +67,7 @@ export class MmTransition<T> {
   >;
   private readonly vcr = inject(ViewContainerRef);
   private readonly parent = inject(Injector);
-  private readonly onServer = isPlatformServer(
-    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-  );
+  private readonly onServer = isServer();
 
   /** The value whose changes are transitioned. Each view keeps the value it was created with. */
   readonly value = input.required<T>({ alias: 'mmTransition' });

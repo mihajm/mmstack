@@ -1,4 +1,4 @@
-import { isPlatformBrowser } from '@angular/common';
+import { isBrowser } from './platform';
 import {
   assertInInjectionContext,
   DestroyRef,
@@ -6,7 +6,6 @@ import {
   InjectionToken,
   Injector,
   isDevMode,
-  PLATFORM_ID,
   type DefaultExport,
   type InjectOptions,
   type ProviderToken,
@@ -154,7 +153,7 @@ export function injectAsync<T>(
       ? inject(DestroyRef)
       : (target.get(DestroyRef, null) ?? inject(DestroyRef));
 
-  const isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+  const onBrowser = isBrowser();
 
   // host destroyed mid-import
   let child: (Injector & { destroy?(): void }) | null = null;
@@ -200,7 +199,7 @@ export function injectAsync<T>(
 
   // Prefetch only eagerly, only in the browser, and only on a healthy
   // connection — an explicit `await getter()` always loads regardless.
-  if (isBrowser && options?.prefetch !== undefined && !hasSlowConnection())
+  if (onBrowser && options?.prefetch !== undefined && !hasSlowConnection())
     void normalizePrefetch(options.prefetch)().then(load);
 
   return load;

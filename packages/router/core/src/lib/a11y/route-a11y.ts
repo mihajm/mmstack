@@ -1,4 +1,4 @@
-import { DOCUMENT, isPlatformBrowser } from '@angular/common';
+import { isBrowser } from '@mmstack/primitives';
 import {
   afterNextRender,
   effect,
@@ -8,9 +8,9 @@ import {
   InjectionToken,
   Injector,
   makeEnvironmentProviders,
-  PLATFORM_ID,
   provideEnvironmentInitializer,
   untracked,
+  DOCUMENT,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { VisualCommitCoordinator } from '../visual-commit';
@@ -81,14 +81,14 @@ class RouteA11y {
   private readonly title = inject(Title);
   private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
-  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+  private readonly onBrowser = isBrowser();
 
   private liveRegion: HTMLElement | null = null;
   private announcedFor: number | null = null;
   private initialSkipped = false;
 
   constructor() {
-    if (!this.isBrowser) return;
+    if (!this.onBrowser) return;
 
     effect(() => {
       const { status, navigationId } = this.coordinator.state();

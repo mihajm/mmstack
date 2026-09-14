@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
   computed,
@@ -8,14 +7,13 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   runInInjectionContext,
   signal,
   untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { pointerDrag } from '@mmstack/primitives';
+import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { resolveSignal } from '../internal/resolve';
 import type { Resolvable } from '../internal/types';
@@ -51,7 +49,7 @@ export function rotatable(
   angle: WritableSignal<number>,
   opts: RotatableOptions,
 ): RotatableRef {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return { rotating: computed(() => false), angle: angle.asReadonly() };
   }
 

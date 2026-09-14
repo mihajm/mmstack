@@ -90,6 +90,16 @@ import { DocSection } from '../../../layout/doc-section';
           since the marker is written with <code>defineProperty</code>.
           <code>isOpaque(value)</code> is the matching guard, for niche interop.
         </p>
+        <p>
+          The symbol itself can be swapped with
+          <code>setOpaqueSymbol(symbol)</code>. Reach for it when two bundles or
+          realms need to agree on the marker (hand both a
+          <code>Symbol.for</code>), or when another library already stamps its
+          objects with a symbol set to <code>true</code> and you want those
+          treated as leaves without marking each one. Call it once before
+          anything is marked; values marked under the old symbol stop counting
+          after a swap. It returns the previous symbol so you can put it back.
+        </p>
       </docs-section>
 
       <docs-section title="extendStore" id="extend-store">

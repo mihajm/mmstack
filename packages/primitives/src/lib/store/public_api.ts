@@ -90,7 +90,7 @@ export {
   type PersistedStoreDefaults,
   type PersistedStoreOptions,
 } from './persisted-store';
-export { isOpaque, opaque, type Opaque } from './opaque';
+export { isOpaque, opaque, setOpaqueSymbol, type Opaque } from './opaque';
 export {
   projection,
   reconcile,

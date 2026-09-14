@@ -9,7 +9,7 @@ import {
 } from './internals';
 import { isMutable } from '../mutable';
 import { isLeaf } from './leaf';
-import { isOpaque, OPAQUE, opaque } from './opaque';
+import { isOpaque, OPAQUE, opaque, setOpaqueSymbol } from './opaque';
 import { extendStore, mutableStore, store } from './store';
 
 describe('store', () => {
@@ -578,6 +578,69 @@ describe('store', () => {
       expect(OPAQUE in o).toBe(true);
       expect(isOpaque(o)).toBe(true);
       expect(isOpaque({})).toBe(false);
+    });
+
+    describe('setOpaqueSymbol', () => {
+      const MINE = Symbol.for('store.spec/opaque');
+      let previous: symbol;
+
+      beforeEach(() => {
+        previous = setOpaqueSymbol(MINE);
+      });
+      afterEach(() => {
+        setOpaqueSymbol(OPAQUE);
+      });
+
+      it('returns the previous marker, which is the built-in one by default', () => {
+        expect(previous).toBe(OPAQUE);
+        expect(setOpaqueSymbol(MINE)).toBe(MINE);
+      });
+
+      it('opaque() writes the swapped symbol instead of the built-in one', () => {
+        const o = opaque({ a: 1 });
+        expect(MINE in o).toBe(true);
+        expect(OPAQUE in o).toBe(false);
+        expect(Object.getOwnPropertyDescriptor(o, MINE)?.enumerable).toBe(
+          false,
+        );
+        expect(isOpaque(o)).toBe(true);
+      });
+
+      it('an object pre-stamped with the swapped symbol is a leaf without calling opaque()', () => {
+        const stamped = { a: 1, b: { c: 2 }, [MINE]: true as const };
+        expect(isOpaque(stamped)).toBe(true);
+
+        const s = store({ blob: stamped, plain: { a: 1 } }, { injector });
+        expect(isSignal(s.blob)).toBe(true);
+        expect(isLeaf(s.blob)).toBe(true);
+        expect(s.blob()).toBe(stamped);
+        expect(s().blob).toBe(stamped);
+        // sibling plain object still descends
+        s.plain.a.set(9);
+        expect(s().plain.a).toBe(9);
+      });
+
+      it('only recognises the marker when its value is true', () => {
+        expect(isOpaque({ [MINE]: 'yes' })).toBe(false);
+        expect(isOpaque({ [MINE]: false })).toBe(false);
+      });
+
+      it('values marked under the built-in symbol are no longer opaque after a swap', () => {
+        // the compile-time brand still says leaf; only the runtime routing changes
+        const stale = { a: 1, [OPAQUE]: true } as { a: number };
+        expect(isOpaque(stale)).toBe(false);
+        const s = store({ v: stale }, { injector });
+        expect(isLeaf(s.v)).toBe(false);
+        expect(isSignal(s.v.a)).toBe(true);
+      });
+
+      it('restoring the previous marker brings the built-in behaviour back', () => {
+        setOpaqueSymbol(previous);
+        const o = opaque({ a: 1 });
+        expect(OPAQUE in o).toBe(true);
+        expect(MINE in o).toBe(false);
+        expect(isOpaque(o)).toBe(true);
+      });
     });
   });
 

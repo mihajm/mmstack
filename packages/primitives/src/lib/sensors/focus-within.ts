@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
@@ -6,16 +6,13 @@ import {
   ElementRef,
   inject,
   isSignal,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
 import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 type FocusWithinTarget =
-  | ElementRef<Element>
-  | Element
-  | Signal<ElementRef<Element> | Element | null>;
+  ElementRef<Element> | Element | Signal<ElementRef<Element> | Element | null>;
 
 function unwrap(target: ElementRef<Element> | Element | null): Element | null {
   if (!target) return null;
@@ -54,7 +51,7 @@ function createFocusWithin(
 ): Signal<boolean> {
   const debugName = opt?.debugName ?? 'focusWithin';
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return computed(() => false, { debugName });
   }
 

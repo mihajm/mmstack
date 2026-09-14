@@ -1,10 +1,9 @@
-import { isPlatformBrowser } from '@angular/common';
+import { isBrowser } from '@mmstack/primitives';
 import {
   afterNextRender,
   inject,
   Injectable,
   Injector,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -78,7 +77,7 @@ export class VisualCommitCoordinator {
    * There is no visual commit off the browser: nothing paints, and `afterNextRender` never runs,
    * so on the server `NavigationEnd` IS the commit and outlet arms are ignored.
    */
-  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+  private readonly onBrowser = isBrowser();
   private readonly current = signal<VisualCommitState>(IDLE);
 
   readonly state = this.current.asReadonly();
@@ -106,7 +105,7 @@ export class VisualCommitCoordinator {
 
   /** An outlet is activating for the current navigation and owes a terminal swap. */
   arm(outlet: object): void {
-    if (!this.isBrowser || this.navigationId === null) return;
+    if (!this.onBrowser || this.navigationId === null) return;
     this.arms.set(outlet, this.navigationId);
   }
 
@@ -168,7 +167,7 @@ export class VisualCommitCoordinator {
       case EventType.NavigationEnd:
         if (e.id !== this.navigationId) return;
         this.ended.add(e.id);
-        if (!this.isBrowser) this.commitIfSettled(e.id);
+        if (!this.onBrowser) this.commitIfSettled(e.id);
         else if (this.outstanding(e.id) === 0) this.commitAfterRender(e.id);
         break;
       case EventType.NavigationCancel:

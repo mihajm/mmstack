@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   createEnvironmentInjector,
   DestroyRef,
@@ -10,14 +9,13 @@ import {
   InjectionToken,
   isDevMode,
   makeEnvironmentProviders,
-  PLATFORM_ID,
   provideEnvironmentInitializer,
   runInInjectionContext,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { type Route, Router } from '@angular/router';
-import { provideTransitionScope } from '@mmstack/primitives';
+import { provideTransitionScope, isServer } from '@mmstack/primitives';
 import { PreloadRequester } from '../preloading/preload-requester';
 import { extractRouteParams } from '../util/extract-params';
 import { findPath } from '../util/find-path';
@@ -52,7 +50,7 @@ export class RouteDataPrefetcher {
   private readonly req = inject(PreloadRequester);
   private readonly rootInjector = inject(EnvironmentInjector);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly onServer = isPlatformServer(inject(PLATFORM_ID));
+  private readonly onServer = isServer();
   private readonly prefetchTimeout =
     inject(PREFETCH_TIMEOUT, { optional: true }) ?? DEFAULT_PREFETCH_TIMEOUT;
   private connected = false;

@@ -1,11 +1,10 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   effect,
   ElementRef,
   inject,
   isSignal,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -106,7 +105,7 @@ function createElementVisibility(
     | Signal<ElementRef<Element> | Element | null>,
   opt?: ElementVisibilityOptions,
 ): ElementVisibilitySignal {
-  if (isPlatformServer(inject(PLATFORM_ID)) || !observerSupported()) {
+  if (isServer() || !observerSupported()) {
     const base = computed(() => undefined, {
       debugName: opt?.debugName,
     }) as InternalElementVisibilitySignal;

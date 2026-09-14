@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from './platform';
 import {
   computed,
   DestroyRef,
@@ -6,7 +6,6 @@ import {
   Injector,
   isDevMode,
   isSignal,
-  PLATFORM_ID,
   signal,
   untracked,
   type CreateSignalOptions,
@@ -198,9 +197,9 @@ export function stored<T>(
   }: CreateStoredOptions<T>,
 ): StoredSignal<T> {
   const injector = providedInjector ?? inject(Injector);
-  const isServer = isPlatformServer(injector.get(PLATFORM_ID));
+  const onServer = isServer(injector);
 
-  const fallbackStore = isServer ? noopStore : localStorage;
+  const fallbackStore = onServer ? noopStore : localStorage;
   const store = providedStore ?? fallbackStore;
 
   const keySig =
@@ -286,7 +285,7 @@ export function stored<T>(
     );
   }
 
-  if (syncTabs && !isServer) {
+  if (syncTabs && !onServer) {
     const destroyRef = injector.get(DestroyRef);
     const sync = (e: StorageEvent) => {
       if (e.storageArea !== store) return;
@@ -319,5 +318,7 @@ export function stored<T>(
 export function isStored<T = unknown>(
   value: WritableSignal<T>,
 ): value is StoredSignal<T> {
-  return 'clear' in value && typeof value.clear === 'function' && 'key' in value;
+  return (
+    'clear' in value && typeof value.clear === 'function' && 'key' in value
+  );
 }

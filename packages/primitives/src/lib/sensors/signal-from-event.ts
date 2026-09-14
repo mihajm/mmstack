@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
@@ -7,7 +7,6 @@ import {
   inject,
   Injector,
   isSignal,
-  PLATFORM_ID,
   signal,
   type Signal,
   untracked,
@@ -84,7 +83,7 @@ export function signalFromEvent<TEvent extends Event, U>(
   const opt = typeof projectOrOpt === 'function' ? maybeOpt : projectOrOpt;
   const injector = opt?.injector ?? inject(Injector);
 
-  if (isPlatformServer(injector.get(PLATFORM_ID))) {
+  if (isServer(injector)) {
     return computed(() => initial, { debugName: opt?.debugName });
   }
 

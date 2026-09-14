@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   DestroyRef,
   effect,
@@ -6,7 +6,6 @@ import {
   InjectionToken,
   Injector,
   isDevMode,
-  PLATFORM_ID,
   signal,
   untracked,
   type CreateSignalOptions,
@@ -180,12 +179,12 @@ export function persist<T extends object>(
       ? serialize(value)
       : { [VERSION_KEY]: version, data: serialize(value) };
 
-  const isServer = isPlatformServer(injector.get(PLATFORM_ID));
+  const onServer = isServer(injector);
   const initialRef = untracked(read); // copy-on-write: an untouched store keeps this reference
   const hydrated = signal(false);
 
-  if (isServer || !backend) {
-    if (!backend && !isServer && isDevMode()) {
+  if (onServer || !backend) {
+    if (!backend && !onServer && isDevMode()) {
       console.warn(
         `[@mmstack/primitives] persist("${key}"): no AsyncStore backend (pass { store } or providePersistedStoreOptions). Running in-memory, not persisted.`,
       );

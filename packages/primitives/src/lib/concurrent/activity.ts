@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   Directive,
@@ -8,7 +8,6 @@ import {
   InjectionToken,
   Injector,
   input,
-  PLATFORM_ID,
   type Provider,
   signal,
   type Signal,
@@ -50,9 +49,7 @@ export class MmActivity {
   private readonly tpl = inject(TemplateRef);
   private readonly vcr = inject(ViewContainerRef);
   private readonly parent = inject(Injector);
-  private readonly onServer = isPlatformServer(
-    inject(PLATFORM_ID, { optional: true }) ?? 'browser',
-  );
+  private readonly onServer = isServer();
 
   /** When false, keep the content mounted but hidden + CD-detached. */
   readonly visible = input.required<boolean>({ alias: 'mmActivity' });
@@ -105,8 +102,7 @@ const NEVER_PAUSED: Signal<boolean> = signal(false).asReadonly();
  * not exported.
  */
 export function injectPaused(): Signal<boolean> {
-  if (isPlatformServer(inject(PLATFORM_ID, { optional: true }) ?? 'browser'))
-    return NEVER_PAUSED;
+  if (isServer()) return NEVER_PAUSED;
   return inject(PAUSED_CONTEXT, { optional: true }) ?? NEVER_PAUSED;
 }
 

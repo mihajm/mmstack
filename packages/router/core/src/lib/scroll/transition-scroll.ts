@@ -1,11 +1,11 @@
-import { isPlatformBrowser, ViewportScroller } from '@angular/common';
+import { isBrowser } from '@mmstack/primitives';
+import { ViewportScroller } from '@angular/common';
 import {
   effect,
   type EnvironmentProviders,
   inject,
   Injectable,
   makeEnvironmentProviders,
-  PLATFORM_ID,
   provideEnvironmentInitializer,
   untracked,
 } from '@angular/core';
@@ -51,7 +51,7 @@ class TransitionScrollRestoration {
   private readonly router = inject(Router);
   private readonly scroller = inject(ViewportScroller);
   private readonly commit = inject(VisualCommitCoordinator).state;
-  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+  private readonly onBrowser = isBrowser();
 
   /** Scroll position each navigation left the page at, keyed by its navigation id. */
   private readonly positions = new Map<number, [number, number]>();
@@ -60,7 +60,7 @@ class TransitionScrollRestoration {
   private scrolledFor: number | null = null;
 
   constructor() {
-    if (!this.isBrowser) return;
+    if (!this.onBrowser) return;
 
     // The browser must not also restore, or it does so against the pre-swap DOM.
     this.scroller.setHistoryScrollRestoration('manual');

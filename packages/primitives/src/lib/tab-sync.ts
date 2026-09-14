@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from './platform';
 import {
   DestroyRef,
   effect,
@@ -6,7 +6,6 @@ import {
   Injectable,
   Injector,
   isDevMode,
-  PLATFORM_ID,
   untracked,
   type WritableSignal,
 } from '@angular/core';
@@ -82,7 +81,12 @@ function storeTabSync(
           post(
             covered
               ? { t: 'uptodate', proto: OP_PROTO_VERSION, to: msg.from }
-              : { t: 'state', proto: OP_PROTO_VERSION, to: msg.from, state: snap },
+              : {
+                  t: 'state',
+                  proto: OP_PROTO_VERSION,
+                  to: msg.from,
+                  state: snap,
+                },
           );
         };
         // `jitterMs: 0` answers HERE, in the message handler, with no timer at all. This is the
@@ -119,7 +123,12 @@ function storeTabSync(
   });
 
   const unsubEnv = sync.subscribe((env) => post({ t: 'env', env }));
-  post({ t: 'hello', proto: OP_PROTO_VERSION, from: sync.origin, wm: sync.watermark() });
+  post({
+    t: 'hello',
+    proto: OP_PROTO_VERSION,
+    from: sync.origin,
+    wm: sync.watermark(),
+  });
   helloTimer = setTimeout(goLive, helloTimeoutMs);
 
   injector.get(DestroyRef).onDestroy(() => {
@@ -318,7 +327,7 @@ export function tabSync<T extends WritableSignal<any>>(
     typeof opt === 'object' ? (opt as SyncSignalOptions) : undefined;
   const injector = optObj?.injector ?? inject(Injector);
 
-  if (isPlatformServer(injector.get(PLATFORM_ID))) return sig;
+  if (isServer(injector)) return sig;
 
   const id =
     typeof opt === 'string' ? opt : (opt?.id ?? generateDeterministicID());

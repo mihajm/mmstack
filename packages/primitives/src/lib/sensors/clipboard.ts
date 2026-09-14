@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -45,11 +44,7 @@ export function clipboard(opt?: string | SensorRunOptions): ClipboardSignal {
 }
 
 function createClipboard(debugName: string): ClipboardSignal {
-  if (
-    isPlatformServer(inject(PLATFORM_ID)) ||
-    typeof navigator === 'undefined' ||
-    !navigator.clipboard
-  ) {
+  if (isServer() || typeof navigator === 'undefined' || !navigator.clipboard) {
     const sig = computed(() => '', { debugName }) as InternalClipboardSignal;
     sig.copy = () => Promise.resolve();
     sig.isSupported = computed(() => false);

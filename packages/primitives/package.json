@@ -16,8 +16,7 @@
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/primitives",
   "peerDependencies": {
-    "@angular/core": ">=21 <22",
-    "@angular/common": ">=21 <22"
+    "@angular/core": ">=21 <22"
   },
   "sideEffects": false
 }

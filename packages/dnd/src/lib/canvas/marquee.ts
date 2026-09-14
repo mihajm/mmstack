@@ -1,13 +1,11 @@
-import { isPlatformServer } from '@angular/common';
 import {
   computed,
   ElementRef,
-  inject,
   linkedSignal,
-  PLATFORM_ID,
   type Signal,
+  inject,
 } from '@angular/core';
-import { pointerDrag } from '@mmstack/primitives';
+import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { intersects, normalizeRect, type Box } from './geometry';
 
@@ -39,7 +37,7 @@ export function marquee<T>(
   items: Signal<readonly MarqueeItem<T>[]>,
   opts: MarqueeOptions = {},
 ): MarqueeRef<T> {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return {
       selecting: computed(() => false),
       rect: computed(() => null),

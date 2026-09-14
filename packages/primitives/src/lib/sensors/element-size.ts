@@ -1,11 +1,10 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   effect,
   ElementRef,
   inject,
   isSignal,
-  PLATFORM_ID,
   signal,
   type Signal,
   untracked,
@@ -92,7 +91,7 @@ function createElementSize(
     return undefined;
   };
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return computed(() => untracked(resolveInitialValue), {
       debugName: opt?.debugName,
     });

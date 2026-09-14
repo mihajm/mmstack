@@ -1,9 +1,8 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '../platform';
 import {
   computed,
   DestroyRef,
   inject,
-  PLATFORM_ID,
   signal,
   type Signal,
 } from '@angular/core';
@@ -64,7 +63,7 @@ export function idle(opt?: IdleOptions): IdleSignal {
 }
 
 function createIdle(opt?: IdleOptions): IdleSignal {
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     const sig = computed(() => false, {
       debugName: opt?.debugName ?? 'idle',
     }) as InternalIdleSignal;

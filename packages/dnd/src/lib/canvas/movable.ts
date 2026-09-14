@@ -1,4 +1,3 @@
-import { isPlatformServer } from '@angular/common';
 import {
   afterNextRender,
   booleanAttribute,
@@ -10,14 +9,17 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   runInInjectionContext,
   signal,
   untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { pointerDrag, type PointerDragState } from '@mmstack/primitives';
+import {
+  pointerDrag,
+  type PointerDragState,
+  isServer,
+} from '@mmstack/primitives';
 
 import { resolveElement, resolveSignal } from '../internal/resolve';
 import type { DragHandleLike, Resolvable } from '../internal/types';
@@ -118,7 +120,7 @@ export function movable(
 ): MovableRef {
   const guides = signal<readonly Guide[]>([]);
 
-  if (isPlatformServer(inject(PLATFORM_ID))) {
+  if (isServer()) {
     return {
       moving: computed(() => false),
       position: position.asReadonly(),

@@ -1,4 +1,4 @@
-import { isPlatformServer } from '@angular/common';
+import { isServer } from '@mmstack/primitives';
 import {
   afterNextRender,
   computed,
@@ -8,7 +8,6 @@ import {
   inject,
   Injector,
   input,
-  PLATFORM_ID,
   runInInjectionContext,
   type Signal,
   untracked,
@@ -32,7 +31,7 @@ export function connectCanvasSurface<T, K = unknown>(
 ): void {
   const el =
     element ?? inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  if (isPlatformServer(inject(PLATFORM_ID))) return;
+  if (isServer()) return;
   const injector = inject(Injector);
 
   const getAutoScroll = resolveAutoScroll(injector);

@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/telemetry-core",
-  "version": "21.1.0",
+  "version": "21.2.0",
   "keywords": [
     "angular",
     "signals",
@@ -22,7 +22,7 @@
     "@angular/core": ">=21 <22",
     "@angular/common": ">=21 <22",
     "rxjs": "~7.8.2",
-    "@mmstack/primitives": ">=21.9 <22"
+    "@mmstack/primitives": ">=21.13 <22"
   },
   "sideEffects": false
 }

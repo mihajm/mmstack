@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/worker",
-  "version": "21.2.1",
+  "version": "21.3.0",
   "keywords": [
     "angular",
     "signals",
@@ -18,7 +18,7 @@
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/worker",
   "peerDependencies": {
     "@angular/core": ">=21 <22",
-    "@mmstack/primitives": ">=21.8 <22"
+    "@mmstack/primitives": ">=21.13 <22"
   },
   "sideEffects": false
 }

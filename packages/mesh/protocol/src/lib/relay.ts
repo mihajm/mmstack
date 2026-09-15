@@ -226,21 +226,29 @@ const createRelease = (
   const drain = async (): Promise<void> => {
     if (draining) return;
     draining = true;
-    while (!stalled && queue.length > 0) {
-      const head = queue[0];
-      if (head.done) {
+    try {
+      while (!stalled && queue.length > 0) {
+        const head = queue[0];
+        if (head.done) {
+          try {
+            await head.done;
+          } catch (cause) {
+            stalled = true;
+            onFail(head.env, cause);
+            break;
+          }
+        }
+        queue.shift();
+        // an adapter that throws on send is its own bug; it must not stall every later release
         try {
-          await head.done;
-        } catch (cause) {
-          stalled = true;
-          onFail(head.env, cause);
-          break;
+          head.run();
+        } catch {
+          // deliberately swallowed: the item was released, its delivery is the adapter's
         }
       }
-      queue.shift();
-      head.run();
+    } finally {
+      draining = false;
     }
-    draining = false;
   };
 
   return {
@@ -761,6 +769,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             frontier: room.frontier,
             schemaVersion: room.schemaVersion,
           });
+          // who gets the echo: the members present now. A member that joins while this
+          // envelope waits for durability has it in its welcome already (the welcome's
+          // document half is captured at hello, after this ingest), and sending it again
+          // would hand that member one change twice.
+          const audience = [...room.members];
           room.release.submit(
             () => {
               // the frontier notice rides with the envelope that moved it, ahead of the echo,
@@ -772,7 +785,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   frontier: moved,
                 });
               }
-              broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
+              const echo: ServerMsg = { t: 'env', room: msg.room, env: seqEnv };
+              for (const member of audience) {
+                if (room.members.has(member)) member.socket.send(echo);
+              }
             },
             done ?? undefined,
             seqEnv,

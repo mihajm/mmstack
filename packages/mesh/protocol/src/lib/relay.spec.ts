@@ -2422,3 +2422,70 @@ describe('createRelay: the room sequence reaches the policy', () => {
     expect(seen).toEqual([0, 1]); // the sequence BEFORE each envelope is assigned one
   });
 });
+
+describe('createRelay: a late joiner holds a waiting envelope once', () => {
+  const envelope = (
+    origin: string,
+    version: number,
+    path: string,
+  ): OpEnvelope => ({
+    proto: MESH_PROTO_VERSION,
+    origin,
+    writer: origin,
+    version,
+    hlc: { p: 100, l: version },
+    policyVersion: 0,
+    ops: [{ kind: 'set', path: [path], next: version, cites: [], epoch: 0 }],
+  });
+
+  const countOf = (got: readonly ServerMsg[], seq: number): number => {
+    let n = 0;
+    for (const m of got) {
+      if (m.t === 'env' && m.env.seq === seq) n += 1;
+      else if (m.t === 'welcome' && m.mode === 'delta')
+        n += m.envs.filter((e) => e.seq === seq).length;
+      else if (m.t === 'welcome' && m.mode === 'snapshot') n += 1;
+    }
+    return n;
+  };
+
+  it('a member whose welcome carried the envelope is not sent it again at release', async () => {
+    const held: Deferred[] = [];
+    const relay = createRelay({
+      onCommit: () => {
+        const d = deferred();
+        held.push(d);
+        return d.promise;
+      },
+    });
+    const join = (origin: string) => {
+      const got: ServerMsg[] = [];
+      const conn = relay.connect(
+        { send: (m) => got.push(m), close: () => undefined },
+        {
+          writer: origin,
+        },
+      );
+      conn.receive({
+        t: 'hello',
+        room: 'r',
+        origin,
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 0,
+      });
+      return { conn, got };
+    };
+    const a = join('a');
+    a.conn.receive({ t: 'env', room: 'r', env: envelope('a', 1, 'x') });
+    const b = join('b');
+    expect(b.got.filter((m) => m.t === 'welcome')).toHaveLength(0);
+
+    held[0].resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(countOf(a.got, 1)).toBe(1);
+    expect(countOf(b.got, 1)).toBe(1);
+    expect(b.got.filter((m) => m.t === 'env')).toHaveLength(0);
+  });
+});

@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/mesh-protocol",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "main": "./index.js",
   "module": "./index.js",

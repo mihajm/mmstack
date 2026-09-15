@@ -166,6 +166,19 @@ export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   readonly status: Signal<MeshStatus>;
   /** Composed sync-health for a user-facing surface. */
   readonly health: Signal<SyncHealth>;
+  /**
+   * Every local write is acknowledged by the room. `false` while a write is still in the
+   * unacknowledged tail, and it stays `false` once a session ends with writes outstanding —
+   * those never landed, and no later echo can arrive to change that.
+   */
+  readonly acked: Signal<boolean>;
+  /**
+   * Resolves when the unacknowledged tail is empty (immediately if it already is), rejects
+   * with the terminal reason if the session ends while writes are outstanding. The barrier
+   * to await before publishing something that must contain every edit; `synced()` is a
+   * connection indicator, not a save barrier.
+   */
+  whenAcked(): Promise<void>;
   readonly peers: Signal<readonly MeshPeer[]>;
   /** Publish this client's ephemeral presence payload (cursor, section, activity…). */
   setPresence(data: unknown): void;
@@ -202,6 +215,7 @@ export function meshSync<T extends object>(
   const lastReason = signal<string | undefined>(undefined);
   const lastSyncedAt = signal<number | undefined>(undefined);
   const droppedOffline = signal(0);
+  const acked = signal(true); // nothing has been written yet
   const droppedInvalid = signal(0);
   const peerMap = signal<ReadonlyMap<string, MeshPeer>>(new Map());
   const peers = computed(() => [...peerMap().values()]);
@@ -325,9 +339,15 @@ export function meshSync<T extends object>(
         },
         onSynced: () => lastSyncedAt.set(Date.now()),
         onPeers: (map) => peerMap.set(map),
-        onOutboxChange: () => persistOutbox(),
+        onOutboxChange: () => {
+          persistOutbox();
+          acked.set(!session?.hasUnacked());
+        },
         onTerminal: () => {
           dropLocks();
+          // latched: the tail is about to be dropped from the session, but it was never
+          // acknowledged, so the answer to "is everything I wrote in the room" stays no
+          if (session?.hasUnacked()) acked.set(false);
           persistOutbox(true); // save the still-unacked tail for the next boot before dropping it
         },
         onLocalReject: (violation) => {
@@ -470,6 +490,8 @@ export function meshSync<T extends object>(
   return {
     status: status.asReadonly(),
     health,
+    acked: acked.asReadonly(),
+    whenAcked: () => (session ? session.whenAcked() : Promise.resolve()), // nothing written yet
     peers,
     setPresence: (data) => {
       if (session) session.setPresence(data);

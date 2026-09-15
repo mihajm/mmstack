@@ -96,6 +96,17 @@ export type MeshSession = {
   /** Highest relay seq observed. With no unacked writes, local state is the pure fold of the room at this seq. */
   lastSeq(): number;
   hasUnacked(): boolean;
+  /**
+   * Resolves once the unacknowledged local tail is empty — the acknowledgement barrier a
+   * caller awaits before treating its writes as the room's. Resolves immediately when
+   * nothing is outstanding. Rejects with the terminal reason if the session ends (eject or
+   * close) while entries remain: those writes never reached the room, and every later call
+   * rejects the same way.
+   *
+   * With a relay whose adapter confirms durability before echoing, acknowledged means
+   * stored; against a relay that echoes eagerly it means only "the relay has it".
+   */
+  whenAcked(): Promise<void>;
   /** The unacknowledged local tail (the durable-outbox payload). */
   unackedEnvs(): readonly OpEnvelope[];
   peers(): ReadonlyMap<string, PresenceState>;
@@ -131,6 +142,18 @@ export function meshSession<T extends object>(
   let reconnectTimer: unknown;
   let unsubs: (() => void)[] = [];
   let closed = false;
+  let ackFailure: Error | undefined;
+  const ackWaiters: {
+    resolve: () => void;
+    reject: (cause: Error) => void;
+  }[] = [];
+
+  const releaseAckWaiters = (failure?: Error): void => {
+    for (const waiter of ackWaiters.splice(0)) {
+      if (failure) waiter.reject(failure);
+      else waiter.resolve();
+    }
+  };
 
   const setStatus = (next: MeshStatus, reason?: string): void => {
     status = next;
@@ -147,6 +170,13 @@ export function meshSession<T extends object>(
     for (const unsub of unsubs.splice(0)) unsub();
     unsubLocal();
     hooks.onTerminal?.(state, reason); // unacked is still intact here — the persist window
+    if (unacked.size > 0) {
+      // these writes are not in the room and never will be on this session
+      ackFailure = new Error(reason ?? state);
+      releaseAckWaiters(ackFailure);
+    } else {
+      releaseAckWaiters();
+    }
     unacked.clear();
     transport?.close();
     transport = null;
@@ -180,6 +210,7 @@ export function meshSession<T extends object>(
       unacked.delete(unackedKey(env));
       acked.set(env.origin, Math.max(acked.get(env.origin) ?? 0, env.version));
       hooks.onOutboxChange?.();
+      if (unacked.size === 0) releaseAckWaiters();
       return;
     }
     sync.receive(env);
@@ -302,6 +333,9 @@ export function meshSession<T extends object>(
       env,
       { ...opt.ctx, writer: opt.writer },
       opt.room,
+      // the last sequence this client observed; it can only lag the relay's, so a rule that
+      // keys off an empty room is at worst more permissive here than it is at the relay
+      { seq: lastSeq },
     );
     if (violation) {
       // same outcome the relay's own check would produce one hop later — the emit-side
@@ -321,6 +355,14 @@ export function meshSession<T extends object>(
     status: () => status,
     lastSeq: () => lastSeq,
     hasUnacked: () => unacked.size > 0,
+    whenAcked: () =>
+      ackFailure
+        ? Promise.reject(ackFailure)
+        : unacked.size === 0
+          ? Promise.resolve()
+          : new Promise<void>((resolve, reject) => {
+              ackWaiters.push({ resolve, reject });
+            }),
     unackedEnvs: () => [...unacked.values()],
     peers: () => peers,
     setPresence: (data) => {

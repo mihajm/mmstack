@@ -126,12 +126,25 @@ export type ClientSignalMsg = {
 };
 
 export type ClientMsg =
-  | HelloMsg
-  | ClientEnvMsg
-  | ClientPresenceMsg
-  | ClientSignalMsg;
+  HelloMsg | ClientEnvMsg | ClientPresenceMsg | ClientSignalMsg;
 
 /** The tri-state join answer, plus the current presence roster. */
+/**
+ * The state half of a welcome: how the joiner is caught up. `up-to-date` carries nothing,
+ * `delta` the journal suffix past the client's watermark, `snapshot` the room's retained
+ * register state (never a folded value — the fold is the client's policy).
+ */
+export type WelcomeBody =
+  | { readonly mode: 'up-to-date' }
+  | { readonly mode: 'delta'; readonly envs: readonly SeqEnvelope[] }
+  | {
+      readonly mode: 'snapshot';
+      /** The room's retained register state; the client folds it with its own policy. */
+      readonly registers: readonly RegisterCheckpoint[];
+      /** Per-origin envelope-version high-water marks at the snapshot point. */
+      readonly wm: Readonly<Record<string, number>>;
+    };
+
 export type WelcomeMsg = {
   readonly t: 'welcome';
   readonly room: string;
@@ -144,17 +157,7 @@ export type WelcomeMsg = {
   readonly peers: readonly PresenceState[];
   /** Origins currently in the room (membership ≠ presence) — the P2P bootstrap roster. */
   readonly members: readonly string[];
-} & (
-  | { readonly mode: 'up-to-date' }
-  | { readonly mode: 'delta'; readonly envs: readonly SeqEnvelope[] }
-  | {
-      readonly mode: 'snapshot';
-      /** The room's retained register state; the client folds it with its own policy. */
-      readonly registers: readonly RegisterCheckpoint[];
-      /** Per-origin envelope-version high-water marks at the snapshot point. */
-      readonly wm: Readonly<Record<string, number>>;
-    }
-);
+} & WelcomeBody;
 
 export type ServerEnvMsg = {
   readonly t: 'env';

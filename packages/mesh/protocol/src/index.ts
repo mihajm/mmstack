@@ -3,6 +3,7 @@ export {
   pathPrefixAcl,
   type OpPolicy,
   type PathAclRule,
+  type PolicyRoomInfo,
   type PolicyViolation,
   type PrincipalCtx,
 } from './lib/policy';
@@ -43,5 +44,6 @@ export {
   type StoreOp,
   type SyncOp,
   type SyncSibling,
+  type WelcomeBody,
   type WelcomeMsg,
 } from './lib/wire';

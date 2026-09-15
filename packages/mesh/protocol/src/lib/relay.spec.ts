@@ -1,13 +1,42 @@
 import {
   pathPrefixAcl,
+  type PolicyRoomInfo,
   type PolicyViolation,
   type PrincipalCtx,
 } from './policy';
-import { createRelay, type RelaySocket } from './relay';
+// counts the relay's register walks, so "lazy" can be asserted rather than asserted-by-reading
+const spy = vi.hoisted(() => ({ checkpoints: 0 }));
+vi.mock('./register', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown> & {
+    createRegisterStore: typeof createRegisterStore;
+  };
+  return {
+    ...actual,
+    createRegisterStore: () => {
+      const store = actual.createRegisterStore();
+      return {
+        ...store,
+        checkpoint: () => {
+          spy.checkpoints++;
+          return store.checkpoint();
+        },
+      };
+    },
+  };
+});
+
+import {
+  createRelay,
+  type RelayConnection,
+  type RelaySocket,
+  type RoomSnapshot,
+  type RoomState,
+} from './relay';
 import { createRegisterStore } from './register';
 import {
   MESH_PROTO_VERSION,
   type Dot,
+  type Hlc,
   type Key,
   type OpEnvelope,
   type RegisterCheckpoint,
@@ -533,14 +562,13 @@ describe('createRelay: persistence seam', () => {
   it('onCommit fires per sequenced envelope with the retained register state', () => {
     const commits: {
       env: { seq: number };
-      state: {
-        seq: number;
-        registers: readonly RegisterCheckpoint[];
-        wm: Readonly<Record<string, number>>;
-      };
+      registers: readonly RegisterCheckpoint[];
+      state: { seq: number; wm: Readonly<Record<string, number>> };
     }[] = [];
     const relay = createRelay({
-      onCommit: (_room, env, state) => commits.push({ env, state }),
+      onCommit: (_room, env, state) => {
+        commits.push({ env, registers: state.checkpoint(), state });
+      },
     });
     const a = client(relay, 'wa', 'oa');
     a.hello();
@@ -550,16 +578,19 @@ describe('createRelay: persistence seam', () => {
     expect(commits.map((c) => c.env.seq)).toEqual([1, 2]);
     expect(commits[1].state.seq).toBe(2);
     expect(commits[1].state.wm).toEqual({ oa: 2 });
-    expect(regAt(commits[1].state.registers, ['v'])?.siblings[0]).toMatchObject(
-      { kind: 'set', value: 1 },
-    );
+    expect(regAt(commits[1].registers, ['v'])?.siblings[0]).toMatchObject({
+      kind: 'set',
+      value: 1,
+    });
   });
 
   it('onCommit does not fire for a rejected envelope', () => {
     const commits: unknown[] = [];
     const relay = createRelay({
       policy: { canWrite: (_ctx, path) => path[0] !== 'admin' },
-      onCommit: (_room, env) => commits.push(env),
+      onCommit: (_room, env) => {
+        commits.push(env);
+      },
     });
     const a = client(relay, 'wa', 'oa');
     a.hello();
@@ -585,7 +616,11 @@ describe('createRelay: persistence seam', () => {
     };
     const relay = createRelay({
       onCommit: (_room, env, state) => {
-        saved = { ...state, journal: [...saved.journal, env] };
+        saved = {
+          ...state,
+          registers: state.checkpoint(),
+          journal: [...saved.journal, env],
+        };
       },
     });
     const a = client(relay, 'wa', 'oa');
@@ -1506,5 +1541,884 @@ describe('createRelay: migration schema floor', () => {
 
     // the straggler was neither sequenced nor broadcast, so it cannot fold into the migrated room
     expect(bEnvsAfter).toBe(bEnvsBefore);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Durable acknowledgement — the release gate as a pure model.
+//
+// The gate is the whole mechanism durable release adds: an ordered queue of outbound groups,
+// each held until its own durability promise settles AND every earlier group has been
+// released. The model carries no relay, no sockets and no wire types, so what it proves is the
+// ordering algebra itself; the relay suite below re-points the same properties at the impl.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Deferred = {
+  readonly promise: Promise<void>;
+  resolve(): void;
+  reject(cause: unknown): void;
+};
+
+const deferred = (): Deferred => {
+  let resolve!: () => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  promise.catch(() => undefined); // the gate observes a rejection; the host must not see it unhandled
+  return { promise, resolve, reject };
+};
+
+/** Let every already-settled promise chain run to quiescence. */
+const settle = async (turns = 50): Promise<void> => {
+  for (let i = 0; i < turns; i++) await Promise.resolve();
+};
+
+const mulberry32 = (seed: number): (() => number) => {
+  let a = (seed + 0x9e3779b9) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+type Gate<M> = {
+  /** Queue one outbound group behind everything already queued. */
+  submit(msgs: readonly M[], done?: Promise<void>): void;
+  pending(): number;
+};
+
+function releaseGate<M>(
+  emit: (msg: M) => void,
+  onFail?: (msgs: readonly M[], cause: unknown) => void,
+): Gate<M> {
+  type Item = { readonly msgs: readonly M[]; readonly done?: Promise<void> };
+  const queue: Item[] = [];
+  let stalled = false;
+  let draining = false;
+
+  const drain = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    while (!stalled && queue.length > 0) {
+      const head = queue[0];
+      if (head.done) {
+        try {
+          await head.done;
+        } catch (cause) {
+          stalled = true;
+          onFail?.(head.msgs, cause);
+          break;
+        }
+      }
+      queue.shift();
+      for (const msg of head.msgs) emit(msg);
+    }
+    draining = false;
+  };
+
+  return {
+    submit: (msgs, done) => {
+      if (stalled) {
+        queue.push({ msgs, done });
+        return;
+      }
+      if (!draining && queue.length === 0 && done === undefined) {
+        for (const msg of msgs) emit(msg); // nothing is owed: release at once
+        return;
+      }
+      queue.push({ msgs, done });
+      void drain();
+    },
+    pending: () => queue.length,
+  };
+}
+
+describe('release gate (pure model)', () => {
+  type Group = { readonly id: number; readonly d?: Deferred };
+
+  /**
+   * One randomized run: `n` groups submitted in order, interleaved with resolutions of any
+   * still-pending promise (resolution order is deliberately NOT submission order).
+   */
+  const run = async (seed: number) => {
+    const rnd = mulberry32(seed);
+    const n = 3 + Math.floor(rnd() * 6);
+    const groups: Group[] = [];
+    for (let i = 0; i < n; i++) {
+      groups.push({ id: i, d: rnd() < 0.3 ? undefined : deferred() });
+    }
+
+    const resolved = new Set<number>();
+    const emitted: { id: number; resolvedThen: ReadonlySet<number> }[] = [];
+    const gate = releaseGate<number>((id) =>
+      emitted.push({ id, resolvedThen: new Set(resolved) }),
+    );
+
+    let next = 0;
+    const unresolved = (): Group[] =>
+      groups.filter((g) => g.d && !resolved.has(g.id) && g.id < next);
+
+    while (next < n || unresolved().length > 0) {
+      const pendingNow = unresolved();
+      const submitNext = next < n && (pendingNow.length === 0 || rnd() < 0.55);
+      if (submitNext) {
+        const g = groups[next++];
+        if (!g.d) resolved.add(g.id); // a void hook is durable the moment it returns
+        gate.submit([g.id], g.d?.promise);
+      } else {
+        const pick = pendingNow[Math.floor(rnd() * pendingNow.length)];
+        resolved.add(pick.id);
+        pick.d?.resolve();
+      }
+      await settle(4);
+    }
+    await settle();
+    return { n, groups, emitted };
+  };
+
+  it('releases in submit order, never before its own promise, never before an earlier one (200 seeds)', async () => {
+    for (let seed = 0; seed < 200; seed++) {
+      const { n, emitted } = await run(seed);
+      // order
+      expect(emitted.map((e) => e.id)).toEqual(
+        Array.from({ length: n }, (_, i) => i),
+      );
+      // safety: at the moment group i was emitted, groups 0..i were all durable
+      for (const e of emitted) {
+        for (let j = 0; j <= e.id; j++) {
+          expect(e.resolvedThen.has(j)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('an ungated emitter fails the same safety assertion (the property is not vacuous)', async () => {
+    const resolved = new Set<number>();
+    const emitted: { id: number; resolvedThen: ReadonlySet<number> }[] = [];
+    const ungated = (id: number) =>
+      emitted.push({ id, resolvedThen: new Set(resolved) });
+
+    const d = deferred();
+    ungated(0); // what the relay does today: broadcast, then hand the adapter the record
+    resolved.add(0);
+    d.resolve();
+    await settle();
+
+    expect(emitted[0].resolvedThen.has(0)).toBe(false);
+  });
+
+  it('a rejected promise stalls the queue: nothing at or after it is ever released', async () => {
+    const emitted: number[] = [];
+    const failures: { msgs: readonly number[]; cause: unknown }[] = [];
+    const gate = releaseGate<number>(
+      (id) => emitted.push(id),
+      (msgs, cause) => failures.push({ msgs, cause }),
+    );
+
+    const a = deferred();
+    const b = deferred();
+    const c = deferred();
+    gate.submit([0], a.promise);
+    gate.submit([1], b.promise);
+    gate.submit([2], c.promise);
+
+    a.resolve();
+    b.reject(new Error('storage closed'));
+    c.resolve();
+    await settle();
+
+    expect(emitted).toEqual([0]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].msgs).toEqual([1]);
+    expect((failures[0].cause as Error).message).toBe('storage closed');
+
+    gate.submit([3]); // a later write queues behind the stall rather than jumping it
+    await settle();
+    expect(emitted).toEqual([0]);
+  });
+
+  it('a group with no promise still waits behind queued work, and passes at once when nothing is owed', async () => {
+    const emitted: number[] = [];
+    const gate = releaseGate<number>((id) => emitted.push(id));
+
+    gate.submit([0]);
+    expect(emitted).toEqual([0]); // synchronous: the void-adapter path is untouched
+
+    const d = deferred();
+    gate.submit([1], d.promise);
+    gate.submit([2]);
+    await settle();
+    expect(emitted).toEqual([0]);
+
+    d.resolve();
+    await settle();
+    expect(emitted).toEqual([0, 1, 2]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Durable release — the model's properties, re-pointed at the real relay.
+//
+// The adapter answers a promise per envelope and the test resolves them BY HAND, in an order
+// that is deliberately not seq order. Randomized interleavings of { ingest, resolve one
+// pending promise, join a fresh connection } are checked against four properties, and the
+// scenario then crashes: a second relay is hydrated from exactly the durable prefix and each
+// connection resends what it never saw echoed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const envKey = (e: { origin: string; version: number }): string =>
+  `${e.origin}#${e.version}`;
+const dotKey = (d: { origin: string; hlc: Hlc }): string =>
+  `${d.origin}@${d.hlc.p}.${d.hlc.l}`;
+
+describe('createRelay: durable release', () => {
+  type Peer = {
+    readonly writer: string;
+    readonly origin: string;
+    conn: RelayConnection;
+    readonly got: ServerMsg[];
+    version: number;
+    p: number;
+  };
+
+  const heldBy = (
+    peer: Peer,
+    byDot: ReadonlyMap<string, string>,
+  ): Set<string> => {
+    const held = new Set<string>();
+    for (const m of peer.got) {
+      if (m.t === 'env') held.add(envKey(m.env));
+      else if (m.t === 'welcome' && m.mode === 'delta') {
+        for (const e of m.envs) held.add(envKey(e));
+      } else if (m.t === 'welcome' && m.mode === 'snapshot') {
+        for (const reg of m.registers) {
+          for (const sib of reg.siblings) {
+            const k = byDot.get(dotKey(sib));
+            if (k) held.add(k);
+          }
+        }
+      }
+    }
+    return held;
+  };
+
+  const run = async (seed: number) => {
+    const rnd = mulberry32(seed);
+    const pending: { env: SeqEnvelope; d: Deferred }[] = [];
+    const states = new Map<
+      number,
+      RoomState & { readonly registers: readonly RegisterCheckpoint[] }
+    >();
+    const durableEnvs: SeqEnvelope[] = [];
+    const durable = new Set<string>();
+    const durableDots = new Set<string>();
+    const durableSeqs = new Set<number>();
+    const byDot = new Map<string, string>();
+    const all = new Set<string>();
+    const own = new Map<string, OpEnvelope[]>();
+    const violations: string[] = [];
+
+    const relay = createRelay({
+      onCommit: (_room, env, state) => {
+        // captured inside the hook: the thunk reads live state, so a later call would
+        // describe a later seq than the envelope it is filed under
+        states.set(env.seq, { ...state, registers: state.checkpoint() });
+        const d = deferred();
+        pending.push({ env, d });
+        return d.promise;
+      },
+    });
+
+    // P1, enforced at the instant the relay hands the message to the socket
+    const check = (who: string, msg: ServerMsg): void => {
+      const late = (what: string) =>
+        violations.push(`${who} was told ${what} before it was durable`);
+      if (msg.t === 'env') {
+        if (!durable.has(envKey(msg.env))) late(`env ${envKey(msg.env)}`);
+      } else if (msg.t === 'welcome' && msg.mode === 'delta') {
+        for (const e of msg.envs) {
+          if (!durable.has(envKey(e))) late(`welcome/delta ${envKey(e)}`);
+        }
+      } else if (msg.t === 'welcome' && msg.mode === 'snapshot') {
+        for (const reg of msg.registers) {
+          for (const sib of reg.siblings) {
+            if (!durableDots.has(dotKey(sib))) {
+              late(`welcome/snapshot ${dotKey(sib)}`);
+            }
+          }
+        }
+        for (const [origin, v] of Object.entries(msg.wm)) {
+          if (!durable.has(`${origin}#${v}`) && v > 0) {
+            late(`welcome/wm ${origin}#${v}`);
+          }
+        }
+      }
+    };
+
+    const peers: Peer[] = [];
+    const join = (i: number): Peer => {
+      const peer: Peer = {
+        writer: `w${i}`,
+        origin: `o${i}`,
+        conn: null as unknown as RelayConnection,
+        got: [],
+        version: 0,
+        p: 0,
+      };
+      const sock: RelaySocket = {
+        send: (m) => {
+          check(peer.origin, m);
+          peer.got.push(m);
+        },
+        close: () => undefined,
+      };
+      peer.conn = relay.connect(sock, { writer: peer.writer });
+      peer.conn.receive({
+        t: 'hello',
+        room: 'r',
+        origin: peer.origin,
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 0,
+      });
+      peers.push(peer);
+      return peer;
+    };
+
+    let paths = 0;
+    const emit = (peer: Peer): void => {
+      const at = paths++;
+      const env: OpEnvelope = {
+        proto: MESH_PROTO_VERSION,
+        origin: peer.origin,
+        writer: peer.writer,
+        version: ++peer.version,
+        hlc: { p: ++peer.p, l: 0 },
+        policyVersion: 0,
+        // every write lands at its own path, so nothing supersedes anything and a snapshot
+        // must still carry every dot the room ever accepted
+        ops: [set(['p', at], at)],
+      };
+      byDot.set(dotKey(env), envKey(env));
+      all.add(envKey(env));
+      const mine = own.get(peer.origin) ?? [];
+      mine.push(env);
+      own.set(peer.origin, mine);
+      peer.conn.receive({ t: 'env', room: 'r', env });
+    };
+
+    const resolveOne = (i: number): void => {
+      const [item] = pending.splice(i, 1);
+      durable.add(envKey(item.env));
+      durableDots.add(dotKey(item.env));
+      durableSeqs.add(item.env.seq);
+      durableEnvs.push(item.env);
+      item.d.resolve();
+    };
+
+    join(0);
+    join(1);
+    for (let step = 0; step < 18; step++) {
+      const roll = rnd();
+      if (roll < 0.5 || (pending.length === 0 && roll < 0.9)) {
+        emit(peers[Math.floor(rnd() * peers.length)]);
+      } else if (pending.length > 0 && roll < 0.9) {
+        resolveOne(Math.floor(rnd() * pending.length)); // NOT seq order
+      } else if (peers.length < 4) {
+        join(peers.length);
+      }
+      await settle(4);
+    }
+    await settle();
+
+    // P1 holds while writes are still in flight, before anything is drained
+    expect(violations).toEqual([]);
+
+    const crashPoint = {
+      durableEnvs: [...durableEnvs],
+      durableSeqs: new Set(durableSeqs),
+      held: new Map(peers.map((p) => [p.origin, heldBy(p, byDot)])),
+    };
+
+    while (pending.length > 0) resolveOne(Math.floor(rnd() * pending.length));
+    await settle();
+
+    return { peers, all, byDot, violations, states, crashPoint, own };
+  };
+
+  it('P1/P2/P3: nothing is released early, everything is released, per-connection seqs rise (200 seeds)', async () => {
+    for (let seed = 0; seed < 200; seed++) {
+      const { peers, all, byDot, violations } = await run(seed);
+
+      expect(violations).toEqual([]); // P1 safety
+
+      for (const peer of peers) {
+        // P2 liveness: once every promise resolves, every connection holds every envelope
+        expect([...heldBy(peer, byDot)].sort()).toEqual([...all].sort());
+
+        // P3 order: per connection, echoed seqs are strictly increasing
+        const seqs = peer.got
+          .filter((m): m is Extract<ServerMsg, { t: 'env' }> => m.t === 'env')
+          .map((m) => m.env.seq);
+        for (let i = 1; i < seqs.length; i++) {
+          expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
+        }
+      }
+    }
+  });
+
+  it('P4 restart: a relay hydrated from the durable prefix plus each writer’s unacked resend holds the whole set (60 seeds)', async () => {
+    for (let seed = 0; seed < 60; seed++) {
+      const { all, byDot, states, crashPoint, own } = await run(seed);
+
+      // a journal appends in order, so what survives a crash is the longest durable PREFIX
+      let k = 0;
+      while (crashPoint.durableSeqs.has(k + 1)) k++;
+
+      const restored = createRelay({});
+      if (k > 0) {
+        const st = states.get(k) as RoomState & {
+          readonly registers: readonly RegisterCheckpoint[];
+        };
+        expect(
+          restored.hydrate('r', {
+            seq: k,
+            registers: st.registers,
+            wm: st.wm,
+            instance: st.instance,
+            schemaVersion: st.schemaVersion,
+            journal: crashPoint.durableEnvs.filter((e) => e.seq <= k),
+          }),
+        ).toBe(true);
+      }
+
+      for (const [origin, envs] of own) {
+        const held = crashPoint.held.get(origin) ?? new Set<string>();
+        const writer = `w${origin.slice(1)}`;
+        const conn = restored.connect(
+          { send: () => undefined, close: () => undefined },
+          { writer },
+        );
+        conn.receive({
+          t: 'hello',
+          room: 'r',
+          origin,
+          proto: MESH_PROTO_VERSION,
+          policyVersion: 0,
+        });
+        for (const env of envs) {
+          if (!held.has(envKey(env)))
+            conn.receive({ t: 'env', room: 'r', env });
+        }
+      }
+
+      const probe = socket();
+      const pc = restored.connect(probe, { writer: 'probe' });
+      pc.receive({
+        t: 'hello',
+        room: 'r',
+        origin: 'probe',
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 0,
+      });
+      const welcome = last(probe) as Extract<ServerMsg, { t: 'welcome' }>;
+      const recovered = new Set<string>();
+      if (welcome.mode === 'snapshot') {
+        for (const reg of welcome.registers) {
+          for (const sib of reg.siblings) {
+            recovered.add(dotKey(sib));
+          }
+        }
+      }
+      const everyDot = [...byDot.entries()]
+        .filter(([, env]) => all.has(env))
+        .map(([dot]) => dot);
+      expect([...recovered].sort()).toEqual(everyDot.sort());
+    }
+  });
+
+  // pinned oracle for the capture point: reading room state when the welcome is finally SENT
+  // would fold in whatever was ingested while it waited, which is exactly what is not durable
+  it('a held welcome answers the room as it stood when the hello arrived, not as it stands at release', async () => {
+    const pending: Deferred[] = [];
+    const relay = createRelay({
+      onCommit: () => {
+        const d = deferred();
+        pending.push(d);
+        return d.promise;
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['a'], 1)]);
+    await settle();
+
+    const b = client(relay, 'wb', 'ob');
+    b.hello(); // captured here: the room holds only oa's first write
+    await settle();
+    expect(b.sock.sent.some((m) => m.t === 'welcome')).toBe(false);
+
+    a.env([set(['later'], 2)]); // ingested while the welcome waits
+    await settle();
+
+    pending[0].resolve();
+    await settle();
+
+    const welcome = b.sock.sent.find((m) => m.t === 'welcome') as Extract<
+      ServerMsg,
+      { t: 'welcome' }
+    >;
+    expect(welcome.mode).toBe('snapshot');
+    if (welcome.mode !== 'snapshot') throw new Error('unreachable');
+    expect(welcome.seq).toBe(1);
+    expect(regAt(welcome.registers, ['a'])).toBeDefined();
+    expect(regAt(welcome.registers, ['later'])).toBeUndefined();
+
+    pending[1].resolve();
+    await settle();
+    expect(b.sock.sent.some((m) => m.t === 'env' && m.env.seq === 2)).toBe(
+      true,
+    );
+  });
+
+  it('presence and membership pass while a write is held: only document state waits', async () => {
+    const pending: Deferred[] = [];
+    const relay = createRelay({
+      onCommit: () => {
+        const d = deferred();
+        pending.push(d);
+        return d.promise;
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['a'], 1)]);
+    await settle();
+    expect(a.sock.sent.some((m) => m.t === 'env')).toBe(false);
+
+    const b = client(relay, 'wb', 'ob');
+    b.hello();
+    b.conn.receive({ t: 'presence', room: 'r', data: { at: 'x' } });
+    await settle();
+
+    expect(a.sock.sent.some((m) => m.t === 'member')).toBe(true);
+    expect(a.sock.sent.some((m) => m.t === 'presence')).toBe(true);
+    expect(a.sock.sent.some((m) => m.t === 'env')).toBe(false);
+
+    pending[0].resolve();
+    await settle();
+    expect(a.sock.sent.some((m) => m.t === 'env')).toBe(true);
+  });
+
+  it('a rejected durability promise stalls the room: the echo never lands, later work queues, onDurabilityFailed fires once', async () => {
+    const failures: { env: SeqEnvelope; cause: unknown }[] = [];
+    const pending: Deferred[] = [];
+    const relay = createRelay({
+      onDurabilityFailed: (_room, env, cause) => failures.push({ env, cause }),
+      onCommit: () => {
+        const d = deferred();
+        pending.push(d);
+        return d.promise;
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['a'], 1)]);
+    await settle();
+
+    pending[0].reject(new Error('storage closed'));
+    await settle();
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0].env.seq).toBe(1);
+    expect((failures[0].cause as Error).message).toBe('storage closed');
+    expect(a.sock.sent.some((m) => m.t === 'env')).toBe(false);
+
+    a.env([set(['b'], 2)]); // still sequenced and retained, never released
+    pending[1]?.resolve();
+    await settle();
+    expect(a.sock.sent.some((m) => m.t === 'env')).toBe(false);
+    expect(relay.room('r')?.seq).toBe(2);
+
+    const b = client(relay, 'wb', 'ob'); // a stalled room stops answering hellos too
+    b.hello();
+    await settle();
+    expect(b.sock.sent.some((m) => m.t === 'welcome')).toBe(false);
+    expect(failures).toHaveLength(1);
+  });
+
+  it('a void onCommit releases synchronously, exactly as before', () => {
+    const relay = createRelay({ onCommit: () => undefined });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['a'], 1)]);
+    expect(last(a.sock)).toEqual({
+      t: 'env',
+      room: 'r',
+      env: expect.objectContaining({ seq: 1 }),
+    });
+  });
+});
+
+describe('createRelay: the commit checkpoint is a thunk', () => {
+  beforeEach(() => {
+    spy.checkpoints = 0;
+  });
+
+  it('walks no register when the hook never asks for one', () => {
+    const relay = createRelay({ onCommit: () => undefined });
+    const a = client(relay, 'wa', 'oa');
+    a.hello(); // a fresh room answers up-to-date: nothing to walk
+    for (let i = 0; i < 5; i++) a.env([set(['v'], i)]);
+
+    expect(relay.room('r')?.seq).toBe(5);
+    expect(spy.checkpoints).toBe(0);
+  });
+
+  it('walks once per commit that asks, and the answer is the state a joiner would be seeded with', () => {
+    let captured: readonly RegisterCheckpoint[] = [];
+    const relay = createRelay({
+      onCommit: (_room, _env, state) => {
+        captured = state.checkpoint();
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    for (let i = 0; i < 5; i++) a.env([set(['v'], i)]);
+
+    expect(spy.checkpoints).toBe(5);
+
+    const fresh = client(relay, 'wf', 'of');
+    fresh.hello();
+    expect(captured).toEqual(snapshotOf(fresh.sock).registers);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Below-frontier admission. The relay's gate must be the SAME predicate the client runs on
+// receive, or the two sides retain different op sets and a joiner is seeded into divergence.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('below-frontier drop (pure model: relay/client twin)', () => {
+  // transcribed from the client's receive gate: `prunedFrontier &&
+  // compareHlc(env.hlc, prunedFrontier) <= 0` → drop, with `compareHlc(a, b) =
+  // a.p !== b.p ? a.p - b.p : a.l - b.l`
+  const compareHlc = (a: Hlc, b: Hlc): number =>
+    a.p !== b.p ? a.p - b.p : a.l - b.l;
+  const clientDrops = (frontier: Hlc | undefined, hlc: Hlc): boolean =>
+    !!frontier && compareHlc(hlc, frontier) <= 0;
+
+  // transcribed from the relay's gate: `room.frontier && hlcLte(env.hlc, room.frontier)`
+  const relayDrops = (frontier: Hlc | undefined, hlc: Hlc): boolean =>
+    !!frontier &&
+    (hlc.p < frontier.p || (hlc.p === frontier.p && hlc.l <= frontier.l));
+
+  it('the two gates agree on every stamp, including the boundary (4000 pairs)', () => {
+    const rnd = mulberry32(7);
+    const disagreements: string[] = [];
+    for (let i = 0; i < 4000; i++) {
+      const fp = Math.floor(rnd() * 5);
+      const fl = Math.floor(rnd() * 5);
+      const frontier: Hlc = { p: fp, l: fl };
+      const hlc: Hlc = {
+        p: Math.floor(rnd() * 5),
+        l: Math.floor(rnd() * 5),
+      };
+      if (relayDrops(frontier, hlc) !== clientDrops(frontier, hlc)) {
+        disagreements.push(`${hlc.p}.${hlc.l} vs ${fp}.${fl}`);
+      }
+    }
+    expect(disagreements).toEqual([]);
+    // the boundary is inclusive on BOTH sides
+    expect(relayDrops({ p: 3, l: 2 }, { p: 3, l: 2 })).toBe(true);
+    expect(clientDrops({ p: 3, l: 2 }, { p: 3, l: 2 })).toBe(true);
+    expect(relayDrops({ p: 3, l: 2 }, { p: 3, l: 3 })).toBe(false);
+  });
+
+  it('with no frontier the gate is inert, and a frontier that advances never admits more', () => {
+    const rnd = mulberry32(11);
+    for (let i = 0; i < 400; i++) {
+      const hlc: Hlc = {
+        p: Math.floor(rnd() * 6),
+        l: Math.floor(rnd() * 6),
+      };
+      expect(relayDrops(undefined, hlc)).toBe(false);
+
+      const lo: Hlc = { p: Math.floor(rnd() * 6), l: Math.floor(rnd() * 6) };
+      const hi: Hlc = { p: lo.p + Math.floor(rnd() * 3), l: lo.l };
+      if (relayDrops(lo, hlc)) expect(relayDrops(hi, hlc)).toBe(true);
+    }
+  });
+});
+
+describe('createRelay: below-frontier admission', () => {
+  /** Write past `journalLimit` so the room compacts and a frontier exists. */
+  const compacted = (relay: ReturnType<typeof createRelay>) => {
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    for (let i = 0; i < 5; i++) a.env([set(['fill', i], i)]);
+    const notice = a.sock.sent.find((m) => m.t === 'frontier');
+    if (!notice || notice.t !== 'frontier') {
+      throw new Error('expected the room to have compacted');
+    }
+    return { a, frontier: notice.frontier };
+  };
+
+  it('drops a write at or below the frontier: not sequenced, not ejected, not echoed, not seeded into a joiner', () => {
+    const drops: { env: OpEnvelope; reason: string }[] = [];
+    const relay = createRelay({
+      journalLimit: 4,
+      onDrop: (_room, env, reason) => {
+        drops.push({ env, reason });
+      },
+    });
+    const { a, frontier } = compacted(relay);
+    expect(frontier).toEqual({ p: 1, l: 0 });
+
+    const stale = client(relay, 'ws', 'os');
+    stale.hello();
+    const seqBefore = relay.room('r')?.seq;
+
+    // an honest offline writer: stamped before the room compacted, at a path nobody used
+    stale.env([set(['stale'], 'resurrected')], { hlc: { p: 1, l: 0 } });
+
+    expect(drops.map((d) => d.reason)).toEqual(['frontier']);
+    expect(relay.room('r')?.seq).toBe(seqBefore);
+    expect(stale.sock.closed).toBe(false);
+    expect(stale.sock.sent.some((m) => m.t === 'eject')).toBe(false);
+    expect(
+      a.sock.sent.some(
+        (m) => m.t === 'env' && m.env.ops.some((o) => o.path[0] === 'stale'),
+      ),
+    ).toBe(false);
+
+    // the established peer's own receive gate would have refused it too, so the room's
+    // retained state and the peer's stay the same op set: a joiner is seeded with that set
+    const b = client(relay, 'wb', 'ob');
+    b.hello();
+    expect(regAt(snapshotOf(b.sock).registers, ['stale'])).toBeUndefined();
+
+    // one tick above the frontier is admitted — the gate is a boundary, not a blanket
+    stale.env([set(['fresh'], 1)], { hlc: { p: 1, l: 1 } });
+    expect(relay.room('r')?.seq).toBe((seqBefore ?? 0) + 1);
+  });
+
+  it('a restored frontier still refuses; a snapshot that lost it readmits the same write', () => {
+    let saved: RoomSnapshot = { seq: 0 };
+    const source = createRelay({
+      journalLimit: 4,
+      onCommit: (_room, env, state) => {
+        saved = {
+          seq: state.seq,
+          instance: state.instance,
+          registers: state.checkpoint(),
+          wm: state.wm,
+          frontier: state.frontier,
+          schemaVersion: state.schemaVersion,
+          journal: [env],
+        };
+      },
+    });
+    compacted(source);
+    expect(saved.frontier).toEqual({ p: 1, l: 0 });
+
+    const replay = (snapshot: RoomSnapshot) => {
+      const reasons: string[] = [];
+      const revived = createRelay({
+        journalLimit: 4,
+        onDrop: (_room, _env, reason) => {
+          reasons.push(reason);
+        },
+      });
+      expect(revived.hydrate('r', snapshot)).toBe(true);
+      const stale = client(revived, 'ws', 'os');
+      stale.hello();
+      stale.env([set(['stale'], 'resurrected')], { hlc: { p: 1, l: 0 } });
+      return { reasons, seq: revived.room('r')?.seq };
+    };
+
+    const restored = replay(saved);
+    expect(restored.reasons).toEqual(['frontier']);
+    expect(restored.seq).toBe(saved.seq);
+
+    // the same room restored from a checkpoint written before the frontier was persisted
+    const legacy: RoomSnapshot = {
+      seq: saved.seq,
+      instance: saved.instance,
+      registers: saved.registers,
+      wm: saved.wm,
+      schemaVersion: saved.schemaVersion,
+      journal: saved.journal,
+    };
+    const forgetful = replay(legacy);
+    expect(forgetful.reasons).toEqual([]);
+    expect(forgetful.seq).toBe((saved.seq ?? 0) + 1);
+  });
+});
+
+describe('createRelay: the room sequence reaches the policy', () => {
+  // an agent may seed a room it finds empty, and may never write the root afterwards: a later
+  // root set is a concurrent sibling that wins the root register and shadows every leaf the
+  // first seed's value carried
+  const seatPolicy = {
+    canWrite: (
+      ctx: PrincipalCtx,
+      path: readonly Key[],
+      _room: string,
+      info?: PolicyRoomInfo,
+    ) => path.length > 0 || ctx.kind !== 'agent' || info?.seq === 0,
+  };
+
+  it("admits an agent's seed of an empty room and ejects the same write once the room has state", () => {
+    const relay = createRelay({ policy: seatPolicy });
+    const agent = client(relay, 'wa', 'oa', { kind: 'agent' });
+    agent.hello();
+
+    agent.env([set([], { title: 'seeded' })]); // the fresh-room seed
+    expect(relay.room('r')?.seq).toBe(1);
+    expect(agent.sock.closed).toBe(false);
+
+    const late = client(relay, 'wl', 'ol', { kind: 'agent' });
+    late.hello();
+    late.env([set([], { title: 'reseeded' })]); // the room is no longer empty
+
+    expect(last(late.sock)).toMatchObject({ t: 'eject', reason: 'can-write' });
+    expect(late.sock.closed).toBe(true);
+    expect(relay.room('r')?.seq).toBe(1);
+  });
+
+  it('a human keeps writing the root at any sequence, and leaf writes are unaffected', () => {
+    const relay = createRelay({ policy: seatPolicy });
+    const human = client(relay, 'wh', 'oh', { kind: 'human' });
+    human.hello();
+    human.env([set([], { title: 'seeded' })]);
+    human.env([set([], { title: 'again' })]);
+    expect(human.sock.closed).toBe(false);
+
+    const agent = client(relay, 'wa', 'oa', { kind: 'agent' });
+    agent.hello();
+    agent.env([set(['title'], 'from the agent')]);
+    expect(agent.sock.closed).toBe(false);
+    expect(relay.room('r')?.seq).toBe(3);
+  });
+
+  it('canBump sees the room sequence too', () => {
+    const seen: number[] = [];
+    const relay = createRelay({
+      policy: {
+        canBump: (_ctx, _path, _epoch, _room, info) => {
+          seen.push(info?.seq ?? -1);
+          return true;
+        },
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['v'], 1, { epoch: 1 })]);
+    a.env([set(['v'], 2, { epoch: 2 })]);
+    expect(seen).toEqual([0, 1]); // the sequence BEFORE each envelope is assigned one
   });
 });

@@ -58,7 +58,7 @@ export function runChaosSimulation(opt: ChaosOptions): SimResult {
     const relay = createRelay({
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRegisters = state.registers;
+        relayRegisters = state.checkpoint();
       },
     });
 
@@ -168,12 +168,12 @@ export function runRestartSimulation(opt: RestartOptions): RestartResult {
       state: {
         seq: number;
         instance: string;
-        registers: readonly RegisterCheckpoint[];
+        checkpoint(): readonly RegisterCheckpoint[];
         wm: Readonly<Record<string, number>>;
       },
     ) => {
       journal.push(env);
-      relayRegisters = state.registers;
+      relayRegisters = state.checkpoint();
       relayWm = state.wm;
       relayInstance = state.instance;
       relaySeq = state.seq;
@@ -427,17 +427,36 @@ export function runZombieSimulation(opt: ZombieOptions): ZombieResult {
   vi.setSystemTime(BASE_TIME);
   try {
     const journal: SeqEnvelope[] = [];
-    const relay = createRelay({ onCommit: (_room, env) => journal.push(env) });
+    const relay = createRelay({
+      onCommit: (_room, env) => {
+        journal.push(env);
+      },
+    });
     const zombieWriter = `p${opt.zombieIndex}`;
-    const zombieCommits = () => journal.filter((e) => e.writer === zombieWriter).length;
+    const zombieCommits = () =>
+      journal.filter((e) => e.writer === zombieWriter).length;
 
     const peers = Array.from({ length: opt.peers }, (_, i) => {
       const writer = `p${i}`;
-      const link = chaosLink(directTransport(relay, { writer }), net, opt.faults ?? {});
+      const link = chaosLink(
+        directTransport(relay, { writer }),
+        net,
+        opt.faults ?? {},
+      );
       return TestBed.runInInjectionContext(() => {
         const s = simStore();
-        const mesh = meshSync(s, { room: 'sim', writer, transport: link.transport });
-        return { writer, s, link, status: () => mesh.status(), close: () => mesh.close() };
+        const mesh = meshSync(s, {
+          room: 'sim',
+          writer,
+          transport: link.transport,
+        });
+        return {
+          writer,
+          s,
+          link,
+          status: () => mesh.status(),
+          close: () => mesh.close(),
+        };
       });
     });
     drain();
@@ -528,7 +547,7 @@ export function runEjectionSimulation(opt: EjectionOptions): EjectionResult {
       policy: noNegatives,
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRegisters = state.registers;
+        relayRegisters = state.checkpoint();
       },
     });
 

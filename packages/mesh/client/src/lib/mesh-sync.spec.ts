@@ -48,7 +48,8 @@ const _regToWire = (r: RegisterCheckpoint): WireRegisterCheckpoint => r;
 const _regFromWire = (r: WireRegisterCheckpoint): RegisterCheckpoint => r;
 // the ingress validator is a structural twin too: identical signature on both sides
 const _validateToWire: (e: WireEnvelope) => string | null = validateEnvelope;
-const _validateFromWire: (e: OpEnvelope) => string | null = validateEnvelopeWire;
+const _validateFromWire: (e: OpEnvelope) => string | null =
+  validateEnvelopeWire;
 void _validateToWire;
 void _validateFromWire;
 void _toWire;
@@ -94,13 +95,22 @@ describe('wire twins (protocol ↔ primitives)', () => {
       policyVersion: 0,
       ops,
     });
-    const dot = (origin: string, p: number): Dot => ({ origin, hlc: { p, l: 0 } });
+    const dot = (origin: string, p: number): Dot => ({
+      origin,
+      hlc: { p, l: 0 },
+    });
 
     // seed, causal succession (cited), a concurrent uncited write, a delete, a subtree
     // replace with a clear group, and a duplicate delivery
     const envelopes: OpEnvelope[] = [
       env('A', 1, { p: 1, l: 0 }, [
-        { kind: 'set', path: [], next: { title: 't', items: {} }, cites: [], epoch: 0 },
+        {
+          kind: 'set',
+          path: [],
+          next: { title: 't', items: {} },
+          cites: [],
+          epoch: 0,
+        },
       ]),
       env('A', 2, { p: 2, l: 0 }, [
         { kind: 'set', path: ['items', 'x'], next: 1, cites: [], epoch: 0 },
@@ -109,11 +119,22 @@ describe('wire twins (protocol ↔ primitives)', () => {
         { kind: 'set', path: ['items', 'x'], next: 2, cites: [], epoch: 0 },
       ]),
       env('B', 2, { p: 3, l: 0 }, [
-        { kind: 'delete', path: ['title'], prev: 't', cites: [dot('A', 1)], epoch: 0 },
+        {
+          kind: 'delete',
+          path: ['title'],
+          prev: 't',
+          cites: [dot('A', 1)],
+          epoch: 0,
+        },
       ]),
       env('A', 3, { p: 4, l: 0 }, [
         { kind: 'set', path: ['items'], next: {}, cites: [], epoch: 1 },
-        { kind: 'clear', path: ['items', 'x'], cites: [dot('A', 2), dot('B', 2)], epoch: 1 },
+        {
+          kind: 'clear',
+          path: ['items', 'x'],
+          cites: [dot('A', 2), dot('B', 2)],
+          epoch: 1,
+        },
       ]),
     ];
 
@@ -134,7 +155,13 @@ describe('wire twins (protocol ↔ primitives)', () => {
         .map((r) => ({
           path: r.path.map(String),
           siblings: [...r.siblings]
-            .map((s) => ({ kind: s.kind, origin: s.origin, hlc: s.hlc, epoch: s.epoch, value: s.kind === 'set' ? s.value : undefined }))
+            .map((s) => ({
+              kind: s.kind,
+              origin: s.origin,
+              hlc: s.hlc,
+              epoch: s.epoch,
+              value: s.kind === 'set' ? s.value : undefined,
+            }))
             .sort((a, b) => (a.origin < b.origin ? -1 : 1)),
           water: Object.fromEntries(Object.entries(r.water).sort()),
         }))
@@ -149,8 +176,14 @@ describe('wire twins (protocol ↔ primitives)', () => {
 
     for (let seed = 1; seed <= 30; seed++) {
       const r = rng(seed);
-      const pick = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
-      const paths: (string | number)[][] = [[], ['a'], ['a', 'b'], ['a', 'c'], ['d']];
+      const pick = <T>(a: readonly T[]) => a[Math.floor(r() * a.length)];
+      const paths: (string | number)[][] = [
+        [],
+        ['a'],
+        ['a', 'b'],
+        ['a', 'c'],
+        ['d'],
+      ];
       const origins = ['o1', 'o2', 'o3'];
       const envs: OpEnvelope[] = [];
       const lastDot = new Map<string, Dot>();
@@ -165,16 +198,47 @@ describe('wire twins (protocol ↔ primitives)', () => {
         // a spread of cite shapes, including a SELF-cite and an occasional root delete/clear (the
         // malformed cases both twins must drop identically)
         const roll = r();
-        const cites: Dot[] = roll < 0.15 ? [{ origin, hlc }] : observed && roll < 0.65 ? [observed] : [];
+        const cites: Dot[] =
+          roll < 0.15
+            ? [{ origin, hlc }]
+            : observed && roll < 0.65
+              ? [observed]
+              : [];
         const kindRoll = r();
-        const kind = kindRoll < 0.6 ? 'set' : kindRoll < 0.8 ? 'delete' : 'clear';
+        const kind =
+          kindRoll < 0.6 ? 'set' : kindRoll < 0.8 ? 'delete' : 'clear';
         const op: SyncOp =
           kind === 'set'
-            ? ({ kind: 'set', path, next: `v${i}`, cites, epoch: Math.floor(r() * 3) } as SyncOp)
+            ? ({
+                kind: 'set',
+                path,
+                next: `v${i}`,
+                cites,
+                epoch: Math.floor(r() * 3),
+              } as SyncOp)
             : kind === 'delete'
-              ? ({ kind: 'delete', path, prev: null, cites, epoch: Math.floor(r() * 3) } as SyncOp)
-              : ({ kind: 'clear', path, cites, epoch: Math.floor(r() * 3) } as SyncOp);
-        envs.push({ proto: OP_PROTO_VERSION, origin, writer: origin, version: i + 1, hlc, policyVersion: 0, ops: [op] });
+              ? ({
+                  kind: 'delete',
+                  path,
+                  prev: null,
+                  cites,
+                  epoch: Math.floor(r() * 3),
+                } as SyncOp)
+              : ({
+                  kind: 'clear',
+                  path,
+                  cites,
+                  epoch: Math.floor(r() * 3),
+                } as SyncOp);
+        envs.push({
+          proto: OP_PROTO_VERSION,
+          origin,
+          writer: origin,
+          version: i + 1,
+          hlc,
+          policyVersion: 0,
+          ops: [op],
+        });
         if (kind !== 'clear') lastDot.set(key, { origin, hlc });
       }
 
@@ -197,8 +261,14 @@ describe('wire twins (protocol ↔ primitives)', () => {
         return c;
       });
       // and every order converged to the same register state (order-independence of both)
-      expect(results[1], `seed ${seed}: order-dependent register state`).toEqual(results[0]);
-      expect(results[2], `seed ${seed}: duplicate/shuffle-dependent register state`).toEqual(results[0]);
+      expect(
+        results[1],
+        `seed ${seed}: order-dependent register state`,
+      ).toEqual(results[0]);
+      expect(
+        results[2],
+        `seed ${seed}: duplicate/shuffle-dependent register state`,
+      ).toEqual(results[0]);
     }
   });
 
@@ -213,7 +283,12 @@ describe('wire twins (protocol ↔ primitives)', () => {
         .map((r) => ({
           path: r.path.map(String),
           siblings: [...r.siblings]
-            .map((s) => ({ kind: s.kind, origin: s.origin, hlc: s.hlc, epoch: s.epoch }))
+            .map((s) => ({
+              kind: s.kind,
+              origin: s.origin,
+              hlc: s.hlc,
+              epoch: s.epoch,
+            }))
             .sort((a, b) => (a.origin < b.origin ? -1 : 1)),
           water: Object.fromEntries(Object.entries(r.water).sort()),
         }))
@@ -227,8 +302,14 @@ describe('wire twins (protocol ↔ primitives)', () => {
 
     for (let seed = 1; seed <= 25; seed++) {
       const r = rng(seed);
-      const pick = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
-      const paths: (string | number)[][] = [['a'], ['a', 'b'], ['a', 'b', 'c'], ['d'], ['d', 'e']];
+      const pick = <T>(a: readonly T[]) => a[Math.floor(r() * a.length)];
+      const paths: (string | number)[][] = [
+        ['a'],
+        ['a', 'b'],
+        ['a', 'b', 'c'],
+        ['d'],
+        ['d', 'e'],
+      ];
       const origins = ['o1', 'o2'];
       const conv = createConvergingApply();
       const twin = createRegisterStore();
@@ -244,9 +325,29 @@ describe('wire twins (protocol ↔ primitives)', () => {
         // bias toward deletes that cite the observed set, so lone tombstones actually form
         const del = r() < 0.5 && observed;
         const op: SyncOp = del
-          ? ({ kind: 'delete', path, prev: null, cites: [observed], epoch: 0 } as SyncOp)
-          : ({ kind: 'set', path, next: `v${i}`, cites: observed && r() < 0.5 ? [observed] : [], epoch: 0 } as SyncOp);
-        const e: OpEnvelope = { proto: OP_PROTO_VERSION, origin, writer: origin, version: i + 1, hlc, policyVersion: 0, ops: [op] };
+          ? ({
+              kind: 'delete',
+              path,
+              prev: null,
+              cites: [observed],
+              epoch: 0,
+            } as SyncOp)
+          : ({
+              kind: 'set',
+              path,
+              next: `v${i}`,
+              cites: observed && r() < 0.5 ? [observed] : [],
+              epoch: 0,
+            } as SyncOp);
+        const e: OpEnvelope = {
+          proto: OP_PROTO_VERSION,
+          origin,
+          writer: origin,
+          version: i + 1,
+          hlc,
+          policyVersion: 0,
+          ops: [op],
+        };
         conv.ingest(e);
         twin.ingest(e as WireEnvelope);
         lastDot.set(key, { origin, hlc });
@@ -625,18 +726,34 @@ describe('ingress validation (client ↔ relay twin)', () => {
       patch((e) => (e.writer = `w${CTRL}`)),
       patch((e) => (e.hlc = { p: NaN, l: 0 })),
       patch((e) => (e.version = 0)),
-      patch((e) => (e.ops = [{ kind: 'delete', path: [], prev: 0, cites: [], epoch: 0 } as any])),
+      patch(
+        (e) =>
+          (e.ops = [
+            { kind: 'delete', path: [], prev: 0, cites: [], epoch: 0 } as any,
+          ]),
+      ),
       patch((e) => (e.ops = [null as any])), // totality: both twins reject, neither throws
       patch((e) => (e.ops[0] = { ...e.ops[0], epoch: -1 })),
       patch((e) => (e.ops[0] = { ...e.ops[0], path: [`x${CTRL}`] })),
-      patch((e) => (e.ops[0] = { ...e.ops[0], cites: [{ origin: '', hlc: { p: 1, l: 0 } }] })),
-      patch((e) => (e.ops = [
-        { kind: 'set', path: ['a'], next: 1, cites: [], epoch: 0 },
-        { kind: 'set', path: ['a'], next: 2, cites: [], epoch: 0 },
-      ])),
+      patch(
+        (e) =>
+          (e.ops[0] = {
+            ...e.ops[0],
+            cites: [{ origin: '', hlc: { p: 1, l: 0 } }],
+          }),
+      ),
+      patch(
+        (e) =>
+          (e.ops = [
+            { kind: 'set', path: ['a'], next: 1, cites: [], epoch: 0 },
+            { kind: 'set', path: ['a'], next: 2, cites: [], epoch: 0 },
+          ]),
+      ),
     ];
     for (const env of samples) {
-      expect(validateEnvelopeWire(env as WireEnvelope)).toBe(validateEnvelope(env));
+      expect(validateEnvelopeWire(env as WireEnvelope)).toBe(
+        validateEnvelope(env),
+      );
     }
   });
 
@@ -649,7 +766,7 @@ describe('ingress validation (client ↔ relay twin)', () => {
     };
     for (let seed = 1; seed <= 60; seed++) {
       const r = rng(seed);
-      const pick = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
+      const pick = <T>(a: readonly T[]) => a[Math.floor(r() * a.length)];
       const origin = pick(['o1', '', `bad${CTRL}`, 'ok']);
       const writer = pick(['w1', '', `w${CTRL}`]);
       const version = pick([1, 0, -1, 2.5, 7]);
@@ -657,12 +774,32 @@ describe('ingress validation (client ↔ relay twin)', () => {
       const kind = pick(['set', 'delete', 'clear', 'weird']);
       const path = pick([['a'], ['a', 'b'], [], [`c${CTRL}`], 'nope' as any]);
       const epoch = pick([0, 1, -1, NaN]);
-      const cites = pick([[], [{ origin: 'o2', hlc: { p: 1, l: 0 } }], [{ origin: '', hlc: { p: 1, l: 0 } }], 'x' as any]);
+      const cites = pick([
+        [],
+        [{ origin: 'o2', hlc: { p: 1, l: 0 } }],
+        [{ origin: '', hlc: { p: 1, l: 0 } }],
+        'x' as any,
+      ]);
       const dup = r() < 0.25;
-      const op: any = kind === 'delete' ? { kind, path, prev: 0, cites, epoch } : kind === 'clear' ? { kind, path, cites, epoch } : { kind, path, next: 1, cites, epoch };
+      const op: any =
+        kind === 'delete'
+          ? { kind, path, prev: 0, cites, epoch }
+          : kind === 'clear'
+            ? { kind, path, cites, epoch }
+            : { kind, path, next: 1, cites, epoch };
       const ops = dup ? [op, { ...op }] : [op];
-      const env = { proto: OP_PROTO_VERSION, origin, writer, version, hlc, policyVersion: 0, ops } as OpEnvelope;
-      expect(validateEnvelopeWire(env as WireEnvelope), `seed ${seed}`).toBe(validateEnvelope(env));
+      const env = {
+        proto: OP_PROTO_VERSION,
+        origin,
+        writer,
+        version,
+        hlc,
+        policyVersion: 0,
+        ops,
+      } as OpEnvelope;
+      expect(validateEnvelopeWire(env as WireEnvelope), `seed ${seed}`).toBe(
+        validateEnvelope(env),
+      );
     }
   });
 
@@ -694,7 +831,9 @@ describe('ingress validation (client ↔ relay twin)', () => {
         version: 1,
         hlc: { p: 1, l: 0 },
         policyVersion: 0,
-        ops: [{ kind: 'set', path: ['title'], next: 'HACK', cites: [], epoch: 0 }],
+        ops: [
+          { kind: 'set', path: ['title'], next: 'HACK', cites: [], epoch: 0 },
+        ],
         seq: 1,
       },
     });
@@ -703,5 +842,110 @@ describe('ingress validation (client ↔ relay twin)', () => {
     expect(mesh.health().droppedInvalidEnvelopes).toBe(1); // and the rejection is surfaced
 
     mesh.close();
+  });
+});
+
+describe('meshSync: the acknowledgement barrier', () => {
+  function peer(relay: Relay, writer: string, over?: Partial<MeshSyncOptions>) {
+    return TestBed.runInInjectionContext(() => {
+      const s = store<State>(initial());
+      const mesh = meshSync(s, {
+        room: 'ack',
+        writer,
+        transport: directTransport(relay, { writer }),
+        ...over,
+      });
+      return { s, mesh };
+    });
+  }
+  const flush = () => TestBed.tick();
+  const settle = async (turns = 30) => {
+    for (let i = 0; i < turns; i++) await Promise.resolve();
+    flush();
+  };
+
+  /** A relay that will not confirm durability until the test says so. */
+  const heldRelay = () => {
+    let release!: () => void;
+    let fail!: (cause: Error) => void;
+    const gate = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      fail = reject;
+    });
+    gate.catch(() => undefined);
+    return { relay: createRelay({ onCommit: () => gate }), release, fail };
+  };
+
+  it('stays unacked until the relay confirms the write, then resolves', async () => {
+    const { relay, release } = heldRelay();
+    const a = peer(relay, 'wa');
+
+    a.s.title.set('pending');
+    flush();
+    await settle();
+
+    expect(a.mesh.acked()).toBe(false);
+    let resolved = false;
+    const barrier = a.mesh.whenAcked().then(() => {
+      resolved = true;
+    });
+    await settle();
+    expect(resolved).toBe(false); // the write is out, but nothing has acknowledged it
+
+    release();
+    await barrier;
+    await settle();
+
+    expect(resolved).toBe(true);
+    expect(a.mesh.acked()).toBe(true);
+  });
+
+  it('resolves at once when nothing is outstanding', async () => {
+    const relay = createRelay();
+    const a = peer(relay, 'wa');
+    a.s.title.set('landed');
+    flush();
+
+    expect(a.mesh.acked()).toBe(true);
+    await expect(a.mesh.whenAcked()).resolves.toBeUndefined();
+  });
+
+  it('rejects with the terminal reason when the session is ejected with a write outstanding', async () => {
+    // the relay refuses writes under `nested` and never confirms durability; the client runs
+    // no emit-side policy, so the refusal arrives as an ejection one hop later, with a write
+    // still unacknowledged
+    const relay = createRelay({
+      onCommit: () => new Promise<void>(() => undefined),
+      policy: { canWrite: (_ctx, path) => path[0] !== 'nested' },
+    });
+    const a = peer(relay, 'wa');
+
+    a.s.title.set('outstanding');
+    flush();
+    await settle();
+    expect(a.mesh.acked()).toBe(false);
+
+    const barrier = a.mesh.whenAcked();
+    a.s.nested.a.set(1); // ejected by the room
+    flush();
+    await settle();
+
+    await expect(barrier).rejects.toThrow('can-write');
+    expect(a.mesh.status()).toBe('ejected');
+    expect(a.mesh.acked()).toBe(false); // latched: those writes are not in the room
+    await expect(a.mesh.whenAcked()).rejects.toThrow('can-write');
+  });
+
+  it('rejects when the caller closes while a write is outstanding', async () => {
+    const { relay } = heldRelay();
+    const a = peer(relay, 'wa');
+    a.s.title.set('outstanding');
+    flush();
+    await settle();
+
+    const barrier = a.mesh.whenAcked();
+    a.mesh.close();
+    await expect(barrier).rejects.toThrow('closed');
+    expect(a.mesh.acked()).toBe(false);
   });
 });

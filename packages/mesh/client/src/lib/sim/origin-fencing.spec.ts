@@ -111,7 +111,9 @@ describe('origin fencing', () => {
       net.posted
         .filter(
           (m): m is { t: 'env'; env: OpEnvelope } =>
-            typeof m === 'object' && m !== null && (m as { t?: string }).t === 'env',
+            typeof m === 'object' &&
+            m !== null &&
+            (m as { t?: string }).t === 'env',
         )
         .map((m) => m.env.origin),
     );
@@ -122,7 +124,11 @@ describe('origin fencing', () => {
 
   it('a cloned outbox restores as identical duplicates: the resent envelope is idempotent everywhere', async () => {
     const seen: SeqEnvelope[] = [];
-    const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+    const relay = createRelay({
+      onCommit: (_r, env) => {
+        seen.push(env);
+      },
+    });
     const witness = TestBed.runInInjectionContext(() => {
       const s = store<State>(initial());
       const mesh = meshSync(s, {
@@ -166,7 +172,9 @@ describe('origin fencing', () => {
     await settle();
 
     // the duplicate is dedup'd by (origin, version): nothing double-applies, all converge
-    expect(seen.filter((e) => e.origin === 'A' && e.version === 1).length).toBeGreaterThanOrEqual(1);
+    expect(
+      seen.filter((e) => e.origin === 'A' && e.version === 1).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(witness.s()).toEqual({ title: 'room', n: 42 });
     expect(a2.s()).toEqual(witness.s());
 

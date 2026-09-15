@@ -133,6 +133,17 @@ export type AgentSeat<T extends object> = {
   fork(
     opt?: ForkStoreOptions<T & Record<string, any>>,
   ): SyncedFork<T & Record<string, any>>;
+  /**
+   * Every local write is acknowledged by the room. `false` while a write is still in the
+   * unacknowledged tail, and it stays `false` once the seat ends with writes outstanding.
+   */
+  acked(): boolean;
+  /**
+   * Resolves when the unacknowledged tail is empty (immediately if it already is), rejects
+   * with the terminal reason if the seat ends while writes are outstanding. The barrier to
+   * await before handing a result to something that must contain every edit.
+   */
+  whenAcked(): Promise<void>;
   /** Publish this seat's ephemeral presence payload (e.g. `{ name, kind: 'agent' }`). */
   setPresence(data: unknown): void;
   /** Authority surface over this seat's op-sync; see {@link SeatSync}. */
@@ -181,6 +192,7 @@ export function agentSeat<T extends object>(
   let welcomed = false;
   let diverged = false;
   let terminated = false;
+  let lostWrites = false;
 
   const session = meshSession({
     room: opt.room,
@@ -214,7 +226,10 @@ export function agentSeat<T extends object>(
         );
       },
       onTerminal: () => {
-        if (session.hasUnacked()) diverged = true;
+        if (session.hasUnacked()) {
+          diverged = true;
+          lostWrites = true; // latched: no echo can arrive for them now
+        }
         terminated = true;
       },
     },
@@ -267,6 +282,14 @@ export function agentSeat<T extends object>(
         },
         rebase: recapture,
       };
+    },
+    acked: () => {
+      sync.flush(); // a write made this tick counts as pending, not as unstamped
+      return !lostWrites && !session.hasUnacked();
+    },
+    whenAcked: () => {
+      sync.flush();
+      return session.whenAcked();
     },
     setPresence: (data) => session.setPresence(data),
     sync: {

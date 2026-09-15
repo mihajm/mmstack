@@ -35,10 +35,10 @@ register state with its own rules.
 
 ```ts
 type OpEnvelope = {
-  proto: number;         // wire format version
-  origin: string;        // the emitting log instance (one per tab or device)
-  writer: string;        // the authenticated principal (a person or an agent)
-  version: number;       // per-origin counter, for gap detection
+  proto: number; // wire format version
+  origin: string; // the emitting log instance (one per tab or device)
+  writer: string; // the authenticated principal (a person or an agent)
+  version: number; // per-origin counter, for gap detection
   hlc: { p: number; l: number }; // hybrid logical clock, for last-writer-wins ordering
   policyVersion: number; // the room policy this writer validated against
   ops: readonly SyncOp[];
@@ -64,9 +64,9 @@ import { createRelay } from '@mmstack/mesh-protocol';
 
 const relay = createRelay({
   policyVersion: 1,
-  policy: myOpPolicy,           // optional, see below
+  policy: myOpPolicy, // optional, see below
   limits: { maxOpsPerEnvelope: 1024, maxEnvelopesPerSecond: 50 },
-  journalLimit: 1000,           // envelopes kept for delta catch-up before compacting into register state
+  journalLimit: 1000, // envelopes kept for delta catch-up before compacting into register state
 });
 ```
 
@@ -130,6 +130,30 @@ matches a path. For richer rules, write your own `OpPolicy` with `canWrite` and 
 Schema-aware validation (deriving a policy from your data model) composes on top and stays in
 your codebase, not here.
 
+### Rules that need to know the room is empty
+
+Every hook takes the room name and a trailing `info: PolicyRoomInfo` — `{ seq }`, the room's
+sequence **before** this envelope is given one, so `0` means the envelope is the room's first.
+
+The case that needs it is the root. A client joining a room it finds empty seeds it with a `set`
+at the root path; that write establishes the document. The identical op on a room already at
+`seq >= 1` is something else entirely: a concurrent root sibling that wins the root register by
+clock and shadows every leaf that lived only inside the earlier seed's value. So a rule like "an
+agent may never write the root" would lock agents out of creating rooms, and "an agent may write
+the root" would let one flatten a live document. Only the relay knows which it is:
+
+```ts
+const policy: OpPolicy = {
+  canWrite: (ctx, path, room, info) =>
+    path.length > 0 || ctx.kind !== 'agent' || info?.seq === 0,
+};
+```
+
+`info` is absent when the caller cannot know the sequence. A client running the same policy
+before it emits supplies its own last observed sequence, which can only lag the relay's, so the
+emit-side check is at worst more permissive than the relay's — it never refuses an honest write
+the room would have taken.
+
 Two boundaries to be clear about. Policy gates writes, not reads: every member of a room sees
 the whole root, so the room is the confidentiality boundary, and data with different audiences
 belongs in different rooms. A `clear` op counts as a write at its path, so ACLs see a subtree
@@ -171,10 +195,15 @@ export class MeshRoom {
     server.accept();
     const writer = await authenticate(request);
     const conn = this.relay.connect(
-      { send: (m) => server.send(JSON.stringify(m)), close: () => server.close() },
+      {
+        send: (m) => server.send(JSON.stringify(m)),
+        close: () => server.close(),
+      },
       { writer },
     );
-    server.addEventListener('message', (e) => conn.receive(JSON.parse(String(e.data))));
+    server.addEventListener('message', (e) =>
+      conn.receive(JSON.parse(String(e.data))),
+    );
     server.addEventListener('close', () => conn.disconnect());
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -189,19 +218,47 @@ lost as long as somebody was online. For durability beyond that, the relay expos
 rather than a storage engine, because the envelope already is the persistence record: an
 event-sourced journal is just `register checkpoint + envelopes`, compacted by re-checkpointing.
 
-`onCommit` fires after every envelope is sequenced and retained, with the envelope and the
-room's current `{ seq, instance, registers, wm, schemaVersion }`. Append the envelope to your
-journal, and checkpoint the register state as often as you like. The relay never awaits it, so
-batching and backpressure belong to your adapter:
+`onCommit` fires synchronously after every envelope is sequenced and retained, with the
+envelope and the room's current `{ seq, instance, checkpoint(), wm, frontier, schemaVersion }`.
+Append the envelope to your journal, and checkpoint the register state as often as you like.
+`checkpoint()` is a thunk — walking every register is the dominant per-commit cost, so it runs
+only when you ask, and it must be called inside the callback because it reads live state:
 
 ```ts
 const relay = createRelay({
   onCommit: (room, env, state) => {
     journal.append(room, env); // your DB, KV, or DO storage
-    if (state.seq % 100 === 0) checkpoints.put(room, state);
+    if (state.seq % 100 === 0) {
+      checkpoints.put(room, { ...state, registers: state.checkpoint() });
+    }
   },
 });
 ```
+
+### Telling a client a write is safe
+
+Return nothing and the relay releases the envelope at once — the memory-adapter behaviour, and
+the default. Return a **promise** and the relay holds everything that carries that envelope (its
+echo, the frontier notice emitted with it, and any welcome answered while it is in flight) until
+the promise resolves. Presence, signal, membership and ejection are not document state and always
+pass immediately.
+
+```ts
+const relay = createRelay({
+  onCommit: (room, env) => journal.record(room, env), // resolves once the append landed
+  onDurabilityFailed: (room, env, cause) => {
+    log.error({ room, seq: env.seq, cause }, 'room stalled');
+  },
+});
+```
+
+This matters because a client takes the relay's echo of its own envelope as proof the write is
+safe and drops it from its unacknowledged tail. Echoing before the adapter has stored anything
+makes that a lie, the same way returning from `COMMIT` before the log is written would. A
+rejected promise **stalls the room**: that envelope and everything queued behind it stay
+unreleased and `onDurabilityFailed` fires once. Nothing is un-ingested and nothing is answered
+with state that will not survive; recovery is a process restart, after which the writers still
+holding those envelopes unacknowledged resend them.
 
 `relay.hydrate(room, snapshot)` restores a persisted room before clients join (relay boot, or
 inside a Durable Object's `blockConcurrencyWhile`). It refuses once the room has state or
@@ -221,6 +278,20 @@ Restoring the persisted `instance` nonce is what lets clients that were connecte
 restart keep their sequence watermark and catch up with a cheap `delta` answer. Omit it and
 they fall back to a full snapshot, which is always safe. The optional journal tail is only
 there to make those delta answers possible; the room is complete without it.
+
+Persist `state.frontier` with the checkpoint and hand it back as `snapshot.frontier`. The
+frontier is the stamp compaction has settled past; a room that forgets it readmits the very
+writes it used to drop, which is how a pruned value comes back from the dead.
+
+### Writes the relay refuses without ejecting anyone
+
+Some envelopes are neither valid nor an offence. They are dropped silently and reported through
+`onDrop(room, env, reason)`:
+
+| reason       | what happened                                                                                                                                                                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'schema'`   | a straggler stamped with a data shape older than the room's, arriving after a migration — its sender is outdated, not malicious                                                                                                              |
+| `'frontier'` | a write stamped at or below the room's compaction frontier. An honest offline writer produces one; every client's own receive gate refuses the same envelope, so the relay refusing it is what keeps the two sides retaining the same op set |
 
 ## WebRTC signaling
 

@@ -25,7 +25,7 @@ const board = store<Board>(initialBoard());
 
 const mesh = meshSync(board, {
   room: 'board-42',
-  writer: currentUserId,          // an opaque principal id, never a display name
+  writer: currentUserId, // an opaque principal id, never a display name
   transport: webSocketTransport('wss://sync.example.com'),
 });
 ```
@@ -91,7 +91,9 @@ const yjsDoc: MergeFn = (_ancestor, mine, theirs) => {
 };
 
 meshSync(store, {
-  room, writer, transport,
+  room,
+  writer,
+  transport,
   policies: [{ path: 'doc', merge: yjsDoc }],
 });
 ```
@@ -270,11 +272,11 @@ the synced store. Its writes stay on the fork, so nothing reaches the room until
 `discard()` drops it.
 
 ```ts
-const proposal = seat.fork();                       // the agent's isolated branch, off the room
+const proposal = seat.fork(); // the agent's isolated branch, off the room
 setAtPath(proposal.store, 'plan.endDate', '2026-10-11'); // it writes here
 
 const staged = proposal.ops(); // StoreOp[] for the reviewer to see
-proposal.commit();             // approve: emits as concurrent writes to the room
+proposal.commit(); // approve: emits as concurrent writes to the room
 // proposal.rebase();          // re-observe the room, then commit on top
 // proposal.discard();         // reject: drops the staged writes
 ```
@@ -313,7 +315,7 @@ seat.changes((e) => {
 if (!base || sinceBase.length > 200) {
   const next = seat.stableSnapshot();
   if (next) {
-    base = next;         // new cached prefix
+    base = next; // new cached prefix
     sinceBase.length = 0;
   }
 }
@@ -381,6 +383,22 @@ is `outdated` versus `ejected`. A versioned reject (the client's `proto`, `polic
 reload prompt instead of a dead connection. A policy tripwire reports `ejected`. `degraded` is the
 slot for local problems such as a full storage quota or a dead worker; those are your own signals to
 fold in, since `meshSync` only owns the connection side.
+
+## Knowing a write landed
+
+`health` and `status` describe the connection. They do not answer "is what I wrote in the room",
+and a live socket with an unacknowledged tail answers no. Two members do:
+
+```ts
+mesh.acked(); // signal: every local write is acknowledged
+await mesh.whenAcked(); // resolves when the tail empties
+```
+
+`whenAcked()` resolves immediately when nothing is outstanding and rejects with the terminal reason
+if the session is ejected or closed while writes remain — those never reached the room, so every
+later call rejects the same way and `acked()` stays `false`. Await it before publishing anything
+that has to contain every edit; against a relay whose adapter confirms durability before echoing,
+acknowledged also means stored. `agentSeat` exposes the same pair as plain functions.
 
 ## Schema versions
 

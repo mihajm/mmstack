@@ -2488,4 +2488,39 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
     expect(countOf(b.got, 1)).toBe(1);
     expect(b.got.filter((m) => m.t === 'env')).toHaveLength(0);
   });
+
+  it('a member that joins inside the commit hook itself is not echoed either', () => {
+    let relay: Relay;
+    let c: { got: ServerMsg[] } | undefined;
+    const join = (origin: string) => {
+      const got: ServerMsg[] = [];
+      const conn = relay.connect(
+        { send: (m) => got.push(m), close: () => undefined },
+        {
+          writer: origin,
+        },
+      );
+      conn.receive({
+        t: 'hello',
+        room: 'r',
+        origin,
+        proto: MESH_PROTO_VERSION,
+        policyVersion: 0,
+      });
+      return { conn, got };
+    };
+    relay = createRelay({
+      onCommit: () => {
+        // an adapter that opens a seat on the room the moment it hears of a commit
+        c ??= join('c');
+      },
+    });
+    const a = join('a');
+    a.conn.receive({ t: 'env', room: 'r', env: envelope('a', 1, 'x') });
+
+    expect(countOf(a.got, 1)).toBe(1);
+    expect(c).toBeDefined();
+    expect(countOf(c!.got, 1)).toBe(1);
+    expect(c!.got.filter((m) => m.t === 'env')).toHaveLength(0);
+  });
 });

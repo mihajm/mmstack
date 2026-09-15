@@ -761,6 +761,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               moved = room.frontier;
             }
           }
+          // who gets the echo: the members present at ingest, read BEFORE the commit hook
+          // runs. A member that joins later — while the envelope waits for durability, or
+          // synchronously inside the hook itself — has it in its welcome already (the
+          // welcome's document half is captured at hello, after this ingest), and sending it
+          // again would hand that member one change twice.
+          const audience = [...room.members];
           const done = opt.onCommit?.(msg.room, seqEnv, {
             seq: room.seq,
             instance: room.instance,
@@ -769,11 +775,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             frontier: room.frontier,
             schemaVersion: room.schemaVersion,
           });
-          // who gets the echo: the members present now. A member that joins while this
-          // envelope waits for durability has it in its welcome already (the welcome's
-          // document half is captured at hello, after this ingest), and sending it again
-          // would hand that member one change twice.
-          const audience = [...room.members];
           room.release.submit(
             () => {
               // the frontier notice rides with the envelope that moved it, ahead of the echo,

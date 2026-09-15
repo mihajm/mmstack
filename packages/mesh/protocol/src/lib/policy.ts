@@ -31,10 +31,23 @@ export type PrincipalCtx = {
  * per room (a role that owns one care context but not another). A policy that ignores the
  * parameter applies uniformly. The room does not weaken the shared `policyVersion` pin: rules for
  * ANY room changing means the one pin bumps.
+ *
+ * Hooks also receive {@link PolicyRoomInfo}, which is how a rule can tell a room's FIRST write
+ * from a later one. Only the relay knows that, so it cannot be derived inside a rule.
  */
 export type OpPolicy = {
-  canWrite?(ctx: PrincipalCtx, path: readonly Key[], room: string): boolean;
-  validate?(op: StoreOp, ctx: PrincipalCtx, room: string): boolean;
+  canWrite?(
+    ctx: PrincipalCtx,
+    path: readonly Key[],
+    room: string,
+    info?: PolicyRoomInfo,
+  ): boolean;
+  validate?(
+    op: StoreOp,
+    ctx: PrincipalCtx,
+    room: string,
+    info?: PolicyRoomInfo,
+  ): boolean;
   /**
    * Authority gate for epoch raises, evaluated at the relay against the room's retained
    * register state. An op whose `epoch` EXCEEDS the room's observed max at its path is a BUMP
@@ -50,6 +63,7 @@ export type OpPolicy = {
     path: readonly Key[],
     epoch: number,
     room: string,
+    info?: PolicyRoomInfo,
   ): boolean;
   /**
    * Reject an op citing a dot the room has no record of at that path (reason
@@ -63,6 +77,26 @@ export type OpPolicy = {
    * state forgets the dots honest writers still cite.
    */
   readonly verifyCitations?: boolean;
+};
+
+/**
+ * What the relay knows about the room that a rule cannot work out for itself.
+ *
+ * `seq` is the room's sequence BEFORE this envelope is given one, so `0` means the room is
+ * empty and this envelope is its first: the seed a joiner emits when it finds a fresh room.
+ * That distinction is load-bearing for the root path. A root `set` on an EMPTY room
+ * establishes the document; the same op on a room at `seq >= 1` lands as a concurrent root
+ * sibling that wins the root register by clock and shadows every leaf that lived only inside
+ * the earlier seed's value. So "may this principal write the root" has two honest answers, and
+ * only the room's emptiness separates them.
+ *
+ * Absent on the emit-side check when the caller cannot know the room's sequence. A client
+ * supplies its own last observed sequence, which can only LAG the relay's, so the emit-side
+ * check is at worst more permissive than the relay's — never wrongly refusing an honest write.
+ */
+export type PolicyRoomInfo = {
+  /** The room's sequence before this envelope is sequenced; `0` on an empty room. */
+  readonly seq: number;
 };
 
 export type PolicyViolation = {
@@ -89,16 +123,17 @@ export function checkEnvelope(
   env: OpEnvelope,
   ctx: PrincipalCtx,
   room: string,
+  info?: PolicyRoomInfo,
 ): PolicyViolation | null {
   if (env.writer !== ctx.writer) {
     return { writer: ctx.writer, reason: 'writer-mismatch' };
   }
   if (!policy) return null;
   for (const op of env.ops) {
-    if (policy.canWrite && !policy.canWrite(ctx, op.path, room)) {
+    if (policy.canWrite && !policy.canWrite(ctx, op.path, room, info)) {
       return { writer: ctx.writer, reason: 'can-write', path: op.path };
     }
-    if (policy.validate && !policy.validate(op, ctx, room)) {
+    if (policy.validate && !policy.validate(op, ctx, room, info)) {
       return { writer: ctx.writer, reason: 'validate', path: op.path };
     }
   }

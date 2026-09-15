@@ -904,7 +904,11 @@ describe('describeOp', () => {
 describe('seat.sync — the authority surface', () => {
   it('override emits an epoch-bumped op, from a seat and from a browser ref alike', async () => {
     const envs: SeqEnvelope[] = [];
-    const relay = createRelay({ onCommit: (_room, env) => envs.push(env) });
+    const relay = createRelay({
+      onCommit: (_room, env) => {
+        envs.push(env);
+      },
+    });
     const { s } = seat(relay, 'agent');
     await Promise.resolve();
     s.sync.override(() => setAtPath(s.doc, 'title', 'authoritative'));
@@ -934,7 +938,11 @@ describe('seat.sync — the authority surface', () => {
 
   it('commitScope cites what the captured frontier observed, not what landed since', async () => {
     const envs: SeqEnvelope[] = [];
-    const relay = createRelay({ onCommit: (_room, env) => envs.push(env) });
+    const relay = createRelay({
+      onCommit: (_room, env) => {
+        envs.push(env);
+      },
+    });
     const { s: a } = seat(relay, 'a');
     const { s: b } = seat(relay, 'b');
     await Promise.resolve();
@@ -952,6 +960,33 @@ describe('seat.sync — the authority surface', () => {
     await Promise.resolve();
     const plain = envs.at(-1)!.ops.find((op) => op.path[0] === 'title')!;
     expect(plain.cites.length).toBeGreaterThan(0);
+    a.close();
+    b.close();
+  });
+
+  it('a commitScope opened inside another hands the outer scope its frontier back', async () => {
+    const envs: SeqEnvelope[] = [];
+    const relay = createRelay({
+      onCommit: (_room, env) => {
+        envs.push(env);
+      },
+    });
+    const { s: a } = seat(relay, 'a');
+    const { s: b } = seat(relay, 'b');
+    await Promise.resolve();
+    const frontier = a.sync.captureFrontier();
+    b.setAtPath('title', 'from-b');
+    await Promise.resolve();
+    a.sync.commitScope(frontier, () => {
+      a.sync.commitScope(a.sync.captureFrontier(), () =>
+        setAtPath(a.doc, 'nested.a', 1),
+      );
+      setAtPath(a.doc, 'title', 'from-a');
+    });
+    a.write(() => undefined);
+    await Promise.resolve();
+    const after = envs.at(-1)!.ops.find((op) => op.path[0] === 'title')!;
+    expect(after.cites).toEqual([]);
     a.close();
     b.close();
   });
@@ -1006,5 +1041,117 @@ describe('seat.sync — the authority surface', () => {
     human.mesh.close();
     a.close();
     b.close();
+  });
+});
+
+describe('agentSeat — the acknowledgement barrier', () => {
+  it('waits for the room to confirm a write, and rejects when the seat ends with one outstanding', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const relay = createRelay({ onCommit: () => gate });
+    const { s } = seat(relay, 'agent');
+    await Promise.resolve();
+
+    s.setAtPath('title', 'pending');
+    await Promise.resolve();
+    expect(s.acked()).toBe(false);
+
+    let landed = false;
+    const barrier = s.whenAcked().then(() => {
+      landed = true;
+    });
+    await Promise.resolve();
+    expect(landed).toBe(false);
+
+    release();
+    await barrier;
+    expect(landed).toBe(true);
+    expect(s.acked()).toBe(true);
+
+    s.close();
+  });
+
+  it('resolves at once when nothing is outstanding', async () => {
+    const relay = createRelay();
+    const { s } = seat(relay, 'agent');
+    await Promise.resolve();
+    s.setAtPath('title', 'landed');
+    await Promise.resolve();
+
+    expect(s.acked()).toBe(true);
+    await expect(s.whenAcked()).resolves.toBeUndefined();
+    s.close();
+  });
+
+  it('rejects, and stays unacked, when the seat is closed with a write outstanding', async () => {
+    const relay = createRelay({
+      onCommit: () => new Promise<void>(() => undefined),
+    });
+    const { s } = seat(relay, 'agent');
+    await Promise.resolve();
+    s.setAtPath('title', 'outstanding');
+    await Promise.resolve();
+
+    const barrier = s.whenAcked();
+    s.close();
+    await expect(barrier).rejects.toThrow('closed');
+    expect(s.acked()).toBe(false);
+  });
+});
+
+describe('agentSeat — seeding a fresh room under a root-write policy', () => {
+  // the room's write policy: an agent may establish an empty room and never rewrite the root
+  const seatPolicy = {
+    canWrite: (
+      ctx: { kind?: string },
+      path: readonly (string | number)[],
+      _room: string,
+      info?: { seq: number },
+    ) => path.length > 0 || ctx.kind !== 'agent' || info?.seq === 0,
+  };
+
+  it('seeds an empty room without tripping its own emit-side check', async () => {
+    const relay = createRelay({ policy: seatPolicy });
+    const { s } = seat(relay, 'agent', {
+      policy: seatPolicy,
+      ctx: { kind: 'agent' }, // the seat runs the room's policy on itself before emitting
+    });
+    await Promise.resolve();
+
+    expect(s.status()).toBe('live');
+    s.setAtPath('title', 'from the agent');
+    await Promise.resolve();
+    expect(s.snapshot().title).toBe('from the agent');
+    s.close();
+  });
+
+  // a seat joining an established room is welcomed with a snapshot and never emits a root set,
+  // so the policy that guards the root cannot get in the way of ordinary collaboration
+  it('a second seat joins an established room and keeps writing leaves', async () => {
+    const relay = createRelay({ policy: seatPolicy });
+    const first = seat(relay, 'owner', {
+      policy: seatPolicy,
+      ctx: { kind: 'agent' },
+    });
+    await Promise.resolve();
+    first.s.setAtPath('title', 'established');
+    await Promise.resolve();
+
+    const rejected: string[] = [];
+    const late = seat(relay, 'late', {
+      policy: seatPolicy,
+      ctx: { kind: 'agent' },
+      onEject: (reason: string) => rejected.push(reason),
+    });
+    await Promise.resolve();
+    late.s.write(() => setAtPath(late.s.doc, 'title', 'reseed'));
+    await Promise.resolve();
+
+    expect(late.s.status()).toBe('live'); // a leaf write is fine
+    expect(rejected).toEqual([]);
+    first.s.close();
+    late.s.close();
   });
 });

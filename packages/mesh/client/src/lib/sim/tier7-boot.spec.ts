@@ -112,7 +112,11 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
   ): number => {
     return TestBed.runInInjectionContext(() => {
       const s = store<Doc>({ k: 'init' });
-      const sync = opSync(s, { writer: 'w', origin, clock: createHlcClock(() => 30) });
+      const sync = opSync(s, {
+        writer: 'w',
+        origin,
+        clock: createHlcClock(() => 30),
+      });
       const emitted: OpEnvelope[] = [];
       sync.subscribe((e) => emitted.push(e));
       sync.restore(restoreEnvs, highWater);
@@ -130,7 +134,11 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
     // session 1: an authority override stamps ['k'] at epoch 1 and the room commits it
     const overrideEnv = TestBed.runInInjectionContext(() => {
       const s = store<Doc>({ k: 'init' });
-      const sync = opSync(s, { writer: 'w', origin: 'o1', clock: createHlcClock(() => 10) });
+      const sync = opSync(s, {
+        writer: 'w',
+        origin: 'o1',
+        clock: createHlcClock(() => 10),
+      });
       const sent: OpEnvelope[] = [];
       sync.subscribe((e) => sent.push(e));
       sync.override(() => s.k.set('AUTH'));
@@ -165,20 +173,52 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
 
   it('the hydrated-boot retry WINS the fold at the exposed epoch; only a blind epoch-fresh write can lose', () => {
     // shown deterministically at the register. A survivor of the old epoch under another origin:
-    const survivor: OpEnvelope = { proto: OP_PROTO_VERSION, origin: 'o2', writer: 'w2', version: 1, hlc: { p: 20, l: 0 }, policyVersion: 0, ops: [{ kind: 'set', path: ['k'], next: 'SURVIVOR', cites: [], epoch: 1 }] };
+    const survivor: OpEnvelope = {
+      proto: OP_PROTO_VERSION,
+      origin: 'o2',
+      writer: 'w2',
+      version: 1,
+      hlc: { p: 20, l: 0 },
+      policyVersion: 0,
+      ops: [
+        { kind: 'set', path: ['k'], next: 'SURVIVOR', cites: [], epoch: 1 },
+      ],
+    };
 
     // the hydrated-boot retry adopted epoch 1 and has a later hlc → it WINS
     const won = createConvergingApply();
     let a: unknown = {};
     a = applyOps(a, won.ingest(survivor));
-    a = applyOps(a, won.ingest({ proto: OP_PROTO_VERSION, origin: 'o3', writer: 'w', version: 1, hlc: { p: 30, l: 0 }, policyVersion: 0, ops: [{ kind: 'set', path: ['k'], next: 'RETRY', cites: [], epoch: 1 }] }));
+    a = applyOps(
+      a,
+      won.ingest({
+        proto: OP_PROTO_VERSION,
+        origin: 'o3',
+        writer: 'w',
+        version: 1,
+        hlc: { p: 30, l: 0 },
+        policyVersion: 0,
+        ops: [{ kind: 'set', path: ['k'], next: 'RETRY', cites: [], epoch: 1 }],
+      }),
+    );
     expect((a as Doc).k).toBe('RETRY'); // competes at the exposed epoch and wins on hlc
 
     // only a blind epoch-0 write loses to the epoch-1 survivor (accepted optimistic-offline outcome)
     const lost = createConvergingApply();
     let b: unknown = {};
     b = applyOps(b, lost.ingest(survivor));
-    b = applyOps(b, lost.ingest({ proto: OP_PROTO_VERSION, origin: 'o3', writer: 'w', version: 1, hlc: { p: 30, l: 0 }, policyVersion: 0, ops: [{ kind: 'set', path: ['k'], next: 'RETRY', cites: [], epoch: 0 }] }));
+    b = applyOps(
+      b,
+      lost.ingest({
+        proto: OP_PROTO_VERSION,
+        origin: 'o3',
+        writer: 'w',
+        version: 1,
+        hlc: { p: 30, l: 0 },
+        policyVersion: 0,
+        ops: [{ kind: 'set', path: ['k'], next: 'RETRY', cites: [], epoch: 0 }],
+      }),
+    );
     expect((b as Doc).k).toBe('SURVIVOR'); // a blind write is a fresh sibling and may lose; not a regression
   });
 });
@@ -200,7 +240,7 @@ describe('Tier 7: effect exactly-once across relay restart replay (INVARIANT)', 
       state: {
         seq: number;
         instance: string;
-        registers: readonly RegisterCheckpoint[];
+        checkpoint(): readonly RegisterCheckpoint[];
         wm: Readonly<Record<string, number>>;
       },
     ) => {
@@ -208,19 +248,36 @@ describe('Tier 7: effect exactly-once across relay restart replay (INVARIANT)', 
       journalEnvs.push(env);
       snapSeq = state.seq;
       snapInstance = state.instance;
-      snapRegisters = state.registers;
+      snapRegisters = state.checkpoint();
       snapWm = state.wm;
     };
 
     // drive a room to a few commits directly through a relay connection (no timers)
     const relay = createRelay({ onCommit });
-    const conn = relay.connect({ send: () => undefined, close: () => undefined }, { writer: 'w' });
-    conn.receive({ t: 'hello', room: 'r', origin: 'o', proto: MESH_PROTO_VERSION, policyVersion: 0 });
+    const conn = relay.connect(
+      { send: () => undefined, close: () => undefined },
+      { writer: 'w' },
+    );
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
     const emit = (v: number, next: unknown) =>
       conn.receive({
         t: 'env',
         room: 'r',
-        env: { proto: MESH_PROTO_VERSION, origin: 'o', writer: 'w', version: v, hlc: { p: v, l: 0 }, policyVersion: 0, ops: [{ kind: 'set', path: ['k'], next, cites: [], epoch: 0 }] },
+        env: {
+          proto: MESH_PROTO_VERSION,
+          origin: 'o',
+          writer: 'w',
+          version: v,
+          hlc: { p: v, l: 0 },
+          policyVersion: 0,
+          ops: [{ kind: 'set', path: ['k'], next, cites: [], epoch: 0 }],
+        },
       });
     emit(1, 'a');
     emit(2, 'b');
@@ -238,12 +295,29 @@ describe('Tier 7: effect exactly-once across relay restart replay (INVARIANT)', 
     });
     expect(fired).toEqual([1, 2, 3]); // hydrate reloaded the journal without re-firing the effect
 
-    const conn2 = restored.connect({ send: () => undefined, close: () => undefined }, { writer: 'w2' });
-    conn2.receive({ t: 'hello', room: 'r', origin: 'o2', proto: MESH_PROTO_VERSION, policyVersion: 0 });
+    const conn2 = restored.connect(
+      { send: () => undefined, close: () => undefined },
+      { writer: 'w2' },
+    );
+    conn2.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o2',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
     conn2.receive({
       t: 'env',
       room: 'r',
-      env: { proto: MESH_PROTO_VERSION, origin: 'o2', writer: 'w2', version: 1, hlc: { p: 10, l: 0 }, policyVersion: 0, ops: [{ kind: 'set', path: ['k'], next: 'd', cites: [], epoch: 0 }] },
+      env: {
+        proto: MESH_PROTO_VERSION,
+        origin: 'o2',
+        writer: 'w2',
+        version: 1,
+        hlc: { p: 10, l: 0 },
+        policyVersion: 0,
+        ops: [{ kind: 'set', path: ['k'], next: 'd', cites: [], epoch: 0 }],
+      },
     });
 
     // the restored relay continues the seq space, firing only for the NEW commit

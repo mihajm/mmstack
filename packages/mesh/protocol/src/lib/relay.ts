@@ -1,6 +1,7 @@
 import {
   checkEnvelope,
   type OpPolicy,
+  type PolicyRoomInfo,
   type PolicyViolation,
   type PrincipalCtx,
 } from './policy';
@@ -16,6 +17,7 @@ import {
   type RejectMsg,
   type SeqEnvelope,
   type ServerMsg,
+  type WelcomeBody,
 } from './wire';
 
 /** What the relay needs from a connection — implement over ws, a DO WebSocket, or a test pair. */
@@ -53,25 +55,53 @@ export type RelayOptions = {
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
   /**
-   * The persistence egress: fired after an envelope is sequenced, retained into the room's
-   * register state, and broadcast. The envelope is the persistence record (append it to a
-   * journal); `state` carries the retained register state for throttled checkpoints. Called
-   * synchronously and never awaited: batch, debounce, and store at the adapter layer. Pair
-   * with {@link Relay.hydrate}.
+   * The persistence egress: fired synchronously once an envelope is sequenced and retained
+   * into the room's register state, and BEFORE anything carrying it leaves the relay. The
+   * envelope is the persistence record (append it to a journal); `state` carries the retained
+   * register state for throttled checkpoints. Pair with {@link Relay.hydrate}.
+   *
+   * Return `void` to release the envelope at once — the memory-adapter behaviour, and the
+   * relay's default. Return a promise and the relay holds every outbound message that carries
+   * the envelope (its echo, the frontier notice emitted with it, and any welcome answered
+   * while it is in flight) until that promise resolves: a connection is told a write is safe
+   * only once the adapter says it is, the way a database returns from `COMMIT` after its log
+   * is written. Messages that are not document state — presence, signal, membership,
+   * ejection — always pass immediately.
+   *
+   * A rejected promise STALLS the room: the envelope and everything queued behind it stay
+   * unreleased and {@link RelayOptions.onDurabilityFailed} fires once. Nothing is un-ingested
+   * and nothing is answered with state that will not survive a restart; recovery is a process
+   * restart, after which the writers still holding those envelopes unacked resend them.
    */
   readonly onCommit?: (
     room: string,
     env: SeqEnvelope,
     state: RoomState,
+  ) => void | Promise<void>;
+  /**
+   * The durability promise for `env` rejected: this room is now stalled and answers nothing
+   * further. Fires once, for the envelope that failed. Report it and restart the process —
+   * there is no in-place recovery, by design.
+   */
+  readonly onDurabilityFailed?: (
+    room: string,
+    env: SeqEnvelope,
+    cause: unknown,
   ) => void;
   /**
    * Observation of a silently dropped envelope: received but neither sequenced nor a
-   * violation (today: a stale-schema straggler arriving after a migration — its sender is
-   * outdated, not malicious, so it is not ejected and nothing is broadcast). Without this
-   * hook the drop is invisible to an audit adapter. Pure observation, zero semantic effect;
-   * synchronous and never awaited, like {@link RelayOptions.onCommit}.
+   * violation. `'schema'` is a stale-schema straggler arriving after a migration;
+   * `'frontier'` is a write stamped at or below what compaction has already settled, which
+   * an honest offline writer can produce and which every client's own receive gate refuses
+   * too. Neither sender is malicious, so neither is ejected and nothing is broadcast.
+   * Without this hook the drop is invisible to an audit adapter. Pure observation, zero
+   * semantic effect; synchronous and never awaited, like {@link RelayOptions.onCommit}.
    */
-  readonly onDrop?: (room: string, env: OpEnvelope, reason: 'schema') => void;
+  readonly onDrop?: (
+    room: string,
+    env: OpEnvelope,
+    reason: 'schema' | 'frontier',
+  ) => void;
   /**
    * Observation of a rejected hello: an ejected writer knocking again (`'unauthorized'`), or
    * a client whose proto / policy-version / schema pin is behind the room's. The client
@@ -99,10 +129,23 @@ export type RelayOptions = {
 export type RoomState = {
   readonly seq: number;
   readonly instance: string;
-  /** The room's retained per-path register state, never a folded value. */
-  readonly registers: readonly RegisterCheckpoint[];
+  /**
+   * The room's retained per-path register state, never a folded value. A thunk because
+   * walking every register on every commit is the dominant cost of a room under load and
+   * most commits do not checkpoint: call it only when you are about to store one.
+   *
+   * It reads LIVE state, so it must be called synchronously inside the `onCommit` callback —
+   * a call made later would describe a later seq than the envelope it is filed under.
+   */
+  checkpoint(): readonly RegisterCheckpoint[];
   /** Per-origin envelope-version high-water marks. */
   readonly wm: Readonly<Record<string, number>>;
+  /**
+   * The stamp compaction has settled past, if any. Persist it and hand it back through
+   * {@link RoomSnapshot.frontier}: without it a restarted room forgets what it settled and
+   * readmits the stragglers it used to drop.
+   */
+  readonly frontier?: Hlc;
   /** The room's data shape; restored via {@link Relay.hydrate}. */
   readonly schemaVersion: number;
 };
@@ -124,6 +167,12 @@ export type RoomSnapshot = {
   readonly schemaVersion?: number;
   /** Journal tail (ascending seq, entries at or below `seq`) enabling those delta answers. */
   readonly journal?: readonly SeqEnvelope[];
+  /**
+   * The compaction frontier captured with the checkpoint. Restoring it keeps the room
+   * refusing writes it has already settled past; omitting it readmits them, which is how a
+   * pruned value comes back from the dead.
+   */
+  readonly frontier?: Hlc;
 };
 
 export type RelayConnection = {
@@ -149,6 +198,64 @@ export type Relay = {
   hydrate(name: string, snapshot: RoomSnapshot): boolean;
 };
 
+/**
+ * An ordered hold on the room's outbound document traffic. Each queued item releases only
+ * after its own durability promise settles and after every item queued ahead of it, so what
+ * a connection reads is always a prefix of what the adapter has confirmed. An item with no
+ * promise releases as soon as it reaches the head — and, when nothing is owed, at once, which
+ * is the whole behaviour of a relay whose adapter stores synchronously.
+ */
+type Release = {
+  submit(run: () => void, done?: Promise<void>, env?: SeqEnvelope): void;
+  /** Something is queued or in flight: a fresh answer must queue behind it. */
+  busy(): boolean;
+};
+
+const createRelease = (
+  onFail: (env: SeqEnvelope | undefined, cause: unknown) => void,
+): Release => {
+  type Item = {
+    readonly run: () => void;
+    readonly done?: Promise<void>;
+    readonly env?: SeqEnvelope;
+  };
+  const queue: Item[] = [];
+  let stalled = false;
+  let draining = false;
+
+  const drain = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    while (!stalled && queue.length > 0) {
+      const head = queue[0];
+      if (head.done) {
+        try {
+          await head.done;
+        } catch (cause) {
+          stalled = true;
+          onFail(head.env, cause);
+          break;
+        }
+      }
+      queue.shift();
+      head.run();
+    }
+    draining = false;
+  };
+
+  return {
+    submit: (run, done, env) => {
+      if (!stalled && !draining && queue.length === 0 && done === undefined) {
+        run();
+        return;
+      }
+      queue.push({ run, done, env });
+      if (!stalled) void drain();
+    },
+    busy: () => draining || queue.length > 0,
+  };
+};
+
 type Member = {
   readonly socket: RelaySocket;
   readonly ctx: PrincipalCtx;
@@ -172,6 +279,8 @@ type Room = {
   presence: Map<string, { peer: PresenceState; by: Member }>;
   ejected: Set<string>;
   buckets: Map<string, Bucket>;
+  /** Holds outbound document traffic behind the adapter's durability confirmations. */
+  release: Release;
 };
 
 let instanceCounter = 0;
@@ -219,6 +328,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         presence: new Map(),
         ejected: new Set(),
         buckets: new Map(),
+        release: createRelease((env, cause) => {
+          if (env) opt.onDurabilityFailed?.(name, env, cause);
+        }),
       };
       rooms.set(name, room);
     }
@@ -325,6 +437,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     room: Room,
     env: OpEnvelope,
     ctx: PrincipalCtx,
+    info: PolicyRoomInfo,
   ): PolicyViolation | null => {
     const policy = opt.policy;
     if (!policy || (!policy.canBump && !policy.verifyCitations)) return null;
@@ -333,7 +446,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         const observed = room.registers.maxEpoch(op.path);
         if (
           op.epoch > observed &&
-          !policy.canBump(ctx, op.path, op.epoch, name)
+          !policy.canBump(ctx, op.path, op.epoch, name, info)
         ) {
           return {
             writer: ctx.writer,
@@ -386,6 +499,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       for (const [origin, v] of Object.entries(snapshot.wm ?? {})) {
         room.wm.set(origin, Math.max(room.wm.get(origin) ?? 0, v));
       }
+      if (snapshot.frontier !== undefined) room.frontier = snapshot.frontier;
       if (snapshot.instance !== undefined) room.instance = snapshot.instance;
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
@@ -491,39 +605,48 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               member,
             );
 
-            const peers = [...room.presence.values()].map((e) => e.peer);
-            const base = {
-              t: 'welcome',
-              room: msg.room,
+            // The document half of the answer is read NOW: room state is exactly what the
+            // adapter has been handed so far, so holding this payload behind the release
+            // queue makes it durable by the time it is sent. Reading it at release time
+            // instead would fold in envelopes ingested since, which are not.
+            const doc = {
               seq: room.seq,
               instance: room.instance,
               schemaVersion: room.schemaVersion,
-              peers,
-              members: [...room.members]
-                .filter((m) => m !== member)
-                .map((m) => m.origin),
             } as const;
-            if (room.seq === 0 || msg.seq === room.seq) {
-              socket.send({ ...base, mode: 'up-to-date' });
-            } else if (
-              msg.seq !== undefined &&
-              room.journal.length > 0 &&
-              msg.seq >= room.journal[0].seq - 1
-            ) {
-              const since = msg.seq;
+            const body: WelcomeBody =
+              room.seq === 0 || msg.seq === room.seq
+                ? { mode: 'up-to-date' }
+                : msg.seq !== undefined &&
+                    room.journal.length > 0 &&
+                    msg.seq >= room.journal[0].seq - 1
+                  ? {
+                      mode: 'delta',
+                      envs: room.journal.filter(
+                        (e) => e.seq > (msg.seq as number),
+                      ),
+                    }
+                  : {
+                      mode: 'snapshot',
+                      registers: room.registers.checkpoint(),
+                      wm: Object.fromEntries(room.wm),
+                    };
+
+            // the roster is NOT document state: read it when the welcome actually goes out,
+            // so a join or presence update that passed in the meantime is not undone by it
+            room.release.submit(() => {
+              if (!room.members.has(member) || member.ejected) return;
               socket.send({
-                ...base,
-                mode: 'delta',
-                envs: room.journal.filter((e) => e.seq > since),
+                t: 'welcome',
+                room: msg.room,
+                ...doc,
+                ...body,
+                peers: [...room.presence.values()].map((e) => e.peer),
+                members: [...room.members]
+                  .filter((m) => m !== member)
+                  .map((m) => m.origin),
               });
-            } else {
-              socket.send({
-                ...base,
-                mode: 'snapshot',
-                registers: room.registers.checkpoint(),
-                wm: Object.fromEntries(room.wm),
-              });
-            }
+            });
             return;
           }
 
@@ -568,7 +691,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   ? { writer: ctx.writer, reason: 'ops-limit' }
                   : overRate(room, ctx.writer)
                     ? { writer: ctx.writer, reason: 'rate' }
-                    : checkEnvelope(opt.policy, env, ctx, msg.room);
+                    : checkEnvelope(opt.policy, env, ctx, msg.room, {
+                        seq: room.seq, // before this envelope is sequenced: 0 on an empty room
+                      });
           if (violation) {
             eject(msg.room, room, member, violation);
             return;
@@ -582,9 +707,21 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             return;
           }
 
-          // after the stale-schema drop: a silently-dropped envelope never ingests, so its
-          // epochs and cites gate nothing (an outdated client stays 'outdated', not ejected)
-          const admission = checkAdmission(msg.room, room, env, ctx);
+          // A write at or below what compaction settled is inert above the frontier and would
+          // resurrect state below it. Dropped, never ejected: an offline writer coming back
+          // after the room compacted is honest. The comparison mirrors the client's own
+          // receive gate exactly, so relay and peers refuse the same envelopes.
+          if (room.frontier && hlcLte(env.hlc, room.frontier)) {
+            opt.onDrop?.(msg.room, env, 'frontier');
+            return;
+          }
+
+          // after the stale-schema and frontier drops: a silently-dropped envelope never
+          // ingests, so its epochs and cites gate nothing (an outdated client stays
+          // 'outdated', not ejected)
+          const admission = checkAdmission(msg.room, room, env, ctx, {
+            seq: room.seq,
+          });
           if (admission) {
             eject(msg.room, room, member, admission);
             return;
@@ -607,27 +744,39 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             env.origin,
             Math.max(room.wm.get(env.origin) ?? 0, env.version),
           );
+          let moved: Hlc | undefined;
           if (room.journal.length > journalLimit) {
             const trimmed = room.journal.shift();
             if (trimmed) {
               room.frontier = laterHlc(room.frontier, trimmed.hlc);
               room.registers.compact(room.frontier);
-              // tell connected clients the frontier moved so they reclaim their own register state
-              broadcast(room, {
-                t: 'frontier',
-                room: msg.room,
-                frontier: room.frontier,
-              });
+              moved = room.frontier;
             }
           }
-          broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
-          opt.onCommit?.(msg.room, seqEnv, {
+          const done = opt.onCommit?.(msg.room, seqEnv, {
             seq: room.seq,
             instance: room.instance,
-            registers: room.registers.checkpoint(),
+            checkpoint: () => room.registers.checkpoint(),
             wm: Object.fromEntries(room.wm),
+            frontier: room.frontier,
             schemaVersion: room.schemaVersion,
           });
+          room.release.submit(
+            () => {
+              // the frontier notice rides with the envelope that moved it, ahead of the echo,
+              // so clients reclaim their own register state before folding the write
+              if (moved) {
+                broadcast(room, {
+                  t: 'frontier',
+                  room: msg.room,
+                  frontier: moved,
+                });
+              }
+              broadcast(room, { t: 'env', room: msg.room, env: seqEnv });
+            },
+            done ?? undefined,
+            seqEnv,
+          );
         },
       };
     },

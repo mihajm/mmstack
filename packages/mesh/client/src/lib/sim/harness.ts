@@ -7,7 +7,14 @@ import {
 import { meshSync, type MeshStatus } from '../mesh-sync';
 import { directTransport } from '../transport';
 import { prng, type Prng } from './prng';
-import { applyWrites, BASE_TIME, installRng, simStore, type SimDoc, type SimStore } from './model';
+import {
+  applyWrites,
+  BASE_TIME,
+  installRng,
+  simStore,
+  type SimDoc,
+  type SimStore,
+} from './model';
 
 export type { SimDoc } from './model';
 
@@ -75,7 +82,7 @@ export function runSimulation(opt: SimOptions): SimResult {
     const relay = createRelay({
       onCommit: (_room, env, state) => {
         journal.push(env);
-        relayRegisters = state.registers;
+        relayRegisters = state.checkpoint();
       },
     });
 
@@ -88,7 +95,12 @@ export function runSimulation(opt: SimOptions): SimResult {
           writer,
           transport: directTransport(relay, { writer }),
         });
-        return { writer, s, status: () => mesh.status(), close: () => mesh.close() };
+        return {
+          writer,
+          s,
+          status: () => mesh.status(),
+          close: () => mesh.close(),
+        };
       });
     });
     TestBed.tick(); // flush the seed envelope + welcomes

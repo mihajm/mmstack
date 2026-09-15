@@ -1,6 +1,15 @@
 import { TestBed } from '@angular/core/testing';
-import { createRelay, type Relay, type SeqEnvelope } from '@mmstack/mesh-protocol';
-import { OP_PROTO_VERSION, store, type AsyncStore, type OpEnvelope } from '@mmstack/primitives/core';
+import {
+  createRelay,
+  type Relay,
+  type SeqEnvelope,
+} from '@mmstack/mesh-protocol';
+import {
+  OP_PROTO_VERSION,
+  store,
+  type AsyncStore,
+  type OpEnvelope,
+} from '@mmstack/primitives/core';
 import { meshSync, type MeshSyncOptions } from './mesh-sync';
 import { directTransport } from './transport';
 
@@ -67,7 +76,9 @@ describe('meshSync durable outbox — reboot survival', () => {
     // as a prior (rebooted) session left it: origin A, emitted through v1, one unacked offline edit
     backing.set('m:A', { origin: 'A', version: 1, envs: [offlineEnv()] });
 
-    const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+    });
     await settle(); // A boots, restores 'offline', reconnects and resends it to the room
 
     expect(a.s().title).toBe('offline'); // offline edit applied on boot
@@ -129,7 +140,14 @@ describe('meshSync durable outbox — reboot survival', () => {
       hlc: { p: 10, l: 0 },
       policyVersion: 0,
       ops: [
-        { kind: 'set', path: ['title'], next: 'boot1', prev: 'init', cites: [], epoch: 0 },
+        {
+          kind: 'set',
+          path: ['title'],
+          next: 'boot1',
+          prev: 'init',
+          cites: [],
+          epoch: 0,
+        },
       ],
     };
     const e2: OpEnvelope = {
@@ -170,7 +188,11 @@ describe('meshSync durable outbox — reboot survival', () => {
 
   it('mints new writes on a FRESH origin, so they never collide with an acked-but-dropped mint on the old one', async () => {
     const seen: SeqEnvelope[] = [];
-    const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+    const relay = createRelay({
+      onCommit: (_r, env) => {
+        seen.push(env);
+      },
+    });
     const { store: disk, backing } = memStore();
     // high-water 5, but only v3 still unacked (v4/v5 were acked before the reboot, dropped from disk)
     backing.set('m:A', {
@@ -198,12 +220,16 @@ describe('meshSync durable outbox — reboot survival', () => {
       ],
     });
 
-    const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+    });
     await settle();
     a.s.v.set(9); // a fresh local write after boot
     await settle();
 
-    const aVersions = seen.filter((e) => e.origin === 'A').map((e) => e.version);
+    const aVersions = seen
+      .filter((e) => e.origin === 'A')
+      .map((e) => e.version);
     expect(aVersions).toEqual([3]); // the restored tail resent VERBATIM under 'A', and only that
     // the old origin is never minted on again — v4/v5 (acked, dropped) can never be re-minted
     expect(seen.some((e) => e.origin === 'A' && e.version > 3)).toBe(false);
@@ -217,7 +243,9 @@ describe('meshSync durable outbox — reboot survival', () => {
     const relay = createRelay();
     const { store: disk, backing } = memStore();
 
-    const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+    });
     await settle();
 
     // a fresh origin was minted and pinned to disk immediately (so a crash before any write is safe)
@@ -230,7 +258,9 @@ describe('meshSync durable outbox — reboot survival', () => {
     // (a byte clone of this disk must not resurrect an origin and mint colliding dots)
     a.mesh.close();
     await settle();
-    const b = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+    const b = peer(relay, 'wa', {
+      outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+    });
     await settle();
     expect((backing.get('m:A') as { origin: string }).origin).not.toBe(origin);
 
@@ -241,7 +271,11 @@ describe('meshSync durable outbox — reboot survival', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const seen: SeqEnvelope[] = [];
-      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const relay = createRelay({
+        onCommit: (_r, env) => {
+          seen.push(env);
+        },
+      });
       const { store: disk, backing } = memStore();
       // a proto-1 build persisted this outbox: ops carry no cites/epoch
       backing.set('m:A', {
@@ -255,12 +289,16 @@ describe('meshSync durable outbox — reboot survival', () => {
             version: 2,
             hlc: { p: Date.now(), l: 0 },
             policyVersion: 0,
-            ops: [{ kind: 'set', path: ['title'], next: 'stale', prev: 'init' }],
+            ops: [
+              { kind: 'set', path: ['title'], next: 'stale', prev: 'init' },
+            ],
           },
         ],
       });
 
-      const a = peer(relay, 'wa', { outbox: { key: 'm:A', store: disk, crossTab: 'off' } });
+      const a = peer(relay, 'wa', {
+        outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+      });
       await settle();
 
       expect(a.s().title).toBe('init'); // the stale write was NOT applied
@@ -283,7 +321,11 @@ describe('meshSync durable outbox — reboot survival', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const seen: SeqEnvelope[] = [];
-      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const relay = createRelay({
+        onCommit: (_r, env) => {
+          seen.push(env);
+        },
+      });
       const { store: disk, backing } = memStore();
       backing.set('m:F', {
         origin: 'A',
@@ -343,7 +385,11 @@ describe('meshSync durable outbox — reboot survival', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const seen: SeqEnvelope[] = [];
-      const relay = createRelay({ onCommit: (_r, env) => seen.push(env) });
+      const relay = createRelay({
+        onCommit: (_r, env) => {
+          seen.push(env);
+        },
+      });
       const { store: disk, backing } = memStore();
       backing.set('m:V', {
         origin: 'A',
@@ -368,7 +414,9 @@ describe('meshSync durable outbox — reboot survival', () => {
   it('a store with no persisted outbox boots clean and replicates through the deferred boot', async () => {
     const relay = createRelay();
     const { store: disk } = memStore();
-    const a = peer(relay, 'wa', { outbox: { key: 'absent', store: disk, crossTab: 'off' } });
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'absent', store: disk, crossTab: 'off' },
+    });
     await settle(); // deferred boot with an empty slot: fresh origin, no restore
 
     a.s.title.set('live-write');
@@ -442,7 +490,14 @@ describe('meshSync whenReady — assemble the local base before connecting', () 
           hlc: { p: Date.now(), l: 0 },
           policyVersion: 0,
           ops: [
-            { kind: 'set', path: ['v'], next: 42, prev: 0, cites: [], epoch: 0 },
+            {
+              kind: 'set',
+              path: ['v'],
+              next: 42,
+              prev: 0,
+              cites: [],
+              epoch: 0,
+            },
           ],
         },
       ],

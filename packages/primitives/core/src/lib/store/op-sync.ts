@@ -1541,13 +1541,16 @@ export function opSync<T extends object>(
     liveAt: (path) => conv.liveAt(path),
     appliedFrontier: () => conv.appliedFrontier(),
     commitScope: (frontier, fn) => {
-      log.flush(); // earlier pending writes emit against the live frontier, not this one
+      log.flush(); // earlier pending writes emit against the frontier in force, not this one
+      const outer = scopeFrontier;
       scopeFrontier = frontier;
       try {
         fn();
         log.flush(); // stamp + register the scoped writes now, while the frontier is frozen
       } finally {
-        scopeFrontier = undefined;
+        // restore, never clear: a scope opened inside another (a fork commit inside a manager
+        // emission) hands the outer one back its frontier for the writes that follow
+        scopeFrontier = outer;
       }
     },
     watermark: () => Object.fromEntries(versions),

@@ -283,6 +283,15 @@ Persist `state.frontier` with the checkpoint and hand it back as `snapshot.front
 frontier is the stamp compaction has settled past; a room that forgets it readmits the very
 writes it used to drop, which is how a pruned value comes back from the dead.
 
+`relay.unload(room)` is the other half of the same contract: it drops a quiescent room from
+memory, so a relay serving thousands of them holds only the ones somebody is in. It refuses a
+room with members and one whose release queue still owes a client a message, so nobody is
+dropped mid-answer. Everything else is the adapter's promise — that what the room held is
+already on the substrate, and that the name is hydrated from that substrate before it is served
+again. The next `hello` for an unloaded name gets a brand-new room at seq 0, so an adapter
+without that gate grows a second sequence space into an old journal, and the two then read as
+one history.
+
 ### Writes the relay refuses without ejecting anyone
 
 Some envelopes are neither valid nor an offence. They are dropped silently and reported through

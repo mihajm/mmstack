@@ -196,6 +196,17 @@ export type Relay = {
    * it. Load asynchronously at the adapter layer, then hydrate synchronously.
    */
   hydrate(name: string, snapshot: RoomSnapshot): boolean;
+  /**
+   * Drop a quiescent room from memory, so a relay holding thousands of them keeps only the ones
+   * somebody is in. The ADAPTER promises everything the room holds is already on its substrate —
+   * the relay cannot know what a journal has written — and promises to hydrate it from that
+   * substrate before serving the name again: a fresh room under a persisted name seeds a new
+   * sequence space into an old history, and the two then read as one.
+   *
+   * Refused (`false`) for a room with members, or with messages its release queue has not let go
+   * of yet, so no client is dropped mid-answer; and for a name this relay is not holding.
+   */
+  unload(name: string): boolean;
 };
 
 /**
@@ -497,6 +508,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             journal: room.journal.length,
           }
         : undefined;
+    },
+    unload: (name) => {
+      const room = rooms.get(name);
+      if (!room || room.members.size > 0 || room.release.busy()) return false;
+      rooms.delete(name);
+      return true;
     },
     hydrate: (name, snapshot) => {
       const room = roomOf(name);

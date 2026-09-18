@@ -2524,3 +2524,98 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
     expect(c!.got.filter((m) => m.t === 'env')).toHaveLength(0);
   });
 });
+
+describe('createRelay: unloading a quiescent room', () => {
+  const join = (relay: ReturnType<typeof createRelay>, origin: string) => {
+    const sock = socket();
+    const conn = relay.connect(sock, { writer: origin });
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin,
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
+    return { sock, conn };
+  };
+  const write = (conn: RelayConnection, origin: string, version: number) =>
+    conn.receive({
+      t: 'env',
+      room: 'r',
+      env: {
+        proto: MESH_PROTO_VERSION,
+        origin,
+        writer: origin,
+        version,
+        hlc: { p: version, l: 0 },
+        policyVersion: 0,
+        ops: [set(['x'], version)],
+      },
+    });
+
+  it('refuses a room somebody is in, and a name it is not holding', () => {
+    const relay = createRelay();
+    const a = join(relay, 'a');
+    write(a.conn, 'a', 1);
+    expect(relay.unload('r')).toBe(false);
+    expect(relay.unload('never-heard-of')).toBe(false);
+    expect(relay.room('r')?.seq).toBe(1);
+    a.conn.disconnect();
+    expect(relay.unload('r')).toBe(true);
+  });
+
+  it('refuses while a durability promise is pending, and allows it once that has landed', async () => {
+    const held: Deferred[] = [];
+    const relay = createRelay({
+      onCommit: () => {
+        const d = deferred();
+        held.push(d);
+        return d.promise;
+      },
+    });
+    const a = join(relay, 'a');
+    write(a.conn, 'a', 1);
+    a.conn.disconnect();
+
+    expect(relay.unload('r')).toBe(false);
+    held[0].resolve();
+    await settle();
+    expect(relay.unload('r')).toBe(true);
+    expect(relay.room('r')).toBeUndefined();
+  });
+
+  /**
+   * The reason the adapter's hydration gate exists: the relay keeps nothing, so the next hello
+   * for an unloaded name starts a brand-new sequence space. An adapter that lets that reach a
+   * persisted name grows two histories into one journal.
+   */
+  it('gives the next hello a fresh room at seq 0, which is why an adapter must re-hydrate before serving', () => {
+    const relay = createRelay();
+    const a = join(relay, 'a');
+    write(a.conn, 'a', 1);
+    write(a.conn, 'a', 2);
+    expect(relay.room('r')?.seq).toBe(2);
+    a.conn.disconnect();
+
+    expect(relay.unload('r')).toBe(true);
+    expect(relay.room('r')).toBeUndefined();
+
+    const b = join(relay, 'b');
+    expect(welcomeOfSocket(b.sock)?.seq).toBe(0);
+    expect(relay.room('r')?.seq).toBe(0);
+  });
+
+  it('takes a hydrated snapshot after an unload, since the name is free again', () => {
+    const relay = createRelay();
+    const a = join(relay, 'a');
+    write(a.conn, 'a', 1);
+    a.conn.disconnect();
+    expect(relay.hydrate('r', { seq: 9 })).toBe(false);
+    expect(relay.unload('r')).toBe(true);
+    expect(relay.hydrate('r', { seq: 9 })).toBe(true);
+    expect(relay.room('r')?.seq).toBe(9);
+  });
+});
+
+const welcomeOfSocket = (sock: ReturnType<typeof socket>) =>
+  sock.sent.find((m) => m.t === 'welcome');

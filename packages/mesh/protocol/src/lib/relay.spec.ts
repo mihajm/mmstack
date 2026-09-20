@@ -2605,6 +2605,48 @@ describe('createRelay: unloading a quiescent room', () => {
     expect(relay.room('r')?.seq).toBe(0);
   });
 
+  /**
+   * A rejected durability promise stalls the room for good: the failed head stays queued, every
+   * later answer queues behind it, and nothing is ever released again. The adapter, which knows its
+   * substrate refused the write and holds the truth, may DISCARD the queue and drop the room; a
+   * queue that is merely pending is not its to throw away, and a room with members never is.
+   */
+  it('drops a stalled room only when the adapter says discard, never a pending one', async () => {
+    const held: Deferred[] = [];
+    const relay = createRelay({
+      onCommit: () => {
+        const d = deferred();
+        held.push(d);
+        return d.promise;
+      },
+    });
+    const a = join(relay, 'a');
+    write(a.conn, 'a', 1);
+    write(a.conn, 'a', 2);
+
+    /** Pending, not stalled: discard is refused too. */
+    expect(relay.room('r')?.stalled).toBe(false);
+    a.conn.disconnect();
+    expect(relay.unload('r', { discard: true })).toBe(false);
+
+    held[0].reject(new Error('lost the head'));
+    await settle();
+    expect(relay.room('r')?.stalled).toBe(true);
+    expect(relay.unload('r')).toBe(false);
+
+    /** Members present: still refused, whatever the option says. */
+    const b = join(relay, 'b');
+    expect(relay.unload('r', { discard: true })).toBe(false);
+    b.conn.disconnect();
+
+    expect(relay.unload('r', { discard: true })).toBe(true);
+    expect(relay.room('r')).toBeUndefined();
+    /** The second promise was never awaited: nothing behind the failed head was released. */
+    held[1].resolve();
+    await settle();
+    expect(relay.room('r')).toBeUndefined();
+  });
+
   it('takes a hydrated snapshot after an unload, since the name is free again', () => {
     const relay = createRelay();
     const a = join(relay, 'a');

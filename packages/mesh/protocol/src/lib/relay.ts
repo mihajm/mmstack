@@ -184,6 +184,13 @@ export type RoomInfo = {
   readonly seq: number;
   readonly members: number;
   readonly journal: number;
+  /**
+   * A durability promise for this room rejected, so its release queue has stopped: nothing queued
+   * behind the failed head will ever be released, and every new answer queues behind it. The
+   * adapter reads this to decide between refusing the room and dropping it (`unload` with
+   * `discard`).
+   */
+  readonly stalled: boolean;
 };
 
 export type Relay = {
@@ -205,8 +212,16 @@ export type Relay = {
    *
    * Refused (`false`) for a room with members, or with messages its release queue has not let go
    * of yet, so no client is dropped mid-answer; and for a name this relay is not holding.
+   *
+   * `discard` is the one exception, for a room whose release queue has STALLED on a rejected
+   * durability promise: the adapter knows its substrate refused the write (a lost head, a row
+   * that already existed) and that the substrate, not this memory, holds the truth. Nothing queued
+   * behind the failed head was ever acknowledged, so dropping it loses nothing a client is not
+   * already holding to resend. Still refused with members present, and for a queue that is merely
+   * pending rather than stalled — a promise that may yet resolve is not the adapter's to throw
+   * away.
    */
-  unload(name: string): boolean;
+  unload(name: string, options?: { readonly discard?: boolean }): boolean;
 };
 
 /**
@@ -220,6 +235,10 @@ type Release = {
   submit(run: () => void, done?: Promise<void>, env?: SeqEnvelope): void;
   /** Something is queued or in flight: a fresh answer must queue behind it. */
   busy(): boolean;
+  /** A durability promise rejected; the queue will never drain on its own again. */
+  stalled(): boolean;
+  /** Drops everything queued without releasing it. Only meaningful once stalled. Answers how many. */
+  discard(): number;
 };
 
 const createRelease = (
@@ -272,6 +291,12 @@ const createRelease = (
       if (!stalled) void drain();
     },
     busy: () => draining || queue.length > 0,
+    stalled: () => stalled,
+    discard: () => {
+      const dropped = queue.length;
+      queue.length = 0;
+      return dropped;
+    },
   };
 };
 
@@ -506,12 +531,17 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             seq: room.seq,
             members: room.members.size,
             journal: room.journal.length,
+            stalled: room.release.stalled(),
           }
         : undefined;
     },
-    unload: (name) => {
+    unload: (name, options) => {
       const room = rooms.get(name);
-      if (!room || room.members.size > 0 || room.release.busy()) return false;
+      if (!room || room.members.size > 0) return false;
+      if (room.release.busy()) {
+        if (options?.discard !== true || !room.release.stalled()) return false;
+        room.release.discard();
+      }
       rooms.delete(name);
       return true;
     },

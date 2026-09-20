@@ -292,6 +292,15 @@ again. The next `hello` for an unloaded name gets a brand-new room at seq 0, so 
 without that gate grows a second sequence space into an old journal, and the two then read as
 one history.
 
+A room whose durability promise REJECTED is stalled: the failed head stays queued, every later
+answer queues behind it, and nothing is released again — including the welcome, so the room
+answers nobody. `room(name).stalled` says so, and `relay.unload(room, { discard: true })` is the
+adapter's one way out: it drops a stalled room with no members and discards the queue, which is
+safe because nothing behind a failed head was ever acknowledged, so every client still holds
+what it sent. A queue that is merely pending is refused even with `discard` — a promise that may
+yet resolve is not the adapter's to throw away — and so is a room with members. The adapter
+then re-hydrates the name from the substrate, which is where the truth was all along.
+
 ### Writes the relay refuses without ejecting anyone
 
 Some envelopes are neither valid nor an offence. They are dropped silently and reported through

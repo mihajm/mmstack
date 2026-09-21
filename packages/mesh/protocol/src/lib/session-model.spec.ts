@@ -493,6 +493,41 @@ describe('session model: pinned', () => {
     expect(a.applied.size).toBe(0);
     expect(relay.retained().size).toBe(0);
   });
+
+  it('a peer that hands on its own unacknowledged write leaves the receiver apart from the room', () => {
+    const relay = relayModel(3);
+    const a = sessionModel(relay, 'A', {});
+    const b = sessionModel(relay, 'B', {});
+    a.connect();
+    b.connect();
+    settle([a, b]);
+    a.disconnect();
+    a.write('x', 0); // never reaches the relay, and A does not come back
+    const own = [...a.unacked.values()][0];
+    b.fold({ ...own, seq: 0 }); // handed over a peer channel, unsequenced
+    settle([b]);
+    // B shows a write the room never took, and nothing the relay will ever send corrects it
+    expect(check(relay, [b], 'forwarded own write')).toContain(
+      'B applies {g1:A#1} vs relay {}',
+    );
+  });
+
+  it('a sequenced envelope handed on by a peer is the relay delivery arriving early, nothing more', () => {
+    const relay = relayModel(3);
+    const a = sessionModel(relay, 'A', {});
+    const b = sessionModel(relay, 'B', {});
+    a.connect();
+    b.connect();
+    settle([a, b]);
+    a.write('x', 0); // sequenced: the echo is in A's inbox, B's copy is still in flight
+    const echo = relay.inbox('A')?.find((msg) => msg.t === 'env');
+    if (echo?.t !== 'env') throw new Error('no echo');
+    b.fold(echo.env); // the peer channel wins the race
+    expect(check(relay, [b], 'early')).toBeNull();
+    settle([a, b]); // the relay copy lands on top of it
+    expect(check(relay, [a, b], 'settled')).toBeNull();
+    expect([...b.applied]).toEqual(['g1:A#1']);
+  });
 });
 
 describe('session model: random schedules', () => {

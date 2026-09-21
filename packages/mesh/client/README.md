@@ -450,6 +450,14 @@ signaling and membership. Peers exchange watermarks when a channel opens and cat
 up pairwise. It takes an injectable connector, defaulting to a `RTCPeerConnection` adapter with
 perfect-negotiation handling built in.
 
+It is a topology of its own, without a relay's admission: no sequence, no generation, no
+refusals. Do not run it beside a relay-backed `meshSync` over the same document. If a peer channel
+ever carries document envelopes next to a relay, the rule is that a peer hands on only envelopes
+the relay has sequenced, never its own unacknowledged writes: a sequenced envelope arriving early
+is the relay's delivery arriving early, while an unacknowledged one that the relay then refuses,
+or never sees, leaves the receiver showing a write the room does not hold. Ephemeral traffic that
+is not document state (cursors, presence) is outside this rule.
+
 ```ts
 import { webRtcMesh, webSocketTransport } from '@mmstack/mesh';
 

@@ -7,7 +7,12 @@ export {
   type PolicyViolation,
   type PrincipalCtx,
 } from './lib/policy';
-export { createRanges, type Ranges } from './lib/ranges';
+export {
+  createRanges,
+  recordAdmission,
+  type AdmissionEvidence,
+  type Ranges,
+} from './lib/ranges';
 export { createRegisterStore, type RegisterStore } from './lib/register';
 export { validateEnvelope } from './lib/validate';
 export {

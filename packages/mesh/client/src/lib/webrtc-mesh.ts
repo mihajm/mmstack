@@ -167,6 +167,10 @@ type Peer = {
  * carry over intact: a late joiner is indistinguishable from a peer that saw every
  * envelope. Two peers that each hold envelopes the other lacks keep their convergent
  * go-forward guarantees but do not exchange the missed envelopes retroactively.
+ *
+ * There is no relay admission here: no sequence, no generation, no refusals. Beside a
+ * relay-backed session over the same document a peer channel may hand on only envelopes the
+ * relay has sequenced, never a peer's own unacknowledged writes.
  */
 export function webRtcMesh<T extends object>(
   source: WritableSignal<T>,

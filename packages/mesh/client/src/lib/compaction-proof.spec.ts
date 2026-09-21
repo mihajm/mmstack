@@ -160,6 +160,10 @@ type Replica = {
 
 type Admission = { settled: Record<string, Hlc>; nextVersion: Map<string, number>; admitted: Set<string> };
 
+/** What the run varies about the admission rule, to show which parts of it the theorem rests on. */
+type Rule = { readonly orderGate: boolean };
+const RELAY_RULE: Rule = { orderGate: true };
+
 type RelayPair = Admission & {
   u: Store;
   c: Store;
@@ -178,25 +182,33 @@ const cloneAdmission = (a: Admission): Admission => ({
 
 const keyOfEnv = (e: OpEnvelope) => `${e.origin}#${e.version}`;
 
-/** Deliver with the C5 rule: a duplicate is refused, a fresh version is admitted; the settled
- *  vector advances only over a contiguous prefix. Returns whether it was admitted. */
-const admit = (
-  r: { settled: Record<string, Hlc>; nextVersion: Map<string, number>; admitted: Set<string> },
-  e: OpEnvelope,
-): boolean => {
+/** The highest version of an origin this side has admitted, 0 when none. */
+const maxOf = (r: Admission, origin: string): number => {
+  let max = 0;
+  for (const key of r.admitted) {
+    const [o, v] = key.split('#');
+    if (o === origin) max = Math.max(max, Number(v));
+  }
+  return max;
+};
+
+/**
+ * Deliver with the relay's rule. A duplicate is refused; a version below the origin's maximum is
+ * refused as out of order; anything else is admitted. The settled stamp follows the origin's FIRST
+ * contiguous run of admitted versions, wherever that run starts: an origin that enters a
+ * generation at version n (it lived through a cut, or its first envelope was the cut) settles
+ * from n, not from 1. That anchor is sound only because of the order gate — nothing below an
+ * admitted version is ever admitted later — and `rule.orderGate: false` exists to show it.
+ * Returns whether the envelope was admitted.
+ */
+const admit = (r: Admission, e: OpEnvelope, rule: Rule = RELAY_RULE): boolean => {
   if (r.admitted.has(keyOfEnv(e))) return false;
+  if (rule.orderGate && e.version < maxOf(r, e.origin)) return false;
   r.admitted.add(keyOfEnv(e));
-  const next = r.nextVersion.get(e.origin) ?? 1;
-  if (e.version === next) {
-    // advance over every already-admitted successor too
-    let v = e.version;
-    let stamp = e.hlc;
-    while (r.admitted.has(`${e.origin}#${v + 1}`)) {
-      v += 1;
-      stamp = stamps.get(`${e.origin}#${v}`) as Hlc;
-    }
-    r.nextVersion.set(e.origin, v + 1);
-    r.settled[e.origin] = stamp;
+  const next = r.nextVersion.get(e.origin);
+  if (next === undefined || e.version === next) {
+    r.nextVersion.set(e.origin, e.version + 1);
+    r.settled[e.origin] = e.hlc;
   }
   return true;
 };
@@ -216,9 +228,9 @@ const stampOf = (fold: Fold): unknown =>
 /** Retained representation: siblings + watermarks across every register (what GC removes). */
 const sizeOf = (regs: ReturnType<Store['checkpoint']>): number =>
   regs.reduce((n, r) => n + r.siblings.length + Object.keys(r.water).length, 0);
-const collected = { u: 0, c: 0, recovered: 0 };
+const collected = { u: 0, c: 0, recovered: 0, stale: 0, lateEntries: 0 };
 
-function run(seed: number, steps: number, withSettle: boolean): string | null {
+function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELAY_RULE): string | null {
   const rnd = mulberry32(seed);
   stamps.clear();
   const origins = ['A', 'B', 'C'];
@@ -239,7 +251,17 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
   const cursor = new Map<string, number>(); // `${from}>${to}` → next index to deliver
   const allDots: { path: readonly Key[]; dot: Dot }[] = [];
   let clock = 100;
-  const versions = new Map<string, number>(origins.map((o) => [o, 0]));
+  // an origin need not enter the generation at version 1: one that lived through a cut carries its
+  // counter on, and a room's creator enters at 2 because its first envelope was the cut
+  const entry = (): number => [0, 0, 1, 4, 9][Math.floor(rnd() * 5)];
+  const versions = new Map<string, number>(origins.map((o) => [o, entry()]));
+  // a writer with no fold of its own, whose configuration breaks per-origin order: now and then it
+  // sends a version BELOW the one it entered at, stamped older than everything it sent since
+  const GHOST = 'G';
+  const ghostEntry = 5 + Math.floor(rnd() * 4);
+  let ghostVersion = ghostEntry;
+  let ghostStale = 0;
+  authored.set(GHOST, []);
 
   const observe = (): string | null => {
     for (const r of replicas.values()) {
@@ -293,8 +315,8 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
   };
 
   const deliver = (e: OpEnvelope, to: Replica | RelayPair) => {
-    if (!('origin' in to) && to.r && admit(to.r.admission, e)) to.r.store.ingest(e); // C8: the recovered twin keeps pace
-    if (!admit(to, e)) return; // C5: duplicate refused, never ingested
+    if (!('origin' in to) && to.r && admit(to.r.admission, e, rule)) to.r.store.ingest(e); // C8: the recovered twin keeps pace
+    if (!admit(to, e, rule)) return; // C5: duplicate or out-of-order refused, never ingested
     to.u.ingest(e);
     to.c.ingest(e);
     if (!('origin' in to)) to.log.push(e);
@@ -331,14 +353,27 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
       rep.admitted.add(keyOfEnv(e));
       rep.u.ingest(e, { local: true });
       rep.c.ingest(e, { local: true });
-      const next = rep.nextVersion.get(o) ?? 1;
-      if (v === next) {
+      const next = rep.nextVersion.get(o);
+      if (next === undefined || v === next) {
         rep.nextVersion.set(o, v + 1);
         rep.settled[o] = hlc;
       }
+    } else if (r < 0.42) {
+      // the ghost writes: usually its next version, sometimes a stale one from below its entry
+      const path = PATHS[Math.floor(rnd() * PATHS.length)];
+      const stale = ghostVersion > ghostEntry && ghostStale < ghostEntry - 1 && rnd() < 0.3;
+      clock += 1;
+      const v = stale ? ++ghostStale : ++ghostVersion;
+      const hlc = stale ? { p: 1 + ghostStale, l: 0 } : { p: clock, l: 0 };
+      const ops: SyncOp[] = [{ kind: 'set', path, next: `ghost-${v}`, cites: [], epoch: 0 }];
+      const e = env(GHOST, v, hlc, ops);
+      stamps.set(keyOfEnv(e), hlc);
+      (authored.get(GHOST) as OpEnvelope[]).push(e);
+      allDots.push({ path, dot: { origin: GHOST, hlc } });
     } else if (r < 0.8) {
       // deliver the next envelope from one origin to one target (per-origin FIFO, arbitrary across origins)
-      const from = origins[Math.floor(rnd() * origins.length)];
+      const senders = [...origins, GHOST];
+      const from = senders[Math.floor(rnd() * senders.length)];
       const targets: (Replica | RelayPair)[] = [...replicas.values()].filter((x) => x.origin !== from);
       targets.push(relay);
       const to = targets[Math.floor(rnd() * targets.length)];
@@ -361,7 +396,7 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
       } else {
         // over-eager: every origin taken as settled at the latest stamp seen, received or not
         const latest = [...stamps.values()].reduce<Hlc>((m, h) => (compareHlc(h, m) > 0 ? h : m), { p: 0, l: 0 });
-        to.c.settle({ A: latest, B: latest, C: latest });
+        to.c.settle({ A: latest, B: latest, C: latest, G: latest });
       }
     } else if (r < 0.975) {
       // C8: checkpoint the collecting relay twin now, or recover from an earlier checkpoint by
@@ -374,7 +409,7 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
         store.load(relay.checkpoint.registers);
         const admission = cloneAdmission(relay.checkpoint.admission);
         for (const e of relay.log.slice(relay.checkpoint.at)) {
-          if (admit(admission, e)) store.ingest(e);
+          if (admit(admission, e, rule)) store.ingest(e);
           if (rnd() < 0.3) store.settle(admission.settled);
         }
         relay.r = { store, admission };
@@ -412,6 +447,8 @@ function run(seed: number, steps: number, withSettle: boolean): string | null {
   collected.u += sizeOf(relay.u.checkpoint());
   collected.c += sizeOf(relay.c.checkpoint());
   if (relay.r) collected.recovered += 1;
+  collected.stale += ghostStale;
+  collected.lateEntries += origins.filter((o) => (authored.get(o) as OpEnvelope[])[0]?.version > 1).length;
   return null;
 }
 
@@ -426,6 +463,8 @@ describe('compaction proof: observational equivalence', () => {
     collected.u = 0;
     collected.c = 0;
     collected.recovered = 0;
+    collected.stale = 0;
+    collected.lateEntries = 0;
     for (let seed = 0; seed < 600; seed++) {
       const v = run(seed, 80, true);
       expect(v).toBeNull();
@@ -434,5 +473,14 @@ describe('compaction proof: observational equivalence', () => {
     expect(collected.c).toBeLessThan(collected.u * 0.9);
     // and recovery (C8) was exercised: a recovered relay twin ran alongside in a good share of runs
     expect(collected.recovered).toBeGreaterThan(250);
+    // origins that entered above version 1 wrote, and a writer sent versions from below its entry
+    expect(collected.lateEntries).toBeGreaterThan(600);
+    expect(collected.stale).toBeGreaterThan(300);
+  });
+
+  it('the first-run anchor rests on the order gate: admitting a version below an admitted one is observable', () => {
+    let seen = 0;
+    for (let seed = 0; seed < 200; seed++) if (run(seed, 80, true, { orderGate: false }) !== null) seen++;
+    expect(seen).toBeGreaterThan(0);
   });
 });

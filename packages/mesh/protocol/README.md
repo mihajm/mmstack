@@ -282,9 +282,14 @@ there to make those delta answers possible; the room is complete without it.
 Persist `state.ranges` and `state.settled` with the checkpoint and hand them back. The ranges are
 the room's admission evidence — which versions of each origin it holds — and are what lets it
 answer a resend as the acknowledgement it is instead of sequencing the write twice. The settled
-vector is, per origin, the stamp of the last contiguously admitted version: nothing new from that
-origin can arrive at or below it, so superseded siblings and citation watermarks down there are
-garbage, and the relay collects them when its delta tail trims. The rule removes only what no
+vector is, per origin, the stamp of the last version in its first contiguous run of admitted
+versions: nothing new from that origin can arrive at or below it, so superseded siblings and
+citation watermarks down there are garbage, and the relay collects them when its delta tail
+trims. The run starts wherever the origin entered the generation — at 1 for a fresh origin, higher
+for one that lived through a cut, and at 2 for a room's creator when its first envelope was the
+migration that cut. That is sound because a version below one already admitted is refused as out
+of order, never admitted later; an admission rule that filled holes would have to anchor the run
+at the first version the origin could have written instead. The rule removes only what no
 future write can observe — tombstones and epoch baselines are never collected — so a room that
 collected differently across a restart is indistinguishable to every client; what recovery must
 carry exactly is the evidence: registers with their baselines, ranges, settled vector, instance.

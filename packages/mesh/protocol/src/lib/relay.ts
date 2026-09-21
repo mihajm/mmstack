@@ -5,7 +5,7 @@ import {
   type PolicyViolation,
   type PrincipalCtx,
 } from './policy';
-import { createRanges, type Ranges } from './ranges';
+import { createRanges, recordAdmission, type Ranges } from './ranges';
 import { createRegisterStore, type RegisterStore } from './register';
 import { validateEnvelope } from './validate';
 import {
@@ -327,8 +327,6 @@ type Room = {
   registers: RegisterStore;
   /** Admitted versions per origin: the admission evidence. */
   ranges: Map<string, Ranges>;
-  /** Stamps of admitted versions above an origin's contiguous prefix, until the prefix reaches them. */
-  above: Map<string, Map<number, Hlc>>;
   /** Per origin, the stamp of the last contiguously admitted version. */
   settled: Map<string, Hlc>;
   journal: SeqEnvelope[];
@@ -379,7 +377,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         schemaVersion: 0,
         registers: createRegisterStore(),
         ranges: new Map(),
-        above: new Map(),
         settled: new Map(),
         journal: [],
         members: new Set(),
@@ -486,11 +483,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
 
   const hlcLte = (a: Hlc, b: Hlc): boolean =>
     a.p < b.p || (a.p === b.p && a.l <= b.l);
-  const rangesOf = (room: Room, origin: string): Ranges => {
-    let r = room.ranges.get(origin);
-    if (!r) room.ranges.set(origin, (r = createRanges()));
-    return r;
-  };
   const wmOf = (room: Room): Record<string, number> => {
     const out: Record<string, number> = {};
     for (const [origin, r] of room.ranges) out[origin] = r.max();
@@ -500,29 +492,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     const out: Record<string, readonly VersionRange[]> = {};
     for (const [origin, r] of room.ranges) out[origin] = r.toJSON();
     return out;
-  };
-  /** Record an admitted version and advance the origin's settled stamp when its prefix grows. */
-  const admitVersion = (room: Room, env: OpEnvelope): void => {
-    const ranges = rangesOf(room, env.origin);
-    const before = ranges.prefix();
-    ranges.add(env.version);
-    const after = ranges.prefix();
-    const above = room.above.get(env.origin);
-    if (after > before) {
-      // the prefix grew: its last version's stamp is this envelope's, or one recorded earlier
-      // above the old prefix
-      let stamp = env.hlc;
-      if (above) {
-        const recorded = above.get(after);
-        if (recorded) stamp = recorded;
-        for (const v of [...above.keys()]) if (v <= after) above.delete(v);
-      }
-      room.settled.set(env.origin, stamp);
-      return;
-    }
-    // admitted above a hole: keep its stamp until the prefix reaches it
-    if (above) above.set(env.version, env.hlc);
-    else room.above.set(env.origin, new Map([[env.version, env.hlc]]));
   };
   const settledRecord = (room: Room): Record<string, Hlc> =>
     Object.fromEntries(room.settled);
@@ -837,13 +806,15 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           ) {
             return refuse('schema');
           }
-          const ranges = rangesOf(room, env.origin);
+          // read, never opened here: an origin gets an entry when a version of its is admitted,
+          // so a refused or ejected writer leaves nothing for a checkpoint to carry
+          const ranges = room.ranges.get(env.origin);
           // admission evidence: a version the room holds is a resend, and the answer is its
           // acknowledgement — never a second sequence number
-          if (ranges.has(env.version)) return refuse('duplicate');
+          if (ranges?.has(env.version)) return refuse('duplicate');
           // below the maximum yet never admitted: not a loss in transit on one FIFO connection
           // with in-order resend, so a configuration that violates that assumption
-          if (env.version < ranges.max()) return refuse('order');
+          if (ranges && env.version < ranges.max()) return refuse('order');
           // after the refusals: a refused envelope never ingests, so its epochs and cites gate
           // nothing (an outdated client stays outdated, not ejected)
           const admission = checkAdmission(msg.room, room, env, ctx, {
@@ -867,13 +838,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             room.instance = mintInstance();
             room.registers.reset();
             room.ranges.clear();
-            room.above.clear();
             room.settled.clear();
             room.journal = [seqEnv];
             bumped = true;
           }
           room.registers.ingest(env);
-          if (!bumped) admitVersion(room, env);
+          if (!bumped) recordAdmission(room, env);
           // garbage collection runs when the delta tail trims, on the settled vector: it removes
           // only what no future write can observe, so the notice is parity for clients, not a gate
           let moved: Readonly<Record<string, Hlc>> | undefined;

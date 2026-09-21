@@ -1,4 +1,4 @@
-import type { VersionRange } from './wire';
+import type { Hlc, VersionRange } from './wire';
 
 /**
  * The admitted versions of one origin, as disjoint inclusive ranges in ascending order: the
@@ -13,7 +13,14 @@ export type Ranges = {
   add(version: number): boolean;
   /** The highest admitted version, 0 when none. */
   max(): number;
-  /** The end of the range that starts at 1 — the contiguously admitted prefix — or 0. */
+  /**
+   * The end of the first range — the origin's first contiguous run of admitted versions — or 0.
+   * The run starts wherever the origin entered the generation: at 1 for a fresh origin, higher
+   * for one that lived through a cut or whose first envelope was the cut. Reading a settled
+   * stamp off it is sound only while a version below an admitted one is never admitted later
+   * (the relay refuses it as out of order); an admission rule that fills holes must anchor this
+   * at the version the origin could first have written, not at the first one that arrived.
+   */
   prefix(): number;
   toJSON(): readonly VersionRange[];
 };
@@ -45,7 +52,34 @@ export function createRanges(initial: readonly VersionRange[] = []): Ranges {
       return true;
     },
     max: () => (ranges.length ? ranges[ranges.length - 1][1] : 0),
-    prefix: () => (ranges.length && ranges[0][0] === 1 ? ranges[0][1] : 0),
+    prefix: () => (ranges.length ? ranges[0][1] : 0),
     toJSON: () => ranges.map(([a, b]) => [a, b] as const),
   };
+}
+
+/** A room's admission evidence as it is held while the room runs. */
+export type AdmissionEvidence = {
+  readonly ranges: Map<string, Ranges>;
+  readonly settled: Map<string, Hlc>;
+};
+
+/**
+ * Records one admitted envelope in a room's evidence: its version joins the origin's ranges, and
+ * the origin's settled stamp becomes this envelope's when its first contiguous run grew. The
+ * relay runs this on every envelope it sequences; anything that rebuilds a room from a checkpoint
+ * and the envelopes admitted since (recovery) runs the same step over them, in sequence order,
+ * so the two cannot drift apart. The envelope that cuts a generation is not recorded: it belongs
+ * to the generation it closed.
+ */
+export function recordAdmission(
+  evidence: AdmissionEvidence,
+  env: { readonly origin: string; readonly version: number; readonly hlc: Hlc },
+): void {
+  let held = evidence.ranges.get(env.origin);
+  if (!held) evidence.ranges.set(env.origin, (held = createRanges()));
+  const before = held.prefix();
+  held.add(env.version);
+  // the run grows only by the version just admitted: one below the maximum is refused as out of
+  // order before it gets here, so a hole never fills and no later stamp is owed
+  if (held.prefix() > before) evidence.settled.set(env.origin, env.hlc);
 }

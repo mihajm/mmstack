@@ -1077,6 +1077,69 @@ describe('createRelay: settled notice', () => {
   });
 });
 
+describe('createRelay: an origin settles from the version it entered the generation at', () => {
+  const rig = () => {
+    let state: RoomState | undefined;
+    const drops: string[] = [];
+    const relay = createRelay({
+      onCommit: (_room, _env, s) => {
+        state = s;
+      },
+      onDrop: (_room, _env, reason) => drops.push(reason),
+    });
+    return { relay, drops, state: () => state as RoomState };
+  };
+
+  it("a room's creator: its first envelope cut the generation, so it enters at version 2 and settles from there", () => {
+    const { relay, state } = rig();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set([], { v: 1 })], { schemaVersion: 1 }); // version 1 cuts, and is not in the new ranges
+    a.env([set(['v'], 2)]);
+    a.env([set(['v'], 3)]);
+
+    expect(state().ranges).toEqual({ oa: [[2, 3]] });
+    expect(state().settled).toEqual({ oa: { p: 3, l: 0 } });
+  });
+
+  it('an origin that lived through a cut carries its counter on and settles from its next version', () => {
+    const { relay, state } = rig();
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set([], { v: 1 })]);
+    a.env([set(['v'], 2)]);
+    b.env([set([], { v: 'migrated' })], { schemaVersion: 1 });
+    expect(state().ranges).toEqual({});
+    expect(state().settled).toEqual({});
+
+    a.env([set(['v'], 3)]);
+    a.env([set(['v'], 4)]);
+
+    expect(state().ranges).toEqual({ oa: [[3, 4]] });
+    expect(state().settled).toEqual({ oa: { p: 4, l: 0 } });
+  });
+
+  it('a version below the one it entered at is refused as out of order, and the settled stamp does not move', () => {
+    const { relay, state, drops } = rig();
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    b.env([set([], { v: 0 })], { schemaVersion: 1 });
+    a.env([set(['v'], 5)], { version: 5 });
+    const before = state();
+
+    // older than everything the origin has sent here, which is what would undercut the stamp
+    a.env([set(['v'], 'stale')], { version: 2, hlc: { p: 0, l: 1 } });
+
+    expect(drops).toEqual(['order']);
+    expect(relay.room('r')).toMatchObject({ seq: before.seq });
+    expect(state().settled).toEqual({ oa: { p: 1, l: 0 } });
+  });
+});
+
 describe('createRelay: epoch-bump admission (canBump)', () => {
   it('tripwire: an unauthorized epoch RAISE ejects with "epoch-bump"; the whole envelope is rejected, never an op mid-log', () => {
     const violations: PolicyViolation[] = [];
@@ -1182,6 +1245,29 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     ]);
     expect(forger.sock.closed).toBe(true);
     expect(relay.room('r')).toMatchObject({ seq: 1 });
+  });
+
+  it('an ejected envelope leaves no admission evidence: its origin gets no ranges entry and no high-water mark', () => {
+    let state: RoomState | undefined;
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      onCommit: (_room, _env, s) => {
+        state = s;
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    const forger = client(relay, 'wf', 'of');
+    a.hello();
+    forger.hello();
+    a.env([set(['doc'], 'real')]);
+    forger.env([
+      set(['doc'], 'kill', { cites: [{ origin: 'oa', hlc: { p: 99, l: 0 } }] }),
+    ]);
+    a.env([set(['doc'], 'again')]);
+
+    // an empty entry would ride into every later checkpoint, one per origin ever ejected
+    expect(state?.ranges).toEqual({ oa: [[1, 2]] });
+    expect(state?.wm).toEqual({ oa: 2 });
   });
 
   it("admits a cite of a retained dot, and of an origin's OLDER dot its newer sibling already covers", () => {

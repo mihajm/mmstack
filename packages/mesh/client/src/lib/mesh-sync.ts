@@ -29,6 +29,7 @@ import {
   type SyncedFork,
   type SyncOp,
   type WritableSignalStore,
+  type Hlc,
 } from '@mmstack/primitives/core';
 import { meshSession, type MeshSession, type MeshStatus } from './session';
 import type { MeshTransportFactory } from './transport';
@@ -57,6 +58,11 @@ export type SyncHealth = {
    * so they are dropped (loudly) instead of being upgraded with fabricated citations.
    */
   readonly droppedOfflineWrites?: number;
+  /**
+   * Writes the relay refused on this session: they are not in the room. Each was handed to
+   * `onRefused` with its values, and the store was rehydrated from a fresh snapshot after it.
+   */
+  readonly refusedWrites?: number;
   /**
    * Received envelopes rejected as malformed by the deterministic well-formedness check (a bad id
    * or path segment, a non-integer version, an unknown op kind, a negative epoch, forged cites, a
@@ -101,6 +107,8 @@ export type MeshSyncOptions = {
   /** Register with the nearest transition scope so (re)connection surfaces as `pending`. */
   readonly register?: 'track' | 'suspend';
   readonly onEject?: (reason: string) => void;
+  /** A write the relay refused (see `MeshSessionHooks.onRefused`); the envelope carries its values. */
+  readonly onRefused?: (env: OpEnvelope, reason: 'generation' | 'schema' | 'order') => void;
   /**
    * Hold the connection until the local base is assembled. `meshSync` awaits this before it connects
    * (and before it restores an `outbox`), so a store hydrated from another source first (a worker
@@ -141,6 +149,12 @@ type PersistedOutbox = {
   readonly origin: string;
   readonly version: number;
   readonly envs: readonly OpEnvelope[];
+  /** The room generation the tail was written in; the first welcome decides whether it still holds. */
+  readonly instance?: string;
+  /** Emission epoch floors: a floor whose own sibling was collected has no other source on reload. */
+  readonly floors?: readonly { readonly path: readonly (string | number)[]; readonly epoch: number }[];
+  /** The last stamp minted: an acked, dropped tail still moved the clock. */
+  readonly clock?: Hlc;
 };
 
 /**
@@ -216,6 +230,7 @@ export function meshSync<T extends object>(
   const lastSyncedAt = signal<number | undefined>(undefined);
   const droppedOffline = signal(0);
   const acked = signal(true); // nothing has been written yet
+  const refused = signal(0);
   const droppedInvalid = signal(0);
   const peerMap = signal<ReadonlyMap<string, MeshPeer>>(new Map());
   const peers = computed(() => [...peerMap().values()]);
@@ -227,6 +242,7 @@ export function meshSync<T extends object>(
     const invalid = droppedInvalid();
     const extra = {
       ...(dropped > 0 ? { droppedOfflineWrites: dropped } : undefined),
+      ...(refused() > 0 ? { refusedWrites: refused() } : undefined),
       ...(invalid > 0 ? { droppedInvalidEnvelopes: invalid } : undefined),
     };
     switch (status()) {
@@ -255,10 +271,15 @@ export function meshSync<T extends object>(
 
   const doPersist = (): void => {
     if (closed || !opt.outbox || !started || !session) return;
+    const instance = session.instance();
+    const clock = sync.lastStamp();
     const payload: PersistedOutbox = {
       origin: sync.origin,
       version: sync.watermark()[sync.origin] ?? 0,
       envs: session.unackedEnvs(),
+      ...(instance ? { instance } : {}),
+      floors: sync.floors(),
+      ...(clock ? { clock } : {}),
     };
     void Promise.resolve(opt.outbox.store.set(opt.outbox.key, payload));
   };
@@ -302,6 +323,7 @@ export function meshSync<T extends object>(
     if (closed) return;
     sync = opSync(source, {
       writer: opt.writer,
+      instance: restore?.instance,
       policies: opt.policies,
       policyVersion,
       injector,
@@ -325,8 +347,18 @@ export function meshSync<T extends object>(
       ctx: opt.ctx,
       policyVersion,
       schemaVersion: opt.schemaVersion,
+      instance: restore?.instance,
       reconnect: opt.reconnect,
       hooks: {
+        onRefused: (env, reason) => {
+          refused.update((n) => n + 1);
+          opt.onRefused?.(env, reason);
+          if (isDevMode()) {
+            console.warn(
+              `[@mmstack/mesh] the relay refused a write (${reason}); it is not in the room and the store was rehydrated`,
+            );
+          }
+        },
         onStatus: (s, reason) => {
           if (s === 'ejected' || s === 'closed') {
             closed = true;
@@ -372,7 +404,7 @@ export function meshSync<T extends object>(
         }
       }
 
-      sync.restore(kept, restore.version); // → the session's subscribe repopulates its unacked tail for resend
+      sync.restore(kept, restore.version, restore.floors, restore.clock); // → the session's subscribe repopulates its unacked tail for resend
     }
     persistOutbox(true); // pin the freshly minted origin immediately, so a crash before any write is safe
     if (pendingPresence) {

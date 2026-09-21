@@ -66,7 +66,7 @@ const relay = createRelay({
   policyVersion: 1,
   policy: myOpPolicy, // optional, see below
   limits: { maxOpsPerEnvelope: 1024, maxEnvelopesPerSecond: 50 },
-  journalLimit: 1000, // envelopes kept for delta catch-up before compacting into register state
+  journalLimit: 1000, // envelopes kept for delta catch-up; trimming the tail is when settled evidence is collected
 });
 ```
 
@@ -157,9 +157,9 @@ the room would have taken.
 Two boundaries to be clear about. Policy gates writes, not reads: every member of a room sees
 the whole root, so the room is the confidentiality boundary, and data with different audiences
 belongs in different rooms. A `clear` op counts as a write at its path, so ACLs see a subtree
-replace's clear-group like any other write. And because the relay compacts envelopes into
+replace's clear-group like any other write. And because the relay retains envelopes as
 register state, it reads plaintext; end-to-end encryption where the server sees only
-ciphertext is incompatible with server-side compaction as designed. Encrypt the transport and
+ciphertext is incompatible with server-side retention as designed. Encrypt the transport and
 the stored data, but treat the relay as inside the trust boundary.
 
 ## Adapter recipes
@@ -219,7 +219,7 @@ rather than a storage engine, because the envelope already is the persistence re
 event-sourced journal is just `register checkpoint + envelopes`, compacted by re-checkpointing.
 
 `onCommit` fires synchronously after every envelope is sequenced and retained, with the
-envelope and the room's current `{ seq, instance, checkpoint(), wm, frontier, schemaVersion }`.
+envelope and the room's current `{ seq, instance, checkpoint(), wm, ranges, settled, schemaVersion }`.
 Append the envelope to your journal, and checkpoint the register state as often as you like.
 `checkpoint()` is a thunk — walking every register is the dominant per-commit cost, so it runs
 only when you ask, and it must be called inside the callback because it reads live state:
@@ -239,7 +239,7 @@ const relay = createRelay({
 
 Return nothing and the relay releases the envelope at once — the memory-adapter behaviour, and
 the default. Return a **promise** and the relay holds everything that carries that envelope (its
-echo, the frontier notice emitted with it, and any welcome answered while it is in flight) until
+echo, the settled notice emitted with it, and any welcome answered while it is in flight) until
 the promise resolves. Presence, signal, membership and ejection are not document state and always
 pass immediately.
 
@@ -268,7 +268,7 @@ members, so your load can race a fast client without corrupting a live sequence 
 const saved = await checkpoints.get(roomName);
 if (saved) {
   relay.hydrate(roomName, {
-    ...saved, // seq, instance, registers, wm
+    ...saved, // seq, instance, registers, ranges, settled
     journal: await journal.tail(roomName, saved.seq),
   });
 }
@@ -279,9 +279,23 @@ restart keep their sequence watermark and catch up with a cheap `delta` answer. 
 they fall back to a full snapshot, which is always safe. The optional journal tail is only
 there to make those delta answers possible; the room is complete without it.
 
-Persist `state.frontier` with the checkpoint and hand it back as `snapshot.frontier`. The
-frontier is the stamp compaction has settled past; a room that forgets it readmits the very
-writes it used to drop, which is how a pruned value comes back from the dead.
+Persist `state.ranges` and `state.settled` with the checkpoint and hand them back. The ranges are
+the room's admission evidence — which versions of each origin it holds — and are what lets it
+answer a resend as the acknowledgement it is instead of sequencing the write twice. The settled
+vector is, per origin, the stamp of the last contiguously admitted version: nothing new from that
+origin can arrive at or below it, so superseded siblings and citation watermarks down there are
+garbage, and the relay collects them when its delta tail trims. The rule removes only what no
+future write can observe — tombstones and epoch baselines are never collected — so a room that
+collected differently across a restart is indistinguishable to every client; what recovery must
+carry exactly is the evidence: registers with their baselines, ranges, settled vector, instance.
+
+Every room has a **generation**, its `instance` nonce. Every envelope carries the generation it
+was written in, and the relay refuses one from any other. A migration mints a new generation:
+registers, ranges and settled vector are dropped, every member is re-welcomed under the new
+nonce, and a client that learns it drops its own unacknowledged tail loudly and hydrates from the
+snapshot. That is the one place evidence is discarded on purpose, and the reason the fence must
+ride on the envelope: a nonce announced in welcomes alone cannot stop an envelope already in
+flight or a persisted outbox restored after the cut.
 
 `relay.unload(room)` is the other half of the same contract: it drops a quiescent room from
 memory, so a relay serving thousands of them holds only the ones somebody is in. It refuses a
@@ -303,13 +317,21 @@ then re-hydrates the name from the substrate, which is where the truth was all a
 
 ### Writes the relay refuses without ejecting anyone
 
-Some envelopes are neither valid nor an offence. They are dropped silently and reported through
-`onDrop(room, env, reason)`:
+Some envelopes are neither valid nor an offence. The relay answers the submitting connection
+with a `drop` message naming the origin, version and reason — never broadcast, never held behind
+durability — and reports the same through `onDrop(room, env, reason)`. A client resends its whole
+unacknowledged tail after every welcome, so every entry is classified one round trip later:
 
-| reason       | what happened                                                                                                                                                                                                                                |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `'schema'`   | a straggler stamped with a data shape older than the room's, arriving after a migration — its sender is outdated, not malicious                                                                                                              |
-| `'frontier'` | a write stamped at or below the room's compaction frontier. An honest offline writer produces one; every client's own receive gate refuses the same envelope, so the relay refusing it is what keeps the two sides retaining the same op set |
+| reason         | what happened                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'duplicate'`  | the room already holds this (origin, version): a resend after a lost echo. This IS the acknowledgement; the write is never sequenced a second time                                                                                              |
+| `'generation'` | written in another room generation (the `instance` on the envelope differs). Refused before any other evidence can answer, so an old generation's version numbers mean nothing in the new one                                                     |
+| `'schema'`     | a straggler stamped with a data shape older than the room's, arriving after a migration — its sender is outdated, not malicious                                                                                                                |
+| `'order'`      | a version below the origin's admitted maximum that was never admitted. On one FIFO connection with in-order resend that cannot be a loss in transit, so it is a configuration violating that assumption (two tabs on one origin without a lock) |
+
+A refused write is not in the room. The writer drops it locally, hands it to the application
+(the values are in the envelope) and hydrates from a snapshot; whether to write it again is the
+person's call.
 
 ## WebRTC signaling
 

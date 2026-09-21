@@ -41,6 +41,7 @@ function env(
 ): OpEnvelope {
   return {
     proto: OP_PROTO_VERSION,
+    instance: 'g',
     origin: stamp.origin ?? stamp.writer ?? 'o',
     writer: stamp.writer ?? 'w',
     version: stamp.version ?? 1,
@@ -627,7 +628,7 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     expect(root).toEqual({ k: 'REBORN' }); // epoch 3 > 2, no resurrection
   });
 
-  it('GC seam: prune drops settled state without changing the fold; the admission frontier rejects stragglers', () => {
+  it('GC seam: settle drops covered state at or below the settled stamp without changing the fold; nothing gates a straggler', () => {
     const conv = createConvergingApply();
     let root: unknown = {};
     const A = env([set(['v'], 'A')], { p: 5, writer: 'a', origin: 'a' });
@@ -644,12 +645,16 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     );
     expect(root).toEqual({ v: 'B' });
 
-    conv.prune({ p: 10, l: 0 }); // drops a's superseded sibling AND its watermark (state bounding)
+    conv.settle({ a: { p: 10, l: 0 } }); // a's superseded sibling AND its watermark go: a's prefix covers 5
     expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['b']); // fold-equivalent
+    expect(conv.checkpoint().find((r) => r.path[0] === 'v')?.water).toEqual({});
 
-    // a below-frontier straggler is rejected at admission, so pruning cannot resurrect it
-    expect(conv.ingest(A, { frontier: { p: 10, l: 0 } })).toEqual([]);
-    expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['b']);
+    // no stamp gate: a resend of A after collection would come back as a LIVE concurrent sibling
+    // (its supersession evidence is gone) — which is why the transport dedupes by version before
+    // the fold ever sees a duplicate (the relay's admission ranges, the client's watermark)
+    conv.ingest(A);
+    expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['a', 'b']);
+    expect(conv.materialize()).toEqual({ v: 'B' }); // still B: it is the later stamp
   });
 
   it('liveUnder reads the live registers at and under a path, shallow-first, prefix-safe, superseded excluded', () => {
@@ -691,7 +696,7 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     ]);
   });
 
-  it('appliedFrontier is the per-origin max HLC applied: raised by ingest and load, never lowered by prune, reset or a stale envelope', () => {
+  it('appliedFrontier is the per-origin max HLC applied: raised by ingest and load, never lowered by settle, reset or a stale envelope', () => {
     const conv = createConvergingApply();
     conv.ingest(env([set(['v'], 'A')], { p: 5, writer: 'a', origin: 'a' }));
     conv.ingest(
@@ -709,7 +714,7 @@ describe('createConvergingApply — dot-citation register semantics', () => {
     });
     conv.ingest(env([set(['v'], 'A0')], { p: 2, writer: 'a', origin: 'a' })); // older: vector unchanged
     expect(conv.appliedFrontier()['a']).toEqual({ p: 5, l: 0 });
-    conv.prune({ p: 10, l: 0 }); // a's superseded sibling is gone; what was observed is not
+    conv.settle({ a: { p: 10, l: 0 } }); // a's superseded sibling is gone; what was observed is not
     expect(conv.appliedFrontier()['a']).toEqual({ p: 5, l: 0 });
     expect(conv.liveAt(['v']).map((s) => s.origin)).toEqual(['b']);
 
@@ -753,6 +758,7 @@ describe('createConvergingApply — subtree replace/delete groups (clear)', () =
     stamp: { p: number; writer: string },
   ): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
+    instance: 'g',
     origin: stamp.writer,
     writer: stamp.writer,
     version: 1,
@@ -977,6 +983,7 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
       }
       const e: OpEnvelope = {
         proto: OP_PROTO_VERSION,
+        instance: 'g',
         origin: writer,
         writer,
         version: i + 1,
@@ -2202,8 +2209,8 @@ describe('createConvergingApply — path key integrity', () => {
   });
 });
 
-describe('createConvergingApply — prune bounds lone tombstones (GC finding 1)', () => {
-  it('reclaims lone winning tombstones below the frontier under set-then-delete key churn', () => {
+describe('createConvergingApply — settle keeps tombstones', () => {
+  it('keeps every lone tombstone under set-then-delete key churn; only the superseded sets and watermarks go', () => {
     const conv = createConvergingApply();
     conv.ingest(env([set([], {})], { p: 1, writer: 'seed', origin: 'seed' }));
     const N = 20;
@@ -2218,10 +2225,18 @@ describe('createConvergingApply — prune bounds lone tombstones (GC finding 1)'
         }),
       );
     }
-    // each key set then cited-deleted → each ['kᵢ'] register is a lone tombstone; nothing else
-    // materializes the key, so a below-frontier prune must reclaim every one of them
-    conv.prune({ p: 10 * N, l: 0 });
-    expect(conv.checkpoint().length).toBeLessThanOrEqual(1); // only the root set survives
+    // each key set then cited-deleted → each ['kᵢ'] register is a lone tombstone. A delayed older
+    // set under any of them would resurrect the key, so settle keeps them all — and drops the
+    // superseded sets and their watermarks, which nothing can observe any more
+    conv.settle({ w: { p: 10 * N, l: 0 }, seed: { p: 1, l: 0 } });
+    const regs = conv.checkpoint();
+    expect(regs.length).toBe(N + 1);
+    for (const reg of regs) {
+      if (reg.path.length === 0) continue;
+      expect(reg.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
+      expect(reg.water).toEqual({});
+    }
+    expect(conv.materialize()).toEqual({});
   });
 });
 
@@ -2336,8 +2351,8 @@ describe('opSync — hydrate reconciles a same-path conflict through the fold (c
   });
 });
 
-describe('createConvergingApply — prune reclaims nested lone tombstones (GC finding 2 parity)', () => {
-  it('drops an ancestor tombstone even when its descendant tombstone is collected the same pass', () => {
+describe('createConvergingApply — settle keeps nested tombstones', () => {
+  it('keeps an ancestor tombstone and its descendant tombstone alike', () => {
     const conv = createConvergingApply();
     conv.ingest(env([set([], {})], { p: 1, writer: 'oa', origin: 'oa' }));
     conv.ingest(
@@ -2352,14 +2367,15 @@ describe('createConvergingApply — prune reclaims nested lone tombstones (GC fi
     conv.ingest(
       env([del(['items', 'deep'], 9)], { p: 5, writer: 'oa', origin: 'oa' }),
     );
-    conv.prune({ p: 100, l: 0 });
+    conv.settle({ oa: { p: 100, l: 0 } });
     const paths = conv.checkpoint().map((c) => c.path.join('.'));
-    expect(paths).not.toContain('items'); // ancestor tombstone reclaimed, not stranded
-    expect(paths).not.toContain('items.deep');
+    expect(paths).toContain('items');
+    expect(paths).toContain('items.deep');
+    expect(conv.materialize()).toEqual({});
   });
 });
 
-describe('createConvergingApply — prune is fold-equivalent + bounds state (GC property)', () => {
+describe('createConvergingApply — settle is fold-equivalent + bounds covered state (GC property)', () => {
   // A small deterministic PRNG (mulberry32) so the sweep is reproducible.
   const rng = (seed: number) => () => {
     seed = (seed + 0x6d2b79f5) | 0;
@@ -2399,6 +2415,7 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
           : { kind: 'delete' as const, path, prev: null, cites, epoch: 0 };
       envs.push({
         proto: OP_PROTO_VERSION,
+        instance: 'g',
         origin,
         writer: origin,
         version: i + 1,
@@ -2417,48 +2434,41 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
     return conv;
   };
 
-  it('prune at ANY frontier leaves materialize() unchanged (fold-equivalence, 40 seeds × 4 frontiers)', () => {
+  /** A settled vector at a fraction of what each origin has applied (all sound: everything arrived). */
+  const settledAt = (
+    conv: ReturnType<typeof createConvergingApply>,
+    frac: number,
+  ): Record<string, { p: number; l: number }> =>
+    Object.fromEntries(
+      Object.entries(conv.appliedFrontier()).map(([o, h]) => [
+        o,
+        { p: Math.floor(h.p * frac), l: 0 },
+      ]),
+    );
+
+  it('settle at ANY sound vector leaves materialize() unchanged (fold-equivalence, 40 seeds × 4 vectors)', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const envs = buildStream(seed);
-      const maxP = envs.length; // hlc p values run 1..nOps
       for (const frac of [0, 0.33, 0.66, 1]) {
         const conv = materializeAll(envs);
         const before = conv.materialize();
-        conv.prune({ p: Math.floor(maxP * frac), l: 0 });
+        conv.settle(settledAt(conv, frac));
         const after = conv.materialize();
-        expect(
-          after,
-          `seed ${seed} frontier ${frac}: prune changed the fold`,
-        ).toEqual(before);
+        expect(after, `seed ${seed} vector ${frac}: settle changed the fold`).toEqual(before);
       }
     }
   });
 
-  it('prune at the top frontier bounds state: no superseded sibling and no droppable lone tombstone survives', () => {
-    // re-derive the drop guard here so the check is independent of the implementation: a lone
-    // tombstone is droppable (and so must be gone after a top-frontier prune) when nothing else
-    // materializes its key — no live ancestor set holds it, and no live descendant would resurface.
-    const holdsKey = (
-      value: unknown,
-      rel: readonly (string | number)[],
-    ): boolean => {
-      let cur: unknown = value;
-      for (const seg of rel) {
-        if (
-          cur === null ||
-          typeof cur !== 'object' ||
-          !Object.hasOwn(cur, String(seg))
-        )
-          return false;
-        cur = (cur as Record<string, unknown>)[String(seg)];
-      }
-      return true;
-    };
+  it('settle at the applied vector bounds covered state: no superseded sibling survives, every tombstone does', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const envs = buildStream(seed);
       const conv = materializeAll(envs);
       const live = conv.materialize();
-      conv.prune({ p: envs.length + 1, l: 0 }); // above every op
+      const tombstonesBefore = conv
+        .checkpoint()
+        .filter((r) => conv.liveAt(r.path).some((sib) => sib.kind === 'delete'))
+        .map((r) => r.path.join('/'));
+      conv.settle(settledAt(conv, 1));
       const regs = conv.checkpoint();
       for (const reg of regs) {
         const liveSet = conv.liveAt(reg.path);
@@ -2466,33 +2476,16 @@ describe('createConvergingApply — prune is fold-equivalent + bounds state (GC 
           liveSet.length,
           `seed ${seed}: superseded-only register retained at ${reg.path.join('/')}`,
         ).toBeGreaterThan(0);
-        const loneTomb = liveSet.length === 1 && liveSet[0].kind === 'delete';
-        if (!loneTomb) continue;
-        const key = reg.path.join('/');
-        const hasLiveDescendant = regs.some(
-          (o) =>
-            o.path.join('/') !== key &&
-            o.path.join('/').startsWith(key + '/') &&
-            conv.liveAt(o.path).length > 0,
-        );
-        const ancestorHoldsKey = regs.some((o) => {
-          const ok = o.path.join('/');
-          if (ok === key || !key.startsWith(ok === '' ? '' : ok + '/'))
-            return false;
-          const rel = reg.path.slice(o.path.length);
-          return conv
-            .liveAt(o.path)
-            .some((s) => s.kind === 'set' && holdsKey(s.value, rel));
-        });
         expect(
-          hasLiveDescendant || ancestorHoldsKey,
-          `seed ${seed}: droppable lone tombstone leaked at ${key} (nothing materializes the key)`,
-        ).toBe(true);
+          reg.siblings.length,
+          `seed ${seed}: a covered sibling survived at ${reg.path.join('/')}`,
+        ).toBe(liveSet.length);
       }
-      expect(
-        conv.materialize(),
-        `seed ${seed}: top-frontier prune changed the fold`,
-      ).toEqual(live);
+      const paths = regs.map((r) => r.path.join('/'));
+      for (const t of tombstonesBefore) {
+        expect(paths, `seed ${seed}: tombstone ${t} collected`).toContain(t);
+      }
+      expect(conv.materialize(), `seed ${seed}: settle changed the fold`).toEqual(live);
     }
   });
 });
@@ -2627,6 +2620,7 @@ describe('createConvergingApply — fork subtree replace only clears OBSERVED de
     // and it converges: applying the group, the post-fork font survives the replace as a sibling
     const env2: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: 'g',
       origin: 'o1',
       writer: 'o1',
       version: 1,
@@ -2659,6 +2653,7 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
   const CTRL = String.fromCharCode(0x1f); // the path-key separator; must never enter an id or segment
   const valid = (): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
+    instance: 'g1',
     origin: 'o1',
     writer: 'w1',
     version: 1,
@@ -2680,6 +2675,12 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
     fn(e as any);
     return e as OpEnvelope;
   };
+
+  it('rejects a missing or unclean generation; an EMPTY one (none known yet) is well-formed', () => {
+    expect(validateEnvelope(mutate((e) => delete e.instance))).toBe('instance');
+    expect(validateEnvelope(mutate((e) => (e.instance = 'g' + CTRL)))).toBe('instance');
+    expect(validateEnvelope(mutate((e) => (e.instance = '')))).toBeNull();
+  });
 
   it('accepts a well-formed envelope (incl. a set at the root path)', () => {
     expect(validateEnvelope(valid())).toBeNull();
@@ -2867,6 +2868,7 @@ describe('opSync.receive — rejects malformed envelopes whole', () => {
         .mockImplementation(() => undefined);
       sync.receive({
         proto: OP_PROTO_VERSION,
+        instance: 'g',
         origin: `evil${String.fromCharCode(0x1f)}peer`,
         writer: 'w2',
         version: 1,
@@ -2903,7 +2905,7 @@ describe('release-review fixes', () => {
     expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
   });
 
-  it('opSync exposes prune: it reclaims settled state without changing the value', () => {
+  it('opSync exposes settle: it reclaims covered state without changing the value', () => {
     TestBed.runInInjectionContext(() => {
       const s = signal<{ k: string }>({ k: 'init' });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
@@ -2925,43 +2927,25 @@ describe('release-review fixes', () => {
         }),
       );
       const before = s().k;
-      sync.prune({ p: 10, l: 0 }); // frontier above the superseded 'A' write
-      expect(s().k).toBe(before); // value unchanged by prune
+      sync.settle({ ox: { p: 5, l: 0 }, oy: { p: 20, l: 0 } });
+      expect(s().k).toBe(before); // value unchanged by settle
       expect(s().k).toBe('B');
       sync.destroy();
     });
   });
 
-  it('rejects a first-contact straggler at or below the pruned frontier (no resurrection)', () => {
+  it('has no stamp gate: a first-contact write from an unknown origin lands whatever its stamp', () => {
     TestBed.runInInjectionContext(() => {
       const s = signal<Record<string, string>>({ k: 'live' });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
-      sync.prune({ p: 10, l: 0 }); // frontier at p10
-      // a never-seen origin's straggler BELOW the frontier: first-contact, so version dedup (no prior
-      // entry) cannot catch it; the frontier gate must reject it or a settled value could resurrect
-      sync.receive(
-        env([set(['stale'], 'x')], {
-          p: 5,
-          writer: 'wz',
-          origin: 'oz',
-          version: 1,
-        }),
-      );
-      expect(s()['stale']).toBeUndefined();
-      // control: an above-frontier write from a fresh origin still lands
-      sync.receive(
-        env([set(['fresh'], 'y')], {
-          p: 20,
-          writer: 'wq',
-          origin: 'oq',
-          version: 1,
-        }),
-      );
+      sync.settle({ o1: { p: 10, l: 0 } });
+      sync.receive(env([set(['stale'], 'x')], { p: 5, writer: 'wz', origin: 'oz', version: 1 }));
+      expect(s()['stale']).toBe('x');
+      sync.receive(env([set(['fresh'], 'y')], { p: 20, writer: 'wq', origin: 'oq', version: 1 }));
       expect(s()['fresh']).toBe('y');
       sync.destroy();
     });
   });
-
   it('hydrate rebases from the passed pending outbox, not only the bounded recent-local ring', () => {
     TestBed.runInInjectionContext(() => {
       const s = signal<{ k: string }>({ k: 'x' });

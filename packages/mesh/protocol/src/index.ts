@@ -7,6 +7,7 @@ export {
   type PolicyViolation,
   type PrincipalCtx,
 } from './lib/policy';
+export { createRanges, type Ranges } from './lib/ranges';
 export { createRegisterStore, type RegisterStore } from './lib/register';
 export { validateEnvelope } from './lib/validate';
 export {
@@ -27,6 +28,7 @@ export {
   type ClientPresenceMsg,
   type ClientSignalMsg,
   type Dot,
+  type DropMsg,
   type EjectMsg,
   type HelloMsg,
   type Hlc,
@@ -41,9 +43,11 @@ export {
   type ServerMsg,
   type ServerPresenceMsg,
   type ServerSignalMsg,
+  type SettledMsg,
   type StoreOp,
   type SyncOp,
   type SyncSibling,
+  type VersionRange,
   type WelcomeBody,
   type WelcomeMsg,
 } from './lib/wire';

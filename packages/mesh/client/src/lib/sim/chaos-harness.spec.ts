@@ -25,7 +25,9 @@ describe('chaos scenarios — the real stack under network faults', () => {
     const a = runChaosSimulation(cfg);
     const b = runChaosSimulation(cfg);
     expect(a.roots).toEqual(b.roots);
-    expect(a.journal).toEqual(b.journal);
+    const sansInstance = (j: typeof a.journal) =>
+      j.map((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')));
+    expect(sansInstance(a.journal)).toEqual(sansInstance(b.journal));
   });
 
   it('(a) reorder converges across many seeds', () => {

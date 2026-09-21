@@ -60,6 +60,16 @@ export type MeshSessionHooks = {
    * it (and release any single-writer locks) while it is still intact.
    */
   onTerminal?(state: 'ejected' | 'closed', reason?: string): void;
+  /**
+   * The relay refused one of this session's writes: it is not in the room and never will be.
+   * `'generation'` — written in a room generation that has since been cut (the whole tail is
+   * refused at the welcome that names the new one, or one envelope by the relay's reply);
+   * `'schema'` — a data shape older than the room's; `'order'` — a version below this origin's
+   * admitted maximum that was never admitted (a second tab on one origin). The session drops
+   * the write locally and hydrates from a fresh snapshot; the envelope carries the values, so
+   * the application can offer to write them again. Any `whenAcked` waiter rejects.
+   */
+  onRefused?(env: OpEnvelope, reason: 'generation' | 'schema' | 'order'): void;
 };
 
 export type MeshSessionOptions<T extends object> = {
@@ -73,6 +83,8 @@ export type MeshSessionOptions<T extends object> = {
   readonly ctx?: Omit<PrincipalCtx, 'writer'>;
   readonly policyVersion: number;
   readonly schemaVersion?: number;
+  /** The room generation a restored outbox was written in; the first welcome decides whether it still holds. */
+  readonly instance?: string;
   readonly reconnect?: { readonly maxDelayMs?: number };
   /** Timer seam (tests, deterministic harnesses). Defaults to global timers. */
   readonly schedule?: {
@@ -85,7 +97,8 @@ export type MeshSessionOptions<T extends object> = {
 /**
  * The relay-room session protocol, shell-agnostic: hello/welcome handshakes (snapshot
  * hydrate, delta replay, fresh-room seed), own-echo acknowledgement, unacked resend,
- * reconnect backoff, presence, eject/reject and frontier compaction. `meshSync` wraps it for
+ * the relay's per-envelope answers (`drop`), reconnect backoff, presence, eject/reject, the
+ * generation fence and settled-vector garbage collection. `meshSync` wraps it for
  * Angular; `agentSeat` wraps it for injector-free environments. One implementation of the
  * wire contract — shells differ only in environment concerns.
  */
@@ -109,6 +122,8 @@ export type MeshSession = {
   whenAcked(): Promise<void>;
   /** The unacknowledged local tail (the durable-outbox payload). */
   unackedEnvs(): readonly OpEnvelope[];
+  /** The room generation this session is in, once a welcome (or a restored outbox) named one. */
+  instance(): string | undefined;
   peers(): ReadonlyMap<string, PresenceState>;
   setPresence(data: unknown): void;
   close(): void;
@@ -133,7 +148,10 @@ export function meshSession<T extends object>(
   const unackedKey = (env: { origin: string; version: number }): string =>
     `${env.origin} ${env.version}`;
   let lastSeq = 0;
-  let instance: string | undefined;
+  let instance: string | undefined = opt.instance;
+  if (instance) sync.adopt(instance);
+  // a refusal asks for a fresh snapshot; one hello per burst, cleared by the welcome it earns
+  let rehydrating = false;
   let peers: ReadonlyMap<string, PresenceState> = new Map();
   let presenceData: unknown;
   let hasPresence = false;
@@ -186,7 +204,37 @@ export function meshSession<T extends object>(
   };
 
   const sendEnv = (env: OpEnvelope): void => {
-    transport?.send({ t: 'env', room: opt.room, env });
+    // an envelope minted before any generation was known adopts the one this session is in
+    let out = env;
+    if (env.instance === '' && instance) {
+      out = { ...env, instance };
+      unacked.set(unackedKey(env), out);
+    }
+    transport?.send({ t: 'env', room: opt.room, env: out });
+  };
+  const sendHello = (): void => {
+    transport?.send({
+      t: 'hello',
+      room: opt.room,
+      origin: sync.origin,
+      proto: MESH_PROTO_VERSION,
+      policyVersion: opt.policyVersion,
+      seq: lastSeq > 0 ? lastSeq : undefined,
+      schemaVersion: opt.schemaVersion,
+    });
+  };
+  const ackOwn = (origin: string, version: number): void => {
+    if (!unacked.delete(unackedKey({ origin, version }))) return;
+    acked.set(origin, Math.max(acked.get(origin) ?? 0, version));
+    hooks.onOutboxChange?.();
+    if (unacked.size === 0) releaseAckWaiters();
+  };
+  const refuse = (env: OpEnvelope, reason: 'generation' | 'schema' | 'order'): void => {
+    unacked.delete(unackedKey(env));
+    hooks.onRefused?.(env, reason);
+    hooks.onOutboxChange?.();
+    // "every write was classified" is not "every write was stored": a waiter rejects
+    releaseAckWaiters(new Error(`refused: ${reason}`));
   };
 
   const flushUnacked = (): void => {
@@ -207,10 +255,7 @@ export function meshSession<T extends object>(
     lastSeq = Math.max(lastSeq, env.seq);
     hooks.onSynced?.();
     if (ownOrigins.has(env.origin)) {
-      unacked.delete(unackedKey(env));
-      acked.set(env.origin, Math.max(acked.get(env.origin) ?? 0, env.version));
-      hooks.onOutboxChange?.();
-      if (unacked.size === 0) releaseAckWaiters();
+      ackOwn(env.origin, env.version);
       return;
     }
     sync.receive(env);
@@ -223,10 +268,18 @@ export function meshSession<T extends object>(
       case 'welcome': {
         const instanceChanged =
           instance !== undefined && msg.instance !== instance;
-
         const prevSeq = lastSeq;
-        if (instanceChanged) lastSeq = 0;
+        if (instanceChanged) {
+          // the generation boundary on the client: the tail written in the old one is refused
+          // loudly, its acknowledgements mean nothing here, and the new generation's snapshot
+          // replaces the whole applied state below
+          lastSeq = 0;
+          acked.clear();
+          for (const env of [...unacked.values()]) refuse(env, 'generation');
+        }
         instance = msg.instance;
+        sync.adopt(msg.instance);
+        rehydrating = false;
         peers = new Map(msg.peers.map((p) => [p.origin, p]));
         hooks.onPeers?.(peers);
         const resync = msg.mode === 'snapshot' || instanceChanged;
@@ -286,9 +339,25 @@ export function meshSession<T extends object>(
       case 'reject':
         terminal('ejected', msg.reason);
         return;
-      case 'frontier':
-        sync.prune(msg.frontier);
+      case 'settled':
+        sync.settle(msg.settled);
         return;
+      case 'drop': {
+        const held = unacked.get(unackedKey(msg));
+        if (!held) return; // already classified (a duplicate reply after the echo, or an old generation's)
+        if (msg.reason === 'duplicate') {
+          ackOwn(msg.origin, msg.version); // the room holds it: this is the acknowledgement
+          return;
+        }
+        refuse(held, msg.reason);
+        // the refused write is still applied locally: drop and rehydrate from a fresh snapshot
+        if (!rehydrating) {
+          rehydrating = true;
+          lastSeq = 0;
+          sendHello();
+        }
+        return;
+      }
     }
   };
 
@@ -316,15 +385,7 @@ export function meshSession<T extends object>(
         );
       }),
     ];
-    t.send({
-      t: 'hello',
-      room: opt.room,
-      origin: sync.origin,
-      proto: MESH_PROTO_VERSION,
-      policyVersion: opt.policyVersion,
-      seq: lastSeq > 0 ? lastSeq : undefined,
-      schemaVersion: opt.schemaVersion,
-    });
+    sendHello();
   };
 
   const unsubLocal = sync.subscribe((env) => {
@@ -364,6 +425,7 @@ export function meshSession<T extends object>(
               ackWaiters.push({ resolve, reject });
             }),
     unackedEnvs: () => [...unacked.values()],
+    instance: () => instance,
     peers: () => peers,
     setPresence: (data) => {
       presenceData = data;

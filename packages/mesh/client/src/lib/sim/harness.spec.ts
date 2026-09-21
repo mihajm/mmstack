@@ -51,8 +51,11 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
     const b = runSimulation(cfg);
     expect(a.roots).toEqual(b.roots);
     expect(a.relayRegisters).toEqual(b.relayRegisters);
-    // full journal equality (incl. origins/hlc) proves the RNG + clock are fully controlled
-    expect(a.journal).toEqual(b.journal);
+    // full journal equality (incl. origins/hlc) proves the RNG + clock are fully controlled; the
+    // room generation nonce is minted from a process-wide counter and is not part of the run
+    const sansInstance = (j: typeof a.journal) =>
+      j.map((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')));
+    expect(sansInstance(a.journal)).toEqual(sansInstance(b.journal));
   });
 
   it('actually mutates state (the sim is not a no-op)', () => {

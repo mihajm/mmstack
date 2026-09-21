@@ -278,6 +278,7 @@ function migrateRoom(
     room,
     env: {
       proto: MESH_PROTO_VERSION,
+      instance: relay.room(room)?.instance ?? '',
       origin: 'mig',
       writer: 'migrator',
       version: 1,

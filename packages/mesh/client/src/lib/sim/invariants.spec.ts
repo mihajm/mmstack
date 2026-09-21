@@ -3,6 +3,7 @@ import { commitOrdered, converged, deepEqual, journalFoldMatchesClients, relayRe
 
 const env = (seq: number, ops: SyncOp[]): SeqEnvelope => ({
   proto: MESH_PROTO_VERSION,
+  instance: '',
   origin: `o${seq}`,
   writer: `w${seq}`,
   version: 1,

@@ -17,6 +17,7 @@ function env(
 ): OpEnvelope {
   return {
     proto: OP_PROTO_VERSION,
+    instance: 'g',
     origin: stamp.origin ?? 'o',
     writer: 'w',
     version: stamp.version ?? 1,

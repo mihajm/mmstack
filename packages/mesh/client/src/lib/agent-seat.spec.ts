@@ -487,6 +487,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
 
     const migration: SeqEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin: 'migrator',
       writer: 'deploy-job',
       version: 1,
@@ -527,6 +528,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
     });
     const settled: SeqEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin: 'peer-b',
       writer: 'agent-b',
       version: 1,
@@ -557,6 +559,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
       room: 'case-1',
       env: {
         proto: OP_PROTO_VERSION,
+        instance: '',
         origin: 'migrator',
         writer: 'deploy-job',
         version: 1,
@@ -617,6 +620,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
   ): SeqEnvelope {
     return {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin,
       writer,
       version,
@@ -728,6 +732,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
         room: 'case-1',
         env: {
           proto: OP_PROTO_VERSION,
+          instance: 'i1',
           writer: 'w2',
           version: 1,
           hlc: { p: 1, l: 0 },

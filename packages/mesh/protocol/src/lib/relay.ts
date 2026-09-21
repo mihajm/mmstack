@@ -5,11 +5,13 @@ import {
   type PolicyViolation,
   type PrincipalCtx,
 } from './policy';
+import { createRanges, type Ranges } from './ranges';
 import { createRegisterStore, type RegisterStore } from './register';
 import { validateEnvelope } from './validate';
 import {
   MESH_PROTO_VERSION,
   type ClientMsg,
+  type DropMsg,
   type Hlc,
   type OpEnvelope,
   type PresenceState,
@@ -17,6 +19,7 @@ import {
   type RejectMsg,
   type SeqEnvelope,
   type ServerMsg,
+  type VersionRange,
   type WelcomeBody,
 } from './wire';
 
@@ -50,7 +53,7 @@ export type RelayOptions = {
   readonly ejection?: 'writer' | 'connection';
   readonly policyVersion?: number;
   readonly limits?: RelayLimits;
-  /** Seq-envelopes retained per room for delta answers; older compact into register state (default 1000). */
+  /** Seq-envelopes retained per room for delta answers (default 1000). Trimming the tail is also when the room garbage-collects settled register evidence. */
   readonly journalLimit?: number;
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
@@ -62,7 +65,7 @@ export type RelayOptions = {
    *
    * Return `void` to release the envelope at once — the memory-adapter behaviour, and the
    * relay's default. Return a promise and the relay holds every outbound message that carries
-   * the envelope (its echo, the frontier notice emitted with it, and any welcome answered
+   * the envelope (its echo, the settled notice emitted with it, and any welcome answered
    * while it is in flight) until that promise resolves: a connection is told a write is safe
    * only once the adapter says it is, the way a database returns from `COMMIT` after its log
    * is written. Messages that are not document state — presence, signal, membership,
@@ -89,18 +92,18 @@ export type RelayOptions = {
     cause: unknown,
   ) => void;
   /**
-   * Observation of a silently dropped envelope: received but neither sequenced nor a
-   * violation. `'schema'` is a stale-schema straggler arriving after a migration;
-   * `'frontier'` is a write stamped at or below what compaction has already settled, which
-   * an honest offline writer can produce and which every client's own receive gate refuses
-   * too. Neither sender is malicious, so neither is ejected and nothing is broadcast.
-   * Without this hook the drop is invisible to an audit adapter. Pure observation, zero
-   * semantic effect; synchronous and never awaited, like {@link RelayOptions.onCommit}.
+   * Observation of an envelope the relay refused without ejecting anyone; the submitter is
+   * told the same thing through a `drop` message. `'duplicate'` is a resend of a version the
+   * room already holds (answered as the acknowledgement it is); `'generation'` an envelope
+   * written in another room generation; `'schema'` a stale-schema straggler after a
+   * migration; `'order'` a version below the origin's admitted maximum that was never
+   * admitted. None of the senders is malicious. Pure observation, zero semantic effect;
+   * synchronous and never awaited, like {@link RelayOptions.onCommit}.
    */
   readonly onDrop?: (
     room: string,
     env: OpEnvelope,
-    reason: 'schema' | 'frontier',
+    reason: DropMsg['reason'],
   ) => void;
   /**
    * Observation of a rejected hello: an ejected writer knocking again (`'unauthorized'`), or
@@ -138,14 +141,20 @@ export type RoomState = {
    * a call made later would describe a later seq than the envelope it is filed under.
    */
   checkpoint(): readonly RegisterCheckpoint[];
-  /** Per-origin envelope-version high-water marks. */
+  /** Per-origin envelope-version high-water marks (the maximum of {@link RoomState.ranges}). */
   readonly wm: Readonly<Record<string, number>>;
   /**
-   * The stamp compaction has settled past, if any. Persist it and hand it back through
-   * {@link RoomSnapshot.frontier}: without it a restarted room forgets what it settled and
-   * readmits the stragglers it used to drop.
+   * Per-origin admitted-version ranges: the room's admission evidence. Persist them with the
+   * checkpoint and hand them back through {@link RoomSnapshot.ranges}; a room that forgets them
+   * re-sequences resends and cannot tell a refused version from a lost one.
    */
-  readonly frontier?: Hlc;
+  readonly ranges: Readonly<Record<string, readonly VersionRange[]>>;
+  /**
+   * Per-origin stamp of the last contiguously admitted version: what register garbage
+   * collection settles against. Persist with the checkpoint; hand back through
+   * {@link RoomSnapshot.settled}.
+   */
+  readonly settled: Readonly<Record<string, Hlc>>;
   /** The room's data shape; restored via {@link Relay.hydrate}. */
   readonly schemaVersion: number;
 };
@@ -167,12 +176,11 @@ export type RoomSnapshot = {
   readonly schemaVersion?: number;
   /** Journal tail (ascending seq, entries at or below `seq`) enabling those delta answers. */
   readonly journal?: readonly SeqEnvelope[];
-  /**
-   * The compaction frontier captured with the checkpoint. Restoring it keeps the room
-   * refusing writes it has already settled past; omitting it readmits them, which is how a
-   * pruned value comes back from the dead.
-   */
-  readonly frontier?: Hlc;
+  /** Admitted-version ranges captured with the checkpoint (see {@link RoomState.ranges}). Absent
+   *  with `wm` present: every version up to the mark is taken as admitted. */
+  readonly ranges?: Readonly<Record<string, readonly VersionRange[]>>;
+  /** The settled vector captured with the checkpoint (see {@link RoomState.settled}). */
+  readonly settled?: Readonly<Record<string, Hlc>>;
 };
 
 export type RelayConnection = {
@@ -182,6 +190,8 @@ export type RelayConnection = {
 
 export type RoomInfo = {
   readonly seq: number;
+  /** The room's current generation: what every envelope written into it must carry. */
+  readonly instance: string;
   readonly members: number;
   readonly journal: number;
   /**
@@ -315,9 +325,12 @@ type Room = {
   instance: string;
   schemaVersion: number;
   registers: RegisterStore;
-  wm: Map<string, number>;
-  /** The stamp compaction has folded past: what the journal no longer covers. */
-  frontier: Hlc | undefined;
+  /** Admitted versions per origin: the admission evidence. */
+  ranges: Map<string, Ranges>;
+  /** Stamps of admitted versions above an origin's contiguous prefix, until the prefix reaches them. */
+  above: Map<string, Map<number, Hlc>>;
+  /** Per origin, the stamp of the last contiguously admitted version. */
+  settled: Map<string, Hlc>;
   journal: SeqEnvelope[];
   members: Set<Member>;
   presence: Map<string, { peer: PresenceState; by: Member }>;
@@ -365,8 +378,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         instance: mintInstance(),
         schemaVersion: 0,
         registers: createRegisterStore(),
-        wm: new Map(),
-        frontier: undefined,
+        ranges: new Map(),
+        above: new Map(),
+        settled: new Map(),
         journal: [],
         members: new Set(),
         presence: new Map(),
@@ -470,11 +484,48 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     return false;
   };
 
-  const laterHlc = (a: Hlc | undefined, b: Hlc): Hlc =>
-    !a || b.p > a.p || (b.p === a.p && b.l > a.l) ? b : a;
-
   const hlcLte = (a: Hlc, b: Hlc): boolean =>
     a.p < b.p || (a.p === b.p && a.l <= b.l);
+  const rangesOf = (room: Room, origin: string): Ranges => {
+    let r = room.ranges.get(origin);
+    if (!r) room.ranges.set(origin, (r = createRanges()));
+    return r;
+  };
+  const wmOf = (room: Room): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const [origin, r] of room.ranges) out[origin] = r.max();
+    return out;
+  };
+  const rangesRecord = (room: Room): Record<string, readonly VersionRange[]> => {
+    const out: Record<string, readonly VersionRange[]> = {};
+    for (const [origin, r] of room.ranges) out[origin] = r.toJSON();
+    return out;
+  };
+  /** Record an admitted version and advance the origin's settled stamp when its prefix grows. */
+  const admitVersion = (room: Room, env: OpEnvelope): void => {
+    const ranges = rangesOf(room, env.origin);
+    const before = ranges.prefix();
+    ranges.add(env.version);
+    const after = ranges.prefix();
+    const above = room.above.get(env.origin);
+    if (after > before) {
+      // the prefix grew: its last version's stamp is this envelope's, or one recorded earlier
+      // above the old prefix
+      let stamp = env.hlc;
+      if (above) {
+        const recorded = above.get(after);
+        if (recorded) stamp = recorded;
+        for (const v of [...above.keys()]) if (v <= after) above.delete(v);
+      }
+      room.settled.set(env.origin, stamp);
+      return;
+    }
+    // admitted above a hole: keep its stamp until the prefix reaches it
+    if (above) above.set(env.version, env.hlc);
+    else room.above.set(env.origin, new Map([[env.version, env.hlc]]));
+  };
+  const settledRecord = (room: Room): Record<string, Hlc> =>
+    Object.fromEntries(room.settled);
 
   const checkAdmission = (
     name: string,
@@ -502,7 +553,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       }
       if (!policy.verifyCitations) continue;
       for (const c of op.cites) {
-        if (room.frontier && hlcLte(c.hlc, room.frontier)) continue;
+        // a cite at or below the origin's settled stamp names a write the room received and may
+        // have collected: honest by construction, and exempt from coverage
+        const done = room.settled.get(c.origin);
+        if (done && hlcLte(c.hlc, done)) continue;
         // a self-citation of this very envelope's dot is ignored at ingest (born-dead guard)
         if (
           c.origin === env.origin &&
@@ -529,6 +583,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       return room
         ? {
             seq: room.seq,
+            instance: room.instance,
             members: room.members.size,
             journal: room.journal.length,
             stalled: room.release.stalled(),
@@ -551,10 +606,18 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         return false;
       room.seq = snapshot.seq;
       room.registers.load(snapshot.registers ?? []);
-      for (const [origin, v] of Object.entries(snapshot.wm ?? {})) {
-        room.wm.set(origin, Math.max(room.wm.get(origin) ?? 0, v));
+      if (snapshot.ranges) {
+        for (const [origin, r] of Object.entries(snapshot.ranges)) {
+          room.ranges.set(origin, createRanges(r));
+        }
+      } else {
+        for (const [origin, v] of Object.entries(snapshot.wm ?? {})) {
+          if (v > 0) room.ranges.set(origin, createRanges([[1, v]]));
+        }
       }
-      if (snapshot.frontier !== undefined) room.frontier = snapshot.frontier;
+      for (const [origin, h] of Object.entries(snapshot.settled ?? {})) {
+        room.settled.set(origin, h);
+      }
       if (snapshot.instance !== undefined) room.instance = snapshot.instance;
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
@@ -684,7 +747,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   : {
                       mode: 'snapshot',
                       registers: room.registers.checkpoint(),
-                      wm: Object.fromEntries(room.wm),
+                      wm: wmOf(room),
                     };
 
             // the roster is NOT document state: read it when the welcome actually goes out,
@@ -753,27 +816,36 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             eject(msg.room, room, member, violation);
             return;
           }
-
+          // Refusals that eject nobody. The submitter alone hears them, at once: a `drop`
+          // carries no committed state, so it never waits behind durability.
+          const refuse = (reason: DropMsg['reason']): void => {
+            opt.onDrop?.(msg.room, env, reason);
+            member.socket.send({
+              t: 'drop',
+              room: msg.room,
+              origin: env.origin,
+              version: env.version,
+              reason,
+            });
+          };
+          // the generation fence first: nothing written in another generation is answered by
+          // this generation's evidence, not even as a duplicate
+          if (env.instance !== room.instance) return refuse('generation');
           if (
             env.schemaVersion !== undefined &&
             env.schemaVersion < room.schemaVersion
           ) {
-            opt.onDrop?.(msg.room, env, 'schema');
-            return;
+            return refuse('schema');
           }
-
-          // A write at or below what compaction settled is inert above the frontier and would
-          // resurrect state below it. Dropped, never ejected: an offline writer coming back
-          // after the room compacted is honest. The comparison mirrors the client's own
-          // receive gate exactly, so relay and peers refuse the same envelopes.
-          if (room.frontier && hlcLte(env.hlc, room.frontier)) {
-            opt.onDrop?.(msg.room, env, 'frontier');
-            return;
-          }
-
-          // after the stale-schema and frontier drops: a silently-dropped envelope never
-          // ingests, so its epochs and cites gate nothing (an outdated client stays
-          // 'outdated', not ejected)
+          const ranges = rangesOf(room, env.origin);
+          // admission evidence: a version the room holds is a resend, and the answer is its
+          // acknowledgement — never a second sequence number
+          if (ranges.has(env.version)) return refuse('duplicate');
+          // below the maximum yet never admitted: not a loss in transit on one FIFO connection
+          // with in-order resend, so a configuration that violates that assumption
+          if (env.version < ranges.max()) return refuse('order');
+          // after the refusals: a refused envelope never ingests, so its epochs and cites gate
+          // nothing (an outdated client stays outdated, not ejected)
           const admission = checkAdmission(msg.room, room, env, ctx, {
             seq: room.seq,
           });
@@ -781,31 +853,35 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             eject(msg.room, room, member, admission);
             return;
           }
-
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };
           room.journal.push(seqEnv);
+          let bumped = false;
           if (
             env.schemaVersion !== undefined &&
             env.schemaVersion > room.schemaVersion
           ) {
+            // a migration is a generation cut: a new nonce, every piece of evidence dropped,
+            // every member re-welcomed under it. The migration envelope belongs to the
+            // generation it closed and is not recorded in the new one's ranges.
             room.schemaVersion = env.schemaVersion;
             room.instance = mintInstance();
             room.registers.reset();
-            room.frontier = undefined;
+            room.ranges.clear();
+            room.above.clear();
+            room.settled.clear();
             room.journal = [seqEnv];
+            bumped = true;
           }
           room.registers.ingest(env);
-          room.wm.set(
-            env.origin,
-            Math.max(room.wm.get(env.origin) ?? 0, env.version),
-          );
-          let moved: Hlc | undefined;
+          if (!bumped) admitVersion(room, env);
+          // garbage collection runs when the delta tail trims, on the settled vector: it removes
+          // only what no future write can observe, so the notice is parity for clients, not a gate
+          let moved: Readonly<Record<string, Hlc>> | undefined;
           if (room.journal.length > journalLimit) {
-            const trimmed = room.journal.shift();
-            if (trimmed) {
-              room.frontier = laterHlc(room.frontier, trimmed.hlc);
-              room.registers.compact(room.frontier);
-              moved = room.frontier;
+            room.journal.shift();
+            if (room.settled.size > 0) {
+              moved = settledRecord(room);
+              room.registers.settle(moved);
             }
           }
           // who gets the echo: the members present at ingest, read BEFORE the commit hook
@@ -814,28 +890,50 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // welcome's document half is captured at hello, after this ingest), and sending it
           // again would hand that member one change twice.
           const audience = [...room.members];
+          // the re-welcome after a cut reads its document half now, like a hello would
+          const rewelcome = bumped
+            ? ({
+                seq: room.seq,
+                instance: room.instance,
+                schemaVersion: room.schemaVersion,
+                mode: 'snapshot',
+                registers: room.registers.checkpoint(),
+                wm: wmOf(room),
+              } as const)
+            : undefined;
           const done = opt.onCommit?.(msg.room, seqEnv, {
             seq: room.seq,
             instance: room.instance,
             checkpoint: () => room.registers.checkpoint(),
-            wm: Object.fromEntries(room.wm),
-            frontier: room.frontier,
+            wm: wmOf(room),
+            ranges: rangesRecord(room),
+            settled: settledRecord(room),
             schemaVersion: room.schemaVersion,
           });
           room.release.submit(
             () => {
-              // the frontier notice rides with the envelope that moved it, ahead of the echo,
-              // so clients reclaim their own register state before folding the write
-              if (moved) {
-                broadcast(room, {
-                  t: 'frontier',
-                  room: msg.room,
-                  frontier: moved,
-                });
-              }
               const echo: ServerMsg = { t: 'env', room: msg.room, env: seqEnv };
               for (const member of audience) {
                 if (room.members.has(member)) member.socket.send(echo);
+              }
+              // the settled notice rides BEHIND the envelope that moved it, so no client collects
+              // a watermark before the write it protected has passed
+              if (moved) {
+                broadcast(room, { t: 'settled', room: msg.room, settled: moved });
+              }
+              if (rewelcome) {
+                for (const member of audience) {
+                  if (!room.members.has(member) || member.ejected) continue;
+                  member.socket.send({
+                    t: 'welcome',
+                    room: msg.room,
+                    ...rewelcome,
+                    peers: [...room.presence.values()].map((e) => e.peer),
+                    members: [...room.members]
+                      .filter((m) => m !== member)
+                      .map((m) => m.origin),
+                  });
+                }
               }
             },
             done ?? undefined,

@@ -33,7 +33,7 @@ function mockInner() {
 const env = (v: number): ClientMsg => ({
   t: 'env',
   room: 'r',
-  env: { proto: MESH_PROTO_VERSION, origin: 'o', writer: 'w', version: v, hlc: { p: 0, l: v }, policyVersion: 0, ops: [] },
+  env: { proto: MESH_PROTO_VERSION, instance: '', origin: 'o', writer: 'w', version: v, hlc: { p: 0, l: v }, policyVersion: 0, ops: [] },
 });
 
 describe('chaosLink — the fault injector must actually inject faults', () => {

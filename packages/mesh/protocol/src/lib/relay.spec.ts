@@ -77,12 +77,21 @@ function client(
       policyVersion: 0,
       seq,
     });
+  /** The generation this client last learned from a welcome (the fence rides on every envelope). */
+  const instance = (): string => {
+    for (let i = sock.sent.length - 1; i >= 0; i--) {
+      const m = sock.sent[i];
+      if (m.t === 'welcome') return m.instance;
+    }
+    return 'unwelcomed';
+  };
   const env = (ops: SyncOp[], over?: Partial<OpEnvelope>) =>
     conn.receive({
       t: 'env',
       room: 'r',
       env: {
         proto: MESH_PROTO_VERSION,
+        instance: instance(),
         origin,
         writer,
         version: ++version,
@@ -92,7 +101,7 @@ function client(
         ...over,
       },
     });
-  return { sock, conn, hello, env };
+  return { sock, conn, hello, env, instance };
 }
 
 // an uncited op is a CONCURRENT write; causal succession must cite the superseded dot(s)
@@ -249,7 +258,7 @@ describe('createRelay', () => {
     });
   });
 
-  it('compaction drops a below-frontier lone tombstone once nothing else materializes its key', () => {
+  it('garbage collection keeps a lone tombstone: only the superseded set it covers goes', () => {
     const relay = createRelay({ journalLimit: 2 });
     const a = client(relay, 'wa', 'oa');
     a.hello();
@@ -267,7 +276,11 @@ describe('createRelay', () => {
     const b = client(relay, 'wb', 'ob');
     b.hello();
     const welcome = snapshotOf(b.sock);
-    expect(regAt(welcome.registers, ['items', 'a'])).toBeUndefined();
+    // the delete stays (a delayed older set under it would otherwise resurrect the key); the
+    // superseded set it cited, and the watermark, are what collection removed
+    expect(regAt(welcome.registers, ['items', 'a'])?.siblings).toEqual([
+      expect.objectContaining({ kind: 'delete', origin: 'oa' }),
+    ]);
     expect(regAt(welcome.registers, ['other'])?.siblings[0]).toMatchObject({
       kind: 'set',
       value: 2,
@@ -660,8 +673,9 @@ describe('createRelay: persistence seam', () => {
       value: 2,
     });
 
-    // and writes continue the restored seq space
-    back.env([set(['v'], 3)]);
+    // and writes continue the restored seq space — and the origin's own version sequence: the
+    // restored ranges answer a reused version as a duplicate, never with a second seq
+    back.env([set(['v'], 3)], { version: 4 });
     const envs = fresh.sock.sent
       .filter((m) => m.t === 'env')
       .map((m) => m.env.seq);
@@ -715,6 +729,7 @@ describe('createRelay: persistence seam', () => {
   it('hydrate drops journal entries above seq and caps to journalLimit', () => {
     const mkEnv = (seq: number): SeqEnvelope => ({
       proto: MESH_PROTO_VERSION,
+      instance: 'g',
       origin: 'o',
       writer: 'w',
       version: seq,
@@ -797,6 +812,7 @@ describe('pathPrefixAcl', () => {
         room,
         env: {
           proto: MESH_PROTO_VERSION,
+          instance: relay.room(room)?.instance ?? '',
           origin: c.origin,
           writer: c.writer,
           version,
@@ -961,9 +977,10 @@ describe('createRelay — schemaVersion + migration', () => {
   });
 });
 
-describe('createRegisterStore — lone-tombstone compaction reaches a fixpoint', () => {
+describe('createRegisterStore — settle keeps tombstones and baselines', () => {
   const rEnv = (origin: string, ops: SyncOp[], p: number): OpEnvelope => ({
     proto: MESH_PROTO_VERSION,
+    instance: 'g',
     origin,
     writer: origin,
     version: p,
@@ -972,19 +989,38 @@ describe('createRegisterStore — lone-tombstone compaction reaches a fixpoint',
     ops,
   });
 
-  it('reclaims an ancestor tombstone even when its descendant tombstone is collected the same pass', () => {
+  it('removes only covered siblings and watermarks at or below the origin\'s settled stamp; tombstones stay', () => {
     const store = createRegisterStore();
-    store.ingest(rEnv('oa', [set([], {})], 1)); // root never held the key
+    store.ingest(rEnv('oa', [set([], {})], 1));
     store.ingest(rEnv('oa', [set(['items'], { a: 1 })], 2));
     store.ingest(rEnv('oa', [set(['items', 'deep'], 9)], 3));
-    store.ingest(rEnv('oa', [del(['items'], { a: 1 })], 4)); // items → lone tombstone
-    store.ingest(rEnv('oa', [del(['items', 'deep'], 9)], 5)); // items.deep → lone tombstone
-
-    store.compact({ p: 100, l: 0 });
+    store.ingest(
+      rEnv('oa', [del(['items'], { a: 1 }, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })], 4),
+    );
+    store.ingest(
+      rEnv('oa', [del(['items', 'deep'], 9, { cites: [{ origin: 'oa', hlc: { p: 3, l: 0 } }] })], 5),
+    );
+    store.settle({ oa: { p: 100, l: 0 } });
     const cps = store.checkpoint();
-    // nothing materializes either key; a single-pass compaction strands the ancestor tombstone
-    expect(regAt(cps, ['items', 'deep'])).toBeUndefined();
-    expect(regAt(cps, ['items'])).toBeUndefined();
+    // a register keeps one sibling per origin, so the deletes replaced the sets; what settle
+    // removed are the citation watermarks they left behind — the tombstones are untouched
+    expect(regAt(cps, ['items'])?.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
+    expect(regAt(cps, ['items', 'deep'])?.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
+    expect(regAt(cps, ['items'])?.water).toEqual({});
+  });
+
+  it('never lowers the epoch baseline, even when the sibling that carried it is collected', () => {
+    const store = createRegisterStore();
+    store.ingest(rEnv('oa', [set(['x'], 1, { epoch: 5 })], 1));
+    store.ingest(
+      rEnv('ob', [{ kind: 'clear', path: ['x'], cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }], epoch: 0 }], 1),
+    );
+    store.settle({ oa: { p: 1, l: 0 }, ob: { p: 1, l: 0 } });
+    expect(regAt(store.checkpoint(), ['x'])?.siblings.map((sib) => sib.origin)).toEqual(['ob']);
+    expect(store.maxEpoch(['x'])).toBe(5);
+    const reloaded = createRegisterStore();
+    reloaded.load(store.checkpoint());
+    expect(reloaded.maxEpoch(['x'])).toBe(5);
   });
 });
 
@@ -1020,8 +1056,8 @@ describe('createRelay: room lifecycle', () => {
   });
 });
 
-describe('createRelay: frontier broadcast', () => {
-  it('broadcasts the advanced frontier to connected clients when the journal trims', () => {
+describe('createRelay: settled notice', () => {
+  it('rides behind the echo of the envelope that trimmed the tail, carrying the per-origin settled stamps', () => {
     const relay = createRelay({ journalLimit: 2 });
     const a = client(relay, 'wa', 'oa');
     const b = client(relay, 'wb', 'ob');
@@ -1030,11 +1066,14 @@ describe('createRelay: frontier broadcast', () => {
 
     a.env([set([], { v: 1 })]); // seq 1
     a.env([set(['v'], 2)]); // seq 2
-    a.env([set(['v'], 3)]); // seq 3 -> journal (limit 2) trims, frontier advances
+    a.env([set(['v'], 3)]); // seq 3 -> the tail (limit 2) trims, collection runs
 
-    const frontiers = b.sock.sent.filter((m) => m.t === 'frontier');
-    expect(frontiers.length).toBeGreaterThan(0);
-    expect(frontiers[0]).toMatchObject({ t: 'frontier', room: 'r' });
+    const kinds = b.sock.sent.map((m) => m.t);
+    const at = kinds.indexOf('settled');
+    expect(at).toBeGreaterThan(0);
+    expect(kinds[at - 1]).toBe('env'); // behind the write, never ahead of it
+    const notice = b.sock.sent[at];
+    expect(notice).toMatchObject({ t: 'settled', room: 'r', settled: { oa: { p: 3, l: 0 } } });
   });
 });
 
@@ -1254,6 +1293,7 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
 describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
   const rEnv = (origin: string, ops: SyncOp[], p: number): OpEnvelope => ({
     proto: MESH_PROTO_VERSION,
+    instance: 'g',
     origin,
     writer: origin,
     version: p,
@@ -1496,6 +1536,7 @@ describe('createRelay: per-room policy authority', () => {
         room,
         env: {
           proto: MESH_PROTO_VERSION,
+          instance: relay.room(room)?.instance ?? '',
           origin,
           writer,
           version: 1,
@@ -1893,6 +1934,7 @@ describe('createRelay: durable release', () => {
       const at = paths++;
       const env: OpEnvelope = {
         proto: MESH_PROTO_VERSION,
+        instance: relay.room('r')?.instance ?? '',
         origin: peer.origin,
         writer: peer.writer,
         version: ++peer.version,
@@ -1946,7 +1988,7 @@ describe('createRelay: durable release', () => {
     while (pending.length > 0) resolveOne(Math.floor(rnd() * pending.length));
     await settle();
 
-    return { peers, all, byDot, violations, states, crashPoint, own };
+    return { peers, all, byDot, violations, states, crashPoint, own, instance: relay.room('r')?.instance ?? '' };
   };
 
   it('P1/P2/P3: nothing is released early, everything is released, per-connection seqs rise (200 seeds)', async () => {
@@ -1972,7 +2014,7 @@ describe('createRelay: durable release', () => {
 
   it('P4 restart: a relay hydrated from the durable prefix plus each writer’s unacked resend holds the whole set (60 seeds)', async () => {
     for (let seed = 0; seed < 60; seed++) {
-      const { all, byDot, states, crashPoint, own } = await run(seed);
+      const { all, byDot, states, crashPoint, own, instance } = await run(seed);
 
       // a journal appends in order, so what survives a crash is the longest durable PREFIX
       let k = 0;
@@ -1993,6 +2035,10 @@ describe('createRelay: durable release', () => {
             journal: crashPoint.durableEnvs.filter((e) => e.seq <= k),
           }),
         ).toBe(true);
+      } else {
+        // nothing durable yet: the adapter still persisted the generation nonce at creation, so
+        // the writers' resends are this generation's, not a refused older one
+        expect(restored.hydrate('r', { seq: 0, instance })).toBe(true);
       }
 
       for (const [origin, envs] of own) {
@@ -2202,160 +2248,111 @@ describe('createRelay: the commit checkpoint is a thunk', () => {
 // receive, or the two sides retain different op sets and a joiner is seeded into divergence.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('below-frontier drop (pure model: relay/client twin)', () => {
-  // transcribed from the client's receive gate: `prunedFrontier &&
-  // compareHlc(env.hlc, prunedFrontier) <= 0` → drop, with `compareHlc(a, b) =
-  // a.p !== b.p ? a.p - b.p : a.l - b.l`
-  const compareHlc = (a: Hlc, b: Hlc): number =>
-    a.p !== b.p ? a.p - b.p : a.l - b.l;
-  const clientDrops = (frontier: Hlc | undefined, hlc: Hlc): boolean =>
-    !!frontier && compareHlc(hlc, frontier) <= 0;
 
-  // transcribed from the relay's gate: `room.frontier && hlcLte(env.hlc, room.frontier)`
-  const relayDrops = (frontier: Hlc | undefined, hlc: Hlc): boolean =>
-    !!frontier &&
-    (hlc.p < frontier.p || (hlc.p === frontier.p && hlc.l <= frontier.l));
+describe('createRelay: refusals answered with a drop', () => {
+  const dropsTo = (sock: { sent: ServerMsg[] }) =>
+    sock.sent.filter((m): m is Extract<ServerMsg, { t: 'drop' }> => m.t === 'drop');
 
-  it('the two gates agree on every stamp, including the boundary (4000 pairs)', () => {
-    const rnd = mulberry32(7);
-    const disagreements: string[] = [];
-    for (let i = 0; i < 4000; i++) {
-      const fp = Math.floor(rnd() * 5);
-      const fl = Math.floor(rnd() * 5);
-      const frontier: Hlc = { p: fp, l: fl };
-      const hlc: Hlc = {
-        p: Math.floor(rnd() * 5),
-        l: Math.floor(rnd() * 5),
-      };
-      if (relayDrops(frontier, hlc) !== clientDrops(frontier, hlc)) {
-        disagreements.push(`${hlc.p}.${hlc.l} vs ${fp}.${fl}`);
-      }
-    }
-    expect(disagreements).toEqual([]);
-    // the boundary is inclusive on BOTH sides
-    expect(relayDrops({ p: 3, l: 2 }, { p: 3, l: 2 })).toBe(true);
-    expect(clientDrops({ p: 3, l: 2 }, { p: 3, l: 2 })).toBe(true);
-    expect(relayDrops({ p: 3, l: 2 }, { p: 3, l: 3 })).toBe(false);
+  it('a resend of an admitted version is answered "duplicate" — the acknowledgement — and never sequenced twice', () => {
+    const reasons: string[] = [];
+    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set(['x'], 1)]); // version 1, seq 1
+    const echoed = b.sock.sent.filter((m) => m.t === 'env').length;
+    a.env([set(['x'], 1)], { version: 1, hlc: { p: 1, l: 0 } }); // the echo was lost; resent verbatim
+    expect(relay.room('r')?.seq).toBe(1);
+    expect(reasons).toEqual(['duplicate']);
+    expect(dropsTo(a.sock)).toEqual([
+      { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'duplicate' },
+    ]);
+    expect(dropsTo(b.sock)).toEqual([]); // the submitter alone hears it
+    expect(b.sock.sent.filter((m) => m.t === 'env').length).toBe(echoed);
   });
 
-  it('with no frontier the gate is inert, and a frontier that advances never admits more', () => {
-    const rnd = mulberry32(11);
-    for (let i = 0; i < 400; i++) {
-      const hlc: Hlc = {
-        p: Math.floor(rnd() * 6),
-        l: Math.floor(rnd() * 6),
-      };
-      expect(relayDrops(undefined, hlc)).toBe(false);
-
-      const lo: Hlc = { p: Math.floor(rnd() * 6), l: Math.floor(rnd() * 6) };
-      const hi: Hlc = { p: lo.p + Math.floor(rnd() * 3), l: lo.l };
-      if (relayDrops(lo, hlc)) expect(relayDrops(hi, hlc)).toBe(true);
-    }
-  });
-});
-
-describe('createRelay: below-frontier admission', () => {
-  /** Write past `journalLimit` so the room compacts and a frontier exists. */
-  const compacted = (relay: ReturnType<typeof createRelay>) => {
+  it('an envelope from another generation is refused "generation" before any other evidence answers', () => {
+    const reasons: string[] = [];
+    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
     const a = client(relay, 'wa', 'oa');
     a.hello();
-    for (let i = 0; i < 5; i++) a.env([set(['fill', i], i)]);
-    const notice = a.sock.sent.find((m) => m.t === 'frontier');
-    if (!notice || notice.t !== 'frontier') {
-      throw new Error('expected the room to have compacted');
-    }
-    return { a, frontier: notice.frontier };
-  };
-
-  it('drops a write at or below the frontier: not sequenced, not ejected, not echoed, not seeded into a joiner', () => {
-    const drops: { env: OpEnvelope; reason: string }[] = [];
-    const relay = createRelay({
-      journalLimit: 4,
-      onDrop: (_room, env, reason) => {
-        drops.push({ env, reason });
-      },
-    });
-    const { a, frontier } = compacted(relay);
-    expect(frontier).toEqual({ p: 1, l: 0 });
-
-    const stale = client(relay, 'ws', 'os');
-    stale.hello();
-    const seqBefore = relay.room('r')?.seq;
-
-    // an honest offline writer: stamped before the room compacted, at a path nobody used
-    stale.env([set(['stale'], 'resurrected')], { hlc: { p: 1, l: 0 } });
-
-    expect(drops.map((d) => d.reason)).toEqual(['frontier']);
-    expect(relay.room('r')?.seq).toBe(seqBefore);
-    expect(stale.sock.closed).toBe(false);
-    expect(stale.sock.sent.some((m) => m.t === 'eject')).toBe(false);
-    expect(
-      a.sock.sent.some(
-        (m) => m.t === 'env' && m.env.ops.some((o) => o.path[0] === 'stale'),
-      ),
-    ).toBe(false);
-
-    // the established peer's own receive gate would have refused it too, so the room's
-    // retained state and the peer's stay the same op set: a joiner is seeded with that set
-    const b = client(relay, 'wb', 'ob');
-    b.hello();
-    expect(regAt(snapshotOf(b.sock).registers, ['stale'])).toBeUndefined();
-
-    // one tick above the frontier is admitted — the gate is a boundary, not a blanket
-    stale.env([set(['fresh'], 1)], { hlc: { p: 1, l: 1 } });
-    expect(relay.room('r')?.seq).toBe((seqBefore ?? 0) + 1);
+    a.env([set(['x'], 1)]);
+    a.env([set(['x'], 2)], { instance: 'an-older-generation', version: 1 }); // would be a duplicate by version
+    expect(relay.room('r')?.seq).toBe(1);
+    expect(reasons).toEqual(['generation']);
+    expect(dropsTo(a.sock).map((d) => d.reason)).toEqual(['generation']);
+    expect(a.sock.closed).toBe(false);
   });
 
-  it('a restored frontier still refuses; a snapshot that lost it readmits the same write', () => {
+  it('a migration cuts the generation: members are re-welcomed under the new nonce and old-generation writes are refused', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    const before = a.instance();
+    a.env([set([], { v: 1 })]);
+    a.env([set([], { v: 2 })], { schemaVersion: 1 }); // the cut
+    const welcomes = b.sock.sent.filter((m) => m.t === 'welcome');
+    expect(welcomes).toHaveLength(2);
+    expect(b.instance()).not.toBe(before);
+    expect(relay.room('r')?.instance).toBe(b.instance());
+    // a write b stamped before it learned the cut
+    b.env([set(['late'], 1)], { instance: before });
+    expect(dropsTo(b.sock).map((d) => d.reason)).toEqual(['generation']);
+    // and one after
+    b.env([set(['fresh'], 1)]);
+    expect(relay.room('r')?.seq).toBe(3);
+  });
+
+  it('a version below the origin\'s admitted maximum that was never admitted is refused "order"', () => {
+    const reasons: string[] = [];
+    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['x'], 1)], { version: 2 }); // a hole at 1 (a refused write, or a second tab)
+    a.env([set(['x'], 2)], { version: 1 });
+    expect(relay.room('r')?.seq).toBe(1);
+    expect(reasons).toEqual(['order']);
+    expect(a.sock.closed).toBe(false);
+  });
+
+  it('restored ranges and settled vector answer exactly like the live room did', () => {
     let saved: RoomSnapshot = { seq: 0 };
     const source = createRelay({
-      journalLimit: 4,
+      journalLimit: 2,
       onCommit: (_room, env, state) => {
         saved = {
           seq: state.seq,
           instance: state.instance,
           registers: state.checkpoint(),
-          wm: state.wm,
-          frontier: state.frontier,
+          ranges: state.ranges,
+          settled: state.settled,
           schemaVersion: state.schemaVersion,
           journal: [env],
         };
       },
     });
-    compacted(source);
-    expect(saved.frontier).toEqual({ p: 1, l: 0 });
+    const a = client(source, 'wa', 'oa');
+    a.hello();
+    a.env([set([], {})]);
+    a.env([set(['x'], 1)]);
+    a.env([set(['x'], 2)]); // trims: collection ran on settled { oa: 3.0 }
+    expect(saved.ranges).toEqual({ oa: [[1, 3]] });
+    expect(saved.settled).toEqual({ oa: { p: 3, l: 0 } });
 
-    const replay = (snapshot: RoomSnapshot) => {
-      const reasons: string[] = [];
-      const revived = createRelay({
-        journalLimit: 4,
-        onDrop: (_room, _env, reason) => {
-          reasons.push(reason);
-        },
-      });
-      expect(revived.hydrate('r', snapshot)).toBe(true);
-      const stale = client(revived, 'ws', 'os');
-      stale.hello();
-      stale.env([set(['stale'], 'resurrected')], { hlc: { p: 1, l: 0 } });
-      return { reasons, seq: revived.room('r')?.seq };
-    };
-
-    const restored = replay(saved);
-    expect(restored.reasons).toEqual(['frontier']);
-    expect(restored.seq).toBe(saved.seq);
-
-    // the same room restored from a checkpoint written before the frontier was persisted
-    const legacy: RoomSnapshot = {
-      seq: saved.seq,
-      instance: saved.instance,
-      registers: saved.registers,
-      wm: saved.wm,
-      schemaVersion: saved.schemaVersion,
-      journal: saved.journal,
-    };
-    const forgetful = replay(legacy);
-    expect(forgetful.reasons).toEqual([]);
-    expect(forgetful.seq).toBe((saved.seq ?? 0) + 1);
+    const revived = createRelay({ journalLimit: 2 });
+    expect(revived.hydrate('r', saved)).toBe(true);
+    const back = client(revived, 'wa', 'oa');
+    back.hello();
+    const reasons: string[] = [];
+    back.env([set(['x'], 1)], { version: 2, hlc: { p: 2, l: 0 } }); // a resend of what the old room held
+    expect(revived.room('r')?.seq).toBe(3);
+    expect(back.sock.sent.filter((m) => m.t === 'drop').map((m) => (m as { reason: string }).reason)).toEqual(['duplicate']);
+    back.env([set(['x'], 3)], { version: 4 });
+    expect(revived.room('r')?.seq).toBe(4);
+    void reasons;
   });
 });
 
@@ -2425,11 +2422,13 @@ describe('createRelay: the room sequence reaches the policy', () => {
 
 describe('createRelay: a late joiner holds a waiting envelope once', () => {
   const envelope = (
+    relay: ReturnType<typeof createRelay>,
     origin: string,
     version: number,
     path: string,
   ): OpEnvelope => ({
     proto: MESH_PROTO_VERSION,
+    instance: relay.room('r')?.instance ?? '',
     origin,
     writer: origin,
     version,
@@ -2476,7 +2475,7 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
       return { conn, got };
     };
     const a = join('a');
-    a.conn.receive({ t: 'env', room: 'r', env: envelope('a', 1, 'x') });
+    a.conn.receive({ t: 'env', room: 'r', env: envelope(relay, 'a', 1, 'x') });
     const b = join('b');
     expect(b.got.filter((m) => m.t === 'welcome')).toHaveLength(0);
 
@@ -2516,7 +2515,7 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
       },
     });
     const a = join('a');
-    a.conn.receive({ t: 'env', room: 'r', env: envelope('a', 1, 'x') });
+    a.conn.receive({ t: 'env', room: 'r', env: envelope(relay, 'a', 1, 'x') });
 
     expect(countOf(a.got, 1)).toBe(1);
     expect(c).toBeDefined();
@@ -2538,12 +2537,18 @@ describe('createRelay: unloading a quiescent room', () => {
     });
     return { sock, conn };
   };
-  const write = (conn: RelayConnection, origin: string, version: number) =>
+  const write = (
+    relay: ReturnType<typeof createRelay>,
+    conn: RelayConnection,
+    origin: string,
+    version: number,
+  ) =>
     conn.receive({
       t: 'env',
       room: 'r',
       env: {
         proto: MESH_PROTO_VERSION,
+        instance: relay.room('r')?.instance ?? '',
         origin,
         writer: origin,
         version,
@@ -2556,7 +2561,7 @@ describe('createRelay: unloading a quiescent room', () => {
   it('refuses a room somebody is in, and a name it is not holding', () => {
     const relay = createRelay();
     const a = join(relay, 'a');
-    write(a.conn, 'a', 1);
+    write(relay, a.conn, 'a', 1);
     expect(relay.unload('r')).toBe(false);
     expect(relay.unload('never-heard-of')).toBe(false);
     expect(relay.room('r')?.seq).toBe(1);
@@ -2574,7 +2579,7 @@ describe('createRelay: unloading a quiescent room', () => {
       },
     });
     const a = join(relay, 'a');
-    write(a.conn, 'a', 1);
+    write(relay, a.conn, 'a', 1);
     a.conn.disconnect();
 
     expect(relay.unload('r')).toBe(false);
@@ -2592,8 +2597,8 @@ describe('createRelay: unloading a quiescent room', () => {
   it('gives the next hello a fresh room at seq 0, which is why an adapter must re-hydrate before serving', () => {
     const relay = createRelay();
     const a = join(relay, 'a');
-    write(a.conn, 'a', 1);
-    write(a.conn, 'a', 2);
+    write(relay, a.conn, 'a', 1);
+    write(relay, a.conn, 'a', 2);
     expect(relay.room('r')?.seq).toBe(2);
     a.conn.disconnect();
 
@@ -2621,8 +2626,8 @@ describe('createRelay: unloading a quiescent room', () => {
       },
     });
     const a = join(relay, 'a');
-    write(a.conn, 'a', 1);
-    write(a.conn, 'a', 2);
+    write(relay, a.conn, 'a', 1);
+    write(relay, a.conn, 'a', 2);
 
     /** Pending, not stalled: discard is refused too. */
     expect(relay.room('r')?.stalled).toBe(false);
@@ -2650,7 +2655,7 @@ describe('createRelay: unloading a quiescent room', () => {
   it('takes a hydrated snapshot after an unload, since the name is free again', () => {
     const relay = createRelay();
     const a = join(relay, 'a');
-    write(a.conn, 'a', 1);
+    write(relay, a.conn, 'a', 1);
     a.conn.disconnect();
     expect(relay.hydrate('r', { seq: 9 })).toBe(false);
     expect(relay.unload('r')).toBe(true);

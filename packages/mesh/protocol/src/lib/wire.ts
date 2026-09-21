@@ -40,6 +40,13 @@ export const MESH_PROTO_VERSION = 3;
 
 export type OpEnvelope = {
   readonly proto: number;
+  /**
+   * The room generation this envelope was written in: the instance nonce the writer learned
+   * from its welcome. The relay refuses an envelope from another generation (`drop`,
+   * `'generation'`). A nonce announced in welcomes alone cannot fence an envelope already in
+   * flight or a persisted outbox restored after a cut, so the fence rides on the envelope.
+   */
+  readonly instance: string;
   readonly origin: string;
   readonly writer: string;
   readonly version: number;
@@ -84,6 +91,13 @@ export type RegisterCheckpoint = {
   readonly path: readonly Key[];
   readonly siblings: readonly SyncSibling[];
   readonly water: Readonly<Record<string, Hlc>>;
+  /**
+   * The highest epoch ever retained at this path — the epoch-bump admission baseline. Kept
+   * apart from the siblings because compaction may collect the sibling that carried it (a
+   * citing op need not carry the epoch it supersedes), and the relay's policy answer for a
+   * later op must not change with what was collected. Absent means 0.
+   */
+  readonly epoch?: number;
 };
 
 export type PresenceState = {
@@ -201,13 +215,41 @@ export type ServerSignalMsg = {
   readonly data: unknown;
 };
 
-/** The room's stability frontier advanced (the relay compacted past it). A client may reclaim its
- *  own register state at or below this stamp; a straggler below it is rejected at ingest. */
-export type FrontierMsg = {
-  readonly t: 'frontier';
+/**
+ * The room's settled vector moved: per origin, the stamp of the last version in that origin's
+ * contiguously admitted prefix. Nothing new from an origin can arrive at or below its entry
+ * (per-connection FIFO, per-origin monotone stamps, in-order resend), and anything that does
+ * is a duplicate the relay answers as such. Clients garbage-collect superseded siblings and
+ * citation watermarks at or below it — the same rule the relay runs — and nothing else. It
+ * rides behind the envelope that moved it, so a client never collects a watermark before the
+ * write it protected has passed.
+ */
+export type SettledMsg = {
+  readonly t: 'settled';
   readonly room: string;
-  readonly frontier: Hlc;
+  readonly settled: Readonly<Record<string, Hlc>>;
 };
+
+/**
+ * The relay's answer for an envelope it neither echoed nor ejected: sent to the submitting
+ * connection only, never broadcast, never held behind durability (it carries no committed
+ * state). `'duplicate'` is an acknowledgement — the room already holds that (origin, version).
+ * The others refuse an honest writer: `'generation'` (written in another room generation),
+ * `'schema'` (a data shape older than the room's), `'order'` (a version below the origin's
+ * admitted maximum that was never admitted — impossible on one FIFO connection with in-order
+ * resend, so a configuration that violates that assumption). A refused write is not in the
+ * room; the writer drops it and rehydrates.
+ */
+export type DropMsg = {
+  readonly t: 'drop';
+  readonly room: string;
+  readonly origin: string;
+  readonly version: number;
+  readonly reason: 'duplicate' | 'generation' | 'schema' | 'order';
+};
+
+/** An inclusive range of admitted envelope versions for one origin. */
+export type VersionRange = readonly [from: number, to: number];
 
 export type ServerMsg =
   | WelcomeMsg
@@ -217,4 +259,5 @@ export type ServerMsg =
   | EjectMsg
   | MemberMsg
   | ServerSignalMsg
-  | FrontierMsg;
+  | SettledMsg
+  | DropMsg;

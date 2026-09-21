@@ -192,6 +192,7 @@ function genListEnvs(seed: number, rounds: number, rep: Rep): OpEnvelope[] {
     const stamped = world.stamp(ops, opt);
     const e: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: 'g',
       origin: writer,
       writer,
       version: ++clock,
@@ -330,6 +331,7 @@ function scenario(rep: Rep): {
   let clock = 0;
   const wrap = (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
+    instance: 'g',
     origin: writer,
     writer,
     version: ++clock,
@@ -416,6 +418,7 @@ describe.each(REPS)('KEYED CONTAINER obligations on the real register ($name)', 
     // re-create citing only the tombstone (did NOT observe the orphan move): the orphan pos resurfaces
     const recreate: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: 'g',
       origin: 'w3',
       writer: 'w3',
       version: 1,

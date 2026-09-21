@@ -48,6 +48,7 @@ function migrate(relay: Relay, root: State, schemaVersion: number): void {
     room: 'm',
     env: {
       proto: MESH_PROTO_VERSION,
+      instance: relay.room('m')?.instance ?? '',
       origin: 'mig',
       writer: 'migrator',
       version: 1,

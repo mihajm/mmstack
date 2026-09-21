@@ -22,6 +22,9 @@ const isFiniteHlc = (h: unknown): boolean =>
  */
 export function validateEnvelope(env: OpEnvelope): string | null {
   if (!env || typeof env !== 'object') return 'envelope';
+  // the generation may be EMPTY (minted before any welcome named one; the relay's fence refuses
+  // it, a relay-less topology has no generation at all) but never unclean
+  if (typeof env.instance !== 'string' || hasControlChar(env.instance)) return 'instance';
   if (!isCleanId(env.origin)) return 'origin';
   if (!isCleanId(env.writer)) return 'writer';
   if (!isFiniteHlc(env.hlc)) return 'hlc';

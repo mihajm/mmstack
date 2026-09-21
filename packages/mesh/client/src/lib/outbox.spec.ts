@@ -52,6 +52,7 @@ async function settle(): Promise<void> {
 
 const offlineEnv = (): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
+  instance: '',
   origin: 'A',
   writer: 'wa',
   version: 1,
@@ -134,6 +135,7 @@ describe('meshSync durable outbox — reboot survival', () => {
     // citing envelope first — outbox order is the only order that respects the chain.
     const e1: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin: 'zzz-boot1',
       writer: 'wa',
       version: 1,
@@ -152,6 +154,7 @@ describe('meshSync durable outbox — reboot survival', () => {
     };
     const e2: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin: 'aaa-boot2',
       writer: 'wa',
       version: 1,
@@ -201,6 +204,7 @@ describe('meshSync durable outbox — reboot survival', () => {
       envs: [
         {
           proto: OP_PROTO_VERSION,
+          instance: '',
           origin: 'A',
           writer: 'wa',
           version: 3,
@@ -484,6 +488,7 @@ describe('meshSync whenReady — assemble the local base before connecting', () 
       envs: [
         {
           proto: OP_PROTO_VERSION,
+          instance: '',
           origin: 'A',
           writer: 'wa',
           version: 1,
@@ -521,5 +526,76 @@ describe('meshSync whenReady — assemble the local base before connecting', () 
 
     a.mesh.close();
     seeder.mesh.close();
+  });
+});
+
+describe('meshSync durable outbox — the generation rides with the tail', () => {
+  it('persists the room generation, the emission floors and the clock high-water beside the tail', async () => {
+    const relay = createRelay();
+    const { store: disk, backing } = memStore();
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:P', store: disk, crossTab: 'off', debounceMs: 0 },
+    });
+    await settle();
+    a.s.title.set('written');
+    await settle();
+    a.mesh.close(); // teardown persists immediately, past the debounce
+    const kept = backing.get('m:P') as {
+      instance?: string;
+      floors?: unknown[];
+      clock?: { p: number; l: number };
+      version: number;
+    };
+    expect(kept.instance).toBe(relay.room('m')?.instance);
+    expect(Array.isArray(kept.floors)).toBe(true);
+    expect(kept.clock).toEqual(expect.objectContaining({ p: expect.any(Number) }));
+    expect(kept.version).toBeGreaterThan(0);
+  });
+
+  it('a persisted tail from another generation is refused on the first welcome: told and counted; an empty room is then seeded from the local document', async () => {
+    const relay = createRelay();
+    const { store: disk, backing } = memStore();
+    backing.set('m:A', {
+      origin: 'A',
+      version: 1,
+      envs: [{ ...offlineEnv(), instance: 'a-generation-that-was-cut' }],
+      instance: 'a-generation-that-was-cut',
+    });
+    const refused: string[] = [];
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:A', store: disk, crossTab: 'off' },
+      onRefused: (_env, reason) => refused.push(reason),
+    });
+    await settle();
+    expect(refused).toEqual(['generation']);
+    expect(a.mesh.health().refusedWrites).toBe(1);
+    expect(a.mesh.status()).toBe('live');
+    // the refused envelope itself never entered the room: it is not in the journal under its
+    // old generation. The room was EMPTY, though, so the boot seeded it with the local document —
+    // which still holds the restored edit — as a new write of the new generation
+    expect(a.mesh.health().refusedWrites).toBe(1);
+    const b = peer(relay, 'wb');
+    await settle();
+    expect(b.s().title).toBe('offline');
+    a.mesh.close();
+    b.mesh.close();
+  });
+
+  it('a persisted tail with no generation yet adopts the first one it meets and is admitted', async () => {
+    const relay = createRelay();
+    const { store: disk, backing } = memStore();
+    backing.set('m:N', { origin: 'A', version: 1, envs: [offlineEnv()] }); // instance: '' — written before any welcome
+    const refused: string[] = [];
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'm:N', store: disk, crossTab: 'off' },
+      onRefused: (_env, reason) => refused.push(reason),
+    });
+    await settle();
+    expect(refused).toEqual([]);
+    const b = peer(relay, 'wb');
+    await settle();
+    expect(b.s().title).toBe('offline');
+    a.mesh.close();
+    b.mesh.close();
   });
 });

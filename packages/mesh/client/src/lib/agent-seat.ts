@@ -18,6 +18,7 @@ import {
   type SyncedFork,
   type toStoreOptions,
   type WritableSignalStore,
+  type OpEnvelope,
 } from '@mmstack/primitives/core';
 import type { SeatSync } from './mesh-sync';
 import { meshSession, type MeshStatus } from './session';
@@ -97,6 +98,8 @@ export type AgentSeatOptions = {
    */
   readonly context?: toStoreOptions;
   readonly onEject?: (reason: string) => void;
+  /** A write the relay refused; it is not in the room, and the doc was rehydrated. The envelope carries its values. */
+  readonly onRefused?: (env: OpEnvelope, reason: 'generation' | 'schema' | 'order') => void;
 };
 
 export type AgentSeat<T extends object> = {
@@ -218,6 +221,10 @@ export function agentSeat<T extends object>(
         emit({ kind: 'change', ...batch });
       },
       onResync: (seq) => emit({ kind: 'resync', seq }),
+      onRefused: (env, reason) => {
+        diverged = true; // the write stays applied until the rehydrate that follows lands
+        opt.onRefused?.(env, reason);
+      },
       onLocalReject: (violation) => {
         diverged = true; // the write stays in the replica but will never reach the room
         console.warn(

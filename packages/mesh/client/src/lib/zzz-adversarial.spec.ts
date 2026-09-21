@@ -8,9 +8,17 @@ import {
   type SyncOp,
 } from '@mmstack/primitives/core';
 
+/** A settled vector naming every origin the fold has applied at one stamp (a test convenience). */
+const allAt = (
+  conv: { appliedFrontier(): Readonly<Record<string, { p: number; l: number }>> },
+  h: { p: number; l: number },
+): Record<string, { p: number; l: number }> =>
+  Object.fromEntries(Object.keys(conv.appliedFrontier()).map((o) => [o, h]));
+
 const hlc = (p: number, l = 0) => ({ p, l });
 const env = (origin: string, version: number, h: any, ops: SyncOp[]): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
+  instance: '',
   origin,
   writer: origin,
   version,
@@ -54,11 +62,11 @@ describe('ADVERSARIAL PARITY: tombstoneDroppable with ARRAY ancestor value', () 
       twin.ingest(e as unknown as WireEnvelope);
     }
     const frontier = hlc(10); // above all stamps -> everything eligible for compaction
-    conv.prune(frontier);
-    twin.compact(frontier);
+    conv.settle(allAt(conv, frontier));
+    twin.settle(allAt(conv, frontier));
     const c = canon(conv.checkpoint());
     const t = canon(twin.checkpoint() as unknown as RegisterCheckpoint[]);
-    console.log('CLIENT after prune:', JSON.stringify(c));
+    console.log('CLIENT after settle:', JSON.stringify(c));
     console.log('RELAY  after compact:', JSON.stringify(t));
     expect(t).toEqual(c);
   });
@@ -75,8 +83,8 @@ describe('ADVERSARIAL PARITY: tombstoneDroppable with ARRAY ancestor value', () 
       conv.ingest(e);
       twin.ingest(e as unknown as WireEnvelope);
     }
-    conv.prune(hlc(10));
-    twin.compact(hlc(10));
+    conv.settle(allAt(conv, hlc(10)));
+    twin.settle(allAt(conv, hlc(10)));
     expect(canon(twin.checkpoint() as unknown as RegisterCheckpoint[])).toEqual(
       canon(conv.checkpoint()),
     );

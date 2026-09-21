@@ -36,35 +36,48 @@ export type RegisterStore = {
   /** Merge checkpointed register state in (idempotent): the hydrate path. */
   load(registers: readonly RegisterCheckpoint[]): void;
   /**
-   * Compaction at the retention frontier (the stamp the journal no longer covers): drops
-   * superseded siblings and stale watermarks at or below it, and drops a register whose live
-   * set is a lone tombstone below it, but only when nothing else still materializes that
-   * key (no live descendant register, and no live ancestor `set` value containing it), so a
-   * dropped tombstone can never resurrect the value it deleted.
+   * Effect-preserving garbage collection `settled[o]` is the stamp of origin `o`'s last contiguously admitted version: nothing new
+   * from `o` at or below it can arrive, and anything that does is a duplicate the relay refuses.
+   * Drops a superseded sibling `(o, h)` only when `h ≤ settled[o]` (and it is covered), and a
+   * watermark `water[o] = w` only when `w ≤ settled[o]`. Never drops a tombstone. A register
+   * with nothing left goes.
    */
-  compact(frontier: Hlc): void;
+  settle(settled: Readonly<Record<string, Hlc>>): void;
   /** Drop all register state (a migration establishes a fresh retention window). */
   reset(): void;
   /**
    * The max epoch across ALL retained siblings at `path` (0 when nothing is retained): the
    * room's observed epoch, the baseline an admission gate compares an incoming op's epoch
-   * against. Superseded-but-uncompacted siblings count too, so a carry that superseded the
-   * bump it cites never lowers the observed max within the retention window; a full
-   * below-frontier prune legitimately resets it.
+   * against. Superseded siblings count too, so a carry that superseded the
+   * bump it cites never lowers the observed max, and neither does garbage collection: the
+   * baseline is kept apart from the siblings and reset only with the room.
    */
   maxEpoch(path: readonly Key[]): number;
   /**
    * Does the retained state at `path` cover `dot` — is it at or below that origin's known
    * extent there? True when the origin's retained sibling or its supersession watermark sits
    * at or above the dot's stamp. Every op sequenced into the room leaves such a trace until
-   * compaction, so above the compaction frontier a cite of an uncovered dot is a forgery (or
-   * an op the relay never saw).
+   * `settle` collects it, so above the origin's settled stamp a cite of an uncovered dot is a
+   * forgery (or an op the relay never saw). A per-origin extent, not admission evidence for
+   * one dot: a later write from the same origin at the path answers yes as well.
    */
   covers(path: readonly Key[], dot: Dot): boolean;
 };
 
 export function createRegisterStore(): RegisterStore {
   const registers = new Map<string, Reg>();
+  /** Epoch baseline per path (C4): raised on ingest and load, never lowered by collection. */
+  const epochs = new Map<
+    string,
+    { readonly path: readonly Key[]; epoch: number }
+  >();
+  const raiseEpoch = (path: readonly Key[], epoch: number): void => {
+    if (epoch <= 0) return;
+    const key = keyOf(path);
+    const cur = epochs.get(key);
+    if (!cur) epochs.set(key, { path, epoch });
+    else if (epoch > cur.epoch) cur.epoch = epoch;
+  };
 
   const regAt = (path: readonly Key[]): Reg => {
     const key = keyOf(path);
@@ -76,44 +89,6 @@ export function createRegisterStore(): RegisterStore {
     return reg;
   };
 
-  const liveOf = (reg: Reg): SyncSibling[] => {
-    const out: SyncSibling[] = [];
-    for (const [origin, s] of reg.siblings) {
-      const w = reg.water.get(origin);
-      if (!w || compareHlc(s.hlc, w) > 0) out.push(s);
-    }
-    return out;
-  };
-
-  const isContainer = (v: unknown): v is Record<string, unknown> =>
-    typeof v === 'object' && v !== null;
-
-  /** Does `value` (an ancestor sibling's set value) still contain the key at `rel`? */
-  const contains = (value: unknown, rel: readonly Key[]): boolean => {
-    let cur = value;
-    for (let i = 0; i < rel.length; i++) {
-      if (!isContainer(cur) || !Object.hasOwn(cur, String(rel[i]))) return false;
-      cur = (cur as Record<string, unknown>)[String(rel[i])];
-    }
-    return true;
-  };
-
-  /** A lone tombstone is droppable only if nothing else still materializes its key. */
-  const tombstoneDroppable = (key: string, reg: Reg): boolean => {
-    for (const [k, other] of registers) {
-      if (k === key) continue;
-      if (k.startsWith(key + SEP)) {
-        if (liveOf(other).length > 0) return false; // a live descendant would resurface
-      } else if (key.startsWith(k === '' ? '' : k + SEP)) {
-        const rel = reg.path.slice(other.path.length);
-        for (const s of liveOf(other)) {
-          if (s.kind === 'set' && contains(s.value, rel)) return false;
-        }
-      }
-    }
-    return true;
-  };
-
   return {
     ingest: (env) => {
       for (const op of env.ops) {
@@ -121,11 +96,14 @@ export function createRegisterStore(): RegisterStore {
         // ship register state a client can only materialize as a blanked document, so drop it
         if (!op.path.length && op.kind !== 'set') continue;
         const reg = regAt(op.path);
+        raiseEpoch(op.path, op.epoch ?? 0);
         for (const c of op.cites ?? []) {
           // a self-citation would born-dead the write; ignore it (matches the client register)
-          if (c.origin === env.origin && compareHlc(c.hlc, env.hlc) === 0) continue;
+          if (c.origin === env.origin && compareHlc(c.hlc, env.hlc) === 0)
+            continue;
           const cur = reg.water.get(c.origin);
-          if (!cur || compareHlc(c.hlc, cur) > 0) reg.water.set(c.origin, c.hlc);
+          if (!cur || compareHlc(c.hlc, cur) > 0)
+            reg.water.set(c.origin, c.hlc);
         }
         const best = reg.siblings.get(env.origin);
         if (!best || compareHlc(env.hlc, best.hlc) > 0) {
@@ -147,18 +125,35 @@ export function createRegisterStore(): RegisterStore {
 
     checkpoint: () => {
       const out: RegisterCheckpoint[] = [];
-      for (const reg of registers.values()) {
+      for (const [key, reg] of registers) {
+        const base = epochs.get(key);
         out.push({
           path: reg.path,
           siblings: [...reg.siblings.values()],
           water: Object.fromEntries(reg.water),
+          ...(base ? { epoch: base.epoch } : {}),
         });
+      }
+      // a baseline outlives its register: nothing retained there any more, the policy answer stays
+      for (const [key, base] of epochs) {
+        if (!registers.has(key)) {
+          out.push({
+            path: base.path,
+            siblings: [],
+            water: {},
+            epoch: base.epoch,
+          });
+        }
       }
       return out;
     },
 
     load: (regs) => {
       for (const r of regs) {
+        raiseEpoch(r.path, r.epoch ?? 0);
+        for (const s of r.siblings) raiseEpoch(r.path, s.epoch);
+        if (r.siblings.length === 0 && Object.keys(r.water).length === 0)
+          continue;
         const reg = regAt(r.path);
         for (const s of r.siblings) {
           const cur = reg.siblings.get(s.origin);
@@ -173,51 +168,39 @@ export function createRegisterStore(): RegisterStore {
       }
     },
 
-    compact: (frontier) => {
+    settle: (settled) => {
       for (const [key, reg] of [...registers]) {
         for (const [origin, s] of [...reg.siblings]) {
           const w = reg.water.get(origin);
+          const done = settled[origin];
           if (
-            compareHlc(s.hlc, frontier) <= 0 &&
             w &&
-            compareHlc(s.hlc, w) <= 0
+            done &&
+            compareHlc(s.hlc, w) <= 0 &&
+            compareHlc(s.hlc, done) <= 0
           ) {
             reg.siblings.delete(origin);
           }
         }
         for (const [origin, h] of [...reg.water]) {
-          if (compareHlc(h, frontier) <= 0) reg.water.delete(origin);
+          const done = settled[origin];
+          if (done && compareHlc(h, done) <= 0) reg.water.delete(origin);
         }
         if (reg.siblings.size === 0 && reg.water.size === 0) {
           registers.delete(key);
         }
       }
-      // lone-tombstone drop, after the sibling prune settled the live sets. Deepest paths first so a
-      // descendant tombstone is collected before its ancestor is evaluated: otherwise a still-present
-      // descendant tombstone pins the ancestor, and a single pass would strand it until a later compaction.
-      const byDepth = [...registers.entries()].sort(
-        (a, b) => b[1].path.length - a[1].path.length,
-      );
-      for (const [key, reg] of byDepth) {
-        const live = liveOf(reg);
-        if (
-          live.length === 1 &&
-          live[0].kind === 'delete' &&
-          reg.siblings.size === 1 &&
-          compareHlc(live[0].hlc, frontier) <= 0 &&
-          tombstoneDroppable(key, reg)
-        ) {
-          registers.delete(key);
-        }
-      }
+    },
+    reset: () => {
+      registers.clear();
+      epochs.clear();
     },
 
-    reset: () => registers.clear(),
-
     maxEpoch: (path) => {
-      const reg = registers.get(keyOf(path));
-      if (!reg) return 0;
-      let max = 0;
+      const key = keyOf(path);
+      let max = epochs.get(key)?.epoch ?? 0;
+      const reg = registers.get(key);
+      if (!reg) return max;
       for (const s of reg.siblings.values()) if (s.epoch > max) max = s.epoch;
       return max;
     },

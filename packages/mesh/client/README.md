@@ -146,6 +146,12 @@ rebases offline edits onto the room. `persist` stays the tool for a store that i
 cold offline boot shows the store's initial value plus your restored writes until a welcome arrives.
 If you also need to read the last room state while fully offline, assemble it as a base first, below.
 
+The outbox also records the room **generation** the tail was written in (the relay's `instance`
+nonce), this device's emission epoch floors and its clock high-water. A relay cuts a generation on
+a migration: every write from before the cut is refused, and on the first welcome after a reboot
+the client drops such a tail loudly through `onRefused` instead of resending it. A tail written
+before any welcome ever named a generation adopts the first one it meets.
+
 ## Assemble a base before connecting
 
 Pass `whenReady` to hold the connection until a local base is in place. `meshSync` awaits it before
@@ -399,6 +405,16 @@ if the session is ejected or closed while writes remain — those never reached 
 later call rejects the same way and `acked()` stays `false`. Await it before publishing anything
 that has to contain every edit; against a relay whose adapter confirms durability before echoing,
 acknowledged also means stored. `agentSeat` exposes the same pair as plain functions.
+
+The relay answers every write it neither echoes nor ejects, so the tail is always classified one
+round trip after a welcome. A resend of a write the room already holds comes back as `duplicate`,
+which is the acknowledgement. A refusal — `generation` (written before a cut), `schema` (an older
+data shape), `order` (a version this origin never had admitted, which only a second tab on one
+origin can produce) — means the write is not in the room and never will be: the client hands the
+envelope to `onRefused` (its values are inside, so you can offer to write them again), rehydrates
+from a fresh snapshot so the store shows the room, and rejects any pending `whenAcked()` with
+`refused: <reason>`. `health().refusedWrites` counts them. "Every write was classified" and
+"every write was stored" are different questions; `whenAcked()` answers the second.
 
 ## Schema versions
 

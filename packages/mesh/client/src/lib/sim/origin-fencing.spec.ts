@@ -73,6 +73,7 @@ async function settle(): Promise<void> {
 
 const offlineEnv = (): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
+  instance: '',
   origin: 'A',
   writer: 'wa',
   version: 1,

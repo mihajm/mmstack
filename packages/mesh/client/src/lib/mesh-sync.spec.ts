@@ -88,6 +88,7 @@ describe('wire twins (protocol ↔ primitives)', () => {
       ops: SyncOp[],
     ): OpEnvelope => ({
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin,
       writer: `w-${origin}`,
       version,
@@ -232,6 +233,7 @@ describe('wire twins (protocol ↔ primitives)', () => {
                 } as SyncOp);
         envs.push({
           proto: OP_PROTO_VERSION,
+          instance: '',
           origin,
           writer: origin,
           version: i + 1,
@@ -272,7 +274,7 @@ describe('wire twins (protocol ↔ primitives)', () => {
     }
   });
 
-  it('PROPERTY: client prune and relay compact reclaim identically, so a pruning peer stays in twin parity', () => {
+  it('PROPERTY: client settle and relay settle collect identically, so a collecting peer stays in twin parity', () => {
     // GC is the other half of #17: if the client register and the relay twin reclaim DIFFERENT
     // registers, a peer that prunes diverges from a joiner seeded off the relay. Drive a churny
     // stream (many set-then-cited-delete pairs -> lone tombstones) through both, GC both at the same
@@ -341,6 +343,7 @@ describe('wire twins (protocol ↔ primitives)', () => {
             } as SyncOp);
         const e: OpEnvelope = {
           proto: OP_PROTO_VERSION,
+          instance: '',
           origin,
           writer: origin,
           version: i + 1,
@@ -352,9 +355,11 @@ describe('wire twins (protocol ↔ primitives)', () => {
         twin.ingest(e as WireEnvelope);
         lastDot.set(key, { origin, hlc });
       }
-      const frontier = { p: Math.floor((p / 2) * (0.5 + r())), l: 0 };
-      conv.prune(frontier);
-      twin.compact(frontier);
+      const settled = Object.fromEntries(
+        Object.entries(conv.appliedFrontier()).map(([o, h]) => [o, { p: Math.floor(h.p * (0.5 + r())), l: 0 }]),
+      );
+      conv.settle(settled);
+      twin.settle(settled);
       expect(
         canon(twin.checkpoint() as unknown as RegisterCheckpoint[]),
         `seed ${seed}: prune/compact reclaimed differently`,
@@ -706,6 +711,7 @@ describe('ingress validation (client ↔ relay twin)', () => {
   const CTRL = String.fromCharCode(0x1f);
   const base = (): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
+    instance: '',
     origin: 'o1',
     writer: 'w1',
     version: 1,
@@ -790,6 +796,7 @@ describe('ingress validation (client ↔ relay twin)', () => {
       const ops = dup ? [op, { ...op }] : [op];
       const env = {
         proto: OP_PROTO_VERSION,
+        instance: '',
         origin,
         writer,
         version,
@@ -826,6 +833,7 @@ describe('ingress validation (client ↔ relay twin)', () => {
       room: 'p2p',
       env: {
         proto: OP_PROTO_VERSION,
+        instance: '',
         origin: `x${CTRL}y`,
         writer: 'w2',
         version: 1,

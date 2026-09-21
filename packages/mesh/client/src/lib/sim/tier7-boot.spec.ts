@@ -175,6 +175,7 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
     // shown deterministically at the register. A survivor of the old epoch under another origin:
     const survivor: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: '',
       origin: 'o2',
       writer: 'w2',
       version: 1,
@@ -193,6 +194,7 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
       a,
       won.ingest({
         proto: OP_PROTO_VERSION,
+        instance: '',
         origin: 'o3',
         writer: 'w',
         version: 1,
@@ -211,6 +213,7 @@ describe('Tier 7: epoch floor across crash + boot (INVARIANT — dissolved by fr
       b,
       lost.ingest({
         proto: OP_PROTO_VERSION,
+        instance: '',
         origin: 'o3',
         writer: 'w',
         version: 1,
@@ -271,6 +274,7 @@ describe('Tier 7: effect exactly-once across relay restart replay (INVARIANT)', 
         room: 'r',
         env: {
           proto: MESH_PROTO_VERSION,
+          instance: relay.room('r')?.instance ?? '',
           origin: 'o',
           writer: 'w',
           version: v,
@@ -311,6 +315,7 @@ describe('Tier 7: effect exactly-once across relay restart replay (INVARIANT)', 
       room: 'r',
       env: {
         proto: MESH_PROTO_VERSION,
+        instance: restored.room('r')?.instance ?? '',
         origin: 'o2',
         writer: 'w2',
         version: 1,

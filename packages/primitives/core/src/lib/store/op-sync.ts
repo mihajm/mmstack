@@ -84,6 +84,12 @@ export type SyncOp = StoreOp & {
  */
 export type OpEnvelope = {
   readonly proto: number;
+  /**
+   * The room generation this envelope was written in (the relay's instance nonce, learned from
+   * a welcome). The relay refuses an envelope from any other generation. Minted as `''` while no
+   * generation is known yet; the transport stamps the tail with the first one it learns.
+   */
+  readonly instance: string;
   readonly origin: string;
   readonly writer: string;
   readonly version: number;
@@ -139,6 +145,9 @@ const isFiniteHlc = (h: unknown): boolean =>
  */
 export function validateEnvelope(env: OpEnvelope): string | null {
   if (!env || typeof env !== 'object') return 'envelope';
+  // the generation may be EMPTY (minted before any welcome named one; the relay's fence refuses
+  // it, a relay-less topology has no generation at all) but never unclean
+  if (typeof env.instance !== 'string' || hasControlChar(env.instance)) return 'instance';
   if (!isCleanId(env.origin)) return 'origin';
   if (!isCleanId(env.writer)) return 'writer';
   if (!isFiniteHlc(env.hlc)) return 'hlc';
@@ -545,6 +554,8 @@ export type RegisterCheckpoint = {
   readonly path: readonly Key[];
   readonly siblings: readonly SyncSibling[];
   readonly water: Readonly<Record<string, Hlc>>;
+  /** The relay's epoch baseline at this path (wire twin of `RegisterCheckpoint.epoch`); the fold ignores it. */
+  readonly epoch?: number;
 };
 
 /** One register's live siblings, as {@link ConvergingApply.liveUnder} reports them. */
@@ -568,13 +579,11 @@ export type ConvergingApply = {
    * winner changed. Pass `local: true` for envelopes this peer emitted itself: registered,
    * nothing returned, unless `reconcile: true` is also set, which registers the op locally AND
    * returns the fold delta (a fork commit lands as a concurrent sibling, so the store must move to
-   * the fold winner rather than the raw committed value). Pass `frontier` to reject ops at or below
-   * a pruned horizon, so a straggler older than compacted state can never resurrect.
+   * the fold winner rather than the raw committed value). There is no stamp gate: a delayed or
+   * concurrent op always folds, and garbage collection (`settle`) only ever removes what such an
+   * op cannot observe.
    */
-  ingest(
-    env: OpEnvelope,
-    opt?: { local?: boolean; reconcile?: boolean; frontier?: Hlc },
-  ): StoreOp[];
+  ingest(env: OpEnvelope, opt?: { local?: boolean; reconcile?: boolean }): StoreOp[];
   /**
    * Stamp locally-diffed ops for emission: each op cites the live dots at its path and adopts
    * `max(observed epoch, own prior epoch at the path)`, plus 1 per path when `bump` is set (an
@@ -612,13 +621,29 @@ export type ConvergingApply = {
   /** Merge checkpointed register state in (idempotent; call after `reset()` on hydrate). */
   load(registers: readonly RegisterCheckpoint[]): void;
   /**
-   * Drop settled state at or below the stability frontier: superseded siblings and their
-   * watermarks, plus a register whose only live winner is a below-frontier tombstone once nothing
-   * else still materializes its key (no live descendant register, no live ancestor `set` value
-   * holding it), so state stays bounded under key churn. Never changes a fold above the frontier;
-   * pair with `ingest`'s `frontier` so pruned ops are rejected on re-delivery.
+   * Effect-preserving garbage collection the twin of the relay's `settle`. `settled[o]` is the stamp below which nothing new from origin
+   * `o` can arrive. Drops covered siblings and watermarks at or below it; never a tombstone.
    */
-  prune(frontier: Hlc): void;
+  settle(settled: Readonly<Record<string, Hlc>>): void;
+  /**
+   * This replica's emission epoch floors: the highest epoch it has emitted per path. They are
+   * the client half of the epoch baseline and must survive a reload: `load` recovers a floor
+   * only from a retained own sibling, and garbage collection may have collected it. Persist
+   * these beside the local snapshot and hand them back with `restoreFloors`.
+   */
+  emissionFloors(): readonly {
+    readonly path: readonly Key[];
+    readonly epoch: number;
+  }[];
+  /** Raise emission floors from a persisted set (idempotent, never lowers). */
+  restoreFloors(
+    floors: readonly {
+      readonly path: readonly Key[];
+      readonly epoch: number;
+    }[],
+  ): void;
+  /** Drop every emission floor: baselines belong to a room generation, and a new one starts clean. */
+  clearFloors(): void;
   /** Drop all registers (snapshot compaction / rehydration boundary). Emission epoch floors survive. */
   reset(): void;
 };
@@ -663,6 +688,13 @@ export function createConvergingApply(opt?: {
   // per-path floor of this replica's own emitted epochs: monotone, survives reset() so a
   // rehydrated replica can never re-emit below an epoch it already exposed
   const floors = new Map<string, number>();
+  const floorPaths = new Map<string, readonly Key[]>();
+  const raiseFloor = (path: readonly Key[], epoch: number): void => {
+    if (epoch <= 0) return;
+    const key = keyOf(path);
+    floorPaths.set(key, path);
+    floors.set(key, Math.max(floors.get(key) ?? 0, epoch));
+  };
   // monotone ingest counter + the seq at which each live sibling arrived (keyed pathKey → origin).
   // captureFrontier() reads the counter in O(1); a frontier-scoped stamp cites only siblings at or
   // below the captured seq. Side-mapped so the public sibling/checkpoint shapes stay unchanged.
@@ -767,37 +799,6 @@ export function createConvergingApply(opt?: {
         a.path.length - b.path.length ||
         (keyOf(a.path) < keyOf(b.path) ? -1 : 1),
     );
-  };
-
-  /** Does `value` still hold a key at `rel` (present, not merely undefined)? */
-  const holdsKey = (value: unknown, rel: readonly Key[]): boolean => {
-    let cur = value;
-    for (const seg of rel) {
-      if (
-        cur === null ||
-        typeof cur !== 'object' ||
-        !Object.hasOwn(cur, String(seg))
-      ) {
-        return false;
-      }
-      cur = (cur as Record<string, unknown>)[String(seg)];
-    }
-    return true;
-  };
-
-  const tombstoneDroppable = (key: string, reg: PathReg): boolean => {
-    for (const [k, other] of registers) {
-      if (k === key) continue;
-      if (k.startsWith(key + SEP)) {
-        if (liveOf(other).length > 0) return false;
-      } else if (key.startsWith(k === '' ? '' : k + SEP)) {
-        const rel = reg.path.slice(other.path.length);
-        for (const s of liveOf(other)) {
-          if (s.kind === 'set' && holdsKey(s.value, rel)) return false;
-        }
-      }
-    }
-    return true;
   };
 
   /** Nearest ancestor register that contributes a value or a deletion (clears abstain). */
@@ -954,7 +955,6 @@ export function createConvergingApply(opt?: {
       observeApplied(env.origin, env.hlc);
 
       for (const op of env.ops) {
-        if (o?.frontier && compareHlc(env.hlc, o.frontier) <= 0) continue;
 
         if (!op.path.length && op.kind !== 'set') continue;
         const reg = regAt(op.path);
@@ -990,7 +990,7 @@ export function createConvergingApply(opt?: {
         }
 
         if (o?.local && (sop.epoch ?? 0) > 0) {
-          floors.set(key, Math.max(floors.get(key) ?? 0, sop.epoch as number));
+          raiseFloor(op.path, sop.epoch as number);
         }
       }
 
@@ -1103,55 +1103,52 @@ export function createConvergingApply(opt?: {
         if (opt?.origin) {
           const own = reg.siblings.get(opt.origin);
           if (own) {
-            floors.set(key, Math.max(floors.get(key) ?? 0, own.epoch));
+            raiseFloor(r.path, own.epoch);
           }
         }
         refresh(reg);
       }
     },
 
-    prune: (frontier) => {
+    emissionFloors: () =>
+      [...floors].map(([key, epoch]) => ({
+        path: floorPaths.get(key) as readonly Key[],
+        epoch,
+      })),
+    restoreFloors: (entries) => {
+      for (const f of entries) raiseFloor(f.path, f.epoch);
+    },
+    clearFloors: () => {
+      floors.clear();
+      floorPaths.clear();
+    },
+    settle: (settled) => {
       for (const [key, reg] of [...registers]) {
         const sm = seqs.get(key);
         for (const [o, s] of [...reg.siblings]) {
           const w = reg.water.get(o);
+          const done = settled[o];
           if (
-            compareHlc(s.hlc, frontier) <= 0 &&
             w &&
-            compareHlc(s.hlc, w) <= 0
+            done &&
+            compareHlc(s.hlc, w) <= 0 &&
+            compareHlc(s.hlc, done) <= 0
           ) {
             reg.siblings.delete(o);
             sm?.delete(o);
           }
         }
         for (const [o, h] of [...reg.water]) {
-          if (compareHlc(h, frontier) <= 0) reg.water.delete(o);
+          const done = settled[o];
+          if (done && compareHlc(h, done) <= 0) reg.water.delete(o);
         }
         if (reg.siblings.size === 0 && reg.water.size === 0) {
           registers.delete(key);
           seqs.delete(key);
-          floors.delete(key);
-        }
-      }
-      const byDepth = [...registers.entries()].sort(
-        (a, b) => b[1].path.length - a[1].path.length,
-      );
-      for (const [key, reg] of byDepth) {
-        const live = liveOf(reg);
-        if (
-          live.length === 1 &&
-          live[0].kind === 'delete' &&
-          reg.siblings.size === 1 &&
-          compareHlc(live[0].hlc, frontier) <= 0 &&
-          tombstoneDroppable(key, reg)
-        ) {
-          registers.delete(key);
-          seqs.delete(key);
-          floors.delete(key);
+          // the emission floor is this replica's epoch baseline: it outlives the register (C4)
         }
       }
     },
-
     reset: () => {
       registers.clear();
       seqs.clear();
@@ -1244,6 +1241,8 @@ export type OpSyncOptions = {
   /** Opaque principal pseudonym — provided by the app, never minted here. */
   readonly writer: string;
   readonly origin?: string;
+  /** The room generation to stamp emissions with, when already known (a restored session). */
+  readonly instance?: string;
   readonly policyVersion?: number;
   readonly policies?: readonly MergePolicyEntry[];
   /** Per-path custom register folds; take precedence over the `policies` mapping. */
@@ -1268,6 +1267,11 @@ export type OpSyncCheckpoint<T = unknown> = {
   readonly root: T;
   readonly registers: readonly RegisterCheckpoint[];
   readonly wm: Readonly<Record<string, number>>;
+  /**
+   * This replica's emission epoch floors. Local, not a peer's: a persisted local snapshot must
+   * carry them (a floor whose own sibling was collected has no other source on reload).
+   */
+  readonly floors?: readonly { readonly path: readonly Key[]; readonly epoch: number }[];
 };
 
 /**
@@ -1360,15 +1364,29 @@ export type OpSync<T = unknown> = {
    * `receive`/`hydrate` — restoring onto already-ingested remote winners would wrongly let a stale
    * local op override them.
    */
-  restore(envs: readonly OpEnvelope[], highWater?: number): void;
+  restore(
+    envs: readonly OpEnvelope[],
+    highWater?: number,
+    floors?: readonly { readonly path: readonly Key[]; readonly epoch: number }[],
+    clock?: Hlc,
+  ): void;
   /**
-   * Reclaim settled register state at or below a stability frontier: superseded siblings, their
-   * watermarks, and lone tombstones nothing still materializes. Never changes the current value, so
-   * it is safe to call whenever a transport learns the frontier has advanced (a straggler below it
-   * is rejected at ingest, so nothing can resurrect). Without it, per-path register state grows with
-   * every path ever written; with it, state stays bounded by what is live above the frontier.
+   * Effect-preserving garbage collection on the relay's settled vector (per origin, the stamp of
+   * its last contiguously admitted version): superseded siblings and citation watermarks at or
+   * below it go; tombstones and epoch floors never do. Never changes the current value, and never
+   * changes how any later envelope folds — the relay runs the same rule on the same vector.
    */
-  prune(frontier: Hlc): void;
+  settle(settled: Readonly<Record<string, Hlc>>): void;
+  /**
+   * Adopt the room generation for every emission from now on (learned from a welcome). A change
+   * from a known generation to another drops the emission floors: baselines belong to a
+   * generation.
+   */
+  adopt(instance: string): void;
+  /** This replica's emission epoch floors (persist them with the outbox). */
+  floors(): readonly { readonly path: readonly Key[]; readonly epoch: number }[];
+  /** The stamp of the last envelope this replica minted, for persisting the clock high-water. */
+  lastStamp(): Hlc | undefined;
   destroy(): void;
 };
 
@@ -1399,7 +1417,8 @@ export function opSync<T extends object>(
   const subscribers = new Set<(env: OpEnvelope) => void>();
   const versions = new Map<string, number>();
   const recentLocal: OpEnvelope[] = [];
-  let prunedFrontier: Hlc | undefined;
+  let instance = opt.instance;
+  let lastStamp: Hlc | undefined;
 
   const resolvedInjector = opt.driver
     ? null
@@ -1437,6 +1456,7 @@ export function opSync<T extends object>(
     const nextVersion = (versions.get(origin) ?? 0) + 1;
     const env: OpEnvelope = {
       proto: OP_PROTO_VERSION,
+      instance: instance ?? '',
       origin,
       writer: opt.writer,
       version: nextVersion,
@@ -1445,6 +1465,7 @@ export function opSync<T extends object>(
       ops: stamped,
     };
     versions.set(origin, nextVersion);
+    lastStamp = env.hlc;
     if (frontier) {
       // a fork commit: its ops are concurrent siblings (they cite only the fork-time frontier), so
       // move the store to the fold winner rather than leaving the raw committed value in place
@@ -1502,7 +1523,6 @@ export function opSync<T extends object>(
         return;
       }
 
-      if (prunedFrontier && compareHlc(env.hlc, prunedFrontier) <= 0) return;
       const known = versions.get(env.origin);
       if (known !== undefined && env.version <= known) return; // duplicate/covered — idempotent
       if (known !== undefined && env.version !== known + 1) {
@@ -1554,18 +1574,20 @@ export function opSync<T extends object>(
       }
     },
     watermark: () => Object.fromEntries(versions),
-    prune: (frontier) => {
-      if (!prunedFrontier || compareHlc(frontier, prunedFrontier) > 0) {
-        prunedFrontier = frontier;
-      }
-      conv.prune(frontier);
+    settle: (settled) => conv.settle(settled),
+    adopt: (next) => {
+      if (instance !== undefined && instance !== '' && next !== instance) conv.clearFloors();
+      instance = next;
     },
+    floors: () => conv.emissionFloors(),
+    lastStamp: () => lastStamp,
     snapshot: () => {
       log.flush();
       return {
         root: untracked(source),
         registers: conv.checkpoint(),
         wm: Object.fromEntries(versions),
+        floors: conv.emissionFloors(),
       };
     },
     seed: () => {
@@ -1593,7 +1615,9 @@ export function opSync<T extends object>(
         versions.set(o, Math.max(versions.get(o) ?? 0, v));
       }
     },
-    restore: (envs, highWater) => {
+    restore: (envs, highWater, floors, clockHigh) => {
+      if (floors) conv.restoreFloors(floors);
+      if (clockHigh) clock.observe(clockHigh); // an acked, dropped tail still moved the clock
       let tailOrigin: string | undefined;
       for (const env of envs) {
         clock.observe(env.hlc); // keep the clock ≥ restored stamps before any future mint

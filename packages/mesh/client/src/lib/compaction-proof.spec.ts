@@ -1,15 +1,16 @@
-import { describe, expect, it } from 'vitest';
-// The client fold is the other half of the twin; a proof harness may reach across packages.
-import { createConvergingApply } from '../../../../primitives/core/src/lib/store/op-sync';
-import { createRegisterStore } from './register';
 import {
+  createRegisterStore,
   MESH_PROTO_VERSION,
   type Dot,
   type Hlc,
   type Key,
   type OpEnvelope,
   type SyncOp,
-} from './wire';
+} from '@mmstack/mesh-protocol';
+import { createConvergingApply } from '@mmstack/primitives/core';
+import { describe, expect, it } from 'vitest';
+// The twin proof lives here because it needs both halves: the relay's register store and the
+// client fold. The protocol package stays dependency-free.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Compaction proof — "garbage collection may remove representation, but must preserve every
@@ -39,6 +40,7 @@ const env = (
   ops: readonly SyncOp[],
 ): OpEnvelope => ({
   proto: MESH_PROTO_VERSION,
+  instance: 'g',
   policyVersion: 0,
   origin,
   writer: origin,

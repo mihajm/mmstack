@@ -2489,7 +2489,6 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
   });
 
   it('a member that joins inside the commit hook itself is not echoed either', () => {
-    let relay: Relay;
     let c: { got: ServerMsg[] } | undefined;
     const join = (origin: string) => {
       const got: ServerMsg[] = [];
@@ -2508,7 +2507,7 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
       });
       return { conn, got };
     };
-    relay = createRelay({
+    const relay: Relay = createRelay({
       onCommit: () => {
         // an adapter that opens a seat on the room the moment it hears of a commit
         c ??= join('c');

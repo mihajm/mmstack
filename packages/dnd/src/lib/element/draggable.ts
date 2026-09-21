@@ -16,7 +16,7 @@ import {
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-import { nestedEffect, pointerDrag, isServer } from '@mmstack/primitives';
+import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { boxData, extractEdge, mapDropTargets } from '../internal/payload';
 import { resolveElement, resolveSignal } from '../internal/resolve';
@@ -198,68 +198,68 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
       const target = handleSig
         ? computed(() => resolveElement(handleSig()) ?? element)
         : element;
-      const drag = pointerDrag({
-        target,
-        activationThreshold: opts.activationThreshold ?? 5,
-      });
-
       const canDragFn = opts.canDrag;
       let source: PointerDragSource | null = null;
       let preview: PointerPreview | null = null;
       let denied = false;
-      nestedEffect(() => {
-        const g = drag.unthrottled();
-        if (g.active && g.pointerId !== null) {
-          if (denied) return;
-          if (!source) {
-            // gate once per gesture, untracked — like native's per-attempt canDrag
-            if (canDragFn && !untracked(canDragFn)) {
-              denied = true;
-              return;
+      // Drive the engine from events: effects can skip the final move, or even
+      // an entire gesture, when pointer events arrive between Angular renders.
+      pointerDrag({
+        target,
+        activationThreshold: opts.activationThreshold ?? 5,
+        onChange: (g) => {
+          if (g.active && g.pointerId !== null) {
+            if (denied) return;
+            if (!source) {
+              // gate once per gesture, untracked — like native's per-attempt canDrag
+              if (canDragFn && !untracked(canDragFn)) {
+                denied = true;
+                return;
+              }
+              source = {
+                el: element,
+                data: {
+                  ...boxData(untracked(data)),
+                  ...(readMeta() as Record<symbol, unknown>),
+                },
+                kind: 'transfer',
+              };
+              eng.begin(source, g.current.x, g.current.y);
+              const cfg = previewResolver?.();
+              if (cfg && envInjector && appRef)
+                preview = createPointerPreview(cfg, envInjector, appRef);
+              opts.onDragStart?.({
+                data: untracked(data),
+                meta: readMeta(),
+                element,
+              });
+            } else {
+              eng.move(source, g.current.x, g.current.y);
             }
-            source = {
-              el: element,
-              data: {
-                ...boxData(untracked(data)),
-                ...(readMeta() as Record<symbol, unknown>),
-              },
-              kind: 'transfer',
-            };
-            eng.begin(source, g.current.x, g.current.y);
-            const cfg = previewResolver?.();
-            if (cfg && envInjector && appRef)
-              preview = createPointerPreview(cfg, envInjector, appRef);
-            opts.onDragStart?.({
+            if (preview) preview.move(g.current.x, g.current.y);
+            else
+              element.style.transform = `translate(${g.delta.x}px, ${g.delta.y}px)`;
+          } else {
+            denied = false;
+            if (!source) return;
+            let targets: readonly DropTargetHit[] = [];
+            if (g.cancelled) eng.cancel();
+            else targets = eng.end();
+            if (preview) {
+              preview.destroy();
+              preview = null;
+            } else {
+              element.style.transform = '';
+            }
+            opts.onDrop?.({
               data: untracked(data),
               meta: readMeta(),
-              element,
+              edge: null,
+              location: { current: mapDropTargets(targets), previous: [] },
             });
-          } else {
-            eng.move(source, g.current.x, g.current.y);
+            source = null;
           }
-          if (preview) preview.move(g.current.x, g.current.y);
-          else
-            element.style.transform = `translate(${g.delta.x}px, ${g.delta.y}px)`;
-        } else {
-          denied = false;
-          if (!source) return;
-          let targets: readonly DropTargetHit[] = [];
-          if (g.cancelled) eng.cancel();
-          else targets = eng.end();
-          if (preview) {
-            preview.destroy();
-            preview = null;
-          } else {
-            element.style.transform = '';
-          }
-          opts.onDrop?.({
-            data: untracked(data),
-            meta: readMeta(),
-            edge: null,
-            location: { current: mapDropTargets(targets), previous: [] },
-          });
-          source = null;
-        }
+        },
       });
 
       return { dragging, data };

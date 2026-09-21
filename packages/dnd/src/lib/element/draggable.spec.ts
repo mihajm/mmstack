@@ -5,6 +5,7 @@ import { makeDragSession } from '../testing/drag-session';
 import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 
 import { draggable } from './draggable';
+import { DndPointerEngine } from './pointer-engine';
 import { unboxData } from '../internal/payload';
 import { provideDnd, type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession } from '../session';
@@ -109,7 +110,14 @@ describe('draggable', () => {
         initial: {} as never,
         current: {
           input: {} as never,
-          dropTargets: [{ element: {} as Element, data: {}, dropEffect: 'move', isActiveDueToStickiness: false }],
+          dropTargets: [
+            {
+              element: {} as Element,
+              data: {},
+              dropEffect: 'move',
+              isActiveDueToStickiness: false,
+            },
+          ],
         },
         previous: { dropTargets: [] },
       },
@@ -122,7 +130,10 @@ describe('draggable', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         { provide: PLATFORM_ID, useValue: 'server' },
       ],
     });
@@ -169,7 +180,9 @@ describe('draggable — options, callbacks & lazy reads', () => {
   });
 
   it('wires onGenerateDragPreview only when a preview is configured', () => {
-    expect(build({ data: { id: 1 } }).config.onGenerateDragPreview).toBeUndefined();
+    expect(
+      build({ data: { id: 1 } }).config.onGenerateDragPreview,
+    ).toBeUndefined();
     const withPreview = build({
       data: { id: 1 },
       preview: { render: () => undefined },
@@ -228,14 +241,24 @@ describe('draggable — options, callbacks & lazy reads', () => {
 
   it('reports a null drop edge when no hitbox is registered', () => {
     const dropped: DropEvent<{ id: number }>[] = [];
-    const { config } = build({ data: { id: 1 }, onDrop: (e) => dropped.push(e) });
+    const { config } = build({
+      data: { id: 1 },
+      onDrop: (e) => dropped.push(e),
+    });
     config.onDrop?.({
       source: { element: {} as HTMLElement, dragHandle: null, data: {} },
       location: {
         initial: {} as never,
         current: {
           input: {} as never,
-          dropTargets: [{ element: {} as Element, data: {}, dropEffect: 'move', isActiveDueToStickiness: false }],
+          dropTargets: [
+            {
+              element: {} as Element,
+              data: {},
+              dropEffect: 'move',
+              isActiveDueToStickiness: false,
+            },
+          ],
         },
         previous: { dropTargets: [] },
       },
@@ -245,7 +268,10 @@ describe('draggable — options, callbacks & lazy reads', () => {
 
   it('drops with NO targets → null edge + empty location (non-happy)', () => {
     const dropped: DropEvent<{ id: number }>[] = [];
-    const { config } = build({ data: { id: 1 }, onDrop: (e) => dropped.push(e) });
+    const { config } = build({
+      data: { id: 1 },
+      onDrop: (e) => dropped.push(e),
+    });
     config.onDrop?.({
       source: { element: {} as HTMLElement, dragHandle: null, data: {} },
       location: {
@@ -336,13 +362,17 @@ describe('draggable — reactive drag handle (re-registration)', () => {
     });
     TestBed.tick(); // flush the afterRenderEffect
     expect(draggableMock).toHaveBeenCalledTimes(1);
-    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBe(h1);
+    expect(
+      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+    ).toBe(h1);
 
     handle.set(h2);
     TestBed.tick();
     expect(cleanupMock).toHaveBeenCalledTimes(1); // old registration torn down
     expect(draggableMock).toHaveBeenCalledTimes(2);
-    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBe(h2);
+    expect(
+      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+    ).toBe(h2);
 
     // re-setting the same element must NOT churn a re-register
     handle.set(h2);
@@ -366,12 +396,15 @@ describe('draggable — reactive drag handle (re-registration)', () => {
     handle.set(undefined);
     TestBed.tick();
     expect(draggableMock).toHaveBeenCalledTimes(2);
-    expect((draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle).toBeUndefined();
+    expect(
+      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+    ).toBeUndefined();
   });
 });
 
 function pe(type: string, x = 0, y = 0, id = 1): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   Object.assign(e, {
     pointerId: id,
     clientX: x,
@@ -419,6 +452,53 @@ describe('draggable — pointer engine', () => {
     return { element, ref, session };
   }
 
+  it('commits consecutive gestures at their release point without render ticks', () => {
+    const dropped = vi.fn();
+    const { element, ref, session } = setupPointer({ onDrop: dropped });
+    const target = document.createElement('div');
+    const accepted = vi.fn();
+    const engine = TestBed.inject(DndPointerEngine);
+    vi.spyOn(engine as unknown as { elementsAt(x: number, y: number): readonly Element[] }, 'elementsAt').mockImplementation((x) =>
+      x >= 100 ? [target] : [],
+    );
+    engine.registerDropTarget(target, {
+      accepts: () => true,
+      onDrop: accepted,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      element.dispatchEvent(pe('pointerdown', 0, 0));
+      element.dispatchEvent(pe('pointermove', 20, 0));
+      expect(ref.dragging()).toBe(true);
+      // No move onto the target: the pointerup itself supplies the final point.
+      element.dispatchEvent(pe('pointerup', 150, 0));
+      expect(accepted).toHaveBeenCalledTimes(i + 1);
+      expect(dropped.mock.calls[i][0].location.current[0].element).toBe(target);
+      expect(ref.dragging()).toBe(false);
+      expect(session()).toBeNull();
+      expect(element.style.transform).toBe('');
+    }
+    TestBed.tick();
+    expect(accepted).toHaveBeenCalledTimes(3);
+  });
+
+  it('cancels a same-frame gesture without dropping onto a target', () => {
+    const { element, session } = setupPointer();
+    const target = document.createElement('div');
+    const accepted = vi.fn();
+    const engine = TestBed.inject(DndPointerEngine);
+    vi.spyOn(engine as unknown as { elementsAt(x: number, y: number): readonly Element[] }, 'elementsAt').mockReturnValue([target]);
+    engine.registerDropTarget(target, {
+      accepts: () => true,
+      onDrop: accepted,
+    });
+    element.dispatchEvent(pe('pointerdown'));
+    element.dispatchEvent(pe('pointermove', 20, 0));
+    element.dispatchEvent(pe('pointercancel', 20, 0));
+    expect(accepted).not.toHaveBeenCalled();
+    expect(session()).toBeNull();
+  });
+
   it('uses the pointer engine (never registers with pragmatic)', () => {
     setupPointer();
     expect(draggableMock).not.toHaveBeenCalled();
@@ -426,7 +506,9 @@ describe('draggable — pointer engine', () => {
 
   it('a gesture drives the unified session (engine:"pointer") + follows the pointer, then drops', () => {
     const drops: DropEvent<{ id: string }>[] = [];
-    const { element, ref, session } = setupPointer({ onDrop: (e) => drops.push(e) });
+    const { element, ref, session } = setupPointer({
+      onDrop: (e) => drops.push(e),
+    });
 
     expect(ref.dragging()).toBe(false);
     element.dispatchEvent(pe('pointerdown', 0, 0));
@@ -450,7 +532,9 @@ describe('draggable — pointer engine', () => {
 
   it('Escape aborts: session cleared, transform reset, onDrop fires with an EMPTY stack (native parity)', () => {
     const drops: DropEvent<{ id: string }>[] = [];
-    const { element, ref, session } = setupPointer({ onDrop: (e) => drops.push(e) });
+    const { element, ref, session } = setupPointer({
+      onDrop: (e) => drops.push(e),
+    });
 
     element.dispatchEvent(pe('pointerdown', 0, 0));
     element.dispatchEvent(pe('pointermove', 20, 5));

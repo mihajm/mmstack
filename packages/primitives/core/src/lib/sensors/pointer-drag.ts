@@ -7,6 +7,7 @@ import {
   inject,
   isDevMode,
   isSignal,
+  untracked,
   type Signal,
 } from '@angular/core';
 import { throttled } from '../throttled';
@@ -72,7 +73,8 @@ export type PointerDragOptions = SensorRunOptions & {
    *
    * Note: a final sub-throttle move right before `pointerup` may not surface on
    * the throttled view (it coalesces into the terminal idle). Logic that must act
-   * on the *exact* release position should read {@link PointerDragSignal.unthrottled}.
+   * on every transition, including the release position, should use `onChange`.
+   * Even effects reading `unthrottled` can coalesce move and release into idle.
    */
   throttle?: number;
   /** Only start when the pointerdown target matches this selector (delegated handles). */
@@ -95,6 +97,12 @@ export type PointerDragOptions = SensorRunOptions & {
    * capture). @default false
    */
   capture?: boolean;
+  /**
+   * Observe each state synchronously, outside reactive tracking. Unlike an effect,
+   * this cannot miss a move or an entire gesture between renders. A normal release
+   * reports its final position before idle; cancellation reports only cancelled idle.
+   */
+  onChange?: (state: PointerDragState) => void;
 };
 
 type InternalPointerDragSignal = Signal<PointerDragState> & {
@@ -182,6 +190,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     stopPropagation = false,
     capture = false,
     debugName = 'pointerDrag',
+    onChange,
   } = opt ?? {};
 
   const resolve = (t: unknown): HTMLElement | null => {
@@ -208,6 +217,12 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     debugName,
   });
 
+  const publish = (next: PointerDragState): void => {
+    state.set(next);
+    if (next.pointerId === null) state.flush();
+    if (onChange) untracked(() => onChange(next));
+  };
+
   const threshold2 = activationThreshold * activationThreshold;
 
   let startPoint: PointerPoint = { x: 0, y: 0 };
@@ -231,6 +246,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   });
 
   const end = (cancelled = false): void => {
+    if (activePointerId === null) return;
     gesture?.abort();
     gesture = null;
     activePointerId = null;
@@ -238,8 +254,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     activePointerType = '';
     activeOrigin = null;
     activated = false;
-    state.set(cancelled ? CANCELLED : IDLE);
-    state.flush(); // terminal transition: reflect idle now, not on the trailing edge
+    publish(cancelled ? CANCELLED : IDLE);
   };
 
   const onMove = (e: PointerEvent): void => {
@@ -249,7 +264,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     if (!activated && delta.x * delta.x + delta.y * delta.y >= threshold2) {
       activated = true; // squared compare — no sqrt on the pre-activation path
     }
-    state.set({
+    publish({
       active: activated,
       start: startPoint,
       current,
@@ -264,7 +279,12 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   };
 
   const onUp = (e: PointerEvent): void => {
-    if (e.pointerId === activePointerId) end();
+    if (e.pointerId !== activePointerId) return;
+    try {
+      onMove(e); // The release can carry a newer position than the last pointermove.
+    } finally {
+      end();
+    }
   };
 
   const onCancel = (e: PointerEvent): void => {
@@ -309,7 +329,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
         signal,
       });
       window.addEventListener('keydown', onKey, { signal });
-      state.set({
+      publish({
         active: false,
         start: startPoint,
         current: startPoint,

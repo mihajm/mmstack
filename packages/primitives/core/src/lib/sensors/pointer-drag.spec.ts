@@ -18,7 +18,8 @@ function pe(
   } = {},
 ): Event {
   // jsdom lacks a full PointerEvent — synthesize the fields the sensor reads.
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = opts.pointerId ?? 1;
   e['clientX'] = opts.clientX ?? 0;
   e['clientY'] = opts.clientY ?? 0;
@@ -47,6 +48,44 @@ function setup(
 }
 
 describe('pointerDrag', () => {
+  it('reports every transition and the release point without an Angular tick', () => {
+    const changes: { active: boolean; x: number; pointerId: number | null }[] =
+      [];
+    const { el } = setup({
+      onChange: (s) =>
+        changes.push({
+          active: s.active,
+          x: s.current.x,
+          pointerId: s.pointerId,
+        }),
+    });
+    el.dispatchEvent(pe('pointerdown', { clientX: 10 }));
+    el.dispatchEvent(pe('pointermove', { clientX: 30 }));
+    el.dispatchEvent(pe('pointerup', { clientX: 80 }));
+    expect(changes).toEqual([
+      { active: false, x: 10, pointerId: 1 },
+      { active: true, x: 30, pointerId: 1 },
+      { active: true, x: 80, pointerId: 1 },
+      { active: false, x: 0, pointerId: null },
+    ]);
+  });
+
+  it('reports cancellation once without turning it into a final movement', () => {
+    const changed = vi.fn();
+    const { drag, el } = setup({ onChange: changed });
+    el.dispatchEvent(pe('pointerdown'));
+    el.dispatchEvent(pe('pointermove', { clientX: 20 }));
+    changed.mockClear();
+    el.dispatchEvent(pe('pointercancel', { clientX: 100 }));
+    drag.cancel();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed.mock.calls[0][0]).toMatchObject({
+      active: false,
+      pointerId: null,
+      cancelled: true,
+    });
+  });
+
   it('starts idle', () => {
     const { drag } = setup();
     const s = drag.unthrottled();
@@ -96,7 +135,9 @@ describe('pointerDrag', () => {
 
     it('capture: true observes the press despite the shield', () => {
       const { drag, child } = shielded({ capture: true });
-      child.dispatchEvent(pe('pointerdown', { pointerId: 4, clientX: 3, clientY: 4 }));
+      child.dispatchEvent(
+        pe('pointerdown', { pointerId: 4, clientX: 3, clientY: 4 }),
+      );
       const s = drag.unthrottled();
       expect(s.pointerId).toBe(4);
       expect(s.start).toEqual({ x: 3, y: 4 });
@@ -114,7 +155,9 @@ describe('pointerDrag', () => {
 
   it('records a pending (inactive) gesture on pointerdown', () => {
     const { drag, el } = setup();
-    el.dispatchEvent(pe('pointerdown', { clientX: 5, clientY: 6, pointerId: 2 }));
+    el.dispatchEvent(
+      pe('pointerdown', { clientX: 5, clientY: 6, pointerId: 2 }),
+    );
     const s = drag.unthrottled();
     expect(s.active).toBe(false);
     expect(s.pointerId).toBe(2);
@@ -149,7 +192,14 @@ describe('pointerDrag', () => {
   it('captures modifier keys on move', () => {
     const { drag, el } = setup();
     el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
-    el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0, shiftKey: true, altKey: true }));
+    el.dispatchEvent(
+      pe('pointermove', {
+        clientX: 10,
+        clientY: 0,
+        shiftKey: true,
+        altKey: true,
+      }),
+    );
     const m = drag.unthrottled().modifiers;
     expect(m.shift).toBe(true);
     expect(m.alt).toBe(true);
@@ -169,7 +219,9 @@ describe('pointerDrag', () => {
     const { drag, el } = setup({ activationThreshold: 3 });
     el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0, button: 0 }));
     // a real pointermove reports button === -1; the sensor must keep the down-button
-    el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0, button: -1 }));
+    el.dispatchEvent(
+      pe('pointermove', { clientX: 10, clientY: 0, button: -1 }),
+    );
     expect(drag.unthrottled().active).toBe(true);
     expect(drag.unthrottled().button).toBe(0);
   });
@@ -242,10 +294,16 @@ describe('pointerDrag', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       expect(drag.unthrottled().cancelled).toBe(true);
 
-      el.dispatchEvent(pe('pointerdown', { clientX: 5, clientY: 5, pointerId: 2 }));
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 5, clientY: 5, pointerId: 2 }),
+      );
       expect(drag.unthrottled().cancelled).toBe(false);
-      el.dispatchEvent(pe('pointermove', { clientX: 20, clientY: 5, pointerId: 2 }));
-      el.dispatchEvent(pe('pointerup', { clientX: 20, clientY: 5, pointerId: 2 }));
+      el.dispatchEvent(
+        pe('pointermove', { clientX: 20, clientY: 5, pointerId: 2 }),
+      );
+      el.dispatchEvent(
+        pe('pointerup', { clientX: 20, clientY: 5, pointerId: 2 }),
+      );
       expect(drag.unthrottled().cancelled).toBe(false);
     });
   });
@@ -269,14 +327,20 @@ describe('pointerDrag', () => {
     expect(drag.unthrottled().pointerId).toBeNull();
 
     // pointerdown on the handle → starts
-    handle.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0, pointerId: 3 }));
+    handle.dispatchEvent(
+      pe('pointerdown', { clientX: 0, clientY: 0, pointerId: 3 }),
+    );
     expect(drag.unthrottled().pointerId).toBe(3);
   });
 
   it('ignores moves from a different pointer id', () => {
     const { drag, el } = setup();
-    el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0, pointerId: 1 }));
-    el.dispatchEvent(pe('pointermove', { clientX: 50, clientY: 0, pointerId: 9 }));
+    el.dispatchEvent(
+      pe('pointerdown', { clientX: 0, clientY: 0, pointerId: 1 }),
+    );
+    el.dispatchEvent(
+      pe('pointermove', { clientX: 50, clientY: 0, pointerId: 9 }),
+    );
     expect(drag.unthrottled().current).toEqual({ x: 0, y: 0 });
   });
 
@@ -295,17 +359,23 @@ describe('pointerDrag', () => {
     const drag = TestBed.runInInjectionContext(() => pointerDrag({ target }));
     TestBed.tick();
 
-    a.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 }));
+    a.dispatchEvent(
+      pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 }),
+    );
     expect(drag.unthrottled().pointerId).toBe(1);
     a.dispatchEvent(pe('pointerup', { clientX: 1, clientY: 1, pointerId: 1 }));
 
     target.set(b);
     TestBed.tick();
     // old target no longer starts gestures
-    a.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 2 }));
+    a.dispatchEvent(
+      pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 2 }),
+    );
     expect(drag.unthrottled().pointerId).toBeNull();
     // new target does
-    b.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 3 }));
+    b.dispatchEvent(
+      pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 3 }),
+    );
     expect(drag.unthrottled().pointerId).toBe(3);
   });
 
@@ -314,7 +384,10 @@ describe('pointerDrag', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: PLATFORM_ID, useValue: 'server' },
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
       ],
     });
     const drag = TestBed.runInInjectionContext(() => pointerDrag());

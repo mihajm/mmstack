@@ -28,6 +28,23 @@ export const SIGNAL_FN_PROP = new Set([
 ]);
 
 /**
+ * Every property name a store node answers itself instead of routing to a child: the signal
+ * methods above plus the store's own `extend` and `asReadonlyStore`. A data key with one of these
+ * names exists in the value but has no child node, so a path walker must stop at the parent and
+ * read or write it through the parent's value.
+ */
+export const STORE_RESERVED_KEYS: ReadonlySet<string> = new Set([
+  ...SIGNAL_FN_PROP,
+  'extend',
+  'asReadonlyStore',
+]);
+
+/** Whether a key is one the store node answers itself, so it cannot be walked into as a child. */
+export function isStoreReservedKey(key: unknown): key is string {
+  return typeof key === 'string' && STORE_RESERVED_KEYS.has(key);
+}
+
+/**
  * @internal
  * Maps a store's backing signal to its lazily-built child proxies, each held via a `WeakRef`.
  */

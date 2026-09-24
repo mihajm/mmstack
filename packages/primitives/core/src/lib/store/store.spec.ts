@@ -2,6 +2,7 @@ import { computed, effect, Injector, isSignal, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   isStore,
+  isStoreReservedKey,
   PROXY_CACHE_TOKEN,
   PROXY_CLEANUP_TOKEN,
   STORE_SHARED_GLOBALS,
@@ -811,5 +812,25 @@ describe('store', () => {
       expect(runs).toBe(1);
       expect(s.a()).toEqual([1, 20, 3]);
     });
+  });
+});
+
+describe('reserved keys', () => {
+  it('names exactly the keys a record node answers itself instead of routing to a child', () => {
+    const seed: Record<string, number> = {
+      set: 1,
+      update: 2,
+      mutate: 3,
+      inline: 4,
+      asReadonly: 5,
+      extend: 6,
+      asReadonlyStore: 7,
+      plain: 8,
+    };
+    const s = TestBed.runInInjectionContext(() => store(seed));
+    for (const key of Object.keys(seed)) {
+      const answered = !isStore((s as unknown as Record<string, unknown>)[key]);
+      expect(answered, key).toBe(isStoreReservedKey(key));
+    }
   });
 });

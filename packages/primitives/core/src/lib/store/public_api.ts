@@ -1,5 +1,5 @@
 export * from './fork-store';
-export { isStore } from './internals';
+export { isStore, isStoreReservedKey, STORE_RESERVED_KEYS } from './internals';
 export { isLeaf } from './leaf';
 export {
   applyOps,

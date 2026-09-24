@@ -7,6 +7,7 @@ import type {
 import {
   createStoreContext,
   forkStore,
+  isStoreReservedKey,
   opSync,
   store,
   type DotFrontier,
@@ -99,7 +100,10 @@ export type AgentSeatOptions = {
   readonly context?: toStoreOptions;
   readonly onEject?: (reason: string) => void;
   /** A write the relay refused; it is not in the room, and the doc was rehydrated. The envelope carries its values. */
-  readonly onRefused?: (env: OpEnvelope, reason: 'generation' | 'schema' | 'order') => void;
+  readonly onRefused?: (
+    env: OpEnvelope,
+    reason: 'generation' | 'schema' | 'order',
+  ) => void;
 };
 
 export type AgentSeat<T extends object> = {
@@ -371,7 +375,8 @@ export function setAtPath(
     const current = cursor();
     if (current === null || typeof current !== 'object') break;
     const key = resolveKey(current, seg);
-    if (!Object.hasOwn(current, key)) break;
+    // a key the node answers itself has no child node; the rest of the path is set on this value
+    if (!Object.hasOwn(current, key) || isStoreReservedKey(key)) break;
     const child = cursor[key];
     if (typeof child !== 'function') break;
     cursor = child as typeof cursor;

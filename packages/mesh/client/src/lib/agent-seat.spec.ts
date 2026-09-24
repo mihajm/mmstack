@@ -868,6 +868,38 @@ describe('setAtPath', () => {
     expect(s().rec).toEqual({ '0': 'still-a-key' });
   });
 
+  it('writes under a data key named like a store method', () => {
+    const s = make();
+    setAtPath(s, 'tasks.update', { title: 'first', done: false });
+    setAtPath(s, 'tasks.update.done', true);
+    setAtPath(s, ['tasks', 'set', 'title'], 'second');
+    expect(s().tasks).toEqual({
+      update: { title: 'first', done: true },
+      set: { title: 'second' },
+    });
+  });
+
+  it('writes under every key the store node answers itself', () => {
+    for (const key of [
+      'set',
+      'update',
+      'mutate',
+      'inline',
+      'asReadonly',
+      'extend',
+      'asReadonlyStore',
+    ]) {
+      const s = make();
+      setAtPath(s, ['tasks', key], { note: 'a' });
+      setAtPath(s, ['tasks', key, 'note'], 'b');
+      setAtPath(s, ['tasks', key, 'deep', 'leaf'], 1);
+      expect((s().tasks as Record<string, unknown>)[key]).toEqual({
+        note: 'b',
+        deep: { leaf: 1 },
+      });
+    }
+  });
+
   it('accepts segment arrays and whole-node paths', () => {
     const s = make();
     setAtPath(s, ['title'], 'via-segments');

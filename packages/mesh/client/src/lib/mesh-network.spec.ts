@@ -1,7 +1,16 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { TestBed } from '@angular/core/testing';
-import { createRelay, type ClientMsg, type ServerMsg } from '@mmstack/mesh-protocol';
+import {
+  createRelay,
+  type ClientMsg,
+  type ServerMsg,
+} from '@mmstack/mesh-protocol';
 import { store } from '@mmstack/primitives/core';
-import { WebSocket as NodeWebSocket, WebSocketServer, type WebSocket as WsSocket } from 'ws';
+import {
+  WebSocket as NodeWebSocket,
+  WebSocketServer,
+  type WebSocket as WsSocket,
+} from 'ws';
 import { meshSync, type MeshSyncRef } from './mesh-sync';
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
@@ -31,7 +40,8 @@ function nodeWsTransport(url: () => string): MeshTransportFactory {
       send: (msg: ClientMsg) => {
         const frame = JSON.stringify(msg);
         if (ws.readyState === NodeWebSocket.OPEN) ws.send(frame);
-        else if (ws.readyState === NodeWebSocket.CONNECTING) pending.push(frame);
+        else if (ws.readyState === NodeWebSocket.CONNECTING)
+          pending.push(frame);
       },
       onMessage: (cb) => {
         messageCbs.add(cb);
@@ -65,13 +75,17 @@ describe('meshSync over a real WebSocket server', () => {
     const relay = createRelay();
     server = new WebSocketServer({ port: 0 });
     server.on('connection', (ws, req) => {
-      const writer = new URL(req.url ?? '/', 'http://x').searchParams.get('writer') ?? 'anon';
+      const writer =
+        new URL(req.url ?? '/', 'http://x').searchParams.get('writer') ??
+        'anon';
       sockets.set(writer, ws);
       const conn = relay.connect(
         { send: (m) => ws.send(JSON.stringify(m)), close: () => ws.close() },
         { writer },
       );
-      ws.on('message', (data) => conn.receive(JSON.parse(String(data)) as ClientMsg));
+      ws.on('message', (data) =>
+        conn.receive(JSON.parse(String(data)) as ClientMsg),
+      );
       ws.on('close', () => conn.disconnect());
     });
     await new Promise<void>((r) => server.on('listening', () => r()));
@@ -120,7 +134,10 @@ describe('meshSync over a real WebSocket server', () => {
     b.s.nested.b.set(22);
     TestBed.tick();
     await until(() => a.mesh.status() === 'live', 5000);
-    await until(() => a.s().nested.b === 22 && b.s().title === 'offline-edit', 5000);
+    await until(
+      () => a.s().nested.b === 22 && b.s().title === 'offline-edit',
+      5000,
+    );
     expect(a.s()).toEqual(b.s());
 
     a.mesh.setPresence({ section: 'net-test' });

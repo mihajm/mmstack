@@ -467,3 +467,87 @@ const mesh = webRtcMesh(store, {
   signaling: webSocketTransport('wss://sync.example.com'), // data flows peer to peer
 });
 ```
+
+### Pointers and other frame-rate values
+
+`rtcPresence` is for values that change many times a second and only matter while they are
+fresh: pointer positions, viewports. Each peer publishes one value; every other peer sees the
+latest one per sender. Frames go peer to peer over a lossy, unordered data channel, because a
+pointer that waits for a retransmit is already stale. Nothing is persisted and nothing is caught
+up: a peer that connects sees a sender's value when that sender next moves.
+
+It rides on `peerLinks`, the link layer `webRtcMesh` is built on: one peer connection per remote,
+set up from the relay's membership and negotiated over its `signal` frames, carrying the labelled
+channels you ask for. Put `presenceChannel` in the links' channels.
+
+```ts
+import {
+  peerLinks,
+  presenceChannel,
+  rtcPresence,
+  webSocketTransport,
+} from '@mmstack/mesh';
+
+const links = peerLinks({
+  room: 'call-7',
+  origin: tabId, // one origin is one seat; give every tab its own
+  signaling: webSocketTransport('wss://sync.example.com'),
+  channels: [presenceChannel],
+});
+const pointers = rtcPresence<{ x: number; y: number }>(links, {
+  roster: links.onMembers,
+});
+
+pointers.set({ x, y }); // throttled; the first value of a burst goes out at once, the last one lands
+pointers.peers(); // Map of origin to its latest value
+```
+
+A document mesh and pointers can share one peer connection: ask `webRtcMesh` for the extra
+channel and hand its links to the presence.
+
+```ts
+const mesh = webRtcMesh(doc, {
+  room: 'call-7',
+  writer: userId,
+  signaling: webSocketTransport('wss://sync.example.com'),
+  channels: [presenceChannel],
+});
+const pointers = rtcPresence<Point>(mesh.links, {
+  roster: mesh.links.onMembers,
+});
+```
+
+The mesh picks a random replica origin per instance unless you pass `origin`; either way
+`mesh.origin` is the key other peers see this side under, and the seat rule below applies.
+
+A receiver takes its order only from causality it can observe, never from clocks or from
+numbers chosen by different senders. It holds a value only for an origin in the roster, the
+relay's list of who is in the room, and drops that value as soon as the origin leaves: a peer
+link can outlive a dead socket for a while, so the link is not proof that anyone is there.
+Within one link the highest `seq` wins and anything at or below it is dropped: one counter
+stamps every frame sent on that link in send order, so a lower `seq` was sent earlier. The link
+is the epoch: a link that opens or closes starts its origin fresh, and a frame of an old link
+cannot arrive on a new one. The counter belongs to the links and the channel, not to the sender,
+so a sender closed and recreated on the same links carries on where the last one stopped and is
+heard at once. A new tab or device is a new link, which every receiver already treats as fresh.
+
+One origin is one seat. When a second connection arrives with the same origin the relay hands it
+the seat and tells the room about a plain join, so the links tell seats apart by instance: every
+link announces a random instance id in its signals and, once it knows the instance across,
+addresses its signals to it. A signal addressed to an instance a side no longer has is dropped as
+a retired link's leftovers. An unaddressed signal from an instance other than the linked one is a
+new seat, and the receiving side rebuilds its end, addressed, which settles it: only unaddressed
+signals cause a rebuild, and a rebuilt end never sends one. Two tabs sharing an origin still take
+the seat from each other every time one reconnects, so give each tab its own origin.
+
+To share a connection someone else already holds, such as a `meshSync` session, pass a
+`SignalingPort` (`send`, `onMessage`, and `members()` over that connection) as `signaling`.
+`members()` returns the current relay roster for the room, or `undefined` until welcomed;
+the owner must keep it current even before the links subscribe. This lets links negotiate with
+existing members when attached after the welcome. Pass the connection's origin to the links;
+they never send a hello of their own.
+
+For an external presence roster, pass a subscription function as `roster`. It must synchronously
+emit the current origins and every subsequent membership transition, and return an unsubscribe
+function. Do not adapt a signal using an effect: a leave and rejoin can be coalesced into one
+snapshot, losing the evidence that the previous value must be forgotten.

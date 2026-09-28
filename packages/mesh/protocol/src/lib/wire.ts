@@ -159,6 +159,13 @@ export type WelcomeBody =
       readonly wm: Readonly<Record<string, number>>;
     };
 
+/** One ICE server as a browser takes it; the relay may issue these in a welcome. */
+export type IceServer = {
+  readonly urls: string | readonly string[];
+  readonly username?: string;
+  readonly credential?: string;
+};
+
 export type WelcomeMsg = {
   readonly t: 'welcome';
   readonly room: string;
@@ -171,6 +178,8 @@ export type WelcomeMsg = {
   readonly peers: readonly PresenceState[];
   /** Origins currently in the room (membership ≠ presence) — the P2P bootstrap roster. */
   readonly members: readonly string[];
+  /** ICE servers the operator wants peer links to use; replaces any static list. */
+  readonly ice?: readonly IceServer[];
 } & WelcomeBody;
 
 export type ServerEnvMsg = {

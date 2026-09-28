@@ -37,6 +37,7 @@ export {
   type EjectMsg,
   type HelloMsg,
   type Hlc,
+  type IceServer,
   type Key,
   type MemberMsg,
   type OpEnvelope,

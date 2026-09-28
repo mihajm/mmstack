@@ -15,109 +15,9 @@ import {
   type PeerLinksOptions,
 } from './peer-links';
 import { directTransport } from './transport';
-
-/**
- * An in-memory channel hub for peer links, derived from the `fakeHub()` in
- * `webrtc-mesh.spec.ts`: it pairs the two ends of a link by (local, remote) origin rather than
- * by call order, so rooms with more than two peers link correctly, and it gives every link one
- * half per requested channel label.
- */
-function pairHub() {
-  type Half = {
-    channel: DataChannelLike;
-    deliver(frame: string): void;
-    fireOpen(): void;
-    fireClose(): void;
-    link(other: Half): void;
-  };
-  const parked = new Map<string, Record<string, Half>>();
-
-  const makeHalf = (): Half => {
-    const messageCbs = new Set<(f: string) => void>();
-    const openCbs = new Set<() => void>();
-    const closeCbs = new Set<() => void>();
-    const buffered: string[] = [];
-    const inbound: string[] = [];
-    let remote: Half | null = null;
-    let open = false;
-    const half: Half = {
-      channel: {
-        send: (frame) => {
-          if (open && remote) remote.deliver(frame);
-          else buffered.push(frame);
-        },
-        onMessage: (cb) => {
-          for (const frame of inbound.splice(0)) cb(frame);
-          messageCbs.add(cb);
-          return () => messageCbs.delete(cb);
-        },
-        onOpen: (cb) => {
-          if (open) cb();
-          openCbs.add(cb);
-          return () => openCbs.delete(cb);
-        },
-        onClose: (cb) => (closeCbs.add(cb), () => closeCbs.delete(cb)),
-        close: () => {
-          if (!open) return;
-          open = false;
-          remote?.fireClose();
-          half.fireClose();
-        },
-      },
-      deliver: (frame) => {
-        if (messageCbs.size === 0) inbound.push(frame);
-        else for (const cb of [...messageCbs]) cb(frame);
-      },
-      fireOpen: () => {
-        open = true;
-        const frames = buffered.splice(0);
-        for (const cb of [...openCbs]) cb();
-        for (const frame of frames) remote?.deliver(frame);
-      },
-      fireClose: () => {
-        open = false;
-        for (const cb of [...closeCbs]) cb();
-      },
-      link: (other) => {
-        remote = other;
-      },
-    };
-    return half;
-  };
-
-  const connectorFor =
-    (local: string): PeerConnector =>
-    ({ remote, channels }) => {
-      const key = `${local}|${remote}`;
-      const mine: Record<string, Half> = {};
-      for (const c of channels) mine[c.label] = makeHalf();
-      const theirs = parked.get(`${remote}|${local}`);
-      if (theirs) {
-        parked.delete(`${remote}|${local}`);
-        for (const c of channels) {
-          mine[c.label].link(theirs[c.label]);
-          theirs[c.label].link(mine[c.label]);
-        }
-        for (const c of channels) mine[c.label].fireOpen();
-        for (const c of channels) theirs[c.label].fireOpen();
-      } else {
-        parked.set(key, mine);
-      }
-      const byLabel: Record<string, DataChannelLike> = {};
-      for (const c of channels) byLabel[c.label] = mine[c.label].channel;
-      return {
-        channel: byLabel[channels[0].label],
-        channels: byLabel,
-        signal: () => undefined,
-        close: () => {
-          if (parked.get(key) === mine) parked.delete(key);
-          for (const half of Object.values(mine)) half.channel.close();
-        },
-      };
-    };
-
-  return { connectorFor };
-}
+import { store } from '@mmstack/primitives/core';
+import { meshSync } from './mesh-sync';
+import { pairHub } from './testing/pair-hub';
 
 const lossy = { label: 'lossy', ordered: false, maxRetransmits: 0 } as const;
 
@@ -353,6 +253,44 @@ describe('peerLinks', () => {
     owner.close();
   });
 
+  it('shares meshSync signaling without a tee or an additional relay membership', async () => {
+    const relay = createRelay();
+    const hub = pairHub();
+    const a = links(relay, hub, 'a');
+    const mesh = TestBed.runInInjectionContext(() =>
+      meshSync(store({ title: 'initial' }), {
+        room: 'links',
+        writer: 'b',
+        transport: directTransport(relay, { writer: 'b' }),
+      }),
+    );
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+      TestBed.tick();
+    }
+    const origin = mesh.origin()!;
+    expect(mesh.members()).toEqual(['a']);
+    const b = TestBed.runInInjectionContext(() =>
+      peerLinks({
+        room: 'links',
+        origin,
+        signaling: mesh.signaling,
+        connector: hub.connectorFor(origin),
+      }),
+    );
+    expect(b.peers()).toEqual(['a']);
+    expect(a.peers()).toEqual([origin]);
+    expect(relay.room('links')!.members).toBe(2);
+    const received = record(b);
+    a.send(origin, 'shared-session');
+    expect(received).toEqual(['a:mmstack-mesh:shared-session']);
+    mesh.close();
+    expect(b.members()).toEqual([]);
+    expect(b.peers()).toEqual([]);
+    b.close();
+    a.close();
+  });
+
   it('replays membership and delivers leave and rejoin synchronously', () => {
     const relay = createRelay();
     const hub = pairHub();
@@ -435,10 +373,12 @@ describe('peerLinks', () => {
         },
       };
     };
+    const senders = new Map<string, (data: unknown) => void>();
     const talking =
       (local: string): PeerConnector =>
       (o) => {
         const made = hub.connectorFor(local)(o);
+        senders.set(local, o.sendSignal);
         o.sendSignal({ description: `offer-from-${local}` });
         return { ...made, signal: (data) => received.push(data) };
       };
@@ -455,20 +395,32 @@ describe('peerLinks', () => {
       true,
     );
     expect(new Set(ids).size).toBe(2);
-    // a announces unaddressed (it built the link from the join); b answers in the same
-    // turn, built for a's instance, so everything b sends and a's buffered early offer,
-    // flushed after b's answer bound the remote, are addressed
+    // a announces unaddressed (it built the link from the join) and flushes its early offer
+    // before it knows b's instance; b holds both until its welcome, builds from that, and
+    // its own announce and early offer go out before the held announce binds a's instance.
+    // Nothing in the first exchange is addressed: each side binds from the other's announce
     const [fromA] = ids;
     const fromB = ids.find((id) => id !== fromA);
     expect(sent).toEqual([
       { link: fromA },
-      { link: fromB, to: fromA },
-      { link: fromB, to: fromA, description: 'offer-from-b' },
-      { link: fromA, to: fromB, description: 'offer-from-a' },
+      { link: fromA, description: 'offer-from-a' },
+      { link: fromB },
+      { link: fromB, description: 'offer-from-b' },
     ]);
     expect(received).toHaveLength(2);
     expect(received).toContainEqual({ description: 'offer-from-a' });
     expect(received).toContainEqual({ description: 'offer-from-b' });
+    // once bound, every payload is addressed to the instance across
+    senders.get('a')!({ description: 'late-from-a' });
+    senders.get('b')!({ description: 'late-from-b' });
+    expect(sent.slice(4)).toEqual([
+      { link: fromA, to: fromB, description: 'late-from-a' },
+      { link: fromB, to: fromA, description: 'late-from-b' },
+    ]);
+    expect(received.slice(2)).toEqual([
+      { description: 'late-from-a' },
+      { description: 'late-from-b' },
+    ]);
   });
 
   it('a relay reject ends the links', () => {

@@ -1,6 +1,7 @@
 import {
   checkEnvelope,
   MESH_PROTO_VERSION,
+  type ClientSignalMsg,
   type OpPolicy,
   type PolicyViolation,
   type PresenceState,
@@ -18,7 +19,13 @@ import {
 import type { MeshTransport, MeshTransportFactory } from './transport';
 
 export type MeshStatus =
-  'connecting' | 'live' | 'reconnecting' | 'ejected' | 'closed';
+  | 'connecting'
+  /** Queued behind another tab that owns this key's durable outbox (`crossTab: 'queue'`). */
+  | 'waiting'
+  | 'live'
+  | 'reconnecting'
+  | 'ejected'
+  | 'closed';
 
 /** One sequenced remote envelope's ops, attributed to the writer that made them. */
 export type RemoteBatch = {
@@ -34,6 +41,12 @@ export type RemoteBatch = {
  */
 export type MeshSessionHooks = {
   onStatus(status: MeshStatus, reason?: string): void;
+  /** The current op engine's origin, published immediately before each hello. */
+  onOrigin?(origin: string): void;
+  /** Relay membership, independent of presence; undefined while disconnected or before welcome. */
+  onMembers?(members: readonly string[] | undefined): void;
+  /** A room message after the session has processed it, for consumers sharing its connection. */
+  onMessage?(msg: ServerMsg): void;
   /** A welcome or envelope arrived — the shell's "last synced" moment. */
   onSynced?(): void;
   /** The presence roster changed (welcome replace, join/leave, teardown clear). */
@@ -126,6 +139,8 @@ export type MeshSession = {
   instance(): string | undefined;
   peers(): ReadonlyMap<string, PresenceState>;
   setPresence(data: unknown): void;
+  /** Send peer signaling over the current connection without a second hello. */
+  sendSignal(msg: ClientSignalMsg): void;
   close(): void;
 };
 
@@ -153,6 +168,7 @@ export function meshSession<T extends object>(
   // a refusal asks for a fresh snapshot; one hello per burst, cleared by the welcome it earns
   let rehydrating = false;
   let peers: ReadonlyMap<string, PresenceState> = new Map();
+  let members: readonly string[] | undefined;
   let presenceData: unknown;
   let hasPresence = false;
   let transport: MeshTransport | null = null;
@@ -200,6 +216,8 @@ export function meshSession<T extends object>(
     transport = null;
     peers = new Map();
     hooks.onPeers?.(peers);
+    members = undefined;
+    hooks.onMembers?.(members);
     setStatus(state, reason);
   };
 
@@ -213,6 +231,8 @@ export function meshSession<T extends object>(
     transport?.send({ t: 'env', room: opt.room, env: out });
   };
   const sendHello = (): void => {
+    if (!transport) return;
+    hooks.onOrigin?.(sync.origin);
     transport?.send({
       t: 'hello',
       room: opt.room,
@@ -282,6 +302,10 @@ export function meshSession<T extends object>(
         rehydrating = false;
         peers = new Map(msg.peers.map((p) => [p.origin, p]));
         hooks.onPeers?.(peers);
+        members = [
+          ...new Set(msg.members.filter((origin) => origin !== sync.origin)),
+        ];
+        hooks.onMembers?.(members);
         const resync = msg.mode === 'snapshot' || instanceChanged;
         if (msg.mode === 'delta') {
           for (const env of msg.envs) applyRemote(env);
@@ -333,6 +357,16 @@ export function meshSession<T extends object>(
         hooks.onPeers?.(peers);
         return;
       }
+      case 'member': {
+        if (members === undefined || msg.origin === sync.origin) return;
+        members = msg.gone
+          ? members.filter((origin) => origin !== msg.origin)
+          : members.includes(msg.origin)
+            ? members
+            : [...members, msg.origin];
+        hooks.onMembers?.(members);
+        return;
+      }
       case 'eject':
         if (msg.writer === opt.writer) terminal('ejected', msg.reason);
         return;
@@ -367,10 +401,17 @@ export function meshSession<T extends object>(
     const t = opt.transport();
     transport = t;
     unsubs = [
-      t.onMessage(handle),
+      t.onMessage((msg) => {
+        if (closed || transport !== t || msg.room !== opt.room) return;
+        handle(msg);
+        if (!closed || msg.t === 'reject' || msg.t === 'eject')
+          hooks.onMessage?.(msg);
+      }),
       t.onClose(() => {
         if (closed || transport !== t) return;
         transport = null;
+        members = undefined;
+        hooks.onMembers?.(members);
         setStatus('reconnecting');
         const delay = Math.min(
           opt.reconnect?.maxDelayMs ?? 15_000,
@@ -427,6 +468,9 @@ export function meshSession<T extends object>(
     unackedEnvs: () => [...unacked.values()],
     instance: () => instance,
     peers: () => peers,
+    sendSignal: (msg) => {
+      if (!closed && msg.room === opt.room) transport?.send(msg);
+    },
     setPresence: (data) => {
       presenceData = data;
       hasPresence = true;

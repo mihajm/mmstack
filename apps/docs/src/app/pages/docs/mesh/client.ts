@@ -16,13 +16,15 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Status and registration" id="status">
         <p>
           <code>mesh.status()</code> is
-          <code>'connecting' | 'live' | 'reconnecting' | 'ejected'</code>.
-          Reconnection is automatic with exponential backoff. On reconnect the
-          client resumes from a delta when it can, and re-applies any writes made
-          while offline on top of whatever the room moved to. A relay restart is
-          detected through a room epoch, so a stale sequence number never
-          corrupts state. With <code>register: 'track'</code> the store also joins
-          the nearest
+          <code
+            >'connecting' | 'waiting' | 'live' | 'reconnecting' |
+            'ejected'</code
+          >. Reconnection is automatic with exponential backoff. On reconnect
+          the client resumes from a delta when it can, and re-applies any writes
+          made while offline on top of whatever the room moved to. A relay
+          restart is detected through a room epoch, so a stale sequence number
+          never corrupts state. With <code>register: 'track'</code> the store
+          also joins the nearest
           <a mmLink="/docs/primitives/transitions">transition scope</a>, so a
           reconnect shows up as <code>pending</code> to a boundary.
         </p>
@@ -36,8 +38,8 @@ import { DocSection } from '../../../layout/doc-section';
           <a mmLink="/docs/primitives/sync">merge policy</a> per path for
           anything else: reconcile a list by item identity with
           <code>keyedArray</code>, or keep both sides of a clash as data with
-          <code>preserve</code>. A custom merge can also wrap another CRDT such as
-          Yjs for rich text. The package README has the pattern.
+          <code>preserve</code>. A custom merge can also wrap another CRDT such
+          as Yjs for rich text. The package README has the pattern.
         </p>
         <docs-code [code]="policies" lang="ts" />
       </docs-section>
@@ -47,21 +49,27 @@ import { DocSection } from '../../../layout/doc-section';
           Writes made while disconnected are held locally and sent on reconnect.
           That queue lives in memory by default, so a reload loses any write the
           room never acknowledged. Pass <code>outbox</code> to persist it to any
-          <code>AsyncStore</code>, the same interface <code>persist</code> takes.
-          On boot the client restores the queue, adopts the origin it used
-          before, and resends the unacknowledged writes, which then rebase onto
-          whatever the room moved to.
+          <code>AsyncStore</code>, the same interface
+          <code>persist</code> takes. On boot the client restores the queue and
+          resends the unacknowledged writes, each under the origin it was
+          recorded with. New writes go out under a fresh origin, since every
+          boot mints its own. The restored writes then rebase onto whatever the
+          room moved to.
         </p>
         <p>
-          One origin is driven by one tab at a time.
-          <code>crossTab: 'queue'</code> (the default) takes a Web Lock on the
-          key, so a second tab on the same key waits with <code>status()</code>
-          reading <code>'connecting'</code> until the first tab closes. Use
-          <code>'off'</code> to coordinate ownership yourself.
+          The saved queue is a single-writer slot, and a Web Lock on the key
+          elects its writer. <code>crossTab</code> sets what a second tab on the
+          same key does. <code>'queue'</code> (the default) waits with
+          <code>status()</code> reading <code>'waiting'</code> until the first
+          tab closes, then takes over. <code>'ephemeral'</code> goes live at
+          once on its own origin and never touches the saved queue, so its
+          unacknowledged writes are lost if it closes before the room
+          acknowledges them. <code>'off'</code> skips the lock so you can
+          coordinate ownership yourself.
         </p>
         <p>
-          The outbox persists your unacknowledged writes, not a full snapshot. For
-          a meshed store, use it in place of wrapping the store in
+          The outbox persists your unacknowledged writes, not a full snapshot.
+          For a meshed store, use it in place of wrapping the store in
           <code>persist</code>. The two race on boot, and the outbox is the one
           that rebases offline edits onto the room.
         </p>
@@ -70,14 +78,14 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Assemble a base before connecting" id="whenReady">
         <p>
-          Pass <code>whenReady</code> to hold the connection until a local base is
-          in place. <code>meshSync</code> awaits it before it connects and before
-          it restores the outbox, so a store filled from another source is ready
-          when the room welcome arrives and rebases your pending writes on top.
-          This is the boot order for a worker-owned, meshed, persisted graph: the
-          worker hydrates the base, the outbox restores this device's offline
-          writes, then the room welcome supersedes the base and rebases those
-          writes. Each source runs in turn instead of racing.
+          Pass <code>whenReady</code> to hold the connection until a local base
+          is in place. <code>meshSync</code> awaits it before it connects and
+          before it restores the outbox, so a store filled from another source
+          is ready when the room welcome arrives and rebases your pending writes
+          on top. This is the boot order for a worker-owned, meshed, persisted
+          graph: the worker hydrates the base, the outbox restores this device's
+          offline writes, then the room welcome supersedes the base and rebases
+          those writes. Each source runs in turn instead of racing.
         </p>
         <docs-code [code]="whenReady" lang="ts" />
       </docs-section>
@@ -85,24 +93,25 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Multiple tabs" id="tabs">
         <p>
           Run <a mmLink="/docs/primitives/sync">tabSync</a> and
-          <code>meshSync</code> on the same store to share it across a user's tabs
-          while one connection carries it to the room. The outbox lock elects the
-          leader, so only one tab holds the relay connection and the others share
-          state over <code>tabSync</code>. A write in any tab reaches the room
-          through the leader, and a room write reaches every tab through
-          <code>tabSync</code>. When the leader closes, another tab takes over and
-          adopts the persisted origin. Each layer is a separate reader on the
-          store's op stream, so a follower's <code>meshSync</code> stays idle until
-          it holds the lock and never opens a second connection.
+          <code>meshSync</code> on the same store to share it across a user's
+          tabs while one connection carries it to the room. The outbox lock
+          elects the leader, so only one tab holds the relay connection and the
+          others share state over <code>tabSync</code>. A write in any tab
+          reaches the room through the leader, and a room write reaches every
+          tab through <code>tabSync</code>. When the leader closes, another tab
+          takes over, resends the persisted writes and continues under its own
+          origin. Each layer is a separate reader on the store's op stream, so a
+          follower's <code>meshSync</code> stays idle until it holds the lock
+          and never opens a second connection.
         </p>
         <docs-code [code]="tabs" lang="ts" />
       </docs-section>
 
       <docs-section title="Presence" id="presence">
         <p>
-          An ephemeral side channel. Never persisted, never conflicts, drops when
-          a peer leaves. Shape the payload however you like: cursors, selection,
-          who is here, or an agent's current activity.
+          An ephemeral side channel. Never persisted, never conflicts, drops
+          when a peer leaves. Shape the payload however you like: cursors,
+          selection, who is here, or an agent's current activity.
         </p>
         <docs-code [code]="presence" lang="ts" />
       </docs-section>
@@ -120,21 +129,22 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Agents" id="agents">
         <p>
-          An agent acts under the same protocol as a person. <code>mesh.fork()</code>
-          gives it a branch of the synced store and its writes stay off the room
-          until a person approves: <code>ops()</code> is the staged change as data,
+          An agent acts under the same protocol as a person.
+          <code>mesh.fork()</code> gives it a branch of the synced store and its
+          writes stay off the room until a person approves:
+          <code>ops()</code> is the staged change as data,
           <code>commit()</code> emits it to the room, and <code>discard()</code>
-          drops it. The commit cites what the fork observed, so an edit that lands
-          mid-review stays a concurrent value the merge policy decides rather than
-          being overwritten by the approval.
+          drops it. The commit cites what the fork observed, so an edit that
+          lands mid-review stays a concurrent value the merge policy decides
+          rather than being overwritten by the approval.
         </p>
         <docs-code [code]="agentBranch" lang="ts" />
         <p>
           An agent can also join the room directly, scoped by the relay ACL
           through its <code>ctx</code> and <code>policy</code>. A live agent
           inherits the same conflict rules as everyone else, so a fast agent can
-          win a last-writer-wins race on a shared field. Reach for the branch when
-          a write should be seen before it lands.
+          win a last-writer-wins race on a shared field. Reach for the branch
+          when a write should be seen before it lands.
         </p>
         <docs-code [code]="agentPeer" lang="ts" />
         <p>
@@ -149,10 +159,31 @@ import { DocSection } from '../../../layout/doc-section';
           channels, using the relay only for signaling and membership. Peers
           exchange watermarks when a channel opens and catch each other up
           pairwise. It takes an injectable connector, defaulting to an
-          <code>RTCPeerConnection</code> adapter with perfect-negotiation handling
-          built in.
+          <code>RTCPeerConnection</code> adapter with perfect-negotiation
+          handling built in.
         </p>
         <docs-code [code]="p2p" lang="ts" />
+        <p>
+          <strong>Reachability.</strong> The library ships no ICE servers.
+          Without any, browsers hide host addresses behind mDNS names, so links
+          only form on one network segment. Pass an
+          <code>RTCConfiguration</code> to <code>rtcPeerConnector</code>, or let
+          the relay issue a list in every welcome through its
+          <code>iceServers</code> option, which replaces the static list. The
+          option also takes a function of the room and origin, called at each
+          welcome, for minting short-lived TURN credentials.
+        </p>
+        <p>
+          <strong>Recovery.</strong> A link that does not open within fifteen
+          seconds, loses a channel, or fails ICE twice (the connector restarts
+          ICE once first) is dropped and rebuilt after a jittered backoff that
+          doubles from one second up to thirty, for as long as the relay lists
+          the member. Either side may rebuild; the other follows. Links are
+          built only after the welcome of the connection they signal over, so
+          every link carries that welcome's ICE servers.
+          <code>links.stalled()</code> lists the members whose link was lost and
+          has not opened again.
+        </p>
       </docs-section>
     </docs-page>
   `,
@@ -165,7 +196,7 @@ export class MeshClient {
   register: 'track', // a reconnect surfaces as pending to a <mm-suspense> boundary
 });
 
-mesh.status(); // 'connecting' | 'live' | 'reconnecting' | 'ejected'`;
+mesh.status(); // 'connecting' | 'waiting' | 'live' | 'reconnecting' | 'ejected'`;
 
   protected readonly policies = `import { keyedArray, preserve } from '@mmstack/primitives';
 

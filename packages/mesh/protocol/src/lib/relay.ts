@@ -13,6 +13,7 @@ import {
   type ClientMsg,
   type DropMsg,
   type Hlc,
+  type IceServer,
   type OpEnvelope,
   type PresenceState,
   type RegisterCheckpoint,
@@ -126,6 +127,14 @@ export type RelayOptions = {
    * synchronous and never awaited.
    */
   readonly onJoin?: (room: string, ctx: PrincipalCtx, origin: string) => void;
+  /**
+   * ICE servers issued to peer links in every welcome. The function form is called per welcome
+   * with the room and the welcomed origin, for minting short-lived TURN credentials. Credentials
+   * are only refreshed by a later welcome, so choose a lifetime longer than a session.
+   */
+  readonly iceServers?:
+    | readonly IceServer[]
+    | ((room: string, origin: string) => readonly IceServer[]);
 };
 
 /** The room's durable state at a commit: what a checkpoint needs to capture. */
@@ -362,6 +371,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const journalLimit = opt.journalLimit ?? 1000;
   const maxOps = opt.limits?.maxOpsPerEnvelope ?? 1024;
   const rate = opt.limits?.maxEnvelopesPerSecond;
+  const iceFor = (room: string, origin: string) => {
+    const ice = opt.iceServers;
+    const servers = typeof ice === 'function' ? ice(room, origin) : ice;
+    return servers ? { ice: servers } : {};
+  };
   const now = opt.now ?? Date.now;
   const ejection = opt.ejection ?? 'writer';
 
@@ -732,6 +746,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 members: [...room.members]
                   .filter((m) => m !== member)
                   .map((m) => m.origin),
+                ...iceFor(msg.room, member.origin),
               });
             });
             return;
@@ -902,6 +917,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                     members: [...room.members]
                       .filter((m) => m !== member)
                       .map((m) => m.origin),
+                    ...iceFor(msg.room, member.origin),
                   });
                 }
               }

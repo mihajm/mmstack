@@ -8,6 +8,7 @@ import {
 } from '@mmstack/primitives/core';
 import { vi } from 'vitest';
 import { meshSync } from './mesh-sync';
+import { installFakeLocks } from './testing/fake-locks';
 import { directTransport } from './transport';
 
 /**
@@ -56,41 +57,6 @@ function memStore(): AsyncStore {
   };
 }
 
-/** A minimal exclusive-queue Web Locks stand-in (see outbox-lock.spec for the full one). */
-function installFakeLocks(): () => void {
-  const held = new Set<string>();
-  const waiters = new Map<string, (() => void)[]>();
-  const pump = (name: string) => {
-    if (held.has(name)) return;
-    waiters.get(name)?.shift()?.();
-  };
-  const request = (
-    name: string,
-    _o: unknown,
-    cb: (l: unknown) => Promise<unknown>,
-  ) =>
-    new Promise((resolve, reject) => {
-      const run = () => {
-        held.add(name);
-        Promise.resolve(cb({ name })).then(
-          (v) => (held.delete(name), resolve(v), pump(name)),
-          (e) => (held.delete(name), reject(e), pump(name)),
-        );
-      };
-      const q = waiters.get(name) ?? [];
-      q.push(run);
-      waiters.set(name, q);
-      pump(name);
-    });
-  const nav = globalThis.navigator as unknown as { locks?: unknown };
-  const prev = Object.getOwnPropertyDescriptor(nav, 'locks');
-  Object.defineProperty(nav, 'locks', { value: { request }, configurable: true });
-  return () => {
-    if (prev) Object.defineProperty(nav, 'locks', prev);
-    else delete nav.locks;
-  };
-}
-
 // fake timers own setTimeout (tabSync hello) + Date.now (HLC); the loop also flushes microtasks
 // (outbox load + the Web Lock) and ticks Angular effects (the opSync drain)
 async function settle(): Promise<void> {
@@ -102,14 +68,14 @@ async function settle(): Promise<void> {
 }
 
 describe('compose: tabSync + meshSync on one store', () => {
-  let restoreLocks: () => void;
+  let fake: ReturnType<typeof installFakeLocks>;
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(1_700_000_000_000);
-    restoreLocks = installFakeLocks();
+    fake = installFakeLocks();
   });
   afterEach(() => {
-    restoreLocks();
+    fake.restore();
     vi.useRealTimers();
   });
 
@@ -149,7 +115,7 @@ describe('compose: tabSync + meshSync on one store', () => {
     await settle();
 
     expect(a.mesh.status()).toBe('live'); // A holds the outbox lock
-    expect(b.mesh.status()).toBe('connecting'); // B waits on the mesh side
+    expect(b.mesh.status()).toBe('waiting'); // B waits on the mesh side
 
     a.s.title.set('from-a');
     await settle();
@@ -207,7 +173,7 @@ describe('compose: tabSync + meshSync on one store', () => {
     const a = tab(net, relay, disk, 'wa');
     const b = tab(net, relay, disk, 'wb');
     await settle();
-    expect(b.mesh.status()).toBe('connecting');
+    expect(b.mesh.status()).toBe('waiting');
 
     a.mesh.close(); // the leader leaves
     await settle();

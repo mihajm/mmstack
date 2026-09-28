@@ -10,9 +10,11 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import type {
+  IceServer,
   OpPolicy,
   PresenceState,
   PrincipalCtx,
+  ServerMsg,
 } from '@mmstack/mesh-protocol';
 import {
   forkStore,
@@ -33,6 +35,7 @@ import {
 } from '@mmstack/primitives/core';
 import { meshSession, type MeshSession, type MeshStatus } from './session';
 import type { MeshTransportFactory } from './transport';
+import type { SignalingPort } from './peer-links';
 
 export type { MeshStatus } from './session';
 
@@ -43,7 +46,7 @@ export type MeshPeer = PresenceState;
  * turns a versioned reject from a dead socket into a speakable 'outdated' banner.
  */
 export type SyncHealthStatus =
-  'live' | 'offline' | 'outdated' | 'ejected' | 'degraded';
+  'live' | 'waiting' | 'offline' | 'outdated' | 'ejected' | 'degraded';
 
 export type SyncHealth = {
   readonly status: SyncHealthStatus;
@@ -108,7 +111,10 @@ export type MeshSyncOptions = {
   readonly register?: 'track' | 'suspend';
   readonly onEject?: (reason: string) => void;
   /** A write the relay refused (see `MeshSessionHooks.onRefused`); the envelope carries its values. */
-  readonly onRefused?: (env: OpEnvelope, reason: 'generation' | 'schema' | 'order') => void;
+  readonly onRefused?: (
+    env: OpEnvelope,
+    reason: 'generation' | 'schema' | 'order',
+  ) => void;
   /**
    * Hold the connection until the local base is assembled. `meshSync` awaits this before it connects
    * (and before it restores an `outbox`), so a store hydrated from another source first (a worker
@@ -123,12 +129,15 @@ export type MeshSyncOptions = {
    * on the next welcome, instead of being lost with in-memory state. The payload is written to
    * `store` under `key`, debounced.
    *
-   * By default (`crossTab: 'queue'`) a Web Lock on `key` makes this a single-writer-per-key resource:
-   * a second tab sharing the key WAITS (stays `connecting`, surfaced via `status`/`health`) until the
-   * first releases, rather than restoring the same origin and colliding on version mints. Set
-   * `crossTab: 'off'` to skip the lock and coordinate ownership yourself (e.g. a per-tab key, or
-   * leader election over `tabSync`). A debounced write means a hard crash within the debounce window
-   * can drop the very last mint — a small, best-effort gap; tune it with `debounceMs`.
+   * The persisted outbox under `key` is a single-writer slot: every persist overwrites it whole, so
+   * two tabs writing one key would each drop the other's tail from disk. A Web Lock on `key` elects
+   * the one tab that restores from the slot and writes to it; origins are fresh on every boot either
+   * way, so the lock guards the slot, not the origin. `crossTab` sets what a tab that did not get the
+   * lock does: `'queue'` (default) waits (`status` reads `'waiting'`) and takes over when the owner
+   * closes; `'ephemeral'` runs live at once and never touches the slot. `'off'` skips the lock and
+   * leaves ownership to you (e.g. a per-tab key, or leader election over `tabSync`). A debounced
+   * write means a hard crash within the debounce window can drop the very last mint — a small,
+   * best-effort gap; tune it with `debounceMs`.
    */
   readonly outbox?: {
     readonly key: string;
@@ -136,23 +145,32 @@ export type MeshSyncOptions = {
     /** Coalesce outbox writes by this many ms (default 300; `0` = write on every change). */
     readonly debounceMs?: number;
     /**
-     * Cross-tab contention for the shared `key`. `'queue'` (default) holds a Web Lock so only one tab
-     * owns the durable outbox at a time; others wait. `'off'` skips the lock (you coordinate).
-     * (A future `'ephemeral'` — non-leaders run live with a throwaway origin — is planned.)
+     * Cross-tab contention for the shared `key`. The persisted outbox is a single-writer slot: the
+     * Web Lock elects the one tab that restores from it and writes to it.
+     * `'queue'` (default): a tab that did not get the lock WAITS (`status` reads `'waiting'`) and
+     * takes over when the owner closes. `'ephemeral'`: it runs live at once on its own fresh origin
+     * and never touches the slot — its unacknowledged writes live in memory only and are lost if that
+     * tab terminates before the room acknowledges them — online or offline, and it stays ephemeral
+     * for life, also after the owner leaves. When the lock is free both behave the same (take it,
+     * restore, persist). `'off'` skips the lock (you coordinate ownership).
      */
-    readonly crossTab?: 'queue' | 'off';
+    readonly crossTab?: 'queue' | 'off' | 'ephemeral';
   };
 };
 
-/** The shape persisted under `outbox.key`: the stable origin, the emit high-water, and the tail. */
+/** The shape persisted under `outbox.key`: the writing boot's origin, the emit high-water, and the tail. */
 type PersistedOutbox = {
+  /** The origin of the boot that wrote the slot; the next boot mints its own and resends the tail verbatim. */
   readonly origin: string;
   readonly version: number;
   readonly envs: readonly OpEnvelope[];
   /** The room generation the tail was written in; the first welcome decides whether it still holds. */
   readonly instance?: string;
   /** Emission epoch floors: a floor whose own sibling was collected has no other source on reload. */
-  readonly floors?: readonly { readonly path: readonly (string | number)[]; readonly epoch: number }[];
+  readonly floors?: readonly {
+    readonly path: readonly (string | number)[];
+    readonly epoch: number;
+  }[];
   /** The last stamp minted: an acked, dropped tail still moved the clock. */
   readonly clock?: Hlc;
 };
@@ -178,6 +196,12 @@ export type SeatSync<T = unknown> = Pick<
 
 export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   readonly status: Signal<MeshStatus>;
+  /** Origin used by the current session's hello; null until hello, including while waiting on an outbox. */
+  readonly origin: Signal<string | null>;
+  /** Other relay members, including peers with no presence; empty before welcome and while disconnected. */
+  readonly members: Signal<readonly string[]>;
+  /** Peer signaling on this session's connection; buffers up to 256 early signals until the first listener. */
+  readonly signaling: SignalingPort;
   /** Composed sync-health for a user-facing surface. */
   readonly health: Signal<SyncHealth>;
   /**
@@ -226,6 +250,42 @@ export function meshSync<T extends object>(
 ): MeshSyncRef<T> {
   const injector = opt.injector ?? inject(Injector);
   const status = signal<MeshStatus>('connecting');
+  const origin = signal<string | null>(null);
+  const members = signal<readonly string[]>([]);
+  let membership: readonly string[] | undefined;
+  // the last roster the links on the port were given; a socket drop blanks the session's, not this
+  let roster: readonly string[] = [];
+  const signalingListeners = new Set<(msg: ServerMsg) => void>();
+  let earlySignals: ServerMsg[] | null = [];
+  // the ICE servers of the last welcome, for peer links that attach after it
+  let welcomeIce: readonly IceServer[] | undefined;
+  const deliverSignal = (
+    cb: (msg: ServerMsg) => void,
+    msg: ServerMsg,
+  ): void => {
+    try {
+      cb(msg);
+    } catch {
+      // A failed peer link must never interrupt the room's sync session or other listeners.
+    }
+  };
+  const signalMessage = (msg: ServerMsg): void => {
+    if (msg.t === 'welcome') welcomeIce = msg.ice;
+    if (msg.t === 'welcome' && earlySignals !== null) earlySignals = [];
+    if (msg.t === 'member' && msg.gone && earlySignals !== null) {
+      earlySignals = earlySignals.filter(
+        (held) => held.t !== 'signal' || held.from !== msg.origin,
+      );
+    }
+    if (
+      msg.t === 'signal' &&
+      earlySignals !== null &&
+      earlySignals.length < 256
+    ) {
+      earlySignals.push(msg);
+    }
+    for (const cb of [...signalingListeners]) deliverSignal(cb, msg);
+  };
   const lastReason = signal<string | undefined>(undefined);
   const lastSyncedAt = signal<number | undefined>(undefined);
   const droppedOffline = signal(0);
@@ -248,6 +308,8 @@ export function meshSync<T extends object>(
     switch (status()) {
       case 'live':
         return { status: 'live', lastSyncedAt: at, ...extra };
+      case 'waiting':
+        return { status: 'waiting', lastSyncedAt: at, ...extra };
       case 'ejected': {
         const reason = lastReason();
         return reason && OUTDATED_REASONS.has(reason)
@@ -259,20 +321,28 @@ export function meshSync<T extends object>(
     }
   });
 
-  // Created lazily: with a persisted outbox we must adopt the stored origin BEFORE minting anything
+  // Created lazily: with a persisted outbox the slot lock and the restored tail come first, so the
+  // engine never mints before it knows the generation it is in
   let sync!: OpSync<T>;
   let session: MeshSession | undefined;
   let started = false;
   let closed = false;
   let pendingPresence: { data: unknown } | undefined;
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingPersist: Promise<void> | undefined;
   let releaseLock: (() => void) | undefined;
   let cancelLock: (() => void) | undefined;
+  // this tab owns the persisted slot ('off', no Web Locks, or a granted lock); an ephemeral boot never does
+  let durable = false;
+  // the slot's clock high-water as restored: persisted back until this boot mints its own stamp
+  let restoredClock: Hlc | undefined;
 
-  const doPersist = (): void => {
-    if (closed || !opt.outbox || !started || !session) return;
+  // resolves when the store has the payload (a failed write resolves too: persistence is best-effort)
+  const doPersist = (): Promise<void> => {
+    if (closed || !opt.outbox || !started || !session || !durable)
+      return Promise.resolve(); // ephemeral: never writes
     const instance = session.instance();
-    const clock = sync.lastStamp();
+    const clock = sync.lastStamp() ?? restoredClock;
     const payload: PersistedOutbox = {
       origin: sync.origin,
       version: sync.watermark()[sync.origin] ?? 0,
@@ -281,22 +351,41 @@ export function meshSync<T extends object>(
       floors: sync.floors(),
       ...(clock ? { clock } : {}),
     };
-    void Promise.resolve(opt.outbox.store.set(opt.outbox.key, payload));
+    const { store, key } = opt.outbox;
+    // Capture before queueing: teardown clears the session's tail immediately after this call.
+    const write = (): Promise<void> => {
+      try {
+        return Promise.resolve(store.set(key, payload)).then(
+          () => undefined,
+          () => undefined,
+        );
+      } catch {
+        return Promise.resolve(); // a failed save must not block later saves or lock release
+      }
+    };
+    // Keep the idle path synchronous, but never let an older save land after a newer one.
+    const pending = pendingPersist ? pendingPersist.then(write) : write();
+    pendingPersist = pending;
+    void pending.then(() => {
+      if (pendingPersist === pending) pendingPersist = undefined;
+    });
+    return pending;
   };
-  // coalesce outbox writes; `immediate` forces a synchronous-path write (first boot, teardown)
-  const persistOutbox = (immediate = false): void => {
-    if (!opt.outbox) return;
+  // coalesce outbox writes; `immediate` bypasses the debounce, but waits for earlier saves
+  const persistOutbox = (immediate = false): Promise<void> => {
+    if (!opt.outbox) return Promise.resolve();
     if (immediate) {
       if (persistTimer !== undefined) clearTimeout(persistTimer);
       persistTimer = undefined;
-      doPersist();
-      return;
+      return doPersist();
     }
-    if (persistTimer !== undefined) return;
-    persistTimer = setTimeout(() => {
-      persistTimer = undefined;
-      doPersist();
-    }, opt.outbox.debounceMs ?? OUTBOX_DEBOUNCE_MS);
+    if (persistTimer === undefined) {
+      persistTimer = setTimeout(() => {
+        persistTimer = undefined;
+        void doPersist();
+      }, opt.outbox.debounceMs ?? OUTBOX_DEBOUNCE_MS);
+    }
+    return Promise.resolve(); // the debounced path is not awaited
   };
 
   const dropLocks = (): void => {
@@ -321,6 +410,7 @@ export function meshSync<T extends object>(
 
   const initCore = (restore?: PersistedOutbox): void => {
     if (closed) return;
+    restoredClock = restore?.clock;
     sync = opSync(source, {
       writer: opt.writer,
       instance: restore?.instance,
@@ -337,6 +427,8 @@ export function meshSync<T extends object>(
       },
     });
     started = true;
+    // set once this session ends: only then are the links riding on its port retired
+    let ended = false;
     session = meshSession({
       room: opt.room,
       writer: opt.writer,
@@ -350,6 +442,26 @@ export function meshSync<T extends object>(
       instance: restore?.instance,
       reconnect: opt.reconnect,
       hooks: {
+        onOrigin: (value) => origin.set(value),
+        onMembers: (value) => {
+          membership = value;
+          members.set(value ?? []);
+          if (value !== undefined) {
+            roster = value;
+            return;
+          }
+          if (earlySignals !== null) earlySignals = [];
+          // Peer links outlive a socket drop: the next welcome re-lists who is still there. A
+          // borrowed port has no close of its own, so the session's end retires them here, from
+          // the last roster the links saw (a drop before the close already blanked the session's).
+          if (!ended) return;
+          const retired = roster;
+          roster = [];
+          for (const origin of retired) {
+            signalMessage({ t: 'member', room: opt.room, origin, gone: true });
+          }
+        },
+        onMessage: signalMessage,
         onRefused: (env, reason) => {
           refused.update((n) => n + 1);
           opt.onRefused?.(env, reason);
@@ -372,15 +484,23 @@ export function meshSync<T extends object>(
         onSynced: () => lastSyncedAt.set(Date.now()),
         onPeers: (map) => peerMap.set(map),
         onOutboxChange: () => {
-          persistOutbox();
+          void persistOutbox();
           acked.set(!session?.hasUnacked());
         },
         onTerminal: () => {
-          dropLocks();
+          ended = true;
           // latched: the tail is about to be dropped from the session, but it was never
           // acknowledged, so the answer to "is everything I wrote in the room" stays no
           if (session?.hasUnacked()) acked.set(false);
-          persistOutbox(true); // save the still-unacked tail for the next boot before dropping it
+          // save the still-unacked tail for the next boot, and release the lock only once the store
+          // has it: a successor granted earlier could restore the slot before this write lands
+          let saved: Promise<void>;
+          try {
+            saved = persistOutbox(true);
+          } catch {
+            saved = Promise.resolve(); // a failed capture must still hand the slot on
+          }
+          void saved.finally(dropLocks);
         },
         onLocalReject: (violation) => {
           if (isDevMode()) {
@@ -392,7 +512,13 @@ export function meshSync<T extends object>(
         },
       },
     });
-    if (restore && (restore.envs.length > 0 || restore.version > 0)) {
+    if (
+      restore &&
+      (restore.envs.length > 0 ||
+        restore.version > 0 ||
+        (restore.floors?.length ?? 0) > 0 ||
+        restore.clock !== undefined)
+    ) {
       const kept = restore.envs.filter(restorable);
       const dropped = restore.envs.length - kept.length;
       if (dropped > 0) {
@@ -406,7 +532,7 @@ export function meshSync<T extends object>(
 
       sync.restore(kept, restore.version, restore.floors, restore.clock); // → the session's subscribe repopulates its unacked tail for resend
     }
-    persistOutbox(true); // pin the freshly minted origin immediately, so a crash before any write is safe
+    void persistOutbox(true); // pin the freshly minted origin immediately, so a crash before any write is safe
     if (pendingPresence) {
       session.setPresence(pendingPresence.data);
       pendingPresence = undefined;
@@ -418,7 +544,7 @@ export function meshSync<T extends object>(
     const connection: ResourceLike = {
       status: computed(() => {
         const s = status();
-        return s === 'connecting'
+        return s === 'connecting' || s === 'waiting'
           ? 'loading'
           : s === 'reconnecting'
             ? 'reloading'
@@ -427,7 +553,10 @@ export function meshSync<T extends object>(
               : 'resolved';
       }),
       isLoading: computed(
-        () => status() === 'connecting' || status() === 'reconnecting',
+        () =>
+          status() === 'connecting' ||
+          status() === 'waiting' ||
+          status() === 'reconnecting',
       ),
       hasValue: () => true,
     };
@@ -452,6 +581,7 @@ export function meshSync<T extends object>(
 
   // Load the persisted outbox, then boot with the adopted origin. A fresh/unreadable slot boots clean.
   const bootFromDisk = async (): Promise<void> => {
+    durable = true; // every caller owns the slot
     if (closed || !opt.outbox) return;
     let saved: PersistedOutbox | undefined;
     try {
@@ -474,37 +604,65 @@ export function meshSync<T extends object>(
       void bootFromDisk(); // no single-writer lock — the app coordinates ownership
     } else {
       const locks = globalThis.navigator?.locks;
+      const mode = opt.outbox.crossTab ?? 'queue';
       if (!locks) {
         if (isDevMode()) {
           console.warn(
-            '[@mmstack/mesh] outbox crossTab:"queue" needs the Web Locks API (navigator.locks), unavailable here — running WITHOUT a single-writer lock. Two tabs sharing this key can diverge; coordinate ownership yourself, or set crossTab:"off" to silence this.',
+            `[@mmstack/mesh] outbox crossTab:"${mode}" needs the Web Locks API (navigator.locks), unavailable here — running WITHOUT a single-writer lock ('queue' and 'ephemeral' both own the slot). Two tabs sharing this key can diverge; coordinate ownership yourself, or set crossTab:"off" to silence this.`,
           );
         }
         void bootFromDisk();
-      } else {
+        return;
+      }
+      const name = `@mmstack/mesh:outbox:${opt.outbox.key}`;
+      // hold a granted lock until teardown resolves this promise
+      const hold = (queued = false): Promise<void> => {
+        cancelLock = undefined; // granted — no longer abortable, only releasable
+        if (closed) return Promise.resolve();
+        if (queued) status.set('connecting'); // the wait ends with the grant
+        return new Promise<void>((release) => {
+          releaseLock = release;
+          void bootFromDisk();
+        });
+      };
+      const queueUp = (): void => {
+        status.set('waiting');
         const abort = new AbortController();
         cancelLock = () => abort.abort();
         void locks
-          .request(
-            `@mmstack/mesh:outbox:${opt.outbox.key}`,
-            { mode: 'exclusive', signal: abort.signal },
-            () => {
-              cancelLock = undefined; // granted — no longer abortable, only releasable
-              if (closed) return Promise.resolve();
-              // hold the lock until teardown resolves this promise
-              return new Promise<void>((release) => {
-                releaseLock = release;
-                void bootFromDisk();
-              });
-            },
+          .request(name, { mode: 'exclusive', signal: abort.signal }, () =>
+            hold(true),
           )
           .catch((e: unknown) => {
             // an aborted request is our own teardown; any other failure → degrade to no-lock
-            if (!closed && (e as { name?: string })?.name !== 'AbortError') {
+            if (
+              !closed &&
+              !started &&
+              (e as { name?: string })?.name !== 'AbortError'
+            ) {
+              status.set('connecting'); // no longer waiting on anyone
               void bootFromDisk();
             }
           });
-      }
+      };
+      // Web Locks forbids `signal` together with `ifAvailable`, hence the probe first
+      void locks
+        .request(name, { mode: 'exclusive', ifAvailable: true }, (lock) => {
+          if (lock === null) {
+            // another tab owns the slot
+            if (closed) return Promise.resolve();
+            if (mode === 'ephemeral') {
+              initCore(); // live at once on a fresh origin; never reads or writes the slot
+              return Promise.resolve();
+            }
+            queueUp();
+            return Promise.resolve();
+          }
+          return hold();
+        })
+        .catch(() => {
+          if (!closed && !started) void bootFromDisk(); // a broken lock manager degrades to no-lock
+        });
     }
   };
 
@@ -521,6 +679,20 @@ export function meshSync<T extends object>(
 
   return {
     status: status.asReadonly(),
+    origin: origin.asReadonly(),
+    members: members.asReadonly(),
+    signaling: {
+      members: () => membership,
+      iceServers: () => welcomeIce,
+      send: (msg) => session?.sendSignal(msg),
+      onMessage: (cb) => {
+        signalingListeners.add(cb);
+        const held = earlySignals ?? [];
+        earlySignals = null;
+        for (const msg of held) deliverSignal(cb, msg);
+        return () => signalingListeners.delete(cb);
+      },
+    },
     health,
     acked: acked.asReadonly(),
     whenAcked: () => (session ? session.whenAcked() : Promise.resolve()), // nothing written yet

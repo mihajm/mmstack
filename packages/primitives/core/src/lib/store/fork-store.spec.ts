@@ -93,6 +93,55 @@ describe('merge3', () => {
     });
   });
 
+  describe('absent vs undefined (presence follows the winning side)', () => {
+    type AB = { a?: number; b: number };
+
+    it('base deletes a key the fork left alone while the fork edits a sibling → key absent', () => {
+      const out = merge3<AB>({ a: 1, b: 0 }, { a: 1, b: 1 }, { b: 0 });
+      expect('a' in out).toBe(false);
+      expect(out).toStrictEqual({ b: 1 });
+    });
+
+    it('fork deletes a key while the base edits a sibling → key absent, base edit kept', () => {
+      const theirs: AB = { a: 1, b: 2 };
+      const out = merge3<AB>({ a: 1, b: 0 }, { b: 0 }, theirs);
+      expect('a' in out).toBe(false);
+      expect(out).toStrictEqual({ b: theirs.b });
+    });
+
+    it('base deletes a key the fork edited → the fork value is kept', () => {
+      const out = merge3<AB>({ a: 1, b: 0 }, { a: 5, b: 0 }, { b: 3 });
+      expect(out).toStrictEqual({ a: 5, b: 3 });
+    });
+
+    it('a deliberate fork `undefined` stays an own key', () => {
+      const out = merge3<AB>(
+        { a: 1, b: 0 },
+        { a: undefined, b: 0 },
+        { a: 1, b: 2 },
+      );
+      expect('a' in out).toBe(true);
+      expect(out.a).toBeUndefined();
+      expect(out.b).toBe(2);
+    });
+
+    it("the base's own `undefined` on a key the fork left alone stays an own key", () => {
+      const out = merge3<AB>(
+        { a: undefined, b: 0 },
+        { a: undefined, b: 1 },
+        { a: undefined, b: 2 },
+      );
+      expect('a' in out).toBe(true);
+      expect(out.b).toBe(1);
+    });
+
+    it('a base addition holding `undefined` flows through as an own key', () => {
+      const out = merge3<AB>({ b: 0 }, { b: 1 }, { a: undefined, b: 0 });
+      expect('a' in out).toBe(true);
+      expect(out.b).toBe(1);
+    });
+  });
+
   describe('type / shape changes (honoring the structural-sharing contract)', () => {
     it('keeps a fork edit that changes an object into a primitive', () => {
       const shared = { y: 1 };
@@ -476,6 +525,21 @@ describe('fork ops() + policyStrategy', () => {
 
       fork.commit();
       expect(fork.ops()).toEqual([]); // re-linked, no delta
+    });
+  });
+
+  it('a base deletion of a key the fork left alone emits no op for that key', () => {
+    inInjectionContext(() => {
+      const base = store<{ a?: number; b: number }>({ a: 1, b: 0 });
+      const fork = forkStore(base);
+
+      set(fork.store.b, 1);
+      base.set({ b: 0 }); // the base deletes `a` underneath the fork
+
+      expect('a' in fork.store()).toBe(false);
+      expect(fork.ops()).toEqual([
+        { kind: 'set', path: ['b'], next: 1, prev: 0 },
+      ]);
     });
   });
 

@@ -74,23 +74,34 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * path and it will treat that node as edited (recursion/leaf-value checks usually still reconcile,
  * but a fresh-ref clean node vs a base type-change resolves to the fork's stale value). Primitive
  * leaves compare by value, so equal primitives are correctly seen as unchanged.
+ *
+ * An absent key and a key holding `undefined` are different values here, because `diffOps` (and
+ * so `Fork.ops()` and every sync layer built on it) turns one into the other with a `set` or a
+ * `delete`. When a key merges to `undefined`, the result copies presence from the side that won:
+ * if the fork changed the key, the key is present only when the fork holds it; otherwise it is
+ * present only when the base holds it. So a key the base deleted and the fork left alone is
+ * absent, a key the fork deleted is absent, and only a deliberate `undefined` survives as a key.
  */
 export function merge3<T>(ancestor: T, mine: T, theirs: T): T {
   if (Object.is(mine, theirs) || Object.is(mine, ancestor)) return theirs; // unedited → live base
   if (Object.is(theirs, ancestor)) return mine; // base unchanged here → keep the fork's edit
 
   if (isPlainRecord(mine) && isPlainRecord(theirs) && isPlainRecord(ancestor)) {
-    const out: Record<string, unknown> = { ...theirs };
-    for (const key of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
-      const merged = merge3(
-        (ancestor as Record<string, unknown>)[key],
-        (mine as Record<string, unknown>)[key],
-        (theirs as Record<string, unknown>)[key],
-      );
-      // a key deleted on the fork must commit as ABSENT, not as an explicit `undefined`
-      if (merged === undefined && !(key in (mine as Record<string, unknown>)))
-        delete out[key];
-      else out[key] = merged;
+    const a = ancestor as Record<string, unknown>;
+    const m = mine as Record<string, unknown>;
+    const t = theirs as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...t };
+    for (const key of new Set([...Object.keys(m), ...Object.keys(t)])) {
+      const merged = merge3(a[key], m[key], t[key]);
+      if (merged !== undefined) {
+        out[key] = merged;
+        continue;
+      }
+      // An `undefined` result takes its presence from the side that won: the fork's if the fork
+      // changed this key (value or presence), otherwise the base's.
+      const forkChanged = key in m !== key in a || !Object.is(m[key], a[key]);
+      if (forkChanged ? key in m : key in t) out[key] = undefined;
+      else delete out[key];
     }
     return out as T;
   }

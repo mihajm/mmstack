@@ -41,6 +41,33 @@ delta when possible, and re-applies any writes made while offline on top of what
 moved to in the meantime. A relay restart is detected through a room instance nonce, so a stale
 sequence number never corrupts state.
 
+`mesh.origin()` is `null` until the session sends hello, then reflects the origin that hello
+used. It stays stable across socket reconnects and follows the current op engine when a session
+is rebuilt; an outbox restore publishes the new boot's origin, not the origins of replayed writes.
+The last announced origin remains available after close. `mesh.members()` lists other relay
+origins, including peers that have never published presence. It is empty before welcome and
+while disconnected, and updates on welcomes, joins, and departures.
+
+Peer links can share the session's connection directly, without wrapping its transport:
+
+```ts
+const origin = mesh.origin();
+if (origin !== null && mesh.status() === 'live') {
+  const links = peerLinks({
+    room: 'board-42',
+    origin,
+    signaling: mesh.signaling,
+  });
+}
+```
+
+Create links in an injection context (or pass their `injector` option). In a reactive consumer,
+create them once per origin and close the previous links if that origin changes. The signaling
+port follows socket reconnects without sending a second hello. It buffers up to 256 early
+signaling frames for its first listener, clears stale frames on welcome or disconnect, and
+retires peer links only when the session ends: a socket drop leaves them up, and the next welcome
+says who is still there. Closing the links leaves the mesh session open.
+
 ## Conflict resolution
 
 By default the latest write to a path wins, decided by a hybrid logical clock so every peer
@@ -124,21 +151,24 @@ meshSync(board, {
 ```
 
 `store` is any `AsyncStore` (`get`, `set`, `del`), the same interface `persist` takes. On boot the
-client restores the saved queue, adopts the origin it used before the reload, and resends the
-unacknowledged writes when it reconnects. Those offline edits then rebase onto whatever the room
+client restores the saved queue and resends the unacknowledged writes when it reconnects, each under
+the origin it was recorded with. New writes go out under a fresh origin: every boot mints its own. Those offline edits then rebase onto whatever the room
 moved to while the tab was gone. The queue is saved on a 300ms debounce; set `debounceMs` to change
 it, or `0` to write on every change.
 
-One origin is driven by one tab at a time. `crossTab` sets what a second tab on the same key does:
+The saved queue is a single-writer slot, and a Web Lock on the key elects its writer. `crossTab` sets
+what a second tab on the same key does:
 
-- `'queue'` (default) takes a Web Lock on the key. The second tab waits, with `status()` reading
-  `'connecting'`, until the first tab closes, then takes over. Exactly one durable writer holds the
-  key at a time.
+- `'queue'` (default): the second tab waits, with `status()` reading `'waiting'`, until the first
+  tab closes, then takes over.
+- `'ephemeral'`: the second tab is live at once on its own origin. It never reads or writes the saved
+  queue, so its unacknowledged writes are lost if it closes before the room acknowledges them. When
+  the lock is free, it takes the lock and behaves like `'queue'`.
 - `'off'` skips the lock. Use it when you coordinate ownership yourself, for example a distinct key
   per tab, or leader election over `tabSync`.
 
-When the Web Locks API is unavailable, `'queue'` logs a development warning and runs without the
-lock.
+When the Web Locks API is unavailable, `'queue'` and `'ephemeral'` log a development warning and run
+without the lock, as the owner of the saved queue.
 
 The outbox persists your unacknowledged writes, not a full snapshot. For a meshed store, use it in
 place of wrapping the store in `persist`. The two race on boot, and the outbox is the one that
@@ -551,3 +581,34 @@ For an external presence roster, pass a subscription function as `roster`. It mu
 emit the current origins and every subsequent membership transition, and return an unsubscribe
 function. Do not adapt a signal using an effect: a leave and rejoin can be coalesced into one
 snapshot, losing the evidence that the previous value must be forgotten.
+
+### Reachability
+
+The library ships no ICE servers: it contacts no third party unless you tell it to. Without any,
+browsers hide host addresses behind mDNS names, so links only form between peers on the same
+network segment. Give them servers in one of two ways: a static `RTCConfiguration` passed to
+`rtcPeerConnector(config)`, or a list the relay issues in every welcome through its
+`iceServers` option, which replaces the static list for every link built after that welcome.
+TURN credentials are short-lived and belong to the operator, so the option also takes a function
+of the room and the origin, called at each welcome to mint fresh ones. A link rebuilt long after
+its welcome still uses that welcome's credentials, so choose a lifetime longer than a session.
+
+```ts
+const relay = createRelay({
+  iceServers: (room, origin) => [
+    { urls: 'turn:turn.example.com', ...mintTurn(room, origin) },
+  ],
+});
+```
+
+### Recovery
+
+A link that does not open every channel within `openTimeoutMs` (15 s), loses a channel, or is
+reported gone by its connector is dropped and rebuilt, for as long as the relay lists its origin.
+The WebRTC connector first tries one ICE restart when ICE fails, or stays disconnected for
+`disconnectGraceMs` (5 s). Rebuilds wait a jittered backoff that doubles from `retry.minMs` (1 s)
+to `retry.maxMs` (30 s) and never gives up; a welcome or a join rebuilds at once. Either side may
+rebuild: its new instance announces itself, and the other side rebuilds its end to match, as for
+a new seat. Links are built only after the welcome of the connection they signal over, so every
+link carries that welcome's ICE servers. `links.stalled()` lists the members whose link was lost and has not opened again; with
+`peers()` it tells an open link, a first attempt, and one that keeps failing apart.

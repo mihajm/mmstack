@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { createRelay, type Relay } from '@mmstack/mesh-protocol';
 import { store, type AsyncStore } from '@mmstack/primitives/core';
 import { meshSync, type MeshSyncOptions as Opts } from './mesh-sync';
+import { installFakeLocks, LOCK } from './testing/fake-locks';
 import { directTransport } from './transport';
 
 type State = { title: string };
@@ -36,80 +37,6 @@ async function settle(): Promise<void> {
     await Promise.resolve();
     TestBed.tick();
   }
-}
-
-const LOCK = (key: string) => `@mmstack/mesh:outbox:${key}`;
-
-/** A faithful in-process Web Locks stand-in: exclusive, FIFO-queued, `AbortSignal`-cancelable. */
-function installFakeLocks() {
-  const held = new Set<string>();
-  const waiters = new Map<string, { run: () => void; entry: symbol }[]>();
-  let requests = 0;
-
-  const pump = (name: string): void => {
-    if (held.has(name)) return;
-    const q = waiters.get(name);
-    if (!q || q.length === 0) return;
-    q.shift()?.run();
-  };
-
-  const request = (
-    name: string,
-    options: { mode?: string; signal?: AbortSignal },
-    callback: (lock: unknown) => Promise<unknown>,
-  ): Promise<unknown> => {
-    requests++;
-    return new Promise((resolve, reject) => {
-      let done = false;
-      const entry = Symbol();
-      const run = (): void => {
-        if (done) return;
-        held.add(name);
-        Promise.resolve(callback({ name, mode: options.mode ?? 'exclusive' })).then(
-          (v) => {
-            done = true;
-            held.delete(name);
-            resolve(v);
-            pump(name);
-          },
-          (e) => {
-            done = true;
-            held.delete(name);
-            reject(e);
-            pump(name);
-          },
-        );
-      };
-      const q = waiters.get(name) ?? [];
-      q.push({ run, entry });
-      waiters.set(name, q);
-      const onAbort = (): void => {
-        const arr = waiters.get(name);
-        const i = arr?.findIndex((w) => w.entry === entry) ?? -1;
-        if (i >= 0 && !done) {
-          arr?.splice(i, 1);
-          done = true;
-          reject(new DOMException('aborted', 'AbortError'));
-        }
-      };
-      if (options.signal?.aborted) onAbort();
-      else options.signal?.addEventListener('abort', onAbort);
-      pump(name);
-    });
-  };
-
-  const nav = globalThis.navigator as unknown as { locks?: unknown };
-  const prev = Object.getOwnPropertyDescriptor(nav, 'locks');
-  Object.defineProperty(nav, 'locks', { value: { request }, configurable: true });
-
-  return {
-    held,
-    requests: () => requests,
-    restore: () => {
-      if (prev) Object.defineProperty(nav, 'locks', prev);
-      else delete nav.locks;
-    },
-  };
 }
 
 describe('meshSync durable outbox — cross-tab single-writer lock', () => {
@@ -148,7 +75,7 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     // B contends for the SAME key — it must not boot while A holds the lock
     const b = peer(relay, 'wb', { outbox: { key: 'shared', store: disk } });
     await settle();
-    expect(b.mesh.status()).toBe('connecting'); // queued, never went live
+    expect(b.mesh.status()).toBe('waiting'); // queued, never went live
     expect(fake.held.has(LOCK('shared'))).toBe(true); // still A's
 
     // A closes → the lock hands off → B boots. It does NOT reuse A's origin: every boot mints a
@@ -204,8 +131,8 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     const b = peer(relay, 'wb', { outbox: { key: 'shared', store: disk } }); // queued behind A
     const c = peer(relay, 'wc', { outbox: { key: 'shared', store: disk } }); // queued behind B
     await settle();
-    expect(b.mesh.status()).toBe('connecting');
-    expect(c.mesh.status()).toBe('connecting');
+    expect(b.mesh.status()).toBe('waiting');
+    expect(c.mesh.status()).toBe('waiting');
 
     b.mesh.close(); // abort B's queued request before it is ever granted
     await settle();

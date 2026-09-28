@@ -2751,3 +2751,77 @@ describe('createRelay: unloading a quiescent room', () => {
 
 const welcomeOfSocket = (sock: ReturnType<typeof socket>) =>
   sock.sent.find((m) => m.t === 'welcome');
+
+describe('createRelay: ICE servers in welcomes', () => {
+  it('issues what the function form returns for (room, origin) at each welcome; no option means no ice key', () => {
+    const calls: [string, string][] = [];
+    const issued: unknown[] = [];
+    const relay = createRelay({
+      iceServers: (room, origin) => {
+        calls.push([room, origin]);
+        const servers = [
+          {
+            urls: `turn:${origin}.example`,
+            username: origin,
+            credential: `c${calls.length}`,
+          },
+        ];
+        issued.push(servers);
+        return servers;
+      },
+    });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    expect(calls).toEqual([
+      ['r', 'oa'],
+      ['r', 'ob'],
+    ]);
+    const iceOf = (sock: ReturnType<typeof socket>) =>
+      sock.sent.flatMap((m) => (m.t === 'welcome' ? [m.ice] : []));
+    expect(iceOf(a.sock)[0]).toBe(issued[0]);
+    expect(iceOf(b.sock)[0]).toBe(issued[1]);
+
+    // the migration re-welcome is the second emission site: each member gets a fresh call
+    a.env([set([], { v: 1 })], { schemaVersion: 1 });
+    expect(calls.slice(2).sort()).toEqual([
+      ['r', 'oa'],
+      ['r', 'ob'],
+    ]);
+    expect(iceOf(a.sock)).toHaveLength(2);
+    expect(issued).toContain(iceOf(a.sock)[1]);
+    expect(issued).toContain(iceOf(b.sock)[1]);
+    expect(iceOf(a.sock)[1]).not.toBe(iceOf(a.sock)[0]);
+
+    const plain = createRelay();
+    const c = client(plain, 'wc', 'oc');
+    c.hello();
+    const welcome = c.sock.sent.find((m) => m.t === 'welcome');
+    expect(welcome).toBeDefined();
+    expect('ice' in (welcome as object)).toBe(false);
+  });
+
+  it('reads the option when a held welcome is released, not when the hello arrives', async () => {
+    const gate = deferred();
+    let calls = 0;
+    const relay = createRelay({
+      onCommit: () => gate.promise,
+      iceServers: () => (calls++, [{ urls: 'stun:example' }]),
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    expect(calls).toBe(1);
+    a.env([set(['x'], 1)]);
+    const b = client(relay, 'wb', 'ob');
+    b.hello();
+    expect(b.sock.sent.some((m) => m.t === 'welcome')).toBe(false);
+    expect(calls).toBe(1);
+    gate.resolve();
+    await settle();
+    expect(calls).toBe(2);
+    expect(welcomeOfSocket(b.sock)).toMatchObject({
+      ice: [{ urls: 'stun:example' }],
+    });
+  });
+});

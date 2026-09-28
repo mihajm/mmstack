@@ -1,0 +1,23 @@
+{
+  "name": "@mmstack/telemetry-devtools",
+  "version": "21.0.0",
+  "keywords": [
+    "angular",
+    "signals",
+    "telemetry",
+    "devtools",
+    "performance"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihajm/mmstack.git",
+    "directory": "packages/telemetry/devtools"
+  },
+  "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/telemetry/devtools",
+  "peerDependencies": {
+    "@angular/core": ">=22 <23",
+    "@mmstack/telemetry-core": ">=22.3 <23"
+  },
+  "sideEffects": false
+}

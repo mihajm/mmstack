@@ -9,7 +9,12 @@ import {
   type Signal,
   untracked,
 } from '@angular/core';
-import { type AttributePolicy, type Attrs, identityPolicy } from './attrs';
+import {
+  type AttributePolicy,
+  type AttrMeta,
+  type Attrs,
+  identityPolicy,
+} from './attrs';
 import {
   type ConsentConfig,
   type ConsentDecision,
@@ -18,6 +23,8 @@ import {
   createNoopConsent,
   type TrackingRequirement,
 } from './consent';
+import { type Finding, type FindingSpec, fingerprintOf } from './finding';
+import { type Origin } from './origin';
 import {
   type LogSeverity,
   type MetricKind,
@@ -64,6 +71,13 @@ export type EmitOptions = {
 export interface SpanCallOptions extends Omit<EmitOptions, 'parent'> {
   readonly attrs?: Attrs;
   readonly parent?: SpanHandle | null;
+  /**
+   * The span's origin, folded into its start attrs like an ambient one (see
+   * `Telemetry.withOrigin`); wins over the ambient origin. It covers the span's own start attrs
+   * only and does not become ambient for the body: to make an origin ambient for a body, wrap in
+   * `withOrigin`.
+   */
+  readonly origin?: Origin;
 }
 
 export interface MetricOptions extends EmitOptions {
@@ -111,6 +125,23 @@ export interface Telemetry {
    * mechanism additionally receive them via {@link GlobalAttrsSink} for their out-of-band capture.
    */
   setGlobalAttrs(attrs: Attrs): void;
+  /**
+   * Runs `fn` with `origin` ambient for its synchronous extent only (push/pop, try/finally),
+   * exactly like the active-span stack. A returned thenable is passed through untouched — origin
+   * has no async lifetime; nested `withOrigin` shadows; `activeOrigin()` reads the innermost.
+   * Every emit made while an origin is active carries `origin.kind`, `origin.name`, and
+   * `origin.target` (when present) in its attrs: explicit attrs win over them, they win over
+   * global attrs.
+   */
+  withOrigin<T>(origin: Origin, fn: () => T): T;
+  activeOrigin(): Origin | undefined;
+  /**
+   * Emit a finding: an issue with a stable `code` and a `code|path|node` fingerprint. Goes to
+   * `FindingSink.recordFinding`, or as a `finding.<code>` event to sinks that only `capture`.
+   * `spec.data` is the attrs bag (merged, policy-applied with kind `'finding'`). `opt` as for `event`.
+   * The policy filters attrs; a finding's own fields must be value-free by construction.
+   */
+  finding(code: string, spec: FindingSpec, opt?: EmitOptions): void;
 
   // ---- consent (RFC §7) — live only when `TelemetryConfig.consent` is set ----
   /** Everything the app declared it wants to track. */
@@ -169,6 +200,35 @@ function randomHex(bytes: number): string {
   let out = '';
   for (const b of buf) out += b.toString(16).padStart(2, '0');
   return out;
+}
+
+function originAttrs(origin: Origin): Attrs {
+  return origin.target === undefined
+    ? { 'origin.kind': origin.kind, 'origin.name': origin.name }
+    : {
+        'origin.kind': origin.kind,
+        'origin.name': origin.name,
+        'origin.target': origin.target,
+      };
+}
+
+/** A sink without `recordFinding` gets the finding as a `finding.<code>` event. */
+function deliverFinding(sink: Sink, finding: Finding, attrs: Attrs): void {
+  if (sink.recordFinding) {
+    sink.recordFinding(finding, attrs);
+    return;
+  }
+  sink.capture?.(`finding.${finding.code}`, {
+    ...attrs,
+    'finding.code': finding.code,
+    'finding.severity': finding.severity,
+    'finding.path': finding.path,
+    ...(finding.node === undefined
+      ? undefined
+      : { 'finding.node': finding.node }),
+    'finding.fingerprint': finding.fingerprint,
+    'finding.message': finding.message,
+  });
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
@@ -379,6 +439,15 @@ class NoopTelemetry implements Telemetry {
   setGlobalAttrs(): void {
     /* noop */
   }
+  withOrigin<T>(_origin: Origin, fn: () => T): T {
+    return fn();
+  }
+  activeOrigin(): Origin | undefined {
+    return undefined;
+  }
+  finding(): void {
+    /* noop */
+  }
 }
 
 class ActiveTelemetry implements Telemetry {
@@ -386,6 +455,7 @@ class ActiveTelemetry implements Telemetry {
   private readonly policy: AttributePolicy;
   private readonly dispatchers: readonly SinkDispatcher[];
   private readonly stack: SpanHandle[] = [];
+  private readonly origins: Origin[] = [];
   private readonly consentState: ConsentState;
 
   readonly requirements: Signal<readonly TrackingRequirement[]>;
@@ -433,7 +503,7 @@ class ActiveTelemetry implements Telemetry {
 
   /** A throwing (user-supplied) policy skips that sink instead of breaking the caller. */
   private apply(
-    kind: 'span' | 'event' | 'error' | 'metric' | 'log' | 'identify',
+    kind: AttrMeta['kind'],
     name: string,
     sink: Sink,
     attrs: Attrs | undefined,
@@ -455,17 +525,32 @@ class ActiveTelemetry implements Telemetry {
     return this.stack.at(-1);
   }
 
+  activeOrigin(): Origin | undefined {
+    return this.origins.at(-1);
+  }
+
+  withOrigin<T>(origin: Origin, fn: () => T): T {
+    this.origins.push(origin);
+    try {
+      return fn();
+    } finally {
+      this.origins.pop(); // synchronous extent only, like the active-span stack
+    }
+  }
+
   /** Super-properties merged into every emit before dispatch (see {@link setGlobalAttrs}). */
   private readonly globalAttrs: Attrs = {};
 
-  /** Fold global attrs + correlation ids (explicit parent or active span) into the attrs. */
+  /** Fold global attrs, the active origin, and correlation ids (explicit parent or active span) into the attrs. */
   private merged(attrs?: Attrs, opt?: EmitOptions): Attrs | undefined {
     const span = opt?.parent ?? this.activeSpan();
+    const origin = this.activeOrigin();
     const hasGlobal = this.hasGlobalAttrs;
-    if (!span && !hasGlobal) return attrs; // fast path: nothing to fold
+    if (!span && !origin && !hasGlobal) return attrs; // fast path: nothing to fold
     return {
       ...(hasGlobal ? this.globalAttrs : undefined),
-      ...attrs, // caller attrs override globals
+      ...(origin ? originAttrs(origin) : undefined), // origin overrides globals
+      ...attrs, // caller attrs override both
       ...(span
         ? { trace_id: span.ctx.traceId, span_id: span.ctx.spanId }
         : undefined),
@@ -556,6 +641,23 @@ class ActiveTelemetry implements Telemetry {
     }
   }
 
+  finding(code: string, spec: FindingSpec, opt?: EmitOptions): void {
+    const finding: Finding = {
+      ...spec,
+      code,
+      fingerprint: fingerprintOf(code, spec.path, spec.node),
+    };
+    const base = this.merged(spec.data, opt);
+    for (const d of this.dispatchers) {
+      if (!d.sink.recordFinding && !d.sink.capture) continue;
+      const attrs = this.apply('finding', code, d.sink, base);
+      if (!attrs) continue;
+      this.gated(opt?.category, d.sink.name, () =>
+        d.emit((s) => deliverFinding(s, finding, attrs)),
+      );
+    }
+  }
+
   setGlobalAttrs(attrs: Attrs): void {
     // accumulate; an undefined value removes the key (super-property register + unregister)
     for (const key of Object.keys(attrs)) {
@@ -579,10 +681,18 @@ class ActiveTelemetry implements Telemetry {
       parentSpanId: parent?.ctx.spanId,
     };
     const startMs = Date.now();
-    // fold super-properties into the span's start attrs (correlation ids are the span's own)
-    const startAttrs = this.hasGlobalAttrs
-      ? { ...this.globalAttrs, ...opt?.attrs }
-      : opt?.attrs;
+    // fold super-properties and the origin into the span's start attrs (correlation ids are the
+    // span's own); an explicit origin wins over the ambient one
+    const origin = opt?.origin ?? this.activeOrigin();
+    const hasGlobal = this.hasGlobalAttrs;
+    const startAttrs =
+      hasGlobal || origin
+        ? {
+            ...(hasGlobal ? this.globalAttrs : undefined),
+            ...(origin ? originAttrs(origin) : undefined),
+            ...opt?.attrs,
+          }
+        : opt?.attrs;
 
     const live: { sink: Sink; span: SinkSpan }[] = [];
     for (const d of this.dispatchers) {

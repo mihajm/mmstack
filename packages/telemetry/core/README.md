@@ -112,4 +112,54 @@ telemetry.decide('analytics', true);
 
 The default mode is `required`: a categorized emit needs an explicit grant, and undecided or undeclared categories are dropped (you cannot track something you didn't ask consent for). `mode: 'implicit'` flips that to opt-out. Uncategorized emits are never gated. Requirements can be a signal, so when a new app section needs new tracking, `pending()` becomes exactly the delta to re-prompt for. While an async store hydrates, undecided emits are held briefly and then delivered or dropped according to the stored decisions, so a returning user's denial is never raced.
 
+## Origin
+
+An origin is the external cause of work: a click, a navigation, a request, an action step, a timer. Wrap the handler in `withOrigin` and every emit inside it (spans, events, errors, metrics, logs, findings) carries `origin.kind`, `origin.name`, and `origin.target`, so a dashboard can answer "why did this run?".
+
+```ts
+onNext(button: HTMLElement) {
+  this.telemetry.withOrigin(
+    { kind: 'interaction', name: 'click', target: 'button#next' },
+    () => this.wizard.next(),
+  );
+}
+```
+
+Like the active-span stack, the origin lives for the synchronous part of the body only. A returned promise passes through untouched, and emits after an `await` carry no origin. Nested calls shadow the outer origin. Your own attrs win over origin attrs, and origin attrs win over global attrs. `span(name, fn, { origin })` sets a span's origin explicitly. `formatOrigin(origin)` gives the one label every renderer should show, for example `click on button#next`.
+
+## Findings
+
+A finding is an issue with a stable code and a fingerprint (`code|path|node`), so a backend groups recurrences instead of counting each one as new.
+
+```ts
+telemetry.finding('UNBOUND_FIELD', {
+  severity: 'warn',
+  path: 'pages.checkout.form',
+  node: 'email',
+  message: 'Bind the field to a model property.',
+  data: { rule: 'binding' },
+});
+```
+
+`path` says where the issue sits in your own model, and `message` says what to change. Sinks that implement `FindingSink` get the `Finding` plus the attrs. A sink with only `capture` gets a `finding.<code>` event with the finding's fields as `finding.*` attrs. Consent categories, correlation ids, and readiness buffering work as they do for `event()`. The policy filters attrs; a finding's own fields must be value-free by construction.
+
+## Budgets in tests
+
+`memorySink()` records findings in `findings`. The budget helpers turn that record, and the recorded spans, into assertions that work in any test runner. They throw a `BudgetError` that lists every violation.
+
+```ts
+const memory = memorySink();
+// ... provideTelemetry({ sinks: [memory] }), run the scenario ...
+
+expectNoFindings(memory, ['KNOWN_LEGACY']);
+const finding = expectFinding(memory, 'UNBOUND_FIELD');
+assertBudget(memory, {
+  allow: ['KNOWN_LEGACY'],
+  maxFindings: 0,
+  maxSpanMs: { 'checkout.submit': 200, '/^http /': 500 },
+});
+```
+
+A `maxSpanMs` key is an exact span name, or a regex written as `/body/flags`. Only ended spans with both timestamps count. `parseBudgetFile(json)` checks a checked-in file of the shape `{ formatVersion: 1, scenarios: { [name]: Budget } }` and reports every shape error at once.
+
 Full documentation is on its way. The API surface is small; the source and its specs read well in the meantime.

@@ -26,6 +26,7 @@ export function retryOnError<T>(
   opt?: RetryOptions,
   onError?: RetryErrorCallback,
   injector?: Injector,
+  beforeRetry?: () => void,
 ): HttpResourceRef<T> {
   const max = opt ? (typeof opt === 'number' ? opt : (opt.max ?? 0)) : 0;
   const backoff = typeof opt === 'object' ? (opt.backoff ?? 1000) : 1000;
@@ -47,7 +48,10 @@ export function retryOnError<T>(
     if (timeout) clearTimeout(timeout);
 
     timeout = setTimeout(
-      () => res.reload(),
+      () => {
+        beforeRetry?.();
+        res.reload();
+      },
       retries <= 0 ? 0 : backoff * Math.pow(2, retries - 1),
     );
   };

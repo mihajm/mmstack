@@ -33,3 +33,18 @@ export {
   type WebRtcMeshOptions,
   type WebRtcMeshRef,
 } from './lib/webrtc-mesh';
+export {
+  defaultPeerChannels,
+  peerLinks,
+  type PeerChannelSpec,
+  type PeerLinks,
+  type PeerLinksOptions,
+  type SignalingPort,
+} from './lib/peer-links';
+export {
+  presenceChannel,
+  rtcPresence,
+  type PresenceFrame,
+  type RtcPresenceOptions,
+  type RtcPresenceRef,
+} from './lib/rtc-presence';

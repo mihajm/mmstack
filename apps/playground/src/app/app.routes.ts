@@ -119,6 +119,13 @@ export const appRoutes: Route[] = [
     loadComponent: () =>
       import('./examples/webrtc-example').then((m) => m.WebRtcExample),
   },
+  {
+    path: 'rtc-presence',
+    loadComponent: () =>
+      import('./examples/rtc-presence-example').then(
+        (m) => m.RtcPresenceExample,
+      ),
+  },
   // {
   //   path: 'mesh-agent',
   //   loadComponent: () =>

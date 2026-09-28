@@ -2,7 +2,7 @@
 
 > **Experimental.** The API may still change and this package is not yet battle-tested in production. Pin a version and expect some churn.
 
-Sentry adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core). An `ErrorSink` over your own Sentry SDK, plus a reactive last-event-id handle.
+Sentry adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core). An `ErrorSink` over your own Sentry SDK, findings as Sentry issues, plus a reactive last-event-id handle.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/LICENSE)
 
@@ -29,6 +29,10 @@ provideTelemetry({
 ```
 
 `telemetry.error(err, attrs)` forwards to `captureException`, with attrs carried as Sentry `extra`. Errors recorded inside a span carry `trace_id` / `span_id` automatically, so a Sentry issue links back to the trace your OTLP backend received. Send traces themselves to Sentry through [`@mmstack/telemetry-otel`](https://www.npmjs.com/package/@mmstack/telemetry-otel) and OTLP.
+
+## Findings
+
+When your client exposes `captureMessage`, the sink also receives findings. `telemetry.finding(code, spec)` becomes a Sentry message `<code>: <message>`, fingerprinted with the finding's fingerprint, so repeats of the same issue group into one Sentry issue. Severity maps to the Sentry level (`warn` becomes `warning`). The finding's code, severity, path, and node (when set) are sent as tags. Attrs, after your attribute policy has run, are sent as `extra`. A client without `captureMessage` does not receive findings.
 
 ## Last event id handle
 

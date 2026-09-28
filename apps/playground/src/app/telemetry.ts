@@ -3,6 +3,7 @@ import {
   provideTelemetry,
   telemetryInterceptor,
 } from '@mmstack/telemetry-core';
+import { devtoolsSink } from '@mmstack/telemetry-devtools';
 import { otelSink } from '@mmstack/telemetry-otel';
 
 export { telemetryInterceptor };
@@ -16,7 +17,8 @@ export const pageSink = memorySink('page');
  * grafana/otel-lgtm stack (`KEEP=1 bash scripts/telemetry-otlp-smoke.sh`, then
  * browse traces/metrics/logs at http://localhost:3000). The OTLP sink is
  * browser-only; the factory returns null during the server render, and export
- * failures are harmless noise when the stack isn't up.
+ * failures are harmless noise when the stack isn't up. The devtools sink draws
+ * the same records as tracks in Chrome's Performance panel (browser-only too).
  */
 export function providePlaygroundTelemetry() {
   return provideTelemetry({
@@ -26,6 +28,18 @@ export function providePlaygroundTelemetry() {
         typeof window === 'undefined'
           ? null
           : otelSink({ endpoint: 'http://localhost:4318' }),
+      () =>
+        typeof window === 'undefined'
+          ? null
+          : devtoolsSink({
+              // `?devtools=cheap` switches to console.timeStamp for the e2e check.
+              mode:
+                new URLSearchParams(window.location.search).get('devtools') ===
+                'cheap'
+                  ? 'cheap'
+                  : 'rich',
+              seed: ['Interactions', 'Spans', 'Events', 'Findings'],
+            })(),
     ],
   });
 }

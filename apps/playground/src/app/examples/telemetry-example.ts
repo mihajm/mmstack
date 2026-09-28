@@ -28,7 +28,16 @@ import { pageSink } from '../telemetry';
         <button (click)="addItem()">Add item (span → tracedSignal)</button>
         <button (click)="checkout()">Checkout (span + nested HTTP + event + metric + log)</button>
         <button (click)="fail()">Fail (recorded error)</button>
+        <button data-testid="demo-origin" (click)="originDemo()">
+          Span with origin
+        </button>
+        <button data-testid="demo-finding" (click)="findingDemo()">
+          Finding
+        </button>
       </div>
+      <p class="cause">
+        Devtools tracks: open the Performance panel, record, click.
+      </p>
 
       <div class="feed">
         <h3>Spans</h3>
@@ -146,6 +155,27 @@ export class TelemetryExample {
     } catch (err) {
       this.telemetry.error(err, { where: 'telemetry-example' });
     }
+    this.version.update((v) => v + 1);
+  }
+
+  originDemo(): void {
+    this.telemetry.withOrigin(
+      { kind: 'interaction', name: 'click', target: 'button#demo' },
+      () =>
+        this.telemetry.span('demo', () => undefined, {
+          attrs: { track: 'Interactions' },
+        }),
+    );
+    this.version.update((v) => v + 1);
+  }
+
+  findingDemo(): void {
+    this.telemetry.finding('DEMO_FINDING', {
+      severity: 'warn',
+      path: 'examples.telemetry',
+      node: 'finding-button',
+      message: 'Demo finding: nothing to fix.',
+    });
     this.version.update((v) => v + 1);
   }
 }

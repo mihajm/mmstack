@@ -1,5 +1,6 @@
 import { signal, type Signal } from '@angular/core';
 import { type Attrs } from './attrs';
+import { type Finding } from './finding';
 import {
   type LogRecord,
   type MetricKind,
@@ -9,7 +10,7 @@ import {
 } from './sink';
 
 // In-memory sink for tests — assert what telemetry was emitted. Implements every
-// capability so it captures spans, events, errors, metrics, and logs.
+// capability so it captures spans, events, errors, metrics, logs, and findings.
 
 export type RecordedSpan = {
   name: string;
@@ -36,6 +37,11 @@ export type RecordedMetric = {
   kind?: MetricKind;
 };
 export type RecordedLog = LogRecord;
+export type RecordedFinding = {
+  finding: Finding;
+  /** The merged, policy-applied attrs the facade delivered alongside the finding. */
+  attrs?: Attrs;
+};
 export type RecordedIdentify = {
   userId: string | null;
   traits?: Attrs;
@@ -48,6 +54,7 @@ export interface MemorySink extends Sink {
   readonly metrics: RecordedMetric[];
   readonly logs: RecordedLog[];
   readonly identifies: RecordedIdentify[];
+  readonly findings: RecordedFinding[];
   /** Each `setGlobalAttrs` call's argument, in order (the native super-property hook). */
   readonly globalAttrs: Attrs[];
   reset(): void;
@@ -63,6 +70,7 @@ export function memorySink(
   const metrics: RecordedMetric[] = [];
   const logs: RecordedLog[] = [];
   const identifies: RecordedIdentify[] = [];
+  const findings: RecordedFinding[] = [];
   const globalAttrs: Attrs[] = [];
 
   return {
@@ -74,6 +82,7 @@ export function memorySink(
     metrics,
     logs,
     identifies,
+    findings,
     globalAttrs,
     startSpan(
       spanName: string,
@@ -115,6 +124,9 @@ export function memorySink(
     identify: (userId, traits) => {
       identifies.push({ userId, traits });
     },
+    recordFinding: (finding, attrs) => {
+      findings.push({ finding, attrs });
+    },
     setGlobalAttrs: (attrs) => {
       globalAttrs.push(attrs);
     },
@@ -125,6 +137,7 @@ export function memorySink(
       metrics.length = 0;
       logs.length = 0;
       identifies.length = 0;
+      findings.length = 0;
       globalAttrs.length = 0;
     },
   };

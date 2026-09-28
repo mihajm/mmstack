@@ -214,6 +214,7 @@ queryResource<TResult, TRaw = TResult>(
 | `refresh`              | `number \| { interval?, onFocus?, onReconnect? }`       | –                  | Auto-refetch: a number polls every n ms; the object form adds event triggers — `onFocus` refetches when the tab becomes visible again, `onReconnect` when the browser comes back online. Triggers respect disabled/paused state.                                              |
 | `retry`                | `number \| { max, backoff }`                            | `0`                | On failure, retry N times with exponential backoff (default 1000ms × 2^n).                                                                                                                                                                                                    |
 | `onError`              | `(err, retryCount, isFinal) => void`                    | –                  | Called on **every** failed attempt. `retryCount` is the number of retries already done (`0` on the first failure). `isFinal` is `true` when no further retry will be scheduled — branch on it to separate per-attempt instrumentation from "user-needs-to-know" side effects. |
+| `onFlight`             | `(edge: FlightEdge) => void`                            | –                  | Observe each fetch's lifecycle. See [observing fetch lifecycle](#observing-fetch-lifecycle).                                                                                                                                                                                  |
 | `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                                                                                                                                                                                    |
 | `cache`                | `ResourceCacheOptions`                                  | off                | Enables caching for this resource. See [caching](#caching).                                                                                                                                                                                                                   |
 | `triggerOnSameRequest` | `boolean`                                               | `false`            | Re-run even if the request object equals the previous one. Use sparingly.                                                                                                                                                                                                     |
@@ -261,6 +262,39 @@ const rows = queryResource.text(() => '/api/report.csv', {
 A raw variant caches under a distinct key, so a JSON and a text query for the same URL never serve each other's body.
 
 The main reason these exist is keeping a large parse off the main thread. `response.json()` on a 20MB body blocks the thread that paints. Fetch it here as text or an `ArrayBuffer` (interceptors and auth intact), then hand it to a Web Worker to parse and own; a buffer moves zero-copy via `transfer()` from [`@mmstack/worker`](https://www.npmjs.com/package/@mmstack/worker). One caveat when combining the cache with `transfer()`: transferring detaches the cached buffer, so copy it first (`buf.slice(0)`) or disable the cache for that query. Dev mode warns if a detached buffer is ever served from the cache.
+
+### Observing fetch lifecycle
+
+`onFlight` receives one edge per lifecycle step of each fetch, synchronously and without the
+value. Every fetch gets a 1-based `generation` with one `start` and one terminal edge:
+
+- `landed` — the fetch resolved.
+- `failed` — the fetch errored after all retries. A retry is part of the same generation.
+- `superseded` — a newer fetch started first (the request changed). Emitted before the next `start`.
+- `aborted` — the fetch was torn down with no successor: `abort()`, a value write, the request
+  became `undefined` (or offline / circuit open), or `destroy()`.
+
+A `reload()` while a fetch is in flight does nothing, so it emits nothing. A paused resource
+emits nothing. A cache hit still runs the fetch through the cache interceptor, so it is a
+`start` + `landed` pair. Without `onFlight` no observer is created.
+
+Count the fetches a search-as-you-type box throws away:
+
+```ts
+let wasted = 0;
+
+const results = queryResource<Hit[]>(
+  () => ({ url: '/api/search', params: { q: query() } }),
+  {
+    onFlight: ({ phase }) => {
+      if (phase === 'superseded') wasted++;
+    },
+  },
+);
+```
+
+Set an app-wide default with `provideQueryResourceOptions({ onFlight })`. A resource that sets
+its own `onFlight` calls only its own; the default is not called for it.
 
 ## `mutationResource`
 

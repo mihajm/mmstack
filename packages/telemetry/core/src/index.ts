@@ -12,6 +12,25 @@ export {
 } from './lib/attrs';
 
 export {
+    fingerprintOf,
+    type Finding,
+    type FindingSeverity,
+    type FindingSpec
+} from './lib/finding';
+
+export { formatOrigin, type Origin, type OriginKind } from './lib/origin';
+
+export {
+    assertBudget,
+    BudgetError,
+    expectFinding,
+    expectNoFindings,
+    parseBudgetFile,
+    type Budget,
+    type BudgetFile
+} from './lib/budget';
+
+export {
     localStorageConsentStore,
     type ConsentConfig,
     type ConsentDecision,
@@ -22,6 +41,7 @@ export {
 export {
     type ErrorSink,
     type EventSink,
+    type FindingSink,
     type GlobalAttrsSink,
     type IdentitySink,
     type LogRecord,
@@ -67,6 +87,7 @@ export {
     type MemorySink,
     type RecordedError,
     type RecordedEvent,
+    type RecordedFinding,
     type RecordedLog,
     type RecordedMetric,
     type RecordedSpan

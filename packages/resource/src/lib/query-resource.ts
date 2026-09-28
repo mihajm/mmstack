@@ -58,8 +58,10 @@ import {
   toResourceObject,
 } from './util';
 import { type CacheEntry } from './util/cache/cache';
+import { type FlightEdge, trackFlights } from './util/flight';
 
 export { type RefreshOptions } from './util';
+export { type FlightEdge, type FlightPhase } from './util/flight';
 
 /**
  * Options for configuring a `queryResource`. Extends Angular's
@@ -114,6 +116,16 @@ export type QueryResourceOptions<TResult, TRaw = TResult> = HttpResourceOptions<
      * "user actually needs to know" side effects (toasts, error reporting).
      */
     onError?: (err: unknown, retryCount: number, isFinal: boolean) => void;
+    /**
+     * Observe fetch lifecycle edges, synchronously, value-free. Absent = zero cost (no effect created).
+     *
+     * Each fetch gets a 1-based `generation` with one `start` and one terminal edge: `landed`,
+     * `failed` (after retries are exhausted), `superseded` (a newer fetch started first) or
+     * `aborted` (`abort()`, a value write, a disabled request, or `destroy()` mid-flight). Retries
+     * belong to their generation. A default set through `provideQueryResourceOptions` applies
+     * when the resource sets none; when both exist only the per-resource one is called.
+     */
+    onFlight?: (edge: FlightEdge) => void;
     /**
      * Options for enabling and configuring caching for the resource.
      */
@@ -600,6 +612,16 @@ function createQueryResource<TResult, TRaw = TResult>(
 
   resource = catchValueError(resource, defaultValue);
 
+  const flight = options.onFlight
+    ? trackFlights(
+        options.onFlight,
+        resource.status,
+        stableRequest,
+        options.injector,
+      )
+    : null;
+  if (flight) resource = flight.wrap(resource);
+
   const cachedEvent = cache.getEntryOrKey(cacheKey);
 
   const cacheEntry = linkedSignal<
@@ -656,11 +678,18 @@ function createQueryResource<TResult, TRaw = TResult>(
       online: networkAvailable,
     },
   );
+  const onError = options?.onError;
   resource = retryOnError(
     resource,
     options?.retry,
-    options?.onError,
+    flight
+      ? (err, retryCount, isFinal) => {
+          if (isFinal) flight.fail();
+          onError?.(err, retryCount, isFinal);
+        }
+      : onError,
     options.injector,
+    flight?.markRetry,
   );
 
   // Writes land on the transport value; the hold and the cache composition sit above it.
@@ -749,6 +778,7 @@ function createQueryResource<TResult, TRaw = TResult>(
       rawValue.set(untracked(rawValue));
     },
     destroy: () => {
+      flight?.destroy();
       cbEffectRef.destroy();
       cb.destroy();
       resource.destroy();

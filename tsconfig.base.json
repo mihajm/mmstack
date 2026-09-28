@@ -30,6 +30,7 @@
       "@mmstack/resource": ["./packages/resource/src/index.ts"],
       "@mmstack/router-core": ["./packages/router/core/src/index.ts"],
       "@mmstack/telemetry-core": ["./packages/telemetry/core/src/index.ts"],
+      "@mmstack/telemetry-devtools": ["./packages/telemetry/devtools/src/index.ts"],
       "@mmstack/telemetry-otel": ["./packages/telemetry/otel/src/index.ts"],
       "@mmstack/telemetry-posthog": ["./packages/telemetry/posthog/src/index.ts"],
       "@mmstack/telemetry-sentry": ["./packages/telemetry/sentry/src/index.ts"],

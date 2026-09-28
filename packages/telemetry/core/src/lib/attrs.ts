@@ -5,7 +5,14 @@ export type AttrValue = string | number | boolean | null | undefined;
 export type Attrs = Record<string, AttrValue>;
 
 export type AttrMeta = {
-  readonly kind: 'span' | 'event' | 'error' | 'metric' | 'log' | 'identify';
+  readonly kind:
+    | 'span'
+    | 'event'
+    | 'error'
+    | 'metric'
+    | 'log'
+    | 'identify'
+    | 'finding';
   readonly name: string;
   readonly sink: string;
 };

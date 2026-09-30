@@ -505,6 +505,8 @@ fresh: pointer positions, viewports. Each peer publishes one value; every other 
 latest one per sender. Frames go peer to peer over a lossy, unordered data channel, because a
 pointer that waits for a retransmit is already stale. Nothing is persisted and nothing is caught
 up: a peer that connects sees a sender's value when that sender next moves.
+Nothing is minted while no link carries the channel: a sender alone costs no frames, no numbers
+and no timers.
 
 It rides on `peerLinks`, the link layer `webRtcMesh` is built on: one peer connection per remote,
 set up from the relay's membership and negotiated over its `signal` frames, carrying the labelled

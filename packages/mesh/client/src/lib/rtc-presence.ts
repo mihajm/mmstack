@@ -90,6 +90,10 @@ const isNum = (x: unknown): x is number =>
  * and recreated on the same links carries on where the last one stopped and is heard at
  * once. A new tab or device is a new link, which every receiver already treats as fresh.
  *
+ * Nothing is minted while no link carries the channel: a sender alone costs no frames, no
+ * numbers and no timers. The gate is the set of links whose presence channel is open, the very
+ * set `broadcast` delivers to, so no frame that anyone could receive is withheld.
+ *
  * Values travel as JSON.
  */
 export function rtcPresence<T>(
@@ -109,6 +113,8 @@ export function rtcPresence<T>(
   const counter = counterOf(links, label);
   let closed = false;
   let roster: ReadonlySet<string> = new Set();
+  // origins whose link has this channel open: who a broadcast would reach
+  const open = new Set<string>();
 
   const forget = (origin: string): void => {
     if (held.delete(origin)) version.update((v) => v + 1);
@@ -147,9 +153,14 @@ export function rtcPresence<T>(
     }),
     // the link is the epoch: a new or lost link starts the origin fresh
     links.onOpen((origin, channel) => {
-      if (channel === label) forget(origin);
+      if (channel !== label) return;
+      forget(origin);
+      open.add(origin);
     }),
-    links.onClose(forget),
+    links.onClose((origin) => {
+      open.delete(origin);
+      forget(origin);
+    }),
     links.onEnd(() => close()),
   ];
 
@@ -173,7 +184,8 @@ export function rtcPresence<T>(
   const publisher = effect(
     () => {
       const value = outgoing();
-      if (value === none || closed) return;
+      // a link closed since the set: nothing to reach, so nothing is minted
+      if (value === none || closed || open.size === 0) return;
       untracked(() =>
         links.broadcast(
           JSON.stringify({
@@ -193,6 +205,7 @@ export function rtcPresence<T>(
     publisher.destroy();
     for (const unsub of unsubs.splice(0)) unsub();
     held.clear();
+    open.clear();
     version.update((v) => v + 1);
   };
 
@@ -200,7 +213,7 @@ export function rtcPresence<T>(
 
   return {
     set: (value) => {
-      if (!closed) outgoing.set(value);
+      if (!closed && open.size > 0) outgoing.set(value);
     },
     peers,
     close,

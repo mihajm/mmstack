@@ -50,4 +50,10 @@ Tracks appear in the order their first entry arrives, so they can shuffle betwee
 
 ## Verification
 
-The unit tests check the exact arguments passed to `console.timeStamp` and `performance.measure`. They cannot check how Chrome draws them, because the test suite cannot drive the Performance panel. The rendering itself is verified only by a manual check the maintainer performs in the repo's playground: open the Performance panel, record, click.
+The unit tests check the exact arguments passed to `console.timeStamp` and `performance.measure`.
+
+A Playwright spec in the repo, `apps/playground-e2e/src/telemetry-devtools.spec.ts`, checks what Chrome keeps. It opens the playground's telemetry page in Chromium, records a trace over the Chrome DevTools Protocol, clicks, and asserts on the trace events the Performance panel is drawn from. In `'rich'` mode it checks the label, track, `mmstack` group, colour, and properties of a span and a finding, the finding's tooltip, that seeds are zero-length and emitted in seed order, that a span sits inside the click that caused it, and that a measure the sink cleared from `performance.getEntriesByName` is still in the trace. In `'cheap'` mode it checks the `console.timeStamp` entry's label, track, group, and colour, and that each seed is present and zero-length.
+
+Run it with `nx run playground-e2e:e2e --testFiles=telemetry-devtools.spec.ts --project=chromium`. It is not part of this package's `test` target. It needs Playwright's Chromium (`npx playwright install chromium`) and starts the playground dev server itself. On other browsers the tests skip, because CDP tracing is Chromium-only.
+
+The spec stops at the trace. How the Performance panel draws those events is not tested, and is still checked by eye in the playground.

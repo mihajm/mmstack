@@ -1,7 +1,15 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import {
+  createEnvironmentInjector,
+  DestroyRef,
+  effect,
+  EnvironmentInjector,
+  Injector,
+  untracked,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { createRelay, type Relay } from '@mmstack/mesh-protocol';
-import { store } from '@mmstack/primitives/core';
+import { store, throttled } from '@mmstack/primitives/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   peerLinks,
@@ -815,5 +823,271 @@ describe('rtcPresence over peer links', () => {
     a.mesh.close();
     expect(b.pointers.peers().size).toBe(0);
     expect(b.mesh.peers()).toEqual([]);
+  });
+});
+
+// A sender alone mints nothing: no frame, no sequence number, no timer. The gate is the set of
+// links whose presence channel is open, which is exactly who `broadcast` reaches, so what any
+// receiver sees is the same as with an unconditional sender. The stub below plays the links: it
+// opens channels one at a time and records every delivery per channel, so the gate can be told
+// apart from `links.peers()` (every channel open), which would withhold deliverable frames.
+describe('rtcPresence alone', () => {
+  const label = presenceChannel.label;
+  const none = Symbol('none');
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function stubLinks(labels: readonly string[] = [label, 'other']) {
+    const openCbs = new Set<(origin: string, channel: string) => void>();
+    const closeCbs = new Set<(origin: string) => void>();
+    const opened = new Map<string, Set<string>>();
+    const delivered = new Map<string, string[]>();
+    const stats = { mints: 0, reached: 0 };
+    const links = {
+      channels: labels,
+      onOpen: (cb: (origin: string, channel: string) => void) => {
+        openCbs.add(cb);
+        for (const [origin, channels] of opened)
+          for (const channel of channels) cb(origin, channel);
+        return () => openCbs.delete(cb);
+      },
+      onClose: (cb: (origin: string) => void) => (
+        closeCbs.add(cb),
+        () => closeCbs.delete(cb)
+      ),
+      onEnd: () => () => undefined,
+      onMessage: () => () => undefined,
+      broadcast: (frame: string, channel = labels[0]) => {
+        stats.mints++;
+        let any = false;
+        for (const [origin, channels] of opened) {
+          if (!channels.has(channel)) continue;
+          any = true;
+          (
+            delivered.get(origin) ?? delivered.set(origin, []).get(origin)!
+          ).push(frame);
+        }
+        if (any) stats.reached++;
+      },
+    } as unknown as PeerLinks;
+    return {
+      links,
+      delivered,
+      stats,
+      open: (origin: string, channel: string) => {
+        (opened.get(origin) ?? opened.set(origin, new Set()).get(origin)!).add(
+          channel,
+        );
+        for (const cb of [...openCbs]) cb(origin, channel);
+      },
+      close: (origin: string) => {
+        opened.delete(origin);
+        for (const cb of [...closeCbs]) cb(origin);
+      },
+    };
+  }
+
+  const values = (frames: readonly string[]): unknown[] =>
+    frames.map((f) => (JSON.parse(f) as { value: unknown }).value);
+
+  function sender<T>(
+    links: PeerLinks,
+    throttleMs = 33,
+    injector: Injector = TestBed.inject(Injector),
+  ): RtcPresenceRef<T> {
+    return rtcPresence<T>(links, {
+      roster: rosterSource([]).subscribe,
+      throttleMs,
+      injector,
+    });
+  }
+
+  /**
+   * The publisher as it was, every throttled value a frame whoever is there, behind the same
+   * gate on `set`. Against the old publisher without that gate the deliveries are not equal,
+   * and rightly so: it burnt throttle edges on nobody, which coalesced later real values away,
+   * and it leaked a value set while alone to a link that opened inside the throttle window,
+   * which the contract forbids. Both are pinned by their own cases; this oracle isolates the
+   * publisher gate, whose only job is to skip frames nobody could receive.
+   */
+  function unconditionalSender<T>(
+    links: PeerLinks,
+    injector: Injector,
+    throttleMs = 33,
+  ): { set(value: T): void } {
+    {
+      const open = new Set<string>();
+      links.onOpen((origin, channel) => {
+        if (channel === label) open.add(origin);
+      });
+      links.onClose((origin) => open.delete(origin));
+      let seq = 0;
+      const outgoing = throttled<T | typeof none>(none, {
+        ms: throttleMs,
+        leading: true,
+        trailing: true,
+        destroyRef: injector.get(DestroyRef),
+      });
+      effect(
+        () => {
+          const value = outgoing();
+          if (value === none) return;
+          untracked(() =>
+            links.broadcast(JSON.stringify({ seq: seq++, value }), label),
+          );
+        },
+        { injector },
+      );
+      return {
+        set: (value: T) => {
+          if (open.size > 0) outgoing.set(value);
+        },
+      };
+    }
+  }
+
+  it('costs no frame, no number and no timer while no link carries the channel', () => {
+    const stub = stubLinks();
+    const a = sender<number>(stub.links);
+    for (let i = 0; i < 30; i++) {
+      const timers = vi.getTimerCount();
+      a.set(i);
+      expect(vi.getTimerCount()).toBe(timers);
+      vi.advanceTimersByTime(33);
+      TestBed.tick();
+    }
+    expect(stub.stats.mints).toBe(0);
+
+    stub.open('r', label);
+    a.set(100);
+    TestBed.tick();
+    expect(values(stub.delivered.get('r')!)).toEqual([100]);
+    expect(JSON.parse(stub.delivered.get('r')![0]!).seq).toBe(0);
+  });
+
+  it('goes out at once after solitude, and the count carries on across a close', () => {
+    const stub = stubLinks();
+    const a = sender<string>(stub.links);
+    stub.open('r', label);
+    a.set('one');
+    TestBed.tick();
+    stub.close('r');
+    vi.advanceTimersByTime(100);
+    for (let i = 0; i < 10; i++) {
+      a.set(`alone ${i}`);
+      vi.advanceTimersByTime(33);
+      TestBed.tick();
+    }
+    expect(stub.stats.mints).toBe(1);
+
+    stub.open('r', label);
+    a.set('two');
+    TestBed.tick();
+    const frames = stub.delivered.get('r')!;
+    expect(values(frames)).toEqual(['one', 'two']);
+    expect(frames.map((f) => (JSON.parse(f) as { seq: number }).seq)).toEqual([
+      0, 1,
+    ]);
+  });
+
+  it('mints nothing for a trailing value whose link closed inside the throttle window', () => {
+    const stub = stubLinks();
+    const a = sender<number>(stub.links, 50);
+    stub.open('r', label);
+    a.set(1);
+    TestBed.tick();
+    a.set(2);
+    stub.close('r');
+    vi.advanceTimersByTime(100);
+    TestBed.tick();
+    expect(stub.stats.mints).toBe(1);
+    expect(values(stub.delivered.get('r')!)).toEqual([1]);
+  });
+
+  it('gates on the presence channel of a link, not on every channel being open', () => {
+    const stub = stubLinks();
+    const a = sender<number>(stub.links);
+    stub.open('r', 'other');
+    a.set(1);
+    TestBed.tick();
+    expect(stub.stats.mints).toBe(0);
+
+    stub.open('s', label);
+    a.set(2);
+    TestBed.tick();
+    expect(values(stub.delivered.get('s')!)).toEqual([2]);
+    expect(stub.delivered.has('r')).toBe(false);
+  });
+
+  it('a link opening does not replay the value set while alone', () => {
+    const stub = stubLinks();
+    const a = sender<string>(stub.links);
+    a.set('before');
+    vi.advanceTimersByTime(100);
+    TestBed.tick();
+    stub.open('r', label);
+    vi.advanceTimersByTime(100);
+    TestBed.tick();
+    expect(stub.stats.mints).toBe(0);
+    a.set('after');
+    TestBed.tick();
+    expect(values(stub.delivered.get('r')!)).toEqual(['after']);
+  });
+
+  it('delivers exactly what an unconditional publisher delivers, over random link churn', async () => {
+    const ORIGINS = ['a', 'b'];
+    const CHANNELS = [label, 'other'];
+    const GAPS = [5, 20, 40, 100];
+    for (let seed = 0; seed < 200; seed++) {
+      const rnd = mulberry32(seed);
+      const pick = <T>(xs: readonly T[]): T =>
+        xs[Math.floor(rnd() * xs.length)]!;
+      const scope = createEnvironmentInjector(
+        [],
+        TestBed.inject(EnvironmentInjector),
+      );
+      const gated = stubLinks();
+      const plain = stubLinks();
+      const a = sender<number>(gated.links, 33, scope);
+      const o = unconditionalSender<number>(plain.links, scope);
+      let value = 0;
+      for (let step = 0; step < 60; step++) {
+        // Angular counts notifications until a microtask runs after a tick (see runImpl)
+        await Promise.resolve();
+        const roll = rnd();
+        if (roll < 0.45) {
+          value++;
+          a.set(value);
+          o.set(value);
+        } else if (roll < 0.65) {
+          const origin = pick(ORIGINS);
+          const channel = pick(CHANNELS);
+          gated.open(origin, channel);
+          plain.open(origin, channel);
+        } else if (roll < 0.75) {
+          const origin = pick(ORIGINS);
+          gated.close(origin);
+          plain.close(origin);
+        } else {
+          const ms = pick(GAPS);
+          vi.advanceTimersByTime(ms);
+        }
+        TestBed.tick();
+      }
+      vi.advanceTimersByTime(200);
+      TestBed.tick();
+      for (const origin of ORIGINS) {
+        expect(
+          values(gated.delivered.get(origin) ?? []),
+          `seed ${seed}, origin ${origin}`,
+        ).toEqual(values(plain.delivered.get(origin) ?? []));
+      }
+      expect(gated.stats.mints, `seed ${seed} mints`).toBe(plain.stats.reached);
+      expect(gated.stats.reached, `seed ${seed} reached`).toBe(
+        gated.stats.mints,
+      );
+      scope.destroy();
+    }
   });
 });

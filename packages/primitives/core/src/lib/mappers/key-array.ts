@@ -81,7 +81,8 @@ function effectiveKeys<T, K>(
  *  - `key`: A custom key extractor for identity matching (e.g. `(item) => item.id`)
  *    when item references change but conceptual identity is preserved.
  *  - `duplicateKeys`: Opt-in policy for handling duplicate keys. When omitted,
- *    behavior is unchanged (duplicates collapse). See {@link DuplicateKeyPolicy}.
+ *    duplicates still get one entry each, share the raw key and are matched to
+ *    earlier entries in order of occurrence. See {@link DuplicateKeyPolicy}.
  * @returns A `Signal<U[]>` containing the mapped array.
  *
  * @example

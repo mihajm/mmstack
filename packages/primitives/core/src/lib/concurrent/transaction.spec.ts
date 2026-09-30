@@ -9,7 +9,12 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
-import { activeTransaction, createTransaction, injectStartTransaction } from './transaction';
+import { mutable } from '../mutable';
+import {
+  activeTransaction,
+  createTransaction,
+  injectStartTransaction,
+} from './transaction';
 import {
   createTransitionScope,
   injectTransitionScope,
@@ -97,8 +102,12 @@ describe('createTransaction (undo log)', () => {
   });
 });
 
-// eslint-disable-next-line @angular-eslint/component-selector
-@Component({ selector: 'tx-host', template: ``, providers: [provideTransitionScope()] })
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'tx-host',
+  template: ``,
+  providers: [provideTransitionScope()],
+})
 class Host {
   readonly scope = injectTransitionScope();
   readonly start = injectStartTransaction();
@@ -110,7 +119,9 @@ class Host {
   }
   // a stateful write: record into the active transaction (if any), then write live.
   write(v: number) {
-    activeTransaction()?.record(this.state as unknown as WritableSignal<unknown>);
+    activeTransaction()?.record(
+      this.state as unknown as WritableSignal<unknown>,
+    );
     this.state.set(v);
   }
 }
@@ -129,7 +140,9 @@ class Child {
   // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'tx-wrap',
   imports: [Child],
-  template: `@if (show()) {<tx-child />}`,
+  template: `@if (show()) {
+    <tx-child />
+  }`,
   providers: [provideTransitionScope()],
 })
 class Wrap {
@@ -322,5 +335,96 @@ describe('injectStartTransaction', () => {
     host.state.set(3);
     await flush(fixture);
     expect(host.display()).toBe(3);
+  });
+});
+
+describe('recording mutable signals', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('snapshots a recorded mutable, so restore undoes an in-place write and notifies', () => {
+    const list = mutable([1, 2]);
+    let runs = 0;
+    const sum = computed(() => {
+      runs++;
+      return list().reduce((a, b) => a + b, 0);
+    });
+    expect(sum()).toBe(3);
+
+    const txn = createTransaction();
+    txn.record(list as WritableSignal<unknown>);
+    list.mutate((a) => {
+      a.push(3);
+      return a;
+    });
+    const mutated = list();
+    expect(sum()).toBe(6);
+
+    txn.restore();
+    expect(list()).toEqual([1, 2]);
+    expect(list()).not.toBe(mutated);
+    expect(sum()).toBe(3);
+    expect(runs).toBe(3);
+  });
+
+  it('restores a recorded mutable written with set', () => {
+    const obj = mutable({ a: 1 });
+    const txn = createTransaction();
+    txn.record(obj as WritableSignal<unknown>);
+    obj.set({ a: 2 });
+    txn.restore();
+    expect(obj()).toEqual({ a: 1 });
+  });
+
+  it('records a plain signal by reference, without cloning', () => {
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    const value = { a: 1 };
+    const plain = signal(value);
+    const txn = createTransaction();
+    txn.record(plain as WritableSignal<unknown>);
+    plain.set({ a: 2 });
+    txn.restore();
+    expect(plain()).toBe(value);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it('throws a descriptive error when a recorded mutable holds an uncloneable value', () => {
+    const holder = mutable<{ fn: () => number }>({ fn: () => 1 });
+    const txn = createTransaction();
+    expect(() => txn.record(holder as WritableSignal<unknown>)).toThrow(
+      'transaction: a mutable signal holding a value that cannot be cloned cannot be recorded for rollback; hold plain data or write it through a plain signal',
+    );
+  });
+
+  it('does not roll back an unrecorded mutate inside a transaction body', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    const list = mutable([1]);
+
+    const t = host.start(() => {
+      list.inline((a) => a.push(2));
+      host.ref.status.set('loading');
+    });
+    t.abort();
+
+    expect(list()).toEqual([1, 2]);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it('keeps resources registered inside a transaction body after abort', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    const first = makeRef('loading');
+    const second = makeRef('loading');
+
+    const t = host.start(() => {
+      host.scope.add(first, { suspends: false });
+      host.scope.add(second, { suspends: false });
+    });
+    expect(() => t.abort()).not.toThrow();
+
+    expect(host.scope.resources()).toContain(first);
+    expect(host.scope.resources()).toContain(second);
+    expect(host.scope.pending()).toBe(true);
   });
 });

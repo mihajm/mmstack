@@ -7,30 +7,63 @@ type Simplify<T> = T extends infer U
 
 type Autocomplete<T extends string> = T | Omit<string, T>;
 
-type extractSelectOptions<TOpt extends string> =
-  TOpt extends `${infer Option}{${infer _}} ${infer Rest}`
-    ? Option | extractSelectOptions<Rest>
-    : TOpt extends `${infer Option}{${infer _}}`
-      ? Option
-      : never;
+/**
+ * Walks `S` one character at a time and returns the text after the `}` that
+ * closes an already opened `{`. `S` starts just after that opening brace;
+ * `Depth` counts the braces opened since. Never when the braces do not balance.
+ */
+type SkipBalanced<
+  S extends string,
+  Depth extends unknown[] = [],
+> = S extends `${infer C}${infer Rest}`
+  ? C extends '{'
+    ? SkipBalanced<Rest, [...Depth, unknown]>
+    : C extends '}'
+      ? Depth extends [unknown, ...infer Outer]
+        ? SkipBalanced<Rest, Outer>
+        : Rest
+      : SkipBalanced<Rest, Depth>
+  : never;
 
-type Trimmed<T extends string> = T extends `${infer Trimmed} ${infer _}`
-  ? Trimmed
-  : T extends `${infer _} ${infer Trimmed}`
-    ? Trimmed
+type Whitespace = ' ' | '\n' | '\t' | '\r';
+
+type Trim<T extends string> = T extends `${Whitespace}${infer R}`
+  ? Trim<R>
+  : T extends `${infer L}${Whitespace}`
+    ? Trim<L>
     : T;
 
-type extractSelectParam<TName extends string, TOpt extends string> = [
+/** Option labels of `male {..} female {..} other {..}`, arm bodies may nest braces. */
+type extractSelectOptions<
+  TArms extends string,
+  TAcc extends string = never,
+> = TArms extends `${infer Option}{${infer Body}`
+  ? extractSelectOptions<SkipBalanced<Body>, TAcc | Trim<Option>>
+  : TAcc;
+
+type extractSelectParam<TName extends string, TArms extends string> = [
   TName,
-  Autocomplete<Exclude<Trimmed<extractSelectOptions<TOpt>>, 'other'>>,
+  Autocomplete<Exclude<extractSelectOptions<TArms>, 'other'>>,
 ];
 
-type extractComplexParam<T extends string> = T extends
-  | `{${infer VarName}, plural, ${infer _}}}${infer REST}`
-  | `{${infer VarName}, selectordinal, ${infer _}}}${infer REST}`
-  ? [VarName, number] | extractParams<REST>
-  : T extends `{${infer VarName}, select, ${infer SelectOptions}}}${infer REST}`
-    ? extractSelectParam<VarName, `${SelectOptions}}`> | extractParams<REST>
+/**
+ * `T` starts at the `{` of a complex argument. Only the argument itself is
+ * extracted (params inside its arms are not), then scanning resumes after the
+ * brace that closes it.
+ */
+type extractComplexParam<T extends string> =
+  T extends `{${infer VarName}, ${infer Kind}, ${infer Body}`
+    ? [SkipBalanced<Body>] extends [infer REST extends string]
+      ? [REST] extends [never]
+        ? never
+        : Kind extends 'plural' | 'selectordinal'
+          ? [VarName, number] | extractParams<REST>
+          : Kind extends 'select'
+            ? Body extends `${infer Arms}}${REST}`
+              ? extractSelectParam<VarName, Arms> | extractParams<REST>
+              : never
+            : never
+      : never
     : never;
 
 type IsSimpleIdent<T extends string> = T extends ''
@@ -108,9 +141,11 @@ export type inferTranslationParamMap<
   TNS extends string,
   T extends UnknownStringKeyObject,
 > = Simplify<{
-  [Tuple in inferParamTupples<T> as Tuple[0] extends string
-    ? `${TNS}.${Tuple[0]}`
-    : never]: Tuple extends [string, infer Vars] ? Vars : void;
+  [
+    Tuple in inferParamTupples<T> as Tuple[0] extends string
+      ? `${TNS}.${Tuple[0]}`
+      : never
+  ]: Tuple extends [string, infer Vars] ? Vars : void;
 }>;
 
 type StringContaining<Placeholder extends string> =
@@ -122,7 +157,8 @@ type TypeEnsuringAllPlaceholders<PlaceholdersUnion extends string> =
 export type extractParamString<T extends string> =
   T extends `${infer _Start}{${infer Var}}${infer End}`
     ? Var extends `${infer VarName},${string}`
-      ? `{${VarName}, ${string}}` | extractParamString<End>
+      ? | `{${VarName}, ${string}}`
+        | extractParamString<SkipBalanced<`${Var}}${End}`>>
       : `{${Var}}` | extractParamString<End>
     : never;
 

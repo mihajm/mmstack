@@ -124,7 +124,7 @@ export type MeshSyncOptions = {
    */
   readonly whenReady?: () => PromiseLike<void> | void;
   /**
-   * Persist the unacknowledged local outbox (and this client's stable origin) so offline writes
+   * Persist the unacknowledged local outbox (and the writing boot's origin) so offline writes
    * survive a REBOOT, not just a live reconnect: on boot they are restored and rebased onto the room
    * on the next welcome, instead of being lost with in-memory state. The payload is written to
    * `store` under `key`, debounced.
@@ -579,7 +579,7 @@ export function meshSync<T extends object>(
 
   injector.get(DestroyRef).onDestroy(teardown);
 
-  // Load the persisted outbox, then boot with the adopted origin. A fresh/unreadable slot boots clean.
+  // Load the persisted outbox, then boot on a fresh origin. A fresh/unreadable slot boots clean.
   const bootFromDisk = async (): Promise<void> => {
     durable = true; // every caller owns the slot
     if (closed || !opt.outbox) return;

@@ -9,6 +9,7 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
+import { isMutable } from '../mutable';
 import {
   createAttributedPending,
   injectTransitionScope,
@@ -18,9 +19,20 @@ import {
  * An undo log for a transactional transition. Stateful writes made while the transaction is the
  * active one record their PRE-write value here (once, on first touch); `restore()` rolls them all
  * back (abort), `clear()` keeps them (commit — the writes already landed live).
+ *
+ * Rollback covers only what writers record. Nothing is intercepted: a write that was not recorded
+ * stays after `restore()`.
  */
 export type Transaction = {
-  /** Record a signal's current value as its rollback point (no-op if already recorded). */
+  /**
+   * Record a signal's current value as its rollback point (no-op if already recorded). Call it
+   * before the write, whether the write is `set` or `mutate`.
+   *
+   * A plain signal is recorded by reference. A mutable signal is snapshotted with `structuredClone`
+   * at record time, so an in-place write cannot reach the recorded value. Its value must be plain data that
+   * survives a structured clone: class instances come back as plain objects, and functions or
+   * signals throw.
+   */
   record(sig: WritableSignal<unknown>): void;
   /** Roll every recorded signal back to its pre-write value (abort). */
   restore(): void;
@@ -28,11 +40,28 @@ export type Transaction = {
   clear(): void;
 };
 
+/** A deep copy of a mutable signal's value, so its in-place writes cannot reach the rollback point. */
+function snapshot(value: unknown): unknown {
+  try {
+    return structuredClone(value);
+  } catch (e) {
+    if ((e as { name?: unknown } | null)?.name !== 'DataCloneError') throw e;
+    throw new Error(
+      'transaction: a mutable signal holding a value that cannot be cloned cannot be recorded for rollback; hold plain data or write it through a plain signal',
+      { cause: e },
+    );
+  }
+}
+
 export function createTransaction(): Transaction {
   const log = new Map<WritableSignal<unknown>, unknown>();
   return {
     record: (sig) => {
-      if (!log.has(sig)) log.set(sig, untracked(sig));
+      if (!log.has(sig))
+        log.set(
+          sig,
+          isMutable(sig) ? snapshot(untracked(sig)) : untracked(sig),
+        );
     },
     restore: () =>
       untracked(() => {

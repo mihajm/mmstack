@@ -144,11 +144,7 @@ type _shape_plural = Expect<
     inferTranslationShape<{
       key: '{count, plural, one {# quote} other {# quotes}}';
     }>,
-    {
-      key:
-        | `${string}{count, ${string}}${string}`
-        | `${string}{# quotes}${string}`;
-    }
+    { key: `${string}{count, ${string}}${string}` }
   >
 >;
 
@@ -216,6 +212,91 @@ type _withparams_sibling_shape_unaffected = Expect<
       normal: 'Hi {n}';
     }>,
     { branded: string; normal: `${string}{n}${string}` }
+  >
+>;
+
+type _map_plural_arm_ends_in_param = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      { key: '{n, plural, one {Hi {name}} other {many}}' }
+    >,
+    { 'ns.key': { n: number } }
+  >
+>;
+
+type _map_plural_arm_ends_in_param_then_trailing = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      { key: '{n, plural, one {Hi {name}} other {many}} for {z}' }
+    >,
+    { 'ns.key': { n: number; z: string | number } }
+  >
+>;
+
+type _select_nested_arms = inferTranslationParamMap<
+  'ns',
+  { key: '{g, select, male {{he} said} other {{they} said}} {x}' }
+>['ns.key'];
+type _map_select_nested_arms_keys = Expect<
+  Equals<keyof _select_nested_arms, 'g' | 'x'>
+>;
+type _map_select_nested_arms_male = Expect<
+  'male' extends _select_nested_arms['g'] ? true : false
+>;
+
+type _map_select_arm_ends_in_param = Expect<
+  Equals<
+    keyof inferTranslationParamMap<
+      'ns',
+      { key: '{g, select, male {he {x}} other {they}} {y}' }
+    >['ns.key'],
+    'g' | 'y'
+  >
+>;
+
+type _map_plural_arms_all_params = Expect<
+  Equals<
+    inferTranslationParamMap<
+      'ns',
+      { key: '{c, plural, one {{a} {b}} other {{c} {d}}} tail {e}' }
+    >,
+    { 'ns.key': { c: number; e: string | number } }
+  >
+>;
+
+type _long_message = inferTranslationParamMap<
+  'ns',
+  {
+    key: 'You have {count, plural, =0 {no new messages in your inbox today} one {one new message waiting for {user}} other {# new messages waiting for {user}}}, sent by {sender, select, admin {the {team} administrator} bot {an automated {kind} bot} other {someone else}} and ranked {rank, selectordinal, one {#st {tier}} two {#nd} few {#rd} other {#th {tier}}} overall by {judge}.';
+  }
+>['ns.key'];
+type _map_long_message_keys = Expect<
+  Equals<keyof _long_message, 'count' | 'sender' | 'rank' | 'judge'>
+>;
+type _map_long_message_counts = Expect<
+  Equals<[_long_message['count'], _long_message['rank']], [number, number]>
+>;
+type _map_long_message_select = Expect<
+  Equals<
+    [
+      'admin' extends _long_message['sender'] ? true : false,
+      'bot' extends _long_message['sender'] ? true : false,
+    ],
+    [true, true]
+  >
+>;
+type _map_long_message_trailing = Expect<
+  Equals<_long_message['judge'], string | number>
+>;
+
+type _shape_plural_arm_ends_in_param = Expect<
+  Equals<
+    inferTranslationShape<{
+      key: '{n, plural, one {Hi {name}} other {many}} for {z}';
+    }>,
+    { key: `${string}{n, ${string}}${string}` | `${string}{z}${string}` }
   >
 >;
 

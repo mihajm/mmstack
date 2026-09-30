@@ -211,7 +211,7 @@ Run `tabSync` and `meshSync` on the same store to share it across a user's tabs 
 carries it to the room. The outbox lock elects the leader, so only one tab holds the relay
 connection and the others share state over `tabSync`. A write in any tab reaches the room through the
 leader, and a room write reaches every tab through `tabSync`. When the leader tab closes, another
-tab acquires the lock and takes over, adopting the persisted origin.
+tab acquires the lock and takes over on a fresh origin, restoring and resending the persisted tail.
 
 ```ts
 import { store, tabSync } from '@mmstack/primitives';

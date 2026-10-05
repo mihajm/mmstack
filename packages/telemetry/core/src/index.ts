@@ -70,6 +70,10 @@ export {
 } from './lib/telemetry';
 
 export { provideTelemetry } from './lib/provide';
+export {
+    provideSentinelTelemetry,
+    SENTINEL_ERROR_FINDING
+} from './lib/sentinel-telemetry';
 
 export {
     TELEMETRY_HTTP_PARENT,

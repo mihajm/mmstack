@@ -11,7 +11,11 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { render } from '@testing-library/angular';
-import { SuspenseBoundary, UnscopedSuspenseBoundary } from './suspense-boundary';
+import {
+  SuspenseBoundary,
+  UnscopedSuspenseBoundary,
+} from './suspense-boundary';
+import { MmRetryFailed } from './suspense-error';
 import {
   injectTransitionScope,
   provideTransitionScope,
@@ -165,7 +169,9 @@ class ProjHost {}
 describe('SuspenseBoundary scope reaches projected content', () => {
   it('projected content reads the boundary OWN scope, distinct from the ambient one', async () => {
     const captured: Captured = {};
-    await render(ProjHost, { providers: [{ provide: CAPTURED, useValue: captured }] });
+    await render(ProjHost, {
+      providers: [{ provide: CAPTURED, useValue: captured }],
+    });
 
     expect(captured.outside).toBeDefined();
     expect(captured.inside).toBeDefined();
@@ -191,5 +197,175 @@ describe('SuspenseBoundary (standalone, own scope)', () => {
 
     expect(container.textContent).toContain('real-content'); // held
     expect(ariaBusy(container, 'mm-suspense')).toBe('true'); // boundary saw the inner registration
+  });
+});
+
+// ── A4: the error slot, `[failed]`, `data-failed`, and the acceptance case ────
+type FailingRef = FakeRef & {
+  error: WritableSignal<unknown>;
+  readonly reloads: () => number;
+};
+
+/** `makeRef` plus a settable error and a `reload` that counts and goes back in flight. */
+function makeFailingRef(status: ResourceStatus, value: unknown): FailingRef {
+  const ref = makeRef(status, value);
+  let reloads = 0;
+  return Object.assign(ref, {
+    error: signal<unknown>(undefined),
+    reload: () => {
+      reloads++;
+      ref.status.set('loading');
+      return true;
+    },
+    reloads: () => reloads,
+  }) as FailingRef;
+}
+
+const fail = (ref: FailingRef, message: string): void => {
+  ref.error.set(new Error(message));
+  ref.status.set('error');
+};
+
+const REF_2 = new InjectionToken<FakeRef>('test-ref-2');
+
+@Component({ selector: 'reg-cmp', template: `<span>real-content</span>` })
+class Registers {
+  constructor() {
+    registerResource(inject(REF), { suspends: true });
+  }
+}
+
+@Component({ selector: 'reg-2-cmp', template: `` })
+class RegistersSecond {
+  constructor() {
+    registerResource(inject(REF_2), { suspends: true });
+  }
+}
+
+@Component({
+  selector: 'error-host',
+  imports: [SuspenseBoundary, Registers, MmRetryFailed],
+  template: `
+    <mm-suspense>
+      <reg-cmp />
+      <span placeholder>loading-placeholder</span>
+      <p error>
+        load-failed
+        <button mmRetryFailed>retry</button>
+      </p>
+      <span failed>failed-indicator</span>
+    </mm-suspense>
+  `,
+})
+class ErrorHost {}
+
+@Component({
+  selector: 'default-error-host',
+  imports: [SuspenseBoundary, Registers],
+  template: `
+    <mm-suspense>
+      <reg-cmp />
+    </mm-suspense>
+  `,
+})
+class DefaultErrorHost {}
+
+@Component({
+  selector: 'strict-host',
+  imports: [SuspenseBoundary, Registers, RegistersSecond],
+  template: `
+    <mm-suspense type="loading">
+      <reg-cmp />
+      <reg-2-cmp />
+      <span placeholder>loading-placeholder</span>
+      <span error>load-failed</span>
+    </mm-suspense>
+  `,
+})
+class StrictHost {}
+
+const dataFailed = (container: HTMLElement): string | null =>
+  container.querySelector('mm-suspense')?.getAttribute('data-failed') ?? null;
+
+describe('SuspenseBoundary error slot (A4)', () => {
+  it('acceptance: a first-load failure shows the error slot, retry reloads once, success shows content', async () => {
+    const ref = makeFailingRef('loading', undefined);
+    const { container, fixture } = await render(ErrorHost, {
+      providers: [{ provide: REF, useValue: ref }],
+    });
+    expect(container.textContent).toContain('loading-placeholder');
+
+    fail(ref, '404');
+    fixture.detectChanges();
+
+    expect(container.textContent).toContain('load-failed');
+    expect(container.textContent).not.toContain('loading-placeholder');
+    expect(container.textContent).not.toContain('real-content');
+    expect(dataFailed(container)).toBe('');
+
+    container.querySelector<HTMLButtonElement>('[mmRetryFailed]')?.click();
+    fixture.detectChanges();
+
+    expect(ref.reloads()).toBe(1);
+    expect(container.textContent).toContain('loading-placeholder'); // back in flight
+    expect(dataFailed(container)).toBeNull();
+
+    ref.value.set({ ok: true });
+    ref.status.set('resolved');
+    fixture.detectChanges();
+
+    expect(container.textContent).toContain('real-content');
+    expect(container.textContent).not.toContain('load-failed');
+    expect(dataFailed(container)).toBeNull();
+    expect(ref.reloads()).toBe(1);
+  });
+
+  it('with no [error] content, a first-load failure shows the one-line default', async () => {
+    const ref = makeFailingRef('loading', undefined);
+    const { container, fixture } = await render(DefaultErrorHost, {
+      providers: [{ provide: REF, useValue: ref }],
+    });
+
+    fail(ref, '404');
+    fixture.detectChanges();
+
+    expect(container.querySelector('mm-suspense')?.textContent?.trim()).toBe(
+      'Failed to load.',
+    );
+    expect(dataFailed(container)).toBe('');
+  });
+
+  it('a failed reload with content held keeps the content, shows [failed], sets data-failed', async () => {
+    const ref = makeFailingRef('resolved', { ok: true });
+    const { container, fixture } = await render(ErrorHost, {
+      providers: [{ provide: REF, useValue: ref }],
+    });
+    expect(dataFailed(container)).toBeNull();
+    expect(container.textContent).not.toContain('failed-indicator');
+
+    fail(ref, 'reload failed'); // the value is still held
+    fixture.detectChanges();
+
+    expect(container.textContent).toContain('real-content');
+    expect(container.textContent).toContain('failed-indicator');
+    expect(container.textContent).not.toContain('load-failed');
+    expect(dataFailed(container)).toBe('');
+  });
+
+  it('the error slot outranks the placeholder when both apply (type="loading")', async () => {
+    const failing = makeFailingRef('loading', undefined);
+    const busy = makeRef('loading', { held: true }); // in flight with content: suspends under 'loading'
+    const { container, fixture } = await render(StrictHost, {
+      providers: [
+        { provide: REF, useValue: failing },
+        { provide: REF_2, useValue: busy },
+      ],
+    });
+
+    fail(failing, '404');
+    fixture.detectChanges();
+
+    expect(container.textContent).toContain('load-failed');
+    expect(container.textContent).not.toContain('loading-placeholder');
   });
 });

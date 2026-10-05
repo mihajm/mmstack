@@ -9,6 +9,7 @@ export * from './lib/mutable';
 export * from './lib/pipeable/public_api';
 export { isBrowser, isServer } from './lib/platform';
 export * from './lib/pooled';
+export * from './lib/semantics';
 export * from './lib/sensors';
 export * from './lib/store/public_api';
 export * from './lib/stored';

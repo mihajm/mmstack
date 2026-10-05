@@ -9,6 +9,7 @@ import {
   type ResourceRef,
   type Signal,
 } from '@angular/core';
+import { type Outcome, outcomeOf } from '@mmstack/primitives';
 import { applyResourceRegistration } from './options';
 import {
   queryResource,
@@ -73,6 +74,13 @@ export type InfiniteQueryResourceRef<TPage> = {
   isLoading: Signal<boolean>;
   status: QueryResourceRef<TPage | undefined>['status'];
   error: QueryResourceRef<TPage | undefined>['error'];
+  /**
+   * The pages as one total read: `pages()` once any page is in (also while a later page
+   * loads), a `loading` sentinel while the first page loads, an `error` sentinel when a request
+   * failed (minted and reported once per failure; `pages()` keeps what loaded), and `undefined`
+   * while nothing has been requested.
+   */
+  outcome: Signal<Outcome<TPage[]>>;
   /** Loads the next page. No-op while loading or when `hasNextPage()` is false. */
   fetchNextPage: () => void;
   /** Reloads the CURRENT page param — the freshly loaded page replaces its slot. */
@@ -179,9 +187,13 @@ export function infiniteQueryResource<
       status: resource.status,
       isLoading: resource.isLoading,
       hasValue: () => pages().length > 0 || resource.hasValue(),
+      hasContent: () => pages().length > 0 || resource.hasContent(),
+      error: resource.error,
+      reload: () => resource.reload(),
     } as unknown as ResourceRef<unknown>,
     options.register,
     injector,
+    options.displayName,
   );
 
   return {
@@ -193,6 +205,12 @@ export function infiniteQueryResource<
     isLoading: resource.isLoading,
     status: resource.status,
     error: resource.error,
+    outcome: outcomeOf<TPage[]>({
+      status: resource.status,
+      value: pages,
+      error: resource.error,
+      hasValue: () => pages().length > 0,
+    }),
     fetchNextPage,
     reload: () => resource.reload(),
     reset,

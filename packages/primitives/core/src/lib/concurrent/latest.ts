@@ -9,18 +9,34 @@ import {
   type Signal,
   type ValueEqualityFn,
 } from '@angular/core';
+import { joinAbsorbers } from '../semantics/algebra';
+import {
+  type Absorbing,
+  type Done,
+  type ErrorSentinel,
+  isAbsorbing,
+  isError,
+  loading,
+  type Loading,
+} from '../semantics/sentinel';
+import { type Precedence } from './census';
+import { createEdgeMemo, outcomeErrorCause, outcomeOf } from './outcome';
 import { injectTransitionScope } from './transition-scope';
 
 /**
  * What `use()` accepts: any status-bearing async value — an Angular `ResourceRef`,
  * an `@mmstack/resource` query/mutation, or another `latest()` result (so async
- * derivations nest). Purely structural; no class or brand required.
+ * derivations nest). Purely structural; no class or brand required. When the source
+ * carries `outcome`, `use()` reads it; otherwise the outcome is derived from
+ * `status` / `hasContent` / `hasValue` / `value` / `error` (see `outcomeOf`).
  */
 export type UseSource<T> = {
   readonly status: Signal<ResourceStatus>;
   readonly value: Signal<T | undefined>;
   hasValue(): boolean;
+  hasContent?(): boolean;
   readonly error?: Signal<unknown>;
+  readonly outcome?: Signal<T | undefined | Absorbing | Done>;
 };
 
 /**
@@ -34,10 +50,16 @@ export type LatestSignal<T> = Signal<T | undefined> & {
   /** The held value — same signal as the callable itself. */
   readonly value: Signal<T | undefined>;
   /**
-   * Aggregate status. `error` wins (any used member errored, or the computation threw);
-   * otherwise in-flight work maps to `reloading` (a value is held) / `loading` (first
-   * load); a completed computation is `resolved`; blocked-with-nothing-in-flight (e.g.
-   * a member is `idle`) is `idle`.
+   * The value plane of the last evaluation: its result, or the absorbing sentinel it settled
+   * on (`loading` while something it needs has nothing to show, `error` when something it
+   * needs failed or the computation threw). Which absorber, when several were read, is the
+   * `errors` mode's call (see `CreateLatestOptions`). Never held: the held value is `value()`.
+   */
+  readonly outcome: Signal<T | undefined | Absorbing>;
+  /**
+   * Composes both axes: an `error` outcome is `error`; otherwise in-flight work maps to
+   * `reloading` (a value is held) / `loading` (first load); a value outcome is `resolved`;
+   * waiting with nothing in flight (e.g. a member is `idle`) is `idle`.
    */
   readonly status: Signal<ResourceStatus>;
   /** Any used member has a request in flight (`loading`/`reloading`) — the aggregate transition indicator. */
@@ -45,13 +67,27 @@ export type LatestSignal<T> = Signal<T | undefined> & {
   /** Alias of `pending`, for the `ResourceRef`-shaped surface. */
   readonly isLoading: Signal<boolean>;
   /**
-   * The computation's own thrown error, or the first used member's error (in read
-   * order). `undefined` when healthy. The held value stays readable through an error.
+   * The failure behind an `error` outcome (the computation's own thrown error, or the used
+   * member's error), else the first used member's error in read order. `undefined` when
+   * healthy. The held value stays readable through an error.
    */
   readonly error: Signal<unknown>;
   /** Whether a value has ever been produced (and is therefore held). */
   hasValue(): boolean;
 };
+
+/**
+ * How `outcome()` (and so `status()` / `error()`) picks among absorbers when an evaluation
+ * read more than one (`useAll`, or a read whose throw the computation caught and moved past).
+ * - `'first'` (the default): the absorber the evaluation actually stopped at, in read order.
+ *   This is what a sequential callback means.
+ * - `'aggregate'`: the ranked join over what every used member demanded, under `precedence`
+ *   (`'pending-first'` by default: nothing with a member in flight is settled, so an error
+ *   shown in that window is premature; `'error-first'` inverts it).
+ */
+export type LatestErrorsOptions =
+  | { readonly errors?: 'first'; readonly precedence?: never }
+  | { readonly errors: 'aggregate'; readonly precedence?: Precedence };
 
 export type CreateLatestOptions<T> = {
   /** Equality for the held value: an in-flight cycle that recomputes to an equal value never notifies consumers (while `pending` still reports the flight). */
@@ -65,31 +101,66 @@ export type CreateLatestOptions<T> = {
   /** Injection context for `register`, when created outside one. */
   readonly injector?: Injector;
   readonly debugName?: string;
-};
+} & LatestErrorsOptions;
 
 type Frame = {
   readonly deps: UseSource<unknown>[];
-  readonly seen: Set<UseSource<unknown>>;
-  readonly errors: unknown[];
+  readonly demands: Map<UseSource<unknown>, unknown>;
+  readonly precedence: Precedence;
 };
 
 const frameStack: Frame[] = [];
 
+/** What a `loading` sentinel thrown for an idle source with nothing to show carries as `source`. */
+export type AwaitingSource = { readonly kind: 'awaiting' };
+
+const awaiting = new WeakMap<object, Loading>();
+
+function awaitingFor(res: UseSource<unknown>): Loading {
+  let sentinel = awaiting.get(res);
+  if (!sentinel) {
+    sentinel = loading({ kind: 'awaiting' } satisfies AwaitingSource);
+    awaiting.set(res, sentinel);
+  }
+  return sentinel;
+}
+
 /**
- * Thrown by `use()` to short-circuit a computation whose input has no value yet; caught
- * by the owning `latest()`. Identity-compared, so user code must not swallow it — avoid
- * broad `try/catch` around `use()` calls.
+ * What a derivation that needs `res` gets from it: its outcome, except that an idle source with
+ * nothing to show is pending from the reader's point of view (`loading`, source `awaiting`).
  */
-const BLOCKED = new Error(
-  '[mmstack/primitives] latest() blocked — internal sentinel, do not catch',
-);
+function demandOf(res: UseSource<unknown>): unknown {
+  const out = res.outcome ? res.outcome() : outcomeOf(res)();
+  if (out === undefined && !(res.hasContent?.() ?? res.hasValue()))
+    return awaitingFor(res);
+  return out;
+}
+
+function currentFrame(name: string): Frame {
+  const frame = frameStack.at(-1);
+  if (!frame) {
+    throw new Error(
+      `[mmstack/primitives] ${name}() must be called synchronously within a latest() computation`,
+    );
+  }
+  return frame;
+}
+
+function record(frame: Frame, res: UseSource<unknown>): unknown {
+  if (frame.demands.has(res)) return frame.demands.get(res);
+  frame.deps.push(res);
+  const demand = demandOf(res);
+  frame.demands.set(res, demand);
+  return demand;
+}
 
 /**
  * Reads a resource inside a `latest()` computation: returns its value and reports it to
  * the enclosing collector, so the derivation's aggregate `pending`/`status`/`error`
- * include it. When the resource has no value yet (first load) or is in an error state,
- * the computation short-circuits — code after this call simply doesn't run this round —
- * which is what lets you write the happy path with no `undefined` checks:
+ * include it. When the resource has nothing to show yet (first load), or failed, `use()`
+ * throws its absorbing sentinel (`loading` / `error`) and the computation short-circuits —
+ * code after this call simply doesn't run this round — which is what lets you write the
+ * happy path with no `undefined` checks:
  *
  * ```ts
  * const fullName = latest(() => {
@@ -99,33 +170,50 @@ const BLOCKED = new Error(
  * });
  * ```
  *
- * Must be called synchronously within `latest()` — like `inject()`, it throws elsewhere.
+ * The thrown sentinel is the lattice itself: avoid broad `try/catch` around `use()` calls,
+ * or rethrow anything `isAbsorbing`. Must be called synchronously within `latest()` — like
+ * `inject()`, it throws elsewhere.
  */
 export function use<T>(res: UseSource<T>): T {
-  const frame = frameStack.at(-1);
-  if (!frame) {
-    throw new Error(
-      '[mmstack/primitives] use() must be called synchronously within a latest() computation',
-    );
-  }
-  if (!frame.seen.has(res)) {
-    frame.seen.add(res);
-    frame.deps.push(res);
-  }
-  if (res.status() === 'error') {
-    frame.errors.push(res.error?.());
-    throw BLOCKED;
-  }
-  if (!res.hasValue()) throw BLOCKED;
-  return res.value() as T;
+  const demand = record(currentFrame('use'), res as UseSource<unknown>);
+  if (isAbsorbing(demand)) throw demand;
+  return demand as T;
+}
+
+type UseValues<S extends readonly UseSource<unknown>[]> = {
+  -readonly [K in keyof S]: S[K] extends UseSource<infer T> ? T : never;
+};
+
+/**
+ * Reads several resources independently in one evaluation: every source is read and
+ * reported, then, if any of them has nothing to show or failed, the ranked join of their
+ * absorbers is thrown (under the enclosing `latest`'s `precedence`, `'pending-first'` by
+ * default). Otherwise returns their values as a tuple.
+ *
+ * ```ts
+ * const card = latest(() => {
+ *   const [u, org] = useAll(user, org);
+ *   return `${u.name} @ ${org.name}`;
+ * });
+ * ```
+ */
+export function useAll<const S extends readonly UseSource<unknown>[]>(
+  ...sources: S
+): UseValues<S> {
+  const frame = currentFrame('useAll');
+  const demands = sources.map((res) => record(frame, res));
+  const absorber = joinAbsorbers(demands, frame.precedence);
+  if (absorber) throw absorber;
+  return demands as UseValues<S>;
 }
 
 type Evaluation<T> = {
-  readonly kind: 'value' | 'blocked' | 'thrown';
+  readonly kind: 'value' | 'absorbed' | 'thrown';
   readonly value?: T;
+  readonly absorber?: Absorbing;
   readonly thrown?: unknown;
   readonly deps: readonly UseSource<unknown>[];
-  readonly errors: readonly unknown[];
+  readonly demands: ReadonlyMap<UseSource<unknown>, unknown>;
 };
 
 type Held<T> = { readonly has: boolean; readonly v: T | undefined };
@@ -140,8 +228,13 @@ type Held<T> = { readonly has: boolean; readonly v: T | undefined };
  * ```ts
  * const fullName = latest(() => `${use(user).name} @ ${use(org).name}`);
  * fullName();          // held value — undefined only before the first successful run
+ * fullName.outcome();  // the value, or the loading / error sentinel the evaluation settled on
  * fullName.pending();  // true while user OR org (re)loads
  * ```
+ *
+ * Two axes, never one: `outcome()` is the value plane, `pending()` the activity of the used
+ * members. A member reloading with its previous value still in hand keeps `outcome()` at the
+ * value while `pending()` is true. `status()` composes the two.
  *
  * Evaluation is a plain `computed` under the hood: lazy, pure, no effects, usable
  * outside any injection context (`register` is the only DI-touching option).
@@ -150,21 +243,36 @@ export function latest<T>(
   fn: () => T,
   opt?: CreateLatestOptions<T>,
 ): LatestSignal<T> {
+  const aggregate = opt?.errors === 'aggregate';
+  const precedence: Precedence =
+    (opt?.errors === 'aggregate' ? opt.precedence : undefined) ??
+    'pending-first';
+
   const evaluation = computed<Evaluation<T>>(
     () => {
-      const frame: Frame = { deps: [], seen: new Set(), errors: [] };
+      const frame: Frame = { deps: [], demands: new Map(), precedence };
       frameStack.push(frame);
       try {
         const value = fn();
-        return { kind: 'value', value, deps: frame.deps, errors: frame.errors };
+        return {
+          kind: 'value',
+          value,
+          deps: frame.deps,
+          demands: frame.demands,
+        };
       } catch (e) {
-        if (e === BLOCKED)
-          return { kind: 'blocked', deps: frame.deps, errors: frame.errors };
+        if (isAbsorbing(e))
+          return {
+            kind: 'absorbed',
+            absorber: e,
+            deps: frame.deps,
+            demands: frame.demands,
+          };
         return {
           kind: 'thrown',
           thrown: e,
           deps: frame.deps,
-          errors: frame.errors,
+          demands: frame.demands,
         };
       } finally {
         frameStack.pop();
@@ -189,6 +297,26 @@ export function latest<T>(
     opt?.debugName ? { debugName: opt.debugName } : undefined,
   );
 
+  const thrownEdge = createEdgeMemo();
+
+  const outcome = computed<T | undefined | Absorbing>(() => {
+    const ev = evaluation();
+    // Read on every evaluation so the hold observes each value as it lands, even when only
+    // `outcome` is read (a nesting `use`); a value outcome is the held value, so `equal` holds.
+    const kept = held();
+    const stop =
+      ev.kind === 'absorbed'
+        ? ev.absorber
+        : ev.kind === 'thrown'
+          ? thrownEdge(ev.thrown)
+          : undefined;
+    if (aggregate) {
+      const joined = joinAbsorbers([...ev.demands.values(), stop], precedence);
+      if (joined) return joined;
+    } else if (stop) return stop;
+    return kept.v;
+  });
+
   const pending = computed(() =>
     evaluation().deps.some((d) => {
       const s = d.status();
@@ -197,19 +325,36 @@ export function latest<T>(
   );
 
   const status = computed<ResourceStatus>(() => {
-    const ev = evaluation();
-    if (ev.kind === 'thrown' || ev.errors.length > 0) return 'error';
+    const out = outcome();
+    if (isError(out)) return 'error';
     if (pending()) return held().has ? 'reloading' : 'loading';
-    return ev.kind === 'value' ? 'resolved' : 'idle';
+    return isAbsorbing(out) ? 'idle' : 'resolved';
   });
+
+  const causeOf = (
+    sentinel: ErrorSentinel,
+    ev: Evaluation<T>,
+  ): { readonly cause: unknown } | undefined => {
+    const known = outcomeErrorCause(sentinel);
+    if (known) return known;
+    const member = ev.deps.find((d) => ev.demands.get(d) === sentinel);
+    return member ? { cause: member.error?.() } : undefined;
+  };
 
   const error = computed(() => {
     const ev = evaluation();
-    return ev.kind === 'thrown' ? ev.thrown : ev.errors.at(0);
+    const out = outcome();
+    if (isError(out)) return (causeOf(out, ev) ?? { cause: out }).cause;
+    for (const d of ev.deps) {
+      const e = d.error?.();
+      if (e !== undefined) return e;
+    }
+    return undefined;
   });
 
   const result = Object.assign(value, {
     value,
+    outcome,
     status,
     pending,
     isLoading: pending,

@@ -4,7 +4,7 @@ import {
   effect,
   inject,
   InjectionToken,
-  type Injector,
+  Injector,
   isDevMode,
   linkedSignal,
   PendingTasks,
@@ -18,9 +18,33 @@ import {
 } from '@angular/core';
 import { mutable } from '../mutable';
 import {
+  type CensusError,
+  type CensusMember,
+  type CensusRegistry,
+  type ErroredEntry,
+  type MemberId,
+  memberId,
+  ordinalOf,
+  type Precedence,
+  type RetryRound,
+} from './census';
+import { createCensus } from './census-registry';
+import { BOUNDARY_CENSUS } from './census-token';
+import {
+  dismissableEntries,
+  dismissAllEntries,
+  dismissEntry,
+  EMPTY_DISMISSALS,
+  presentedErrored,
+  type DismissalMap,
+} from './dismiss';
+import {
   CONCURRENCY_INSTRUMENTATION,
   type ConcurrencyInstrumentation,
 } from './instrumentation';
+import { resourceHasContent, resourceMember } from './resource-member';
+import { censusSettled } from './settlement';
+import { type SettlementDeadline } from './settlement-deadline';
 
 /**
  * The structural surface a transition scope actually reads — everything a `ResourceRef`
@@ -37,6 +61,20 @@ export type ResourceLike = {
   readonly isLoading: Signal<boolean>;
   hasValue(): boolean;
   abort?(): void;
+  /** The current error, read for the message a boundary presents when the resource fails. */
+  readonly error?: Signal<unknown>;
+  /**
+   * Re-run the load. When present, a failed resource is retryable from its boundary
+   * ({@link TransitionScope.retry} / {@link TransitionScope.retryAll}).
+   */
+  reload?(): unknown;
+  /**
+   * Whether there is something to show, including a value held through a failed reload.
+   * `hasValue()` follows Angular's rule and turns false on error even while a held value is
+   * still displayed; readiness reads this instead when present, so a failed background reload
+   * never blanks content the user is reading. Falls back to `hasValue()`.
+   */
+  hasContent?(): boolean;
 };
 
 /**
@@ -56,6 +94,8 @@ export type RegisterOptions = {
    * (`pending`) and hold-stale, but NOT blank the whole boundary while it first loads.
    */
   readonly suspends?: boolean;
+  /** What the boundary calls this resource when it fails (`errored` entries). Defaults to `'resource'`. */
+  readonly displayName?: string;
 };
 
 /**
@@ -67,12 +107,20 @@ export type TransitionScope = {
   /** The currently-registered resources (read-only view). */
   readonly resources: Signal<readonly ResourceLike[]>;
   /**
-   * Any registered resource has a request in flight (`status` is `loading`/`reloading`).
-   * This is the transition indicator — true during a reload while `keepPrevious` holds
-   * the visible value, so the UI can show "updating…" without unmounting.
+   * Any registered resource has a request in flight (`isLoading()`, or `status` is
+   * `loading`/`reloading`). This is the transition indicator — true during a reload while
+   * `keepPrevious` holds the visible value, so the UI can show "updating…" without unmounting.
+   * It reads activity, never a status fold: a registration whose status settled to `'error'`
+   * while it still has work in flight keeps this true.
    */
   readonly pending: Signal<boolean>;
-  /** Any *suspending* resource is not ready — drives the first-load placeholder. */
+  /**
+   * Any *suspending* resource is not ready — drives the first-load placeholder. `'value'` is the
+   * census fold reading `pending`: a suspending resource with no content that has not failed. A
+   * failed first load leaves it, so the boundary presents {@link failed} instead of holding its
+   * placeholder forever. Under `'error-first'` it also stays true while a suspending resource
+   * has nothing to show and no failure blanks the boundary.
+   */
   suspended(type: SuspendType): boolean;
   /**
    * Register a resource. EVERY `add` must be paired with a `remove` when the
@@ -133,15 +181,79 @@ export type TransitionScope = {
    * the transaction stays visually held until the transaction settles, with no torn frame.
    */
   hold<T>(value: Signal<T>): Signal<T>;
+  /**
+   * The boundary should present its error slot: the census fold is `error` and at least one
+   * suspending member has failed with no content to show. A failed background reload whose
+   * value is still held (`keepPrevious`) does not count: that content stays, and the failure rides
+   * {@link errored} instead. A readiness member registered directly in {@link census}
+   * (`censusResource`) has no content reading, so its failure always counts.
+   */
+  readonly failed: Signal<boolean>;
+  /** Every failing member, with or without content, minus dismissed ones: the indicator reading. */
+  readonly errored: Signal<readonly ErroredEntry[]>;
+  /** Every failing member's error, ignoring dismissal. */
+  readonly failures: Signal<readonly CensusError[]>;
+  /** Retry the member(s) with this id: a round that re-runs each capable member at most once. */
+  retry(id: MemberId): RetryRound;
+  /** Retry every capable member that is not already in flight, as one round. */
+  retryAll(): RetryRound;
+  /** Hide one presented failure until that member fails again (only non-retryable members). */
+  dismiss(entry: ErroredEntry): void;
+  /** Dismiss every presented, dismissable failure. */
+  dismissAll(): void;
+  /**
+   * Resolves once the fold has left `pending` after the reactive graph drained: `'idle'` when
+   * everything settled cleanly, `'error'` when something failed.
+   */
+  settled(): Promise<'idle' | 'error'>;
+  /**
+   * The census this scope folds over. Registrations land here as members; other members
+   * (`censusResource`, enrolled facades) join it through the boundary token. For advanced use.
+   */
+  readonly census: CensusRegistry;
 };
 
-type Entry = { readonly ref: ResourceLike; readonly suspends: boolean };
+type Entry = {
+  readonly ref: ResourceLike;
+  readonly member: CensusMember;
+  readonly unregister: () => void;
+  readonly suspends: boolean;
+};
+
+const MEMBER_SITE = 'transition-scope';
+const DEFAULT_DISPLAY_NAME = 'resource';
+
+const statusInFlight = (s: ResourceStatus): boolean =>
+  s === 'loading' || s === 'reloading';
 
 export type CreateTransitionScopeOptions = {
   /** Scope identity for instrumentation events (idea/concurrency-devtools.md). */
   readonly name?: string;
   /** Optional observability listener; taps are no-ops when omitted (zero cost). */
   readonly instrumentation?: ConcurrencyInstrumentation;
+  /**
+   * Per-member settlement backstop: a suspending member that has not settled within `ms` of its
+   * registration is declared failed, so the boundary presents an error instead of waiting forever.
+   * Absent by default.
+   */
+  readonly deadline?: SettlementDeadline;
+  /**
+   * What the boundary shows when a suspending member is still loading and some member has failed.
+   * - `'pending-first'` (the default): the placeholder (`suspended('value')`) holds until every
+   *   suspending member settles, then the error slot (`failed`) shows if a failure is still there.
+   * - `'error-first'`: a failure that blanks the boundary (a suspending member with no content, or
+   *   a member registered directly in the census) shows the error slot at once, even while others
+   *   load. A failure that does not blank (indicator-only, or content still held) does NOT end
+   *   suspense: the placeholder holds while a suspending member has nothing to show.
+   * Affects `suspended('value')`, `failed` and `settled()` only; `pending` and the transaction
+   * reads do not fold.
+   */
+  readonly precedence?: Precedence;
+  /**
+   * Where the census schedules its drained checks (`retry(...).settled()`, `settled()`). Without
+   * it those calls must run in an injection context. The providers pass their own injector.
+   */
+  readonly injector?: Injector;
 };
 
 export function createTransitionScope(
@@ -155,40 +267,87 @@ export function createTransitionScope(
       ? globalThis.performance.now()
       : Date.now();
 
+  const census = createCensus({
+    injector: opt?.injector,
+    deadline: opt?.deadline,
+    precedence: opt?.precedence,
+  });
+
+  // The scope's own activity fold over EVERY registration, indicator-only ones included. The
+  // census `inFlight` is readiness-only, so it is not this reading.
   const pending = computed(() =>
-    list().some(({ ref }) => {
-      const s = ref.status();
-      return s === 'loading' || s === 'reloading';
-    }),
+    list().some(
+      ({ ref, member }) => member.inFlight() || statusInFlight(ref.status()),
+    ),
+  );
+
+  // Blanks the boundary: the fold is `error` and some failing readiness member has no content.
+  // Registrations answer `hasContent()`; a member registered directly in the census
+  // (`censusResource`) has no content witness, so its failure counts as no content.
+  const failed = computed(() => {
+    if (census.foldState().kind !== 'error') return false;
+    const listed = new Set<MemberId>();
+    const blank = new Set<MemberId>();
+    for (const { ref, member, suspends } of list()) {
+      listed.add(member.id);
+      if (suspends && !resourceHasContent(ref)) blank.add(member.id);
+    }
+    // Read through the census, so a failure it synthesizes (the settlement deadline) counts too.
+    return census
+      .errored()
+      .some(
+        ({ member }) =>
+          member.readiness && (!listed.has(member.id) || blank.has(member.id)),
+      );
+  });
+
+  const dismissed = signal<DismissalMap>(EMPTY_DISMISSALS);
+  const errored = computed(() =>
+    presentedErrored(census.errored(), dismissed()),
   );
 
   const holdCount = signal(0);
   const holding = computed(() => holdCount() > 0);
 
+  const reportRound = (round: RetryRound): RetryRound => {
+    inst?.retryRound?.({ scope: name, dispatched: round.dispatched, at: at() });
+    return round;
+  };
+
   return {
     resources: computed(() => list().map((e) => e.ref)),
     pending,
     suspended: (type) =>
-      list().some(
-        ({ ref, suspends }) =>
-          suspends && (type === 'loading' ? ref.isLoading() : !ref.hasValue()),
-      ),
+      type === 'loading'
+        ? list().some(({ member, suspends }) => suspends && member.inFlight())
+        : census.foldState().kind === 'pending' ||
+          // Under 'error-first' a failure that does not blank must not end suspense while a
+          // suspending registration still has nothing to show. Never true under 'pending-first'.
+          (!failed() &&
+            list().some(
+              ({ member, suspends }) => suspends && member.pending(),
+            )),
     add: (ref, o) =>
       untracked(() => {
         const suspends = o?.suspends ?? true;
-        list.inline((c) => c.push({ ref, suspends }));
+        const member = resourceMember(ref, {
+          id: memberId(MEMBER_SITE, ordinalOf(ref)),
+          displayName: o?.displayName ?? DEFAULT_DISPLAY_NAME,
+          suspends,
+        });
+        const unregister = census.register(member);
+        list.inline((c) => c.push({ ref, member, unregister, suspends }));
         inst?.resourceRegistered?.({ scope: name, suspends });
       }),
     remove: (ref) =>
-      untracked(() =>
-        list.inline((c) => {
-          const i = c.findIndex((e) => e.ref === ref);
-          if (i !== -1) {
-            c.splice(i, 1);
-            inst?.resourceRemoved?.({ scope: name });
-          }
-        }),
-      ),
+      untracked(() => {
+        const i = list().findIndex((e) => e.ref === ref);
+        if (i === -1) return;
+        const entry = list()[i];
+        list.inline((c) => c.splice(i, 1));
+        entry.unregister();
+        inst?.resourceRemoved?.({ scope: name });
+      }),
     commit: <T>(value: Signal<T>): Signal<T> =>
       linkedSignal<{ v: T; settled: boolean }, T>({
         source: () => ({ v: value(), settled: !pending() }),
@@ -199,13 +358,13 @@ export function createTransitionScope(
       untracked(() => {
         let aborted = 0;
         for (const { ref } of list()) {
-          const s = ref.status();
-          if ((s === 'loading' || s === 'reloading') && ref.abort) {
+          if (statusInFlight(ref.status()) && ref.abort) {
             ref.abort();
             aborted++;
           }
         }
-        if (aborted > 0) inst?.abortPending?.({ scope: name, aborted, at: at() });
+        if (aborted > 0)
+          inst?.abortPending?.({ scope: name, aborted, at: at() });
         return aborted;
       }),
     holding,
@@ -218,6 +377,39 @@ export function createTransitionScope(
         computation: (curr, prev) =>
           prev !== undefined && curr.held ? prev.value : curr.v,
       }),
+    failed,
+    errored,
+    failures: census.failures,
+    retry: (id) => reportRound(census.retry(id)),
+    retryAll: () => reportRound(census.retryAll()),
+    dismiss: (entry) =>
+      untracked(() => {
+        const before = dismissed();
+        const next = dismissEntry(before, entry);
+        dismissed.set(next);
+        const id = entry.member.id;
+        if (next.get(id) !== before.get(id))
+          inst?.dismissed?.({
+            scope: name,
+            name: entry.failure.displayName,
+            at: at(),
+          });
+      }),
+    dismissAll: () =>
+      untracked(() => {
+        const before = dismissed();
+        const entries = census.errored();
+        dismissed.set(dismissAllEntries(before, entries));
+        if (inst?.dismissed)
+          for (const entry of dismissableEntries(before, entries))
+            inst.dismissed({
+              scope: name,
+              name: entry.failure.displayName,
+              at: at(),
+            });
+      }),
+    settled: () => censusSettled(census, { injector: opt?.injector }),
+    census,
   };
 }
 
@@ -242,8 +434,27 @@ function createNoopScope(): TransitionScope {
       // noop
     },
     hold: <T>(value: Signal<T>): Signal<T> => value,
+    failed: computed(() => false),
+    errored: computed(() => []),
+    failures: computed(() => []),
+    retry: () => EMPTY_ROUND,
+    retryAll: () => EMPTY_ROUND,
+    dismiss: () => {
+      // noop
+    },
+    dismissAll: () => {
+      // noop
+    },
+    settled: () => Promise.resolve('idle'),
+    census: createCensus(),
   };
 }
+
+const EMPTY_ROUND: RetryRound = {
+  generation: 0,
+  dispatched: 0,
+  settled: () => Promise.resolve(),
+};
 
 const TRANSITION_SCOPE = new InjectionToken<TransitionScope>(
   '@mmstack/primitives:transition-scope',
@@ -286,24 +497,27 @@ export function bridgeScopeToPendingTasks(
 }
 
 /**
- * While a listener is installed, bracket each pending window of `scope` with a
- * `pendingStart`/`pendingEnd` span (the reactive tap that needs an injection context). No-op
- * when no listener is provided, so it stays zero-cost by default.
+ * The reactive taps, which need an injection context: while a listener is installed, bracket each
+ * pending window of `scope` with a `pendingStart`/`pendingEnd` span, and report each member that
+ * starts failing through `resourceFailed`. Each tap exists only when its hook does, so the bridge
+ * is zero-cost by default.
  */
 function bridgeScopeToInstrumentation(
   scope: TransitionScope,
   name: string,
+  inst: ConcurrencyInstrumentation | undefined,
   injector?: Injector,
 ): void {
+  if (!inst) return;
   const run = <T>(fn: () => T): T =>
     injector ? runInInjectionContext(injector, fn) : fn();
+  const at = (): number =>
+    typeof globalThis.performance !== 'undefined'
+      ? globalThis.performance.now()
+      : Date.now();
   run(() => {
-    const inst = inject(CONCURRENCY_INSTRUMENTATION, { optional: true });
-    if (!inst?.pendingStart && !inst?.pendingEnd) return;
-    const at = (): number =>
-      typeof globalThis.performance !== 'undefined'
-        ? globalThis.performance.now()
-        : Date.now();
+    if (inst.resourceFailed) reportFailures(scope, name, inst, at);
+    if (!inst.pendingStart && !inst.pendingEnd) return;
     let handle: unknown;
     let open = false;
     effect(() => {
@@ -328,10 +542,45 @@ function bridgeScopeToInstrumentation(
   });
 }
 
-/** Provide a fresh transition scope at a boundary so its subtree's resources are tracked independently. */
+/** Report each member whose failure appears, once per failure episode (dismissal ignored). */
+function reportFailures(
+  scope: TransitionScope,
+  name: string,
+  inst: ConcurrencyInstrumentation,
+  at: () => number,
+): void {
+  let failing = new Set<MemberId>();
+  effect(() => {
+    const failures = scope.failures();
+    untracked(() => {
+      const next = new Set<MemberId>();
+      for (const f of failures) {
+        if (!failing.has(f.id) && !next.has(f.id))
+          inst.resourceFailed?.({
+            scope: name,
+            name: f.displayName,
+            message: f.message,
+            at: at(),
+          });
+        next.add(f.id);
+      }
+      failing = next;
+    });
+  });
+}
+
+/**
+ * Provide a fresh transition scope at a boundary so its subtree's resources are tracked
+ * independently. The scope's census is provided as the boundary census too, so members that
+ * register through it (`censusResource`) fold into the same boundary.
+ */
 export function provideTransitionScope(
   opt?: CreateTransitionScopeOptions,
 ): Provider {
+  return [scopeProvider(opt), scopeCensusProvider];
+}
+
+function scopeProvider(opt?: CreateTransitionScopeOptions): Provider {
   return {
     provide: TRANSITION_SCOPE,
     useFactory: () => {
@@ -342,13 +591,22 @@ export function provideTransitionScope(
       const scope = createTransitionScope({
         name: opt?.name,
         instrumentation: listener,
+        deadline: opt?.deadline,
+        precedence: opt?.precedence,
+        injector: opt?.injector ?? inject(Injector),
       });
       bridgeScopeToPendingTasks(scope);
-      bridgeScopeToInstrumentation(scope, opt?.name ?? 'scope');
+      bridgeScopeToInstrumentation(scope, opt?.name ?? 'scope', listener);
       return scope;
     },
   };
 }
+
+/** The scope's census doubles as the boundary census, so `censusResource` and facades join it. */
+const scopeCensusProvider: Provider = {
+  provide: BOUNDARY_CENSUS,
+  useFactory: () => inject(TRANSITION_SCOPE).census,
+};
 
 export function injectTransitionScope(): TransitionScope {
   const scope = inject(TRANSITION_SCOPE, { optional: true });
@@ -375,10 +633,13 @@ export type ForwardingTransitionScope = TransitionScope & {
   setTarget(target: TransitionScope | null): void;
 };
 
-export function createForwardingScope(): ForwardingTransitionScope {
-  const own = createTransitionScope();
+export function createForwardingScope(
+  opt?: CreateTransitionScopeOptions,
+): ForwardingTransitionScope {
+  const own = createTransitionScope(opt);
   const target = signal<TransitionScope | null>(null);
   const eff = () => target() ?? own;
+  const current = () => untracked(target) ?? own;
   // WeakMap, deliberately: the forwarder usually outlives its targets (an outlet
   // re-pointing at per-route scopes). If a registrant ever misses its `remove`,
   // ephemeron semantics let the ref↔dead-target cycle collect once the registrant
@@ -416,19 +677,63 @@ export function createForwardingScope(): ForwardingTransitionScope {
         computation: (curr, prev) =>
           prev !== undefined && curr.held ? prev.value : curr.v,
       }),
+    failed: computed(() => eff().failed()),
+    errored: computed(() => eff().errored()),
+    failures: computed(() => eff().failures()),
+    retry: (id) => current().retry(id),
+    retryAll: () => current().retryAll(),
+    dismiss: (entry) => current().dismiss(entry),
+    dismissAll: () => current().dismissAll(),
+    settled: () => current().settled(),
+    census: createForwardingCensus(
+      () => eff().census,
+      () => current().census,
+    ),
   };
 }
 
-/** Provide a forwarding transition scope at a boundary (used by the transition outlet). */
-export function provideForwardingTransitionScope(): Provider {
+/**
+ * The census face of a forwarding scope: reads follow the current target, a member registers
+ * into the target that is current at registration (and leaves from there), as `add` does.
+ */
+function createForwardingCensus(
+  eff: () => CensusRegistry,
+  current: () => CensusRegistry,
+): CensusRegistry {
   return {
-    provide: TRANSITION_SCOPE,
-    useFactory: () => {
-      const scope = createForwardingScope();
-      bridgeScopeToPendingTasks(scope);
-      return scope;
-    },
+    register: (member) => current().register(member),
+    enroll: (descriptor) => current().enroll(descriptor),
+    snapshot: () => untracked(eff).snapshot(),
+    foldState: computed(() => eff().foldState()),
+    inFlight: computed(() => eff().inFlight()),
+    failures: computed(() => eff().failures()),
+    errored: computed(() => eff().errored()),
+    retry: (id) => current().retry(id),
+    retryAll: () => current().retryAll(),
   };
+}
+
+/**
+ * Provide a forwarding transition scope at a boundary (used by the transition outlet). Its own
+ * fallback scope takes `opt`; once re-pointed, the target's options apply.
+ */
+export function provideForwardingTransitionScope(
+  opt?: CreateTransitionScopeOptions,
+): Provider {
+  return [
+    {
+      provide: TRANSITION_SCOPE,
+      useFactory: () => {
+        const scope = createForwardingScope({
+          ...opt,
+          injector: opt?.injector ?? inject(Injector),
+        });
+        bridgeScopeToPendingTasks(scope);
+        return scope;
+      },
+    },
+    scopeCensusProvider,
+  ];
 }
 
 /** Read the transition scope reachable from `injector`, or null if none is provided there. */

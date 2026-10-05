@@ -3,6 +3,7 @@ export * from './deferred-value';
 export * from './instrumentation';
 export * from './hold-until-ready';
 export * from './latest';
+export { joined, settle, type JoinedOptions, type Result } from './joined';
 export {
   outcomeOf,
   type Outcome,
@@ -17,6 +18,7 @@ export * from './transition-scope';
 export * from './census';
 export * from './census-registry';
 export * from './census-resource';
+export * from './census-token';
 export * from './dismiss';
 export * from './settlement';
 export * from './settlement-deadline';

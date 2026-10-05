@@ -1,5 +1,9 @@
-import { joinAbsorbers, joinAbsorbersDeep, invoke } from './algebra';
-import { type Absorbing, isAbsorbing } from './sentinel';
+import {
+  type Absorbing,
+  isAbsorbing,
+  joinAbsorbers,
+} from '@mmstack/primitives/core';
+import { invoke, joinAbsorbersDeep } from './algebra';
 
 export type ApplyFn = (target: unknown, args: readonly unknown[]) => unknown;
 

@@ -24,7 +24,7 @@ Everything that is not a directive or component is also exported from `@mmstack/
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense & the census (`mm-suspense`, error slots, `mmRetryFailed`, `*mmSuspenseError`, retry rounds), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use` / `useAll`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
 - [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`keyedContainer`, `wrappedContainer`, `orderedEntries`, `posBetween`), `rebaseOps`, `policyStrategy`, `syncedFork`
-- [Sentinels](#sentinels) — `loading` / `error` / `done`, `joinAbsorbers`, array shims, the mint reporter
+- [Async state values & sentinels](#async-state-values--sentinels) — `loading` / `error` / `done`, `joined` / `settle`, precedence & `joinAbsorbers`, strict sentinels, the `/algebra` kit
 - [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`, failure / retry / dismiss hooks
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
@@ -439,13 +439,24 @@ With this provided, `stored(...)` / `chunked(...)` (off by default) start readin
 </mm-suspense>
 ```
 
-**Members.** The boundary provides a transition scope, and the scope keeps a census: a list of members that all have one shape, `CensusMember`. A member says whether it blocks first paint (`readiness`), whether it has nothing to show yet (`pending`), whether a request is running (`inFlight`), its current `failure`, and how to run it again (`retry`, when it can). Anything async joins through that shape:
+**Boundary tracking (the census).** The boundary provides a transition scope that coordinates all async tasks registered inside its subtree. Each registered task (a query, mutation, or `latest()` derivation) reports its status through a unified contract:
+- `readiness`: whether it blocks the boundary's first paint (`register: 'suspend'`).
+- `pending`: whether it currently has no content to display.
+- `inFlight`: whether a network request is currently active (drives `aria-busy` and the `[busy]` slot).
+- `failure`: any error that occurred.
+- `retry`: a function to re-trigger the load.
 
-- **Resources.** `@mmstack/resource`'s `register: 'suspend' | 'indicator'` option, or `registerResource(ref, { suspends, displayName })` for any `ResourceRef`. The scope adapts the ref with `resourceMember`: `pending` is "suspends, has no content, has not failed", `inFlight` is `isLoading()`, `failure` follows `status() === 'error'` and carries the error's `message`, and `retry` calls the ref's `reload()` when it has one.
-- **`latest()` derivations.** The same `register: 'indicator' | 'suspend'` option, the same adapter.
-- **Direct members.** `censusResource({ site, displayName, ...resourceOptions })` is an Angular `resource` that joins the nearest boundary's census on its own. `scope.census.register(member)` takes any `CensusMember`, and `scope.census.enroll(descriptor)` returns a facade you drive yourself (`started(generation)` / `settled(generation, outcome)`) for work that has no signals of its own.
+Anything async registers cleanly:
+- **Resources.** `@mmstack/resource`'s `register: 'suspend' | 'indicator'` option, or `registerResource(ref, { suspends, displayName })` for any `ResourceRef`. The scope adapts the ref: `pending` means "suspends, has no content, has not failed", `inFlight` is `isLoading()`, `failure` follows `status() === 'error'` and carries the error's `message`, and `retry` calls the ref's `reload()`.
+- **`latest()` derivations.** The same `register: 'indicator' | 'suspend'` option and adapter.
+- **Direct members.** `censusResource({ site, displayName, ...resourceOptions })` is an Angular `resource` that joins the nearest boundary's tracking automatically. `scope.census.register(member)` takes any custom task, and `scope.census.enroll(descriptor)` returns a handle you drive yourself (`started(generation)` / `settled(generation, outcome)`) for external asynchronous work.
 
-**Three folds.** `scope.census.foldState()` is `pending` while some readiness member has nothing to show, `error` once one has failed, and `idle` otherwise. `suspended('value')`, the boundary's default `type`, reads that fold: the placeholder stays while it says `pending`, and a failed first load leaves it. `suspended('loading')` (`type="loading"`) is true while any suspending registration has a request in flight, content or not. `scope.pending()` is a separate reading: activity over every registration, suspending or not. It drives `aria-busy` and the `[busy]` slot.
+**Boundary state resolution.** `scope.census.foldState()` determines the aggregate boundary state:
+- `pending`: at least one readiness member has no content yet (the boundary shows the `[placeholder]`).
+- `error`: a readiness member failed with nothing to show (the boundary displays the `[error]` slot).
+- `idle`: all required data is ready.
+
+`suspended('value')`, the boundary's default `type`, stays in placeholder mode while the state is `pending`, and leaves it once data arrives or an error occurs. `suspended('loading')` (`type="loading"`) is true whenever any suspending registration has a request in flight, even during background reloads. Meanwhile, `scope.pending()` monitors overall network activity across all registrations to drive `aria-busy` and the `[busy]` indicator.
 
 **`failed` vs `errored`.** Two different questions:
 
@@ -590,7 +601,7 @@ fullName.outcome(); // the value, or the loading / error sentinel this evaluatio
 fullName.pending(); // the aggregate flight indicator
 ```
 
-When a resource has nothing to show yet or has failed, `use()` throws its [sentinel](#sentinels) (`loading` or `error`) and the rest of the callback does not run this round. That is why the body needs no `undefined` handling. A resource that is idle with nothing to show (disabled, not started) throws `loading` too: from the derivation's point of view it is still waiting. The thrown value is the lattice itself, so do not swallow it with a broad `try/catch`; rethrow anything `isAbsorbing`. `latest` catches it and keeps the previous result: `fullName()` is the held value, `hasValue()` says whether there has ever been one, and the held value stays readable through an error (unlike a raw `ResourceRef`, it never throws).
+When a resource has nothing to show yet or has failed, `use()` throws its [sentinel](#async-state-values--sentinels) (`loading` or `error`) and the rest of the callback does not run this round. That is why the body needs no `undefined` handling. A resource that is idle with nothing to show (disabled, not started) throws `loading` too: from the derivation's point of view it is still waiting. The thrown value is an internal control-flow signal, so avoid broad `try/catch` blocks inside `latest()`; if you do catch, re-throw anything where `isAbsorbing(err)` is true. (For combining independent resources without thrown exceptions, prefer `joined()` described below). `latest` catches it and keeps the previous result: `fullName()` is the held value, `hasValue()` says whether there has ever been one, and the held value stays readable through an error (unlike a raw `ResourceRef`, it never throws).
 
 **Two axes.** `outcome()` is the value plane: the result of the last evaluation, or the sentinel it stopped on. `pending()` (alias `isLoading()`) is activity: whether any resource the last evaluation read is `loading` / `reloading`. They are separate on purpose. A `keepPrevious` member that is reloading still has its old value to give, so `outcome()` is that value while `pending()` is true. `status()` composes the two: an `error` outcome is `'error'`; otherwise activity is `'reloading'` (a value is held) or `'loading'` (none yet); otherwise a value outcome is `'resolved'` and a waiting one is `'idle'`. `error()` is the cause behind an `error` outcome, else the first error among the resources it read.
 
@@ -915,17 +926,78 @@ todos.rebalance(sync, board.todos); // authority sweep when positions grow long
 
 Reading order is a pure function of the materialized value, so every replica agrees without consulting the op log. `wrappedContainer` stores elements as `{ '~pos', value }` instead, keeping the payload a closed record a schema can validate; the choice is fixed when the container is created and never inferred from data, so peers of a synced container must agree on it. `posBetween(before, after)` is the fractional index underneath.
 
-## Sentinels
+## Async state values & sentinels
 
-The async primitives above talk about "nothing to show yet" and "failed" as values, so they can be joined, held and passed around like any other value. A sentinel is a frozen, branded object with a `kind`:
+Rather than managing disjoint `isLoading`, `error`, and `data` boolean flags ("boolean soup"), `@mmstack` models async states as explicit, first-class values. A **sentinel** is a frozen, lightweight value representing an in-flight or failed state:
 
-- `loading`: there is nothing to show yet. `loading(source?)` mints one; `source` says what is loading.
-- `error`: something failed. The sentinel is value-free: it carries no message and no cause.
-- `done`: a successful settle with no payload. `DONE` is the one shared instance.
+- `loading`: data is currently in flight. Created via `loading(source?)`, where `source` optionally describes what is loading.
+- `error`: an operation failed. The sentinel object itself is value-free (the actual error cause is delivered to telemetry once and not retained on the value to prevent memory leaks).
+- `done`: an operation settled successfully without a payload (`DONE`).
 
-`loading` and `error` are the **absorbing** kinds (`isAbsorbing(v)`): an operation over an absorbing operand yields the absorber instead of a result, the way `NaN` spreads through arithmetic. `done` is a value like any other and does not absorb. `isLoading`, `isError`, `isDone` and `isSentinel` narrow; `ifLoading(v, fallback)` and `ifError(v, fallback)` swap one kind for a fallback and pass everything else through.
+`loading` and `error` are **absorbing**: any operation depending on an unresolved state yields that state rather than producing garbage data or throwing prematurely (similar to how `NaN` propagates through arithmetic). 
+Use `isLoading(v)`, `isError(v)`, `isDone(v)`, and `isSentinel(v)` to narrow values, or `ifLoading(v, fallback)` and `ifError(v, fallback)` to provide defaults.
 
-**Minting errors.** `errorEdge(cause)` is the mint for an I/O failure (a failed request); every resource `outcome()` uses it. `error(message)` is the authored mint, and `errorConstant(message)` is for a message known to be a constant: it is the only mint that keeps the text on the sentinel (`renderableMessage`), so it can be shown. Every mint reports its cause once, at mint time, to the installed reporter. The cause never travels on the value, and handling the sentinel later (`ifError`) never retracts the report. With no reporter installed, nothing is reported. In an app, `provideSentinelTelemetry()` from [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) installs one that turns each mint into a `SENTINEL_ERROR` finding (origin, subclass and the cause's type; never the cause itself) and uninstalls it when the injector is destroyed. Without DI, `setErrorReporter(reporter)` installs a plain function; the last one installed wins.
+### Combining resources: `joined()`
+
+For combining multiple async resources into a single signal without exceptions or boilerplate, use `joined()`:
+
+```typescript
+import { joined } from '@mmstack/primitives';
+
+// Combines independent resources into a single reactive Result union:
+const card = joined(user, org, (u, o) => `${u.name} @ ${o.name}`);
+
+// card() is:
+//   { kind: 'value', value: '...' }
+// | { kind: 'pending', source: ... }
+// | { kind: 'error', error: ... }
+```
+
+In templates, consume `joined()` using Angular `@switch`:
+
+```html
+@switch (card().kind) {
+  @case ('value') {
+    <p>{{ card().value }}</p>
+  }
+  @case ('pending') {
+    <span class="spinner">Loading card…</span>
+  }
+  @case ('error') {
+    <p class="error">Failed: {{ card().error }}</p>
+  }
+}
+```
+
+`joined()` runs as a standard `computed()`: it never throws, joins pending/error states automatically, and maps any thrown exceptions inside your callback into an `error` result. To convert a single resource outcome to this tagged shape, use `settle(outcome)`.
+
+### State precedence & `joinAbsorbers()`
+
+When multiple async resources are combined, `@mmstack` resolves their combined state using deterministic precedence:
+
+`value < error < pending`
+
+- **Pending outranks error** (`'pending-first'`, default): while any resource is still in flight, the combined operation is not settled, so errors are held until all pending work resolves.
+- **Error outranks pending** (`'error-first'`): pass `'error-first'` to `joined()`, `latest()`, or a transition scope if you want a failure to surface immediately even while other sibling requests are still loading.
+
+`joinAbsorbers(operands, order)` performs this resolution: it returns the winning in-flight or error state, or `undefined` if all operands have resolved to values.
+
+```typescript
+import { errorEdge, joinAbsorbers, loading } from '@mmstack/primitives';
+
+const failed = errorEdge('failed');
+const waiting = loading();
+
+joinAbsorbers([1, failed, waiting]);                  // waiting (pending outranks error by default)
+joinAbsorbers([1, failed, waiting], 'error-first');   // failed
+joinAbsorbers([1, 2]);                                // undefined (all values resolved)
+```
+
+### Minting errors & telemetry
+
+`errorEdge(cause)` mints an error sentinel for an I/O failure (used by resource `outcome()`s); `error(message)` mints an application error. Every mint reports its cause once to the installed reporter at creation time.
+
+In an application, `provideSentinelTelemetry()` from [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) forwards these to your telemetry sink (tracking origin, subclass, and error type) and unregisters cleanly when the injector is destroyed. Without Angular DI, use `setErrorReporter(reporter)`:
 
 ```typescript
 import { errorEdge, isError, setErrorReporter } from '@mmstack/primitives';
@@ -934,30 +1006,30 @@ setErrorReporter(({ origin, subclass, cause }) =>
   console.warn(origin, subclass, cause),
 );
 
-const failed = errorEdge(new Error('503')); // reported once: 'edge', 'external-fault', the Error
+const failed = errorEdge(new Error('503')); // reported once
 isError(failed); // true
 ```
 
-A sentinel refuses to leak: coercing it to a primitive, a string or JSON throws `SentinelLeakError`, so `${failed}` fails loudly instead of rendering `[object Object]`.
+### Template safety & coercion
 
-**The lattice.** Values rank lowest, then `error`, then `loading`: `value < error < pending`. Where several operands meet, the highest wins. `joinAbsorbers(operands, order)` is that join: it returns the winning absorber, or `undefined` when every operand is a value. Ties keep the leftmost operand.
+If a sentinel value is interpolated directly in a template (e.g. `{{ res.outcome() }}` or `{{ res.outcome() | json }}`):
+- By default, it safely renders as `[mmstack loading]`, `[mmstack error]`, or `[mmstack done]` (or `NaN` in numeric contexts and `{"$sentinel": "loading"}` with the `json` pipe), preventing change detection from throwing repeatedly.
+- The first time a sentinel is coerced, it reports an `origin: 'leak'` finding through the installed telemetry reporter so unintended template reads are visible in monitoring.
+- `setStrictSentinels(true)` switches the behavior to throw a `SentinelLeakError` immediately upon coercion, which is useful in compiler or expression-evaluation contexts that require strict containment.
+
+### The compiler & expression kit (`@mmstack/primitives/algebra`)
+
+For teams building dynamic expression interpreters or AST compilers that evaluate user expressions over async sentinels, the operator algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`, `joinAbsorbersDeep`) and sentinel-safe array shims (`ARRAY_METHOD_SHIMS`, `spreadArray`) are published separately under:
 
 ```typescript
-import { errorEdge, joinAbsorbers, loading } from '@mmstack/primitives';
-
-const failed = errorEdge('boom');
-const waiting = loading();
-
-joinAbsorbers([1, failed, waiting]); // waiting: pending outranks error
-joinAbsorbers([1, failed, waiting], 'error-first'); // failed
-joinAbsorbers([1, 2]); // undefined
+import { strictBinary, ARRAY_METHOD_SHIMS } from '@mmstack/primitives/algebra';
 ```
 
-`order` is `'pending-first'` by default: nothing with a member still in flight is settled, so an error shown in that window is premature. `'error-first'` swaps the two absorbers. The same two literals are the `precedence` option on transition scopes and on `latest`. The rest of the algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`) applies the same rule to single operations, for code that evaluates expressions over sentinel-bearing values.
+Standard application development does not need this subpath.
 
-**Containers.** `ARRAY_METHOD_SHIMS` holds sentinel-aware versions of the read-only array methods for such an evaluator. `map` keeps an absorbing element in place; methods that decide on a callback's verdict (`filter`, `find`, `some`, `every`, …) return the first absorbing verdict; `join` and `toSorted` collect every absorber they meet and return the ranked join, so the answer does not depend on the order the sort happened to compare in.
+### Multi-bundle registry
 
-**Two copies in one page.** Sentinels are recognised through a registry kept on `globalThis` under `Symbol.for('@mmstack/primitives.sentinels')`, so two bundled copies of `@mmstack/primitives` recognise each other's sentinels. A copy that speaks a different registry protocol throws `SentinelRegistryError` when it loads instead of quietly failing to recognise them. Each copy still has its own `DONE` instance and its own reporter: compare with `isDone(v)`, not `v === DONE`, and install the reporter in the copy that mints.
+Sentinels are recognized across independently bundled chunks or micro-frontends through a shared registry on `globalThis` (`Symbol.for('@mmstack/primitives.sentinels')`). Two bundles sharing the same protocol version seamlessly recognize each other's sentinels and share the strictness setting.
 
 ## Observability
 

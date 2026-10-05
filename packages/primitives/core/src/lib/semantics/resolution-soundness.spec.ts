@@ -19,7 +19,11 @@ import {
   type Slot,
 } from '@mmstack/primitives/testing';
 import { makeExprArbitrary } from './testing/resolution-arbitraries';
-import { isSentinel, loading } from './sentinel';
+import { isSentinel, loading, setStrictSentinels } from './sentinel';
+
+// Strict sentinels: these rows pin the throwing leak guards an evaluator is proven against.
+beforeEach(() => setStrictSentinels(true));
+afterEach(() => setStrictSentinels(false));
 
 const expr = makeExprArbitrary();
 

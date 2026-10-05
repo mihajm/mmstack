@@ -9,8 +9,15 @@
     "core/**/*.spec.ts",
     "core/**/*.test.ts",
     "core/src/lib/semantics/testing/**",
+    "algebra/**/*.spec.ts",
+    "algebra/**/*.test.ts",
     "testing/**/*.spec.ts",
     "testing/**/*.test.ts"
   ],
-  "include": ["src/**/*.ts", "core/**/*.ts", "testing/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "core/**/*.ts",
+    "testing/**/*.ts",
+    "algebra/**/*.ts"
+  ]
 }

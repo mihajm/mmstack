@@ -31,7 +31,9 @@
           "**/*.spec.ts",
           "**/*.test.ts",
           "../core/**/*.spec.ts",
-          "../core/**/*.test.ts"
+          "../core/**/*.test.ts",
+          "../algebra/**/*.spec.ts",
+          "../algebra/**/*.test.ts"
         ]
       }
     }

@@ -1,7 +1,12 @@
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
-import { conditional, invoke, strictBinary } from './algebra';
-import { ARRAY_METHOD_SHIMS, type ApplyFn } from './containers';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  ARRAY_METHOD_SHIMS,
+  conditional,
+  invoke,
+  strictBinary,
+  type ApplyFn,
+} from '@mmstack/primitives/algebra';
 import {
   type ErrorSentinel,
   type Loading,
@@ -10,7 +15,12 @@ import {
   ifLoading,
   isAbsorbing,
   loading,
+  setStrictSentinels,
 } from './sentinel';
+
+// Strict sentinels: these rows pin the throwing leak guards an evaluator is proven against.
+beforeEach(() => setStrictSentinels(true));
+afterEach(() => setStrictSentinels(false));
 
 /**
  * Error CONTAINMENT, compositional (five-class partition + swap-congruence): an

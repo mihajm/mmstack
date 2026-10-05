@@ -16,11 +16,10 @@ import {
   type ErrorSentinel,
   isAbsorbing,
   isError,
-  loading,
-  type Loading,
 } from '../semantics/sentinel';
 import { type Precedence } from './census';
-import { createEdgeMemo, outcomeErrorCause, outcomeOf } from './outcome';
+import { demandOf } from './demand';
+import { createEdgeMemo, outcomeErrorCause } from './outcome';
 import { injectTransitionScope } from './transition-scope';
 
 /**
@@ -111,30 +110,7 @@ type Frame = {
 
 const frameStack: Frame[] = [];
 
-/** What a `loading` sentinel thrown for an idle source with nothing to show carries as `source`. */
-export type AwaitingSource = { readonly kind: 'awaiting' };
-
-const awaiting = new WeakMap<object, Loading>();
-
-function awaitingFor(res: UseSource<unknown>): Loading {
-  let sentinel = awaiting.get(res);
-  if (!sentinel) {
-    sentinel = loading({ kind: 'awaiting' } satisfies AwaitingSource);
-    awaiting.set(res, sentinel);
-  }
-  return sentinel;
-}
-
-/**
- * What a derivation that needs `res` gets from it: its outcome, except that an idle source with
- * nothing to show is pending from the reader's point of view (`loading`, source `awaiting`).
- */
-function demandOf(res: UseSource<unknown>): unknown {
-  const out = res.outcome ? res.outcome() : outcomeOf(res)();
-  if (out === undefined && !(res.hasContent?.() ?? res.hasValue()))
-    return awaitingFor(res);
-  return out;
-}
+export type { AwaitingSource } from './demand';
 
 function currentFrame(name: string): Frame {
   const frame = frameStack.at(-1);

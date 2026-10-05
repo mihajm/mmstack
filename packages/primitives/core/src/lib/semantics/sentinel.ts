@@ -3,10 +3,17 @@ declare const SENTINEL_BRAND: unique symbol;
 const SENTINEL_REGISTRY_KEY = Symbol.for('@mmstack/primitives.sentinels');
 const SENTINEL_PROTOCOL = 2;
 
+/** How a sentinel answers a coercion. Mutable on purpose: the one record every copy shares. */
+export interface SentinelPolicy {
+  strict: boolean;
+}
+
 export interface SentinelRegistry {
   readonly protocol: number;
   readonly sentinels: WeakSet<object>;
   readonly aware: WeakSet<object>;
+  /** Absent on a record minted by a copy that predates the coercion policy. */
+  readonly policy?: SentinelPolicy;
 }
 
 export class SentinelRegistryError extends TypeError {
@@ -43,6 +50,14 @@ function validateForeignRegistry(slot: unknown): SentinelRegistry {
   ) {
     throw new SentinelRegistryError('sentinel registry record is malformed');
   }
+  if (
+    record.policy !== undefined &&
+    (typeof record.policy !== 'object' ||
+      record.policy === null ||
+      typeof record.policy.strict !== 'boolean')
+  ) {
+    throw new SentinelRegistryError('sentinel registry policy is malformed');
+  }
   return record as SentinelRegistry;
 }
 
@@ -63,6 +78,7 @@ export function joinSentinelRegistry(
     protocol: SENTINEL_PROTOCOL,
     sentinels: new WeakSet<object>(),
     aware: new WeakSet<object>(),
+    policy: { strict: false },
   });
   Object.defineProperty(host, SENTINEL_REGISTRY_KEY, {
     value: minted,
@@ -74,6 +90,24 @@ export function joinSentinelRegistry(
 }
 
 const REGISTRY = joinSentinelRegistry();
+
+// A record minted by an older copy has no policy slot and is frozen, so this copy keeps its own.
+const POLICY: SentinelPolicy = REGISTRY.policy ?? { strict: false };
+
+/**
+ * Chooses how a sentinel answers a coercion, for every copy of `@mmstack/primitives` sharing the
+ * registry. Off (the default): `String(s)` gives `[mmstack loading]` (or `error` / `done`), a number
+ * coercion gives `NaN`, `JSON.stringify` gives `{ "$sentinel": kind }`, and the first coercion of
+ * each sentinel is reported once through the error reporter (origin `'leak'`). On: every coercion
+ * throws `SentinelLeakError`, the law an expression evaluator is proven against.
+ */
+export function setStrictSentinels(on: boolean): void {
+  POLICY.strict = on;
+}
+
+export function isStrictSentinels(): boolean {
+  return POLICY.strict;
+}
 
 export const SENTINEL_KINDS = Object.freeze([
   'loading',
@@ -128,13 +162,37 @@ export class SentinelLeakError extends TypeError {
   }
 }
 
-const leak = (boundary: string) => () => {
-  throw new SentinelLeakError(boundary);
-};
+type LeakBoundary = 'primitive-coercion' | 'string-coercion' | 'serialization';
 
-const LEAK_PRIMITIVE = leak('primitive-coercion');
-const LEAK_STRING = leak('string-coercion');
-const LEAK_JSON = leak('serialization');
+const leakReported = new WeakSet<object>();
+
+/** Strict: throw. Soft: report the first coercion of this sentinel, then let the caller answer. */
+function coerced(value: unknown, boundary: LeakBoundary): SentinelKind {
+  if (POLICY.strict || !isSentinel(value))
+    throw new SentinelLeakError(boundary);
+  if (!weakSetHas(leakReported, value)) {
+    weakSetAdd(leakReported, value);
+    errorReporter?.({
+      origin: 'leak',
+      subclass: 'author-fault',
+      cause: new SentinelLeakError(boundary),
+    });
+  }
+  return value.kind;
+}
+
+function leakPrimitive(this: unknown, hint: string): string | number {
+  const kind = coerced(this, 'primitive-coercion');
+  return hint === 'number' ? NaN : `[mmstack ${kind}]`;
+}
+
+function leakString(this: unknown): string {
+  return `[mmstack ${coerced(this, 'string-coercion')}]`;
+}
+
+function leakJson(this: unknown): { readonly $sentinel: SentinelKind } {
+  return { $sentinel: coerced(this, 'serialization') };
+}
 
 function mint<TKind extends SentinelKind>(
   kind: TKind,
@@ -145,9 +203,9 @@ function mint<TKind extends SentinelKind>(
     kind,
     source,
     ...extra,
-    [Symbol.toPrimitive]: LEAK_PRIMITIVE,
-    toString: LEAK_STRING,
-    toJSON: LEAK_JSON,
+    [Symbol.toPrimitive]: leakPrimitive,
+    toString: leakString,
+    toJSON: leakJson,
   });
   weakSetAdd(REGISTRY.sentinels, sentinel);
   return sentinel as unknown as Sentinel<TKind>;
@@ -200,8 +258,13 @@ export const ifLoading = sentinelAware(
   },
 );
 
+/**
+ * One report per error mint, and one per sentinel the first time it is coerced while sentinels are
+ * not strict: origin `'leak'`, subclass `'author-fault'`, cause = the `SentinelLeakError` strict mode
+ * would have thrown (not thrown).
+ */
 export interface ErrorMintReport {
-  readonly origin: ErrorOrigin;
+  readonly origin: ErrorOrigin | 'leak';
   readonly subclass: ErrorSubclass;
   readonly cause: unknown;
 }

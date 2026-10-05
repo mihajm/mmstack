@@ -1,4 +1,4 @@
-import { invoke } from './algebra';
+import { invoke } from '@mmstack/primitives/algebra';
 import {
   DONE,
   SENTINEL_KINDS,
@@ -12,8 +12,13 @@ import {
   joinSentinelRegistry,
   loading,
   sentinelAware,
+  setStrictSentinels,
 } from './sentinel';
 import type { SentinelRegistry } from './sentinel';
+
+// Strict sentinels: these rows pin the throwing leak guards an evaluator is proven against.
+beforeEach(() => setStrictSentinels(true));
+afterEach(() => setStrictSentinels(false));
 
 describe('sentinel', () => {
   describe('[ASSERTED] closed set', () => {

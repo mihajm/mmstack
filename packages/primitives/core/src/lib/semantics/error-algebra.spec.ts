@@ -1,13 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
-  ABSORBER_PRECEDENCE,
+  ARRAY_METHOD_SHIMS,
   invoke,
-  joinAbsorbers,
   joinAbsorbersDeep,
   strictBinary,
-} from './algebra';
-import { ARRAY_METHOD_SHIMS, type ApplyFn } from './containers';
+  type ApplyFn,
+} from '@mmstack/primitives/algebra';
+import { ABSORBER_PRECEDENCE, joinAbsorbers } from './algebra';
 import {
   type Absorbing,
   DONE,

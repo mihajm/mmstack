@@ -3,13 +3,13 @@ import {
   coalesce,
   conditional,
   invoke,
-  joinAbsorbers,
   member,
   or,
   strictBinary,
   strictUnary,
   type Thunk,
-} from './algebra';
+} from '@mmstack/primitives/algebra';
+import { joinAbsorbers } from './algebra';
 import {
   DONE,
   SentinelLeakError,
@@ -18,7 +18,12 @@ import {
   isSentinel,
   loading,
   sentinelAware,
+  setStrictSentinels,
 } from './sentinel';
+
+// Strict sentinels: these rows pin the throwing leak guards an evaluator is proven against.
+beforeEach(() => setStrictSentinels(true));
+afterEach(() => setStrictSentinels(false));
 
 const uncalled = () => {
   const thunk = vi.fn(() => 'thunk-result');

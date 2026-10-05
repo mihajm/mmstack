@@ -1,3 +1,34 @@
-export * from './algebra';
-export * from './containers';
-export * from './sentinel';
+// The root surface is what an app reads an outcome with. The interpreter kit (operator algebra,
+// array shims) is the `@mmstack/primitives/algebra` entry; the registry plumbing stays internal.
+export { ABSORBER_PRECEDENCE, joinAbsorbers } from './algebra';
+export {
+  type Absorbing,
+  DONE,
+  type Done,
+  error,
+  errorConstant,
+  errorEdge,
+  type ErrorMintReport,
+  type ErrorOrigin,
+  type ErrorReporter,
+  type ErrorSentinel,
+  type ErrorSubclass,
+  ifError,
+  ifLoading,
+  isAbsorbing,
+  isDone,
+  isError,
+  isLoading,
+  isSentinel,
+  isSentinelAware,
+  isStrictSentinels,
+  loading,
+  type Loading,
+  type Sentinel,
+  SENTINEL_KINDS,
+  sentinelAware,
+  type SentinelKind,
+  SentinelLeakError,
+  setErrorReporter,
+  setStrictSentinels,
+} from './sentinel';

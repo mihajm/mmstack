@@ -19,7 +19,7 @@ import {
   reorderable,
 } from './sortable';
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   draggable: vi.fn(() => () => undefined),
   dropTargetForElements: vi.fn(() => () => undefined),
   monitorForElements: vi.fn(() => () => undefined),

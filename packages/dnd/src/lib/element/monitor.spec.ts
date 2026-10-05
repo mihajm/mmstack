@@ -2,7 +2,7 @@ import { EnvironmentInjector, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { trackRuns } from '../testing/reactivity';
 import { makeDragSession } from '../testing/drag-session';
-import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { monitor } from './monitor';
 import { boxData } from '../internal/payload';
@@ -16,7 +16,7 @@ const monitorMock = vi.fn();
 const cleanupMock = vi.fn();
 const configs: MonitorConfig[] = [];
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   monitorForElements: (config: MonitorConfig) => {
     monitorMock(config);
     configs.push(config);

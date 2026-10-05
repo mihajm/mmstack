@@ -20,7 +20,7 @@ let renderFn: PreviewNativeConfig['render'] | undefined;
 let lastConfig: PreviewNativeConfig | undefined;
 
 vi.mock(
-  '@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview',
+  '@atlaskit/pragmatic-drag-and-drop/utils/set-custom-native-drag-preview',
   () => ({
     setCustomNativeDragPreview: (cfg: PreviewNativeConfig) => {
       lastConfig = cfg;
@@ -31,7 +31,7 @@ vi.mock(
 );
 
 vi.mock(
-  '@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview',
+  '@atlaskit/pragmatic-drag-and-drop/utils/pointer-outside-of-preview',
   () => ({ pointerOutsideOfPreview: () => () => ({ x: 0, y: 0 }) }),
 );
 

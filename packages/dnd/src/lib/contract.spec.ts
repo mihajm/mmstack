@@ -1,24 +1,18 @@
 // Contract / probe suite — exercises the REAL @atlaskit packages (no mocks) to
-// guard the assumptions @mmstack/dnd makes about pragmatic-drag-and-drop v2.
+// guard the assumptions @mmstack/dnd makes about pragmatic-drag-and-drop v4.
 // We do NOT test pragmatic's own behaviour, only the seams we depend on, so a
 // version bump that breaks our assumptions fails loudly here.
 import {
   draggable,
   dropTargetForElements,
   monitorForElements,
-} from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-import {
-  attachClosestEdge,
-  extractClosestEdge,
-} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
-import {
-  dropTargetForExternal,
-  monitorForExternal,
-} from '@atlaskit/pragmatic-drag-and-drop/external/adapter';
-import {
-  containsFiles,
-  getFiles,
-} from '@atlaskit/pragmatic-drag-and-drop/external/file';
+} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
+import { dropTargetForExternal } from '@atlaskit/pragmatic-drag-and-drop/adapter/drop-target-for-external';
+import { monitorForExternal } from '@atlaskit/pragmatic-drag-and-drop/adapter/monitor-for-external';
+import { containsFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/contains-files';
+import { getFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/get-files';
 import { autoScrollForElements } from '@atlaskit/pragmatic-drag-and-drop-auto-scroll/element';
 import { triggerPostMoveFlash } from '@atlaskit/pragmatic-drag-and-drop-flourish/trigger-post-move-flash';
 import { announce as liveRegionAnnounce } from '@atlaskit/pragmatic-drag-and-drop-live-region';

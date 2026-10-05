@@ -8,7 +8,7 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import {
   extractDragMeta,

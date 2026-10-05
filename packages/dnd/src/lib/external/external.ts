@@ -10,14 +10,10 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import {
-  dropTargetForExternal,
-  monitorForExternal,
-} from '@atlaskit/pragmatic-drag-and-drop/external/adapter';
-import {
-  containsFiles,
-  getFiles,
-} from '@atlaskit/pragmatic-drag-and-drop/external/file';
+import { dropTargetForExternal } from '@atlaskit/pragmatic-drag-and-drop/adapter/drop-target-for-external';
+import { monitorForExternal } from '@atlaskit/pragmatic-drag-and-drop/adapter/monitor-for-external';
+import { containsFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/contains-files';
+import { getFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/get-files';
 
 import { toWritable, isServer } from '@mmstack/primitives';
 import { deriveHit } from '../internal/hit';

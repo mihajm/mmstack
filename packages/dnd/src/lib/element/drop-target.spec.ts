@@ -1,6 +1,6 @@
 import { ElementRef, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { dropTargetForElements as PDDropTarget } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { dropTargetForElements as PDDropTarget } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { signal } from '@angular/core';
 import type { Edge } from '../internal/types';
@@ -25,7 +25,7 @@ class StubPointerEngine extends DndPointerEngine {
 
 const dropTargetMock = vi.fn();
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   dropTargetForElements: (config: DropTargetConfig) => {
     dropTargetMock(config);
     return () => undefined;

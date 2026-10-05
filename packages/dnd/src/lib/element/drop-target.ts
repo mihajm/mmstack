@@ -13,7 +13,7 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import { dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 import type { Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 
 import { deriveHit } from '../internal/hit';

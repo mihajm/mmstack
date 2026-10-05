@@ -15,7 +15,7 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { boxData, extractEdge, mapDropTargets } from '../internal/payload';

@@ -39,7 +39,7 @@ describe.runIf(!!process.env['OTLP_E2E'])('otel-sink OTLP e2e (live collector)',
         exporter: metrics.exporter,
         exportIntervalMillis: 3_600_000, // flushed manually below
       });
-      const logProcessor = new SimpleLogRecordProcessor(logs.exporter);
+      const logProcessor = new SimpleLogRecordProcessor({ exporter: logs.exporter });
 
       const sink = otelSink({ processor, metricReader, logProcessor });
       TestBed.configureTestingModule({

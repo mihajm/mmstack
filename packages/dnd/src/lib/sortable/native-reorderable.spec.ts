@@ -8,7 +8,7 @@ import { Reorderable, ReorderableItem, reorderable } from './reorderable';
 // is observable (and the ambient monitor is inert).
 const draggableMock = vi.fn();
 const dropTargetMock = vi.fn();
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   draggable: (c: unknown) => {
     draggableMock(c);
     return () => undefined;

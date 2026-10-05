@@ -2,7 +2,7 @@ import { ElementRef, PLATFORM_ID, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { trackRuns } from '../testing/reactivity';
 import { makeDragSession } from '../testing/drag-session';
-import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { draggable } from './draggable';
 import { DndPointerEngine } from './pointer-engine';
@@ -16,7 +16,7 @@ type DraggableConfig = Parameters<typeof PDDraggable>[0];
 const draggableMock = vi.fn();
 const cleanupMock = vi.fn();
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   draggable: (config: DraggableConfig) => {
     draggableMock(config);
     return cleanupMock;

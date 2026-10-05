@@ -8,7 +8,7 @@ import {
   type PointerDropEntry,
 } from './pointer-engine';
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   monitorForElements: vi.fn(() => () => undefined),
   draggable: vi.fn(() => () => undefined),
   dropTargetForElements: vi.fn(() => () => undefined),

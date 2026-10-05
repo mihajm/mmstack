@@ -162,6 +162,8 @@ type BaseStreamResourceOptions<T> = {
   readonly reconnect?: RetryOptions;
   /** Auto-registration into the nearest transition scope (resource vocabulary). */
   readonly register?: TransitionRegistration;
+  /** What the boundary calls this stream when it fails. Defaults to `'resource'`. */
+  readonly displayName?: string;
   /**
    * Pause the stream while a condition holds — the live connection is CLOSED (no
    * socket kept open for a subtree nobody sees), the current value and status are
@@ -466,6 +468,7 @@ export function streamResource<T, TOut = never>(
     ref as ResourceRef<unknown>,
     opt.register,
     opt.injector,
+    opt.displayName,
   );
   return ref;
 }

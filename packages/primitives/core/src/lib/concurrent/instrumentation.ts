@@ -19,6 +19,17 @@ export type ConcurrencyInstrumentation = {
   resourceRegistered?(e: { scope: string; suspends: boolean }): void;
   resourceRemoved?(e: { scope: string }): void;
   abortPending?(e: { scope: string; aborted: number; at: number }): void;
+  /** A member started failing (it was not failing on the previous observation). */
+  resourceFailed?(e: {
+    scope: string;
+    name: string;
+    message: string | undefined;
+    at: number;
+  }): void;
+  /** A `retry` / `retryAll` round was claimed; `dispatched` is how many members it re-ran. */
+  retryRound?(e: { scope: string; dispatched: number; at: number }): void;
+  /** One presented failure was dismissed (`dismissAll` reports each entry it hides). */
+  dismissed?(e: { scope: string; name: string; at: number }): void;
 };
 
 export const CONCURRENCY_INSTRUMENTATION =
@@ -40,8 +51,9 @@ const now = (): number =>
 /**
  * Chrome DevTools "Performance" custom-tracks preset (idea/concurrency-devtools.md): writes a
  * `performance.measure` for each pending/transaction window onto an "mmstack" extension track,
- * so reactive coordination shows up on the Performance panel timeline. Dev-only, zero backend,
- * no dependencies. Give each measure the scope name for readability.
+ * so reactive coordination shows up on the Performance panel timeline. Failures, retry rounds and
+ * dismissals land on the same track as zero-length entries. Dev-only, zero backend, no
+ * dependencies. Give each measure the scope name for readability.
  */
 export function perfCustomTracks(
   track = 'mmstack concurrency',
@@ -50,14 +62,19 @@ export function perfCustomTracks(
     typeof globalThis.performance !== 'undefined' &&
     typeof globalThis.performance.measure === 'function';
 
-  const span = (name: string, start: number): void => {
+  const measure = (
+    name: string,
+    start: number,
+    end: number,
+    color: string,
+  ): void => {
     if (!canMeasure) return;
     try {
       globalThis.performance.measure(name, {
         start,
-        end: now(),
+        end,
         detail: {
-          devtools: { dataType: 'track-entry', track, color: 'primary' },
+          devtools: { dataType: 'track-entry', track, color },
         },
       } as PerformanceMeasureOptions);
     } catch {
@@ -65,11 +82,18 @@ export function perfCustomTracks(
     }
   };
 
+  const span = (name: string, start: number): void =>
+    measure(name, start, now(), 'primary');
+
   return {
     pendingStart: (e) => e.at,
     pendingEnd: (handle, e) => span(`pending`, (handle as number) ?? e.at),
     transactionStart: (e) => e.at,
     transactionEnd: (handle, e) =>
       span(`transaction`, (handle as number) ?? e.at),
+    resourceFailed: (e) => measure(`failed: ${e.name}`, e.at, e.at, 'error'),
+    retryRound: (e) =>
+      measure(`retry (${e.dispatched})`, e.at, e.at, 'tertiary'),
+    dismissed: (e) => measure(`dismissed: ${e.name}`, e.at, e.at, 'secondary'),
   };
 }

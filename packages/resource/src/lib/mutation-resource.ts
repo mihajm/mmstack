@@ -18,6 +18,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { DONE, type Done, type Outcome, outcomeOf } from '@mmstack/primitives';
 import { catchError, combineLatestWith, filter, map, of } from 'rxjs';
 import {
   applyResourceRegistration,
@@ -278,8 +279,23 @@ export type MutationResourceRef<
   TICTX = void,
 > = Omit<
   QueryResourceRef<TResult>,
-  'prefetch' | 'value' | 'hasValue' | 'set' | 'setLocal' | 'update' | 'abort'
+  | 'prefetch'
+  | 'value'
+  | 'hasValue'
+  | 'set'
+  | 'setLocal'
+  | 'update'
+  | 'abort'
+  | 'outcome'
 > & {
+  /**
+   * The mutation's value plane as one total read, following `status()`: a `loading` sentinel
+   * while the request runs, the result once it succeeds, `DONE` when it succeeds with no payload
+   * (the result is `undefined`), an `error` sentinel when it fails (minted and reported once per
+   * failure), and `undefined` while idle (before the first mutation, and again once a mutation
+   * has settled and the ref returns to idle).
+   */
+  readonly outcome: Signal<Outcome<TResult> | Done>;
   /**
    * Executes the mutation.
    *
@@ -791,8 +807,26 @@ export function mutationResource<
   //eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { abort: _abort, ...spreadableResource } = resource;
 
+  // The transport's default value is the private `NULL_VALUE` marker: never content.
+  const settledValue = computed(() => {
+    const v = resource.value() as unknown;
+    return v === NULL_VALUE ? undefined : (v as TResult);
+  });
+  const settledOutcome = outcomeOf<TResult>({
+    status: resource.status,
+    value: settledValue,
+    error: resource.error,
+    hasValue: () => settledValue() !== undefined,
+  });
+
   const ref: MutationResourceRef<TResult, TMutation, TICTX> = {
     ...spreadableResource,
+    outcome: computed(() => {
+      const out = settledOutcome();
+      if (out !== undefined) return out;
+      const status = resource.status();
+      return status === 'resolved' || status === 'local' ? DONE : undefined;
+    }),
     destroy: () => {
       persistDestroyed = true;
       replayEffectRef?.destroy();
@@ -854,6 +888,7 @@ export function mutationResource<
     ref as unknown as ResourceRef<unknown>,
     register,
     options0.injector,
+    options.displayName,
   );
 
   return ref;

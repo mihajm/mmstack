@@ -1,7 +1,7 @@
 import { workspaceRoot } from '@nx/devkit';
 import { defineConfig, devices } from '@playwright/test';
 
-// Own port by default: 4200 is routinely occupied by other dev servers (e.g. studio),
+// Own port by default: 4200 is routinely occupied by other dev servers,
 // and Playwright's reuseExistingServer can't tell a foreign app from the playground.
 const baseURL = process.env['BASE_URL'] || 'http://localhost:4300';
 const port = new URL(baseURL).port || '80';

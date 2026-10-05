@@ -25,6 +25,8 @@ import {
 } from '@angular/core';
 import {
   injectPaused,
+  type Outcome,
+  outcomeOf,
   type PauseOption,
   resolvePause,
   toWritable,
@@ -291,6 +293,20 @@ export type QueryResourceRef<TResult> = Omit<
    * This is what `TransitionScope.abortPending()` calls on registered queries.
    */
   abort(): void;
+  /**
+   * Whether `value()` currently has something to show. Unlike `hasValue()`, a value held
+   * through a failed reload (`keepPrevious`) counts, so a transition scope keeps that content
+   * on screen and reports the failure alongside it instead of blanking the boundary.
+   */
+  hasContent(): boolean;
+  /**
+   * The value plane as one total read: the value while there is content to show (a held
+   * value through a reload counts), a `loading` sentinel while loading with nothing to show,
+   * an `error` sentinel whenever the request failed (even with a held value: `value()` keeps
+   * showing it), and `undefined` while nothing has been requested. Each distinct failure is
+   * minted and reported once. `value()`, `status()`, `error()` and `hasValue()` are unchanged.
+   */
+  readonly outcome: Signal<Outcome<TResult>>;
 };
 
 /** How the response body is read, decided by which `queryResource` variant is called. */
@@ -759,6 +775,14 @@ function createQueryResource<TResult, TRaw = TResult>(
   const ref: QueryResourceRef<TResult | undefined> = {
     ...resource,
     value,
+    hasContent: () => value() !== undefined,
+    outcome: outcomeOf<TResult | undefined>({
+      status: resource.status,
+      value,
+      error: resource.error,
+      hasValue: () => resource.hasValue(),
+      hasContent: () => value() !== undefined,
+    }),
     set,
     setLocal,
     update,
@@ -846,6 +870,7 @@ function createQueryResource<TResult, TRaw = TResult>(
     ref as ResourceRef<unknown>,
     options.register,
     options?.injector,
+    options.displayName,
   );
 
   return ref;

@@ -70,6 +70,15 @@ export {
 } from './lib/telemetry';
 
 export { provideTelemetry } from './lib/provide';
+export {
+    provideSentinelTelemetry,
+    SENTINEL_ERROR_FINDING
+} from './lib/sentinel-telemetry';
+export {
+    provideViewErrorTelemetry,
+    VIEW_ERROR_FINDING,
+    type ViewErrorTelemetryOptions
+} from './lib/view-error-telemetry';
 
 export {
     TELEMETRY_HTTP_PARENT,

@@ -27,6 +27,7 @@
       "@mmstack/mesh-protocol": ["./packages/mesh/protocol/src/index.ts"],
       "@mmstack/primitives": ["./packages/primitives/src/index.ts"],
       "@mmstack/primitives/core": ["./packages/primitives/core/src/index.ts"],
+      "@mmstack/primitives/testing": ["./packages/primitives/testing/src/index.ts"],
       "@mmstack/resource": ["./packages/resource/src/index.ts"],
       "@mmstack/router-core": ["./packages/router/core/src/index.ts"],
       "@mmstack/telemetry-core": ["./packages/telemetry/core/src/index.ts"],

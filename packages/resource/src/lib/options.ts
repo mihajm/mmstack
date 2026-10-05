@@ -99,6 +99,8 @@ export type TransitionRegistration = false | 'indicator' | 'suspend';
 export type CommonResourceOptions = {
   /** Auto-registration into the nearest transition scope. */
   readonly register?: TransitionRegistration;
+  /** What the boundary calls this resource when it fails (its `errored()` entry). Defaults to `'resource'`. */
+  readonly displayName?: string;
   /** Retry failed requests. */
   readonly retry?: RetryOptions;
   /** Configure a circuit breaker for the resource. */
@@ -147,15 +149,20 @@ export function provideTypedResourceOptions<T>(
  * transition scope and removes it when the context is destroyed OR the resource's own
  * `.destroy()` is called (a manually-destroyed resource must not linger in the scope). Runs in
  * the resource's injection context (or the provided `injector`), since registration needs
- * `TRANSITION_SCOPE` + `DestroyRef`. Returns the remover, for callers that manage a facade.
+ * `TRANSITION_SCOPE` + `DestroyRef`. `displayName` names the registration's failures. Returns the
+ * remover, for callers that manage a facade.
  */
 export function applyResourceRegistration(
   ref: ResourceRef<unknown>,
   register: TransitionRegistration | undefined,
   injector?: Injector,
+  displayName?: string,
 ): () => void {
   if (!register) return () => undefined;
-  const opt: RegisterOptions = { suspends: register === 'suspend' };
+  const opt: RegisterOptions = {
+    suspends: register === 'suspend',
+    ...(displayName === undefined ? {} : { displayName }),
+  };
   const run = <T>(fn: () => T): T =>
     injector ? runInInjectionContext(injector, fn) : fn();
   return run(() => {

@@ -218,7 +218,8 @@ queryResource<TResult, TRaw = TResult>(
 | `circuitBreaker`       | `true \| CircuitBreaker \| { threshold?, timeout?, … }` | off                | See [circuit breakers](#circuit-breakers).                                                                                                                                                                                                                                    |
 | `cache`                | `ResourceCacheOptions`                                  | off                | Enables caching for this resource. See [caching](#caching).                                                                                                                                                                                                                   |
 | `triggerOnSameRequest` | `boolean`                                               | `false`            | Re-run even if the request object equals the previous one. Use sparingly.                                                                                                                                                                                                     |
-| `register`             | `boolean \| { suspends?: boolean }`                     | `false`            | Auto-register into the nearest transition scope. See [transitions & Suspense](#transitions--suspense).                                                                                                                                                                        |
+| `register`             | `false \| 'indicator' \| 'suspend'`                     | `false`            | Auto-register into the nearest transition scope. See [transitions & Suspense](#transitions--suspense).                                                                                                                                                                        |
+| `displayName`          | `string`                                                | `'resource'`       | What the boundary calls this resource in its error entries when it fails.                                                                                                                                                                                                     |
 | `equal`                | `ValueEqualityFn<TResult>`                              | `Object.is`        | Custom equality for the result value (forwarded to `httpResource`).                                                                                                                                                                                                           |
 | `equalRequest`         | `(a, b) => boolean`                                     | structural         | Custom equality for the **request** object (controls dedup / refetch). Defaults to a deep structural compare.                                                                                                                                                                 |
 | `injector`             | `Injector`                                              | `inject(Injector)` | Use this injector for cache/circuit-breaker resolution. Required if calling outside an injection context.                                                                                                                                                                     |
@@ -235,12 +236,52 @@ queryResource<TResult, TRaw = TResult>(
 | `statusCode`     | `WritableSignal<number \| undefined>`                         | –                                                                                                                                                                                                                                                                      |
 | `isLoading`      | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
 | `hasValue`       | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
+| `hasContent`     | `() => boolean`                                               | Whether `value()` has something to show. Unlike `hasValue()`, a value held through a failed reload counts. See [outcome as a value](#outcome-as-a-value).                                                                                                             |
+| `outcome`        | `Signal<T \| Loading \| ErrorSentinel>`                       | The value plane as one read: the value, `undefined`, or a `loading` / `error` sentinel. See [outcome as a value](#outcome-as-a-value).                                                                                                                                  |
 | `disabled`       | `Signal<boolean>`                                             | `true` when network is offline, circuit breaker is open, or `request()` returned `undefined`.                                                                                                                                                                          |
 | `disabledReason` | `Signal<'offline' \| 'circuit-open' \| 'no-request' \| null>` | Why the resource is disabled. `null` when enabled. Branch your UI on this rather than parsing combined state.                                                                                                                                                          |
 | `reload`         | `() => void`                                                  | Force a refetch (ignores `staleTime` for the next request).                                                                                                                                                                                                            |
 | `abort`          | `() => void`                                                  | Cancel the in-flight load, keeping the current value (`status` → `'local'`). The request is genuinely torn down and an aborted response never reaches the cache; a later `reload()`/request change loads normally. No-op when idle. `scope.abortPending()` calls this. |
 | `prefetch`       | `(req?) => Promise<void>`                                     | Warm the cache without subscribing. Silently skips on slow connections (`saveData` / 2g).                                                                                                                                                                              |
 | `destroy`        | `() => void`                                                  | –                                                                                                                                                                                                                                                                      |
+
+### Outcome as a value
+
+`outcome()` reads a resource's value plane as one value: the data, `undefined` when nothing was requested, or a [sentinel](https://www.npmjs.com/package/@mmstack/primitives#sentinels) from `@mmstack/primitives` when there is nothing to show (`loading`) or the request failed (`error`). It is the read `use()` in a `latest()` derivation is built on, and it composes with the sentinel helpers (`isLoading`, `isError`, `ifError`, `joinAbsorbers`):
+
+```ts
+import { isError, isLoading } from '@mmstack/primitives';
+
+const user = queryResource<User>(() => `/api/users/${id()}`, { keepPrevious: true });
+
+const label = computed(() => {
+  const out = user.outcome();
+  if (isLoading(out)) return 'Loading…';
+  if (isError(out)) return 'Could not load the user';
+  return out?.name ?? 'No user selected';
+});
+```
+
+| ref | status | content | `outcome()` |
+| --- | --- | --- | --- |
+| query | `error` | either | an `error` sentinel. With `keepPrevious`, `value()` keeps showing the held value and `hasContent()` stays true |
+| query | `loading` / `reloading` | no | a `loading` sentinel |
+| query | `loading` / `reloading` | yes | the value (a reload with a held value) |
+| query | `resolved` / `local` | yes | the value |
+| query | `idle` (disabled, paused, not requested yet) | no | `undefined`: absence is a value, not a trigger |
+| infinite | any | over `pages()` | the same rows, with content = at least one page loaded |
+| mutation | `idle` | – | `undefined`, before the first mutation and again after each one settles |
+| mutation | `loading` | – | a `loading` sentinel |
+| mutation | `resolved` | – | the result, or `DONE` when the result is `undefined` |
+| mutation | `error` | – | an `error` sentinel |
+
+Content is `hasContent()`. It differs from `hasValue()` in one row: `hasValue()` follows Angular and turns false on error even while a `keepPrevious` value is still displayed, while `hasContent()` stays true because `value()` still has something to show. A transition scope reads `hasContent()`, so a failed background reload keeps its content on screen and reports the failure beside it instead of blanking the boundary. With a `defaultValue`, `value()` is never `undefined`, so there is always content and `outcome()` never says `loading`.
+
+Each distinct failure is minted once: re-reading `outcome()` returns the same sentinel, and its cause is reported once to the installed reporter: `provideSentinelTelemetry()` from `@mmstack/telemetry-core` in an app, or `setErrorReporter` from `@mmstack/primitives` without DI. The sentinel itself carries no message; `error()` still has the cause.
+
+A mutation settles back to `idle` right after it resolves, so its result or `DONE` is visible while `status()` is `'resolved'`, which is when `onSuccess` and `onSettled` run. `DONE` means the result is `undefined`; `null` is a value. Angular's `HttpClient` hands an empty body (a 204) back as `null`, so to get `DONE` for it, map it in `parse`: `parse: (body) => body ?? undefined`.
+
+`value()`, `status()`, `error()` and `hasValue()` are unchanged; `outcome()` and `hasContent()` are additions.
 
 ### Raw responses: `queryResource.text` / `.arrayBuffer` / `.blob`
 
@@ -457,6 +498,8 @@ readonly pct = computed(() => {
 | `progress`                                    | `Signal<HttpProgressEvent \| undefined>` | Upload/download progress when `reportProgress: true`.                                 |
 | `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                 | –                                                                                     |
 | `headers` / `statusCode`                      | as in `QueryResourceRef`                 | Response metadata, when available.                                                    |
+| `outcome`                                     | `Signal<T \| Loading \| ErrorSentinel \| Done>` | `undefined` while idle, a `loading` sentinel while running, then the result (`DONE` for an `undefined` result) or an `error` sentinel. See [outcome as a value](#outcome-as-a-value). |
+| `hasContent`                                  | `() => boolean`                          | Always `true`: a mutation never suspends or blanks a boundary.                         |
 
 (Mutations deliberately don't expose `value`, `hasValue`, `set`, `update`, or `prefetch` — those don't make sense for one-off writes.)
 
@@ -722,6 +765,8 @@ class UserPage {
 - `register: 'indicator'` — register for the **pending indicator + hold-stale**; does _not_ block first paint. The right choice for in-region data: the boundary shows the held value with `aria-busy`, not a placeholder.
 - `register: 'suspend'` — register as **suspending**: the boundary holds its placeholder until this resource has a value (full Suspense). The right choice for data the subtree can't render without.
 - `false` / omitted — don't register.
+
+A failed registration (query, manual or infinite) takes the boundary to its error slot (nothing to show) or keeps its held content and reports the failure beside it (`keepPrevious`), and the boundary's `retryAll()` re-runs it through `reload()`; see [Suspense & the census](https://www.npmjs.com/package/@mmstack/primitives#suspense--the-census). The boundary's error entries call a registration by its `displayName` option (`register: 'suspend', displayName: 'orders'`), or `'resource'` without one. A mutation registers activity only: its `hasContent()` is always true, so it drives `pending` and `aria-busy` but never suspends or blanks a boundary, even with `register: 'suspend'`.
 
 Combine with `keepPrevious: true` so reloads hold the last value instead of flashing empty — then a `<mm-suspense>` shows the placeholder only on the genuine first load, and `startTransition` (from `@mmstack/primitives`) can reveal a multi-resource update in one frame. For navigation, `@mmstack/router-core`'s `<mm-transition-outlet>` keeps the current route on screen until the incoming route's registered resources settle.
 

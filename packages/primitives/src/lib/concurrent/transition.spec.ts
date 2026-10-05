@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { render } from '@testing-library/angular';
 import { MmTransition } from './transition';
+import { UnscopedSuspenseBoundary } from './suspense-boundary';
 import { registerResource } from '@mmstack/primitives/core';
 
 type FakeRef = ResourceRef<unknown> & {
@@ -241,5 +242,68 @@ describe('MmTransition (hold-and-swap)', () => {
 
     expect(visibleText(container)).toBe('branch-b'); // no hold
     expect(container.textContent).not.toContain('branch-a');
+  });
+});
+
+// ── A5: hold-and-swap under error ────────────────────────────────────────────
+// The incoming branch's only suspending resource FAILS while the branch is held hidden. An
+// errored member is not pending, so the hold releases and the branch shows its own error UI;
+// holding the stale branch on error would be the placeholder-forever bug again.
+const REF_E = new InjectionToken<FakeRef>('ref-e');
+
+@Component({
+  selector: 'branch-e',
+  imports: [UnscopedSuspenseBoundary],
+  template: `
+    <mm-unscoped-suspense>
+      <span>e-content</span>
+      <span error>e-error</span>
+    </mm-unscoped-suspense>
+  `,
+})
+class BranchE {
+  constructor() {
+    registerResource(inject(REF_E)); // suspends (the default)
+  }
+}
+
+@Component({
+  selector: 'tr-error-host',
+  imports: [MmTransition, BranchA, BranchE],
+  template: `
+    <div class="wrap" *mmTransition="tab(); let t">
+      @switch (t) {
+        @case ('a') {
+          <branch-a />
+        }
+        @case ('e') {
+          <branch-e />
+        }
+      }
+    </div>
+  `,
+})
+class ErrorHost {
+  readonly tab = signal('a');
+}
+
+describe('MmTransition (A5: commit under error)', () => {
+  it('a hidden incoming branch whose suspending resource fails commits and shows its own error UI', async () => {
+    const refE = makeRef('loading', undefined);
+    const { fixture, container } = await render(ErrorHost, {
+      providers: [{ provide: REF_E, useValue: refE }],
+    });
+    await flush(() => fixture.detectChanges());
+
+    fixture.componentInstance.tab.set('e');
+    await flush(() => fixture.detectChanges());
+    expect(visibleText(container)).toBe('branch-a'); // held while the incoming branch loads
+
+    refE.status.set('error');
+    await flush(() => fixture.detectChanges());
+
+    expect(visibleText(container)).toBe('e-error');
+    expect(container.textContent).not.toContain('branch-a'); // the stale branch is gone
+    expect(container.textContent).not.toContain('e-content');
   });
 });

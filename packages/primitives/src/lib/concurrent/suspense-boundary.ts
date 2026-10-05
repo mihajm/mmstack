@@ -20,6 +20,16 @@ import {
  * `type` selects what "not ready" means: `'value'` (default) suspends only until a first value lands
  * then holds through reloads; `'loading'` suspends on every in-flight load (strict suspense).
  *
+ * Failure, checked before suspense:
+ *  - **Failed with nothing to show** (`scope.failed()`): the `[error]` slot replaces placeholder and
+ *    content. Its default is one line of text.
+ *  - **Failed with content held** (`scope.errored()` not empty): content stays, the optional
+ *    `[failed]` slot renders beside it, and the host carries `data-failed`.
+ *
+ * Projected content cannot receive template context, so error content reaches the failures by DI:
+ * anything inside the boundary that calls `injectTransitionScope()` gets this boundary's scope
+ * (`errored()`, `retryAll()`, `dismiss()`). `mmRetryFailed` and `*mmSuspenseError` wrap that.
+ *
  * SSR: the server serializes whatever the scope reports at stabilization, so a registered resource
  * must keep the app unstable until it settles or the placeholder is what gets serialized (then
  * flashes/mismatches on hydration). HttpClient-backed resources, httpResource & all of `@mmstack/resource`
@@ -37,16 +47,25 @@ export abstract class SuspenseBoundaryBase {
   protected readonly suspended = computed(() =>
     this.scope.suspended(this.type()),
   );
+  protected readonly failed = this.scope.failed;
+  protected readonly hasErrored = computed(
+    () => this.scope.errored().length > 0,
+  );
 }
 
 const SUSPENSE_TEMPLATE = `
-  @if (suspended()) {
+  @if (failed()) {
+    <ng-content select="[error]"><span>Failed to load.</span></ng-content>
+  } @else if (suspended()) {
     <ng-content select="[placeholder]"><span>Loading…</span></ng-content>
   } @else {
     @if (pending()) {
       <ng-content select="[busy]" />
     }
     <ng-content />
+    @if (hasErrored()) {
+      <ng-content select="[failed]" />
+    }
   }
 `;
 
@@ -59,6 +78,7 @@ const SUSPENSE_STYLES = `
 
 const SUSPENSE_HOST = {
   '[attr.aria-busy]': 'pending() ? true : null',
+  '[attr.data-failed]': 'hasErrored() ? "" : null',
 };
 
 /**

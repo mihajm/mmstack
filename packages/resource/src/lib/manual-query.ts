@@ -149,10 +149,14 @@ export function manualQueryResource<TResult, TRaw = TResult>(
       status: resource.status,
       isLoading: resource.isLoading,
       hasValue: () => untracked(trigger).epoch === 0 || resource.hasValue(),
+      hasContent: () => untracked(trigger).epoch === 0 || resource.hasContent(),
+      error: resource.error,
+      reload: () => resource.reload(),
       abort: () => resource.abort(),
     } as unknown as ResourceRef<unknown>,
     options?.register,
     injector,
+    options?.displayName,
   );
 
   let pending: {

@@ -21,10 +21,11 @@ Everything that is not a directive or component is also exported from `@mmstack/
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`, `projection`
 - [Effects](#effects) — `nestedEffect`
-- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense (`mm-suspense`), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense & the census (`mm-suspense`, error slots, `mmRetryFailed`, `*mmSuspenseError`, retry rounds), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use` / `useAll`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
 - [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`keyedContainer`, `wrappedContainer`, `orderedEntries`, `posBetween`), `rebaseOps`, `policyStrategy`, `syncedFork`
-- [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`
+- [Sentinels](#sentinels) — `loading` / `error` / `done`, `joinAbsorbers`, array shims, the mint reporter
+- [Observability](#observability) — `provideConcurrencyInstrumentation`, `perfCustomTracks`, failure / retry / dismiss hooks
 - [Performance helpers](#performance-helpers) — `chunked`, `pooled` / `pooledArray` / `pooledMap` / `pooledSet`
 - [Sensors](#sensors) — `sensor()` facade + browser-state signals
 - [Pipelines](#pipelines) — `piped` / `pipeable`, operators (`select`, `map`, `filter`, `filterWith`, `distinct`, `combineWith`, `tap`, `startWith`, `pairwise`, `scan`)
@@ -421,29 +422,93 @@ providers: [providePausableOptions({ pause: true })];
 
 With this provided, `stored(...)` / `chunked(...)` (off by default) start reading the ambient paused context; pass `pause: false` at an individual call site to opt that one back out.
 
-### Suspense — `<mm-suspense>` and the transition scope
+### Suspense & the census
 
-A **transition scope** is a per-boundary registry of resources whose async state a boundary coordinates. `<mm-suspense>` provides its own scope, so resources created in its subtree register into it automatically (via `@mmstack/resource`'s `register` option, or `registerResource(ref)` for a hand-rolled `ResourceRef`):
+`<mm-suspense>` shows a placeholder while the data its subtree needs is loading, the content once it is there, and an error slot when a load failed and there is nothing to show:
 
 ```html
 <mm-suspense>
   <user-profile />
   <!-- its queries register here -->
   <span placeholder>Loading…</span>
-  <!-- shown on FIRST load only -->
+  <!-- first load only -->
   <span busy>Updating…</span>
-  <!-- shown during a reload, content stays mounted -->
+  <!-- during a reload; content stays mounted -->
+  <p error>Could not load the profile. <button mmRetryFailed>Retry</button></p>
+  <!-- failed, nothing to show -->
 </mm-suspense>
 ```
 
-- **First load** (no value yet) → show the `[placeholder]`.
-- **Reload** (a value is already held via `keepPrevious`) → keep the real content mounted, set `aria-busy`, and optionally show the `[busy]` slot — no flash back to the placeholder.
+**Members.** The boundary provides a transition scope, and the scope keeps a census: a list of members that all have one shape, `CensusMember`. A member says whether it blocks first paint (`readiness`), whether it has nothing to show yet (`pending`), whether a request is running (`inFlight`), its current `failure`, and how to run it again (`retry`, when it can). Anything async joins through that shape:
 
-`type` selects what "not ready" means: `'value'` (default — suspend until a first value lands, then hold through reloads) or `'loading'` (strict — suspend on every in-flight load). When you register a resource you choose whether it `suspends` (blocks first paint — for code/data the subtree can't render without) or only drives the indicator (`suspends: false` — in-region data that should hold-stale, not blank the boundary).
+- **Resources.** `@mmstack/resource`'s `register: 'suspend' | 'indicator'` option, or `registerResource(ref, { suspends, displayName })` for any `ResourceRef`. The scope adapts the ref with `resourceMember`: `pending` is "suspends, has no content, has not failed", `inFlight` is `isLoading()`, `failure` follows `status() === 'error'` and carries the error's `message`, and `retry` calls the ref's `reload()` when it has one.
+- **`latest()` derivations.** The same `register: 'indicator' | 'suspend'` option, the same adapter.
+- **Direct members.** `censusResource({ site, displayName, ...resourceOptions })` is an Angular `resource` that joins the nearest boundary's census on its own. `scope.census.register(member)` takes any `CensusMember`, and `scope.census.enroll(descriptor)` returns a facade you drive yourself (`started(generation)` / `settled(generation, outcome)`) for work that has no signals of its own.
 
-> **Where the resource must live.** Registration resolves the scope _up_ the injector tree, and `<mm-suspense>` provides its scope to its **content children** — so a resource is captured only when it's created _inside_ the boundary (e.g. a component projected between the tags). A query declared on the component that _renders_ `<mm-suspense>` sits above it and won't be seen.
+**Three folds.** `scope.census.foldState()` is `pending` while some readiness member has nothing to show, `error` once one has failed, and `idle` otherwise. `suspended('value')`, the boundary's default `type`, reads that fold: the placeholder stays while it says `pending`, and a failed first load leaves it. `suspended('loading')` (`type="loading"`) is true while any suspending registration has a request in flight, content or not. `scope.pending()` is a separate reading: activity over every registration, suspending or not. It drives `aria-busy` and the `[busy]` slot.
 
-**Single-component variant.** When you'd rather keep the boundary and the resource on the **same** component, provide the scope on that component and use `<mm-unscoped-suspense>`, which **reads an ambient scope** instead of opening its own. Now the scope is an ancestor of both the resource and the boundary:
+**`failed` vs `errored`.** Two different questions:
+
+- `scope.failed()`: is something failing with nothing to show? True when the fold is `error` and a failing suspending registration has no content, or when a failing member was registered directly (a direct member has no content reading, so its failure counts as empty).
+- `scope.errored()`: which members are failing right now, content or not? A `keepPrevious` query whose background reload failed still holds its last value (`hasContent()` stays true), so `failed()` stays false, the rows stay on screen, and the failure appears in `errored()` as `{ member, failure }` with `failure.displayName` and `failure.message`.
+
+The boundary checks failure before suspense. When `failed()`, the `[error]` slot replaces both placeholder and content; its default content is one line, `Failed to load.`. Otherwise the placeholder or the content renders as above, and while `errored()` is not empty the optional `[failed]` slot renders beside the content and the host carries a `data-failed` attribute (`mm-suspense[data-failed]` in CSS).
+
+**Error UI.** Projected content cannot receive template context, so error content reaches the failures through DI: anything inside the boundary that calls `injectTransitionScope()` gets this boundary's scope. Two directives wrap that. `mmRetryFailed` calls `retryAll()` on click (the example at the top). `*mmSuspenseError` renders its template while `errored()` is not empty, with the context keys `$implicit` (the entries), `retry` (`retryAll()`, returns the round), `dismiss(entry)` and `dismissAll()`:
+
+```html
+<mm-suspense>
+  <ul error *mmSuspenseError="let entries; retry as retry">
+    @for (e of entries; track e.member.id) {
+    <li>{{ e.failure.displayName }}: {{ e.failure.message }}</li>
+    }
+    <li><button (click)="retry()">Retry</button></li>
+  </ul>
+  <orders-table />
+</mm-suspense>
+```
+
+A structural directive on an element that carries `error` or `failed` projects into that slot. Give the failure a name with `registerResource(ref, { suspends: true, displayName: 'orders' })`; a registration made through the resource `register` option takes the resource's `displayName` option and is called `'resource'` without one.
+
+**Retry rounds.** `scope.retryAll()` and `scope.retry(id)` each run one round: every member that can retry and is not already in flight runs again, once. The round returns `{ dispatched, settled() }`: how many members it re-ran, and a promise for when those runs finish. Each member counts its runs as generations, and a round waits only on the generation it started, so a later round that re-runs the same member takes that wait over. A duplicated retry cannot be constructed: a round skips any member already in flight, so a second click while the first round is still loading dispatches nothing (`dispatched: 0`). A `@mmstack/resource` registration (query, manual, infinite) retries through its `reload()`.
+
+**Dismissal.** `dismiss(entry)` hides one entry from `errored()` until that member fails again; `dismissAll()` hides every entry it can. Dismissal is keyed to the failure's generation, so the member's next failure shows. Only a member without a retry can be dismissed (a retryable failure is meant to be retried), and only a failure that carries a generation, which in practice means an enrolled facade. For a resource registration `dismiss` does nothing. `scope.failures()` lists every failure and ignores dismissal.
+
+**Settlement and the deadline.** `await scope.settled()` resolves once the fold has left `pending` and the graph has drained: `'idle'` when everything settled cleanly, `'error'` when something failed. A member that never answers would hold its placeholder forever, so a scope can carry a backstop:
+
+```typescript
+providers: [provideTransitionScope({ deadline: { ms: 10_000 } })];
+```
+
+Each suspending member gets its own 10 s, counted from its own registration. A member still pending when its time runs out is declared failed with a message that names it (`orders did not settle within 10000ms …`), and the boundary shows its error slot. If the member settles later, the synthesized failure goes away; a failure of its own always wins over it. Indicator-only members are never armed: they cannot hold anything.
+
+**Precedence.** When one suspending member is still loading and another has failed, the scope has to pick what to show. `'pending-first'`, the default, keeps the placeholder until every suspending member has settled, then shows the error slot if a failure is still there. `'error-first'` shows the error slot as soon as a failure leaves nothing to show, even while others load; a failure that does not blank (indicator-only, or content still held) never ends the placeholder while a suspending member has nothing to show. Why pending-first: with three members, one loading, one failed, one done, showing the failure at once means retrying it alone, and if the loading member then fails too the boundary shows a second error and needs a second round for one incident. Waiting for the loading member shows every failure together, and one `retryAll()` covers them. `<mm-suspense>` uses the default; for `'error-first'`, provide the scope yourself and read it with `<mm-unscoped-suspense>` (below):
+
+```typescript
+providers: [provideTransitionScope({ precedence: 'error-first' })];
+```
+
+**Angular's `@boundary`.** mmstack resources surface errors as values; `@boundary` is for rendering throws. A failed `@mmstack/resource` query never throws into the template: its `value()` does not throw (unlike a plain Angular `resource`), and neither does a `latest()`. A throwing opt-in is rejected for now. So the census sees the failure and `@boundary` sees nothing. A template that throws while rendering is the other way round. The two compose, with one rule: put `@boundary` inside the branch it guards (inside the `*mmTransition` template, inside the routed component), never around `*mmTransition` or `<mm-transition-outlet>`. On a throw `@boundary` removes its whole block, and around a swap primitive that block holds both the outgoing and the incoming view. `provideViewErrorTelemetry()` from `@mmstack/telemetry-core` records each throw a `@boundary` catches as a `VIEW_ERROR` finding (the throwing component and the boundary's component) and passes the error on to your `ErrorHandler`.
+
+`$reset()` clears the boundary's error and renders the block again from the same inputs; it fetches nothing. When the throw came from data owned outside the block, reload that data in the same handler:
+
+```html
+@boundary {
+<order-chart [orders]="orders.value()" />
+} @error {
+<p>
+  The chart failed. <button (click)="orders.reload(); $reset()">Retry</button>
+</p>
+}
+```
+
+`$reset()` re-renders at once, before the reload lands, and a reloading resource still holds the value that threw. Guard the block on `orders.isLoading()` (or render only once it is not loading), or the re-render throws on the stale data again.
+
+`@boundary` does not catch everything. Errors in event listeners, root effects, `afterRender` callbacks, promises and `@defer` loads go to the `ErrorHandler`, as does a view effect that runs while its view is only traversed. Projected content belongs to the template that declares it, so a `@boundary` around `<ng-content>` does not cover it.
+
+> **Where the resource must live.** Registration resolves the scope _up_ the injector tree, and `<mm-suspense>` provides its scope to its **content children**, so a resource is captured only when it is created _inside_ the boundary (for example in a component projected between the tags). A query declared on the component that _renders_ `<mm-suspense>` sits above it and is not seen.
+
+**Single-component variant.** To keep the boundary and the resource on the **same** component, provide the scope on that component and use `<mm-unscoped-suspense>`, which reads an ambient scope instead of opening its own:
 
 ```typescript
 import { Component } from '@angular/core';
@@ -472,13 +537,13 @@ export class UserProfile {
 }
 ```
 
-This is also the pattern for coordinating resources registered _above_ a boundary (e.g. an app-builder page whose connectors register at a higher injector): the outer `provideTransitionScope()` is the shared scope, and any number of `<mm-unscoped-suspense>` boundaries observe it.
+The same pattern coordinates resources registered _above_ a boundary: the outer `provideTransitionScope()` is the shared scope, and any number of `<mm-unscoped-suspense>` boundaries observe it.
 
-**Forwarding scope (advanced).** `provideForwardingTransitionScope()` provides a scope that can be **re-pointed at a different target at runtime** via `setTarget(scope | null)` — reads follow the current target, while `add`/`remove` pin to the target a resource was registered under (so re-pointing never strands a registration). It's the building block for a coordinator that hosts several independent sub-scopes and switches which one it observes — e.g. a router outlet that, per navigation, points at the incoming route's own scope (read it from any injector with `getTransitionScope(injector)`). Most apps reach for `provideTransitionScope()`; this is for that one extra level of control.
+**Forwarding scope (advanced).** `provideForwardingTransitionScope()` provides a scope that can be re-pointed at another target at runtime with `setTarget(scope | null)`. Reads follow the current target, while `add` / `remove` (and direct census members) stay with the target they registered under, so re-pointing never strands a registration. It is the building block for a router outlet that points at the incoming route's own scope (`getTransitionScope(injector)` reads it).
 
-**Cancellation — `scope.abortPending()`.** View-scoped work already dies with its view (a superseded transition destroys the hidden incoming view, which aborts its in-flight loads — and an aborted response can never settle into `@mmstack/resource`'s cache). For resources registered in a scope that _outlives_ the transition, `scope.abortPending()` is the manual lever: it calls `abort()` on every in-flight registered resource that exposes it (queries do; mutations deliberately don't — a POST can't be unsent) and returns how many it aborted. A shared resource aborts for _all_ its readers, so reach for this on interactions that invalidate the pending work, not as a reflex. Honest limit: only I/O is cancellable — no framework can preempt a running synchronous computation.
+**Cancellation, `scope.abortPending()`.** View-scoped work dies with its view: a superseded transition destroys the hidden incoming view, which aborts its loads, and an aborted response never settles into `@mmstack/resource`'s cache. For resources registered in a scope that _outlives_ the transition, `abortPending()` calls `abort()` on every in-flight registration that has it (queries do; mutations do not, a POST cannot be unsent) and returns how many it aborted. A shared resource aborts for all its readers, so use it when an interaction makes the pending work pointless. Only I/O is cancellable; no framework can preempt a running synchronous computation.
 
-**SSR.** Scopes bridge into Angular's `PendingTasks` on the server automatically: while a scope has in-flight loads, serialization waits — so even custom (non-HTTP) loaders render settled. This is wired by the `provide*TransitionScope()` factories; call `bridgeScopeToPendingTasks(scope, injector)` yourself only for scopes you construct directly. Browser builds are untouched (client stability is deliberately not tied to loads).
+**SSR.** On the server a scope holds an Angular `PendingTask` while it has loads in flight, so serialization waits and custom (non-HTTP) loaders render settled. The `provide*TransitionScope()` factories wire this; call `bridgeScopeToPendingTasks(scope, injector)` yourself only for a scope from `createTransitionScope()`. Browser stability is not tied to loads.
 
 ### Hold-and-swap — `*mmTransition`
 
@@ -486,14 +551,11 @@ The transition itself, for any branch change — tabs, wizard steps, master-deta
 
 ```html
 <div *mmTransition="selectedTab(); let tab">
-  @switch (tab) {
-    @case ('overview') {
-      <overview-pane />
-    }
-    @case ('activity') {
-      <activity-pane />
-    }
-  }
+  @switch (tab) { @case ('overview') {
+  <overview-pane />
+  } @case ('activity') {
+  <activity-pane />
+  } }
 </div>
 ```
 
@@ -512,24 +574,49 @@ The directive binds `view-transition-name` reactively and normalizes the value t
 
 ### Async derivations — `latest()` / `use()`
 
-A `computed` over resources: `use(res)` reads a resource's value inside a `latest(fn)` computation and reports it to the derivation, so pending-ness propagates **by read** — no wiring, no per-site `isLoading` checks:
+A `computed` over resources: `use(res)` reads a resource's value inside a `latest(fn)` computation and reports it to the derivation, so pending-ness propagates **by read**, with no per-site `isLoading` checks:
 
 ```typescript
 import { latest, use } from '@mmstack/primitives';
 
 const fullName = latest(() => {
-  const u = use(user); // typed value — NO undefined checks in here
+  const u = use(user); // typed value, no undefined checks in here
   const org = use(orgFor(u)); // dependent (waterfall) resources compose too
   return `${u.name} @ ${org.name}`;
 });
 
 fullName(); // holds its previous value while anything it read is in flight
+fullName.outcome(); // the value, or the loading / error sentinel this evaluation settled on
 fullName.pending(); // the aggregate flight indicator
 ```
 
-Semantics worth knowing: a member with no value yet short-circuits the computation (that's why the body needs no `undefined` handling) — the result reports `hasValue: false` until every read member has produced one. `status` aggregates with `error` winning; the held value stays readable through an error (unlike a raw `ResourceRef`, `latest`'s value never throws). Results are themselves status-bearing, so they **nest** (a `latest` inside a `latest` propagates) and register into transition scopes via the same `register: 'indicator' | 'suspend'` vocabulary as resources. `use()` accepts anything structurally resource-shaped — Angular `resource()`/`httpResource`, `@mmstack/resource` queries, or another `latest` result.
+When a resource has nothing to show yet or has failed, `use()` throws its [sentinel](#sentinels) (`loading` or `error`) and the rest of the callback does not run this round. That is why the body needs no `undefined` handling. A resource that is idle with nothing to show (disabled, not started) throws `loading` too: from the derivation's point of view it is still waiting. The thrown value is the lattice itself, so do not swallow it with a broad `try/catch`; rethrow anything `isAbsorbing`. `latest` catches it and keeps the previous result: `fullName()` is the held value, `hasValue()` says whether there has ever been one, and the held value stays readable through an error (unlike a raw `ResourceRef`, it never throws).
 
-Honest limit: the collector is a synchronous stack, so it covers derivations you own — not arbitrary template reads. Boundaries keep creation-time registration.
+**Two axes.** `outcome()` is the value plane: the result of the last evaluation, or the sentinel it stopped on. `pending()` (alias `isLoading()`) is activity: whether any resource the last evaluation read is `loading` / `reloading`. They are separate on purpose. A `keepPrevious` member that is reloading still has its old value to give, so `outcome()` is that value while `pending()` is true. `status()` composes the two: an `error` outcome is `'error'`; otherwise activity is `'reloading'` (a value is held) or `'loading'` (none yet); otherwise a value outcome is `'resolved'` and a waiting one is `'idle'`. `error()` is the cause behind an `error` outcome, else the first error among the resources it read.
+
+**Several absorbers.** `use()` stops at the first absorber, so a plain sequential callback only ever meets one. `useAll(a, b, …)` reads several resources independently: every one is read and reported, and if any has nothing to show or failed it throws their ranked join.
+
+```typescript
+const card = latest(() => {
+  const [u, org] = useAll(user, orgOf);
+  return `${u.name} @ ${org.name}`;
+});
+```
+
+`errors` decides what `outcome()` says when an evaluation read more than one absorber. `'first'` (the default) is the absorber the evaluation actually stopped at. `'aggregate'` is the ranked join over everything the evaluation read, under `precedence` (`'pending-first'` by default, `'error-first'` to invert). The options are a discriminated union, so `precedence` without `errors: 'aggregate'` is a compile error:
+
+```typescript
+const total = latest(() => use(a) + use(b), {
+  errors: 'aggregate',
+  precedence: 'pending-first',
+});
+```
+
+`errors: 'aggregate'` changes the answer only when an evaluation reads past an absorber (`useAll`, or a callback that catches a `use()` throw and keeps reading); with plain sequential `use()` both modes agree, so reach for `useAll` when the reads are independent. `useAll` itself always joins, under `'pending-first'` unless the `latest` sets an aggregate `precedence`.
+
+Results are status-bearing, so they **nest** (a `latest` read by `use` inside another passes its `outcome()` through) and register into transition scopes with the same `register: 'indicator' | 'suspend'` vocabulary as resources. `use()` accepts anything structurally resource-shaped: Angular `resource()` / `httpResource`, `@mmstack/resource` refs, or another `latest`. A source with an `outcome()` is read through it; any other is read through `outcomeOf(source)`, which derives the same answer from `status`, content, `value` and `error`.
+
+Limit: the collector is a synchronous stack, so it covers derivations you own, not arbitrary template reads, and nothing after an `await`.
 
 ### `deferredValue`
 
@@ -702,7 +789,7 @@ const cart = tabSync(signal([]), { id: 'shopping-cart' });
 
 ### `opLog`
 
-A minimal **operation log** over any object-shaped `WritableSignal` that honors the copy-on-write contract (stores qualify, and so do plain immutably-updated model signals): each tick's changes are recovered as one batch of path-level `set`/`delete` ops by a reference-identity-pruned diff — O(changed paths), from *outside* the signal, zero cost when no log exists:
+A minimal **operation log** over any object-shaped `WritableSignal` that honors the copy-on-write contract (stores qualify, and so do plain immutably-updated model signals): each tick's changes are recovered as one batch of path-level `set`/`delete` ops by a reference-identity-pruned diff — O(changed paths), from _outside_ the signal, zero cost when no log exists:
 
 ```typescript
 import { opLog, store } from '@mmstack/primitives';
@@ -722,7 +809,7 @@ log.apply(remoteBatch); // applies ops in ONE commit AND advances the diff basel
 invertBatch(batch); // prev-based inverse — undo is a data transform
 ```
 
-Batching is per tick (two writes to one leaf in a tick emit one composed op), `prev` is always carried in-memory (structural sharing makes it free — wire serializers decide whether to keep it), arrays diff per-index at equal lengths and as whole-array ops on length change, and a `forkStore`'s `commit()` lands as a single batch — fork *is* the transaction primitive. Mutable stores are unsupported (in-place mutation defeats ref-identity diffing; dev warn). This is the substrate for worker mirrors, tab/mesh sync, persistence journals, and undo — one protocol, many consumers.
+Batching is per tick (two writes to one leaf in a tick emit one composed op), `prev` is always carried in-memory (structural sharing makes it free — wire serializers decide whether to keep it), arrays diff per-index at equal lengths and as whole-array ops on length change, and a `forkStore`'s `commit()` lands as a single batch — fork _is_ the transaction primitive. Mutable stores are unsupported (in-place mutation defeats ref-identity diffing; dev warn). This is the substrate for worker mirrors, tab/mesh sync, persistence journals, and undo — one protocol, many consumers.
 
 An `opLog` can also run with no Angular injector, which is what lets the graph mirror into a Web Worker. Pass `driver: microtaskOpLogDriver()` to drive emission off the microtask queue instead of an `effect()`, and build the store with `createStoreContext()` (a self-contained proxy cache) so `store` and `opLog` work in a worker or a plain Node process. The pure helpers `applyOps(root, ops)` and `diffOps(prev, next)` apply and produce batches without owning a log. [`@mmstack/worker`](https://www.npmjs.com/package/@mmstack/worker) is built directly on these seams.
 
@@ -737,8 +824,8 @@ const doc = store({ title: 'Draft', body: '' });
 const history = storeHistory(doc);
 
 doc.title.set('Final');
-history.undo();     // title back to 'Draft'
-history.canRedo();  // Signal<boolean>
+history.undo(); // title back to 'Draft'
+history.canRedo(); // Signal<boolean>
 
 storeHistory(doc, { track: syncClient }); // collaborative: only your own writes are undoable
 ```
@@ -749,23 +836,30 @@ Persists a whole store to an async backend (IndexedDB) and restores it on boot. 
 
 ```typescript
 import * as idbKeyval from 'idb-keyval';
-import { persistedStore, providePersistedStoreOptions } from '@mmstack/primitives';
+import {
+  persistedStore,
+  providePersistedStoreOptions,
+} from '@mmstack/primitives';
 
 providePersistedStoreOptions({ store: idbKeyval }); // wire the backend once
 
 const draft = persistedStore({ title: '', body: '' }, { key: 'draft' });
 draft.store.title.set('Hi'); // persisted (debounced), restored on next load
-draft.hydrated();            // Signal<boolean>
+draft.hydrated(); // Signal<boolean>
 ```
 
 When the persisted shape changes between releases, pass `version` and a `migrate` hook. An older snapshot is brought forward on boot before it is adopted, then re-persisted in the new shape (a newer snapshot than the running build is left untouched). Boot is already async, so `migrate` can be async, so the migration ladder can be lazy-loaded.
 
 ```typescript
-const profile = persistedStore({ first: '', last: '' }, {
-  key: 'profile',
-  version: 2,
-  migrate: async (data, from) => (await import('./migrations')).run(data, from),
-});
+const profile = persistedStore(
+  { first: '', last: '' },
+  {
+    key: 'profile',
+    version: 2,
+    migrate: async (data, from) =>
+      (await import('./migrations')).run(data, from),
+  },
+);
 ```
 
 `persistedStore` is `store()` + `persist()`. Reach for `persist(store, opt)` directly to add durability to a store you already have — one you also `meshSync`, or a worker-owned store's replica. Persistence is a reader over the op-log, so it composes with the other readers on the same store.
@@ -775,7 +869,7 @@ import { store, persist } from '@mmstack/primitives';
 import { meshSync } from '@mmstack/mesh';
 
 const doc = store({ title: '', body: '' });
-persist(doc, { key: 'draft', store: idbKeyval });     // durable to IndexedDB
+persist(doc, { key: 'draft', store: idbKeyval }); // durable to IndexedDB
 meshSync(doc, { room: 'doc-42', writer, transport }); // and synced to peers
 ```
 
@@ -784,13 +878,19 @@ meshSync(doc, { room: 'doc-42', writer, transport }); // and synced to peers
 The op-log is the substrate; these keep two copies of a store in agreement across a boundary (tabs, a worker, a network). `opSync` wires a store to a transport: local writes emit stamped envelopes, received envelopes fold in through a per-path last-writer-wins register map, ordered by a hybrid logical clock so any arrival order converges to the same state. `tabSync(store, { id })` is `opSync` over `BroadcastChannel` with a join handshake.
 
 ```typescript
-import { store, tabSync, keyedArray, preserve, isConflicted } from '@mmstack/primitives';
+import {
+  store,
+  tabSync,
+  keyedArray,
+  preserve,
+  isConflicted,
+} from '@mmstack/primitives';
 
 const board = tabSync(store({ title: 'Board', todos: [] }), {
   id: 'board',
   policies: [
     { path: 'todos', merge: keyedArray((t) => t.id) }, // reconcile a list by item identity
-    { path: 'title', merge: preserve },                // keep both sides of a clash as data
+    { path: 'title', merge: preserve }, // keep both sides of a clash as data
   ],
 });
 ```
@@ -815,15 +915,70 @@ todos.rebalance(sync, board.todos); // authority sweep when positions grow long
 
 Reading order is a pure function of the materialized value, so every replica agrees without consulting the op log. `wrappedContainer` stores elements as `{ '~pos', value }` instead, keeping the payload a closed record a schema can validate; the choice is fixed when the container is created and never inferred from data, so peers of a synced container must agree on it. `posBetween(before, after)` is the fractional index underneath.
 
-## Observability
+## Sentinels
 
-An optional listener seam on the concurrency layer. `provideConcurrencyInstrumentation(listener)` receives events as transition scopes coordinate pending, suspense, and transaction windows; with no listener the taps are no-ops. `perfCustomTracks()` is a ready listener that writes each window to a Chrome DevTools Performance track, and the window hooks are span-shaped, so forwarding to [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) is a direct mapping.
+The async primitives above talk about "nothing to show yet" and "failed" as values, so they can be joined, held and passed around like any other value. A sentinel is a frozen, branded object with a `kind`:
+
+- `loading`: there is nothing to show yet. `loading(source?)` mints one; `source` says what is loading.
+- `error`: something failed. The sentinel is value-free: it carries no message and no cause.
+- `done`: a successful settle with no payload. `DONE` is the one shared instance.
+
+`loading` and `error` are the **absorbing** kinds (`isAbsorbing(v)`): an operation over an absorbing operand yields the absorber instead of a result, the way `NaN` spreads through arithmetic. `done` is a value like any other and does not absorb. `isLoading`, `isError`, `isDone` and `isSentinel` narrow; `ifLoading(v, fallback)` and `ifError(v, fallback)` swap one kind for a fallback and pass everything else through.
+
+**Minting errors.** `errorEdge(cause)` is the mint for an I/O failure (a failed request); every resource `outcome()` uses it. `error(message)` is the authored mint, and `errorConstant(message)` is for a message known to be a constant: it is the only mint that keeps the text on the sentinel (`renderableMessage`), so it can be shown. Every mint reports its cause once, at mint time, to the installed reporter. The cause never travels on the value, and handling the sentinel later (`ifError`) never retracts the report. With no reporter installed, nothing is reported. In an app, `provideSentinelTelemetry()` from [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) installs one that turns each mint into a `SENTINEL_ERROR` finding (origin, subclass and the cause's type; never the cause itself) and uninstalls it when the injector is destroyed. Without DI, `setErrorReporter(reporter)` installs a plain function; the last one installed wins.
 
 ```typescript
-import { provideConcurrencyInstrumentation, perfCustomTracks } from '@mmstack/primitives';
+import { errorEdge, isError, setErrorReporter } from '@mmstack/primitives';
+
+setErrorReporter(({ origin, subclass, cause }) =>
+  console.warn(origin, subclass, cause),
+);
+
+const failed = errorEdge(new Error('503')); // reported once: 'edge', 'external-fault', the Error
+isError(failed); // true
+```
+
+A sentinel refuses to leak: coercing it to a primitive, a string or JSON throws `SentinelLeakError`, so `${failed}` fails loudly instead of rendering `[object Object]`.
+
+**The lattice.** Values rank lowest, then `error`, then `loading`: `value < error < pending`. Where several operands meet, the highest wins. `joinAbsorbers(operands, order)` is that join: it returns the winning absorber, or `undefined` when every operand is a value. Ties keep the leftmost operand.
+
+```typescript
+import { errorEdge, joinAbsorbers, loading } from '@mmstack/primitives';
+
+const failed = errorEdge('boom');
+const waiting = loading();
+
+joinAbsorbers([1, failed, waiting]); // waiting: pending outranks error
+joinAbsorbers([1, failed, waiting], 'error-first'); // failed
+joinAbsorbers([1, 2]); // undefined
+```
+
+`order` is `'pending-first'` by default: nothing with a member still in flight is settled, so an error shown in that window is premature. `'error-first'` swaps the two absorbers. The same two literals are the `precedence` option on transition scopes and on `latest`. The rest of the algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`) applies the same rule to single operations, for code that evaluates expressions over sentinel-bearing values.
+
+**Containers.** `ARRAY_METHOD_SHIMS` holds sentinel-aware versions of the read-only array methods for such an evaluator. `map` keeps an absorbing element in place; methods that decide on a callback's verdict (`filter`, `find`, `some`, `every`, …) return the first absorbing verdict; `join` and `toSorted` collect every absorber they meet and return the ranked join, so the answer does not depend on the order the sort happened to compare in.
+
+**Two copies in one page.** Sentinels are recognised through a registry kept on `globalThis` under `Symbol.for('@mmstack/primitives.sentinels')`, so two bundled copies of `@mmstack/primitives` recognise each other's sentinels. A copy that speaks a different registry protocol throws `SentinelRegistryError` when it loads instead of quietly failing to recognise them. Each copy still has its own `DONE` instance and its own reporter: compare with `isDone(v)`, not `v === DONE`, and install the reporter in the copy that mints.
+
+## Observability
+
+An optional listener seam on the concurrency layer. `provideConcurrencyInstrumentation(listener)` receives events as transition scopes coordinate pending, suspense and transaction windows; with no listener the taps are no-ops. `perfCustomTracks()` is a ready listener that writes each window to a Chrome DevTools Performance track, and the window hooks are span-shaped, so forwarding to [`@mmstack/telemetry-core`](https://www.npmjs.com/package/@mmstack/telemetry-core) is a direct mapping.
+
+```typescript
+import {
+  provideConcurrencyInstrumentation,
+  perfCustomTracks,
+} from '@mmstack/primitives';
 
 providers: [provideConcurrencyInstrumentation(perfCustomTracks())];
 ```
+
+Three hooks report failures and what was done about them:
+
+- `resourceFailed({ scope, name, message, at })`: a member started failing. Reported once per failure; a member that recovers and fails again reports again.
+- `retryRound({ scope, dispatched, at })`: a `retry(id)` or `retryAll()` round was claimed. A round that re-ran nothing reports `dispatched: 0`.
+- `dismissed({ scope, name, at })`: one failure was hidden. `dismissAll()` reports each entry it actually hid.
+
+`perfCustomTracks()` draws these as zero-length entries on the same track (`failed: <name>`, `retry (<dispatched>)`, `dismissed: <name>`). The failure tap runs for scopes made by `provideTransitionScope()`, which has an injection context to watch from; a listener passed as `provideTransitionScope({ instrumentation })` gets every hook, pending spans included. A listener without these hooks costs nothing extra: no watcher is installed and no payload is built.
 
 ## Performance helpers
 
@@ -880,25 +1035,25 @@ const mouse = sensor('mousePosition', {
 
 ### Available sensors
 
-| Type                | Standalone fn                | Returns                                                | Notes                                                                      |
-| ------------------- | ---------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `networkStatus`     | `networkStatus()`            | `Signal<boolean>` + `.since`                           | Online/offline. `since` is `Signal<Date>` of last transition.              |
-| `pageVisibility`    | `pageVisibility()`           | `Signal<DocumentVisibilityState>`                      | `'visible' \| 'hidden' \| 'prerender'`.                                    |
-| `mediaQuery`        | `mediaQuery(q)`              | `Signal<boolean>`                                      | Generic CSS media-query tracker.                                           |
-| `dark-mode`         | `prefersDarkMode()`          | `Signal<boolean>`                                      | Shorthand for `(prefers-color-scheme: dark)`.                              |
-| `reduced-motion`    | `prefersReducedMotion()`     | `Signal<boolean>`                                      | Shorthand for `(prefers-reduced-motion: reduce)`.                          |
-| `windowSize`        | `windowSize()`               | `Signal<{ width, height }>` + `.unthrottled`           | Throttled to 100ms by default.                                             |
-| `scrollPosition`    | `scrollPosition()`           | `Signal<{ x, y }>` + `.unthrottled`                    | Window or element scroll, throttled 100ms.                                 |
-| `mousePosition`     | `mousePosition()`            | `Signal<{ x, y }>` + `.unthrottled`                    | Throttled 100ms. `coordinateSpace: 'client' \| 'page'`, optional `touch`.  |
+| Type                | Standalone fn                | Returns                                                   | Notes                                                                                                          |
+| ------------------- | ---------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `networkStatus`     | `networkStatus()`            | `Signal<boolean>` + `.since`                              | Online/offline. `since` is `Signal<Date>` of last transition.                                                  |
+| `pageVisibility`    | `pageVisibility()`           | `Signal<DocumentVisibilityState>`                         | `'visible' \| 'hidden' \| 'prerender'`.                                                                        |
+| `mediaQuery`        | `mediaQuery(q)`              | `Signal<boolean>`                                         | Generic CSS media-query tracker.                                                                               |
+| `dark-mode`         | `prefersDarkMode()`          | `Signal<boolean>`                                         | Shorthand for `(prefers-color-scheme: dark)`.                                                                  |
+| `reduced-motion`    | `prefersReducedMotion()`     | `Signal<boolean>`                                         | Shorthand for `(prefers-reduced-motion: reduce)`.                                                              |
+| `windowSize`        | `windowSize()`               | `Signal<{ width, height }>` + `.unthrottled`              | Throttled to 100ms by default.                                                                                 |
+| `scrollPosition`    | `scrollPosition()`           | `Signal<{ x, y }>` + `.unthrottled`                       | Window or element scroll, throttled 100ms.                                                                     |
+| `mousePosition`     | `mousePosition()`            | `Signal<{ x, y }>` + `.unthrottled`                       | Throttled 100ms. `coordinateSpace: 'client' \| 'page'`, optional `touch`.                                      |
 | `pointerDrag`       | `pointerDrag()`              | `Signal<PointerDragState>` + `.unthrottled` + `.cancel()` | Pointer gesture (down→move→up) with `activationThreshold`, `delta`, modifiers, pointer capture, Escape-cancel. |
-| `elementVisibility` | `elementVisibility(target?)` | `Signal<IntersectionObserverEntry?>` + `.visible`      | IntersectionObserver-based, `.visible` is a boolean shorthand.             |
-| `elementSize`       | `elementSize(target?)`       | `Signal<{ width, height }?>`                           | ResizeObserver-based. Defaults to `border-box`.                            |
-| `geolocation`       | `geolocation(opt?)`          | `Signal<GeolocationPosition?>` + `.error` + `.loading` | One-shot by default; pass `watch: true` for `watchPosition`.               |
-| `clipboard`         | `clipboard()`                | `Signal<string>` + `.copy(v)` + `.isSupported`         | Mirrors clipboard contents; `.copy` writes through and updates the signal. |
-| `orientation`       | `orientation()`              | `Signal<{ angle, type }>`                              | Tracks `screen.orientation`.                                               |
-| `batteryStatus`     | `batteryStatus()`            | `Signal<BatteryStatus \| null>`                        | `null` until `navigator.getBattery()` resolves, or forever if unsupported. |
-| `idle`              | `idle({ ms })`               | `Signal<boolean>` + `.since`                           | Flips to `true` after `ms` of inactivity. Configurable activity events.    |
-| `focusWithin`       | `focusWithin(target?)`       | `Signal<boolean>`                                      | Mirrors the `:focus-within` CSS pseudo-class.                              |
+| `elementVisibility` | `elementVisibility(target?)` | `Signal<IntersectionObserverEntry?>` + `.visible`         | IntersectionObserver-based, `.visible` is a boolean shorthand.                                                 |
+| `elementSize`       | `elementSize(target?)`       | `Signal<{ width, height }?>`                              | ResizeObserver-based. Defaults to `border-box`.                                                                |
+| `geolocation`       | `geolocation(opt?)`          | `Signal<GeolocationPosition?>` + `.error` + `.loading`    | One-shot by default; pass `watch: true` for `watchPosition`.                                                   |
+| `clipboard`         | `clipboard()`                | `Signal<string>` + `.copy(v)` + `.isSupported`            | Mirrors clipboard contents; `.copy` writes through and updates the signal.                                     |
+| `orientation`       | `orientation()`              | `Signal<{ angle, type }>`                                 | Tracks `screen.orientation`.                                                                                   |
+| `batteryStatus`     | `batteryStatus()`            | `Signal<BatteryStatus \| null>`                           | `null` until `navigator.getBattery()` resolves, or forever if unsupported.                                     |
+| `idle`              | `idle({ ms })`               | `Signal<boolean>` + `.since`                              | Flips to `true` after `ms` of inactivity. Configurable activity events.                                        |
+| `focusWithin`       | `focusWithin(target?)`       | `Signal<boolean>`                                         | Mirrors the `:focus-within` CSS pseudo-class.                                                                  |
 
 Element-targeting sensors (`elementSize`, `elementVisibility`, `focusWithin`, `pointerDrag`) default `target` to `inject(ElementRef)` so they're drop-in inside a component.
 

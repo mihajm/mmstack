@@ -25,6 +25,7 @@ const clientWrite = (
   ops: OpEnvelope['ops'],
 ): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
+  instance: '',
   origin,
   writer: origin,
   version: 1,

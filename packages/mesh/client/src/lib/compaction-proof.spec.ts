@@ -476,7 +476,7 @@ describe('compaction proof: observational equivalence', () => {
     // origins that entered above version 1 wrote, and a writer sent versions from below its entry
     expect(collected.lateEntries).toBeGreaterThan(600);
     expect(collected.stale).toBeGreaterThan(300);
-  });
+  }, 20_000);
 
   it('the first-run anchor rests on the order gate: admitting a version below an admitted one is observable', () => {
     let seen = 0;

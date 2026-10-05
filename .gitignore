@@ -56,3 +56,6 @@ test-results
 
 # agent instructions stay on the private side, same as idea/
 /CLAUDE.md
+
+# vitest 5 artifact root (attachments, blob/json/junit reports)
+.vitest

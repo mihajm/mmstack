@@ -6,8 +6,8 @@ import {
   type TemplateRef,
   type Type,
 } from '@angular/core';
-import { pointerOutsideOfPreview } from '@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview';
-import { setCustomNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview';
+import { pointerOutsideOfPreview } from '@atlaskit/pragmatic-drag-and-drop/utils/pointer-outside-of-preview';
+import { setCustomNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/utils/set-custom-native-drag-preview';
 
 /** Where to anchor the preview relative to the pointer: a fixed `{x,y}` offset, or `'pointer-outside'` to sit just off the cursor. */
 export type PreviewOffset = 'pointer-outside' | { x: number; y: number };

@@ -293,9 +293,9 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
   const logProcessor =
     config.logProcessor ??
     (base
-      ? new SimpleLogRecordProcessor(
-          new OTLPLogExporter({ url: `${base}/v1/logs`, headers }),
-        )
+      ? new SimpleLogRecordProcessor({
+          exporter: new OTLPLogExporter({ url: `${base}/v1/logs`, headers }),
+        })
       : null);
   if (logProcessor) {
     const loggerProvider = new LoggerProvider({ processors: [logProcessor] });

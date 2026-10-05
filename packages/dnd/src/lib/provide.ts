@@ -66,7 +66,8 @@ export const DND_CONFIG = new InjectionToken<DndConfig>('@mmstack/dnd:config');
  *
  * @example
  * ```ts
- * import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+ * import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+ * import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
  * import { autoScrollForElements } from '@atlaskit/pragmatic-drag-and-drop-auto-scroll/element';
  *
  * bootstrapApplication(App, {

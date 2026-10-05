@@ -84,7 +84,7 @@ describe('@mmstack/telemetry-otel', () => {
 
   it('emits a log record with mapped severity, body, and attributes', () => {
     const exporter = new InMemoryLogRecordExporter();
-    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor(exporter) });
+    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor({ exporter }) });
     TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
     TestBed.inject(TELEMETRY).log('error', 'disk full', { device: 'sda1' });
 
@@ -175,7 +175,7 @@ describe('@mmstack/telemetry-otel', () => {
 
   it('maps every LogSeverity tier to the matching SeverityNumber', () => {
     const exporter = new InMemoryLogRecordExporter();
-    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor(exporter) });
+    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor({ exporter }) });
     TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
     const telemetry = TestBed.inject(TELEMETRY);
 

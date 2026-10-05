@@ -4,7 +4,7 @@ Signals-first drag & drop for Angular. Make any element draggable or a drop targ
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mihajm/mmstack/blob/master/packages/dnd/LICENSE)
 
-Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atlaskit/pragmatic-drag-and-drop) (v2) for the native engine; the pointer engine, sortable/FLIP, keyboard a11y, and the optional plugins are all first-party.
+Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atlaskit/pragmatic-drag-and-drop) (v4) for the native engine; the pointer engine, sortable/FLIP, keyboard a11y, and the optional plugins are all first-party.
 
 ## Highlights
 
@@ -32,6 +32,8 @@ npm install @atlaskit/pragmatic-drag-and-drop-hitbox       # edge detection
 npm install @atlaskit/pragmatic-drag-and-drop-auto-scroll  # auto-scroll
 npm install @atlaskit/pragmatic-drag-and-drop-flourish     # post-move flash
 ```
+
+The sub-libraries list the core package as a regular dependency rather than a peer. If the versions you install disagree on a core major, your package manager nests a second copy of the core under the sub-library. The two copies share no state, so auto-scroll registered through the nested copy never sees your drags. Install the core and the sub-libraries within the ranges this package declares as peers and you get a single copy.
 
 ## Quick start
 
@@ -693,7 +695,7 @@ Reorderable logic is testable without a DOM: `reorderable(signal, opts)` is a pu
 
 ### Vitest consumers: inline `@mmstack/dnd` + `@atlaskit/*`
 
-`@atlaskit/pragmatic-drag-and-drop 2.0.1` ships **without an `exports` map** — its subpaths (`element/adapter`, `element/set-custom-native-drag-preview`, …) are the legacy folder-with-`package.json` kind. Vitest externalizes `node_modules` by default and loads externalized packages with **Node's ESM resolver**, which refuses directory imports — so the first spec that touches this package fails with `ERR_UNSUPPORTED_DIR_IMPORT` (surfacing as `EISDIR` in some setups). Tell Vitest to inline both families, so Vite's resolver — which understands the legacy layout — processes them instead:
+`@atlaskit/pragmatic-drag-and-drop 4.0.0` ships **without an `exports` map** — its subpaths (`adapter/element-adapter`, `utils/set-custom-native-drag-preview`, …) are the legacy folder-with-`package.json` kind. Vitest externalizes `node_modules` by default and loads externalized packages with **Node's ESM resolver**, which refuses directory imports — so the first spec that touches this package fails with `ERR_UNSUPPORTED_DIR_IMPORT` (surfacing as `EISDIR` in some setups). Tell Vitest to inline both families, so Vite's resolver — which understands the legacy layout — processes them instead:
 
 ```ts
 // vitest.config.ts

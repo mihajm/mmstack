@@ -14,10 +14,8 @@ import {
 } from '@angular/router';
 import { provideDnd } from '@mmstack/dnd';
 import { edgeAutoScroll } from '@mmstack/dnd/plugins';
-import {
-  attachClosestEdge,
-  extractClosestEdge,
-} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
 import {
   PreloadStrategy,
   provideNavConfig,

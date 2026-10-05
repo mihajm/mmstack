@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { boxData } from '../internal/payload';
 import { type HitboxPlugin } from '../provide';
@@ -16,7 +16,7 @@ const draggableMock = vi.fn();
 const draggableCleanup = vi.fn();
 const dropTargetMock = vi.fn();
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   draggable: (config: DraggableConfig) => {
     draggableMock(config);
     return draggableCleanup;

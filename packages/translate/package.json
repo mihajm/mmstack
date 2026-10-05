@@ -18,7 +18,7 @@
     "@angular/core": ">=22 <23",
     "@angular/router": ">=22 <23",
     "@angular/common": ">=22 <23",
-    "@formatjs/intl": "^4.1.0",
+    "@formatjs/intl": "^6.0.0",
     "rxjs": "^7.8.2"
   },
   "homepage": "https://github.com/mihajm/mmstack/blob/master/packages/translate",

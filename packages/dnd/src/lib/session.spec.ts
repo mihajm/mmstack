@@ -7,7 +7,7 @@ import {
 import { TestBed } from '@angular/core/testing';
 import { trackRuns } from './testing/reactivity';
 import { makeDragSession } from './testing/drag-session';
-import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { DndPointerEngine } from './element/pointer-engine';
 import { DndSession, injectDndActive, provideDndSession } from './session';
@@ -21,7 +21,7 @@ type MonitorEvent = Parameters<NonNullable<MonitorConfig['onDrag']>>[0];
 let monitorConfig: MonitorConfig | undefined;
 let monitorCalls = 0;
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   monitorForElements: (config: MonitorConfig) => {
     monitorConfig = config;
     monitorCalls++;

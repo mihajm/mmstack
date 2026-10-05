@@ -10,7 +10,7 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { DndPointerEngine } from './element/pointer-engine';
 

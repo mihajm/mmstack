@@ -1,4 +1,4 @@
-import type { Key, OpEnvelope, StoreOp } from './wire';
+import type { Key, OpEnvelope, StoreOp, SyncSibling } from './wire';
 
 /**
  * The principal behind a connection, as authenticated by the adapter. `kind` distinguishes non-human peers: an agent is a user, just one
@@ -97,6 +97,16 @@ export type OpPolicy = {
 export type PolicyRoomInfo = {
   /** The room's sequence before this envelope is sequenced; `0` on an empty room. */
   readonly seq: number;
+  /**
+   * The live siblings the relay retains at `path` before this envelope: what the register
+   * holds, unfolded. A rule that must know what is at a path (who holds a record before a
+   * takeover) reads this instead of the op's own `prev`, which is the writer's claim. With more
+   * than one live sibling the path is in conflict and the rule must hold for each of them;
+   * refuse when any one would make the write illegitimate. Relay-side only: the emit-side check
+   * leaves it out, so a rule treats its absence the way it treats a lagging `seq` — at worst more
+   * permissive there, never enforcement.
+   */
+  readonly siblings?: (path: readonly Key[]) => readonly SyncSibling[];
 };
 
 export type PolicyViolation = {

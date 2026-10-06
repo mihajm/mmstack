@@ -793,9 +793,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   ? { writer: ctx.writer, reason: 'ops-limit' }
                   : overRate(room, ctx.writer)
                     ? { writer: ctx.writer, reason: 'rate' }
-                    : checkEnvelope(opt.policy, env, ctx, msg.room, {
-                        seq: room.seq, // before this envelope is sequenced: 0 on an empty room
-                      });
+                    : env.writer !== ctx.writer
+                      ? { writer: ctx.writer, reason: 'writer-mismatch' }
+                      : null;
           if (violation) {
             eject(msg.room, room, member, violation);
             return;
@@ -830,13 +830,20 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // below the maximum yet never admitted: not a loss in transit on one FIFO connection
           // with in-order resend, so a configuration that violates that assumption
           if (ranges && env.version < ranges.max()) return refuse('order');
-          // after the refusals: a refused envelope never ingests, so its epochs and cites gate
-          // nothing (an outdated client stays outdated, not ejected)
-          const admission = checkAdmission(msg.room, room, env, ctx, {
-            seq: room.seq,
-          });
-          if (admission) {
-            eject(msg.room, room, member, admission);
+          // after the refusals: a refused envelope never ingests, so neither its epochs and cites
+          // nor the room state a rule reads gate anything. The policy runs here too, not with the
+          // shape checks above: a resend of an admitted write is acknowledged as a duplicate, never
+          // judged again against a room that has moved on since (an outdated client stays
+          // outdated, not ejected)
+          const info: PolicyRoomInfo = {
+            seq: room.seq, // before this envelope is sequenced: 0 on an empty room
+            siblings: (path) => room.registers.siblings(path),
+          };
+          const judged =
+            checkEnvelope(opt.policy, env, ctx, msg.room, info) ??
+            checkAdmission(msg.room, room, env, ctx, info);
+          if (judged) {
+            eject(msg.room, room, member, judged);
             return;
           }
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };

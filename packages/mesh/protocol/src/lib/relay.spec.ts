@@ -27,6 +27,7 @@ vi.mock('./register', async (importOriginal) => {
 
 import {
   createRelay,
+  type Relay,
   type RelayConnection,
   type RelaySocket,
   type RoomSnapshot,
@@ -43,6 +44,7 @@ import {
   type SeqEnvelope,
   type ServerMsg,
   type SyncOp,
+  type StoreOp,
 } from './wire';
 
 function socket() {
@@ -1388,6 +1390,38 @@ describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
     ops,
   });
 
+  it('siblings: the live ones at a path, none that a citation superseded, none where nothing is retained', () => {
+    const store = createRegisterStore();
+    store.ingest(rEnv('oa', [set(['doc'], 'a')], 1));
+    store.ingest(rEnv('ob', [set(['doc'], 'b')], 2)); // concurrent with oa: both live
+    const seen = (path: string[]) =>
+      store
+        .siblings(path)
+        .map((s) => [s.origin, s.kind === 'set' ? s.value : s.kind])
+        .sort();
+    expect(seen(['doc'])).toEqual([
+      ['oa', 'a'],
+      ['ob', 'b'],
+    ]);
+    // oc cites oa's dot: oa's sibling is superseded and leaves the live set; ob's stays
+    store.ingest(
+      rEnv('oc', [set(['doc'], 'c', { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] })], 3),
+    );
+    expect(seen(['doc'])).toEqual([
+      ['ob', 'b'],
+      ['oc', 'c'],
+    ]);
+    // a delete is a live sibling too, carried with its kind
+    store.ingest(
+      rEnv('od', [del(['doc'], 'c', { cites: [{ origin: 'oc', hlc: { p: 3, l: 0 } }] })], 4),
+    );
+    expect(seen(['doc'])).toEqual([
+      ['ob', 'b'],
+      ['od', 'delete'],
+    ]);
+    expect(store.siblings(['elsewhere'])).toEqual([]);
+  });
+
   it('maxEpoch spans ALL retained siblings — a superseded bump still counts within the retention window — and is 0 where nothing is retained', () => {
     const store = createRegisterStore();
     store.ingest(rEnv('oa', [set(['doc'], 'v', { epoch: 5 })], 1));
@@ -2358,6 +2392,38 @@ describe('createRelay: refusals answered with a drop', () => {
     expect(b.sock.sent.filter((m) => m.t === 'env').length).toBe(echoed);
   });
 
+  it('a resend of an admitted write is still "duplicate" once the room has moved on — the policy judges after the refusals, never an honest retry', () => {
+    // an agent may take a record from nobody or from another client, never from a person
+    const relay = createRelay({
+      policy: {
+        validate: (op: StoreOp, ctx: PrincipalCtx, _room: string, info?: PolicyRoomInfo) =>
+          ctx.kind !== 'agent' ||
+          op.kind !== 'set' ||
+          op.path.join('/') !== 'wp/assignee' ||
+          (info?.siblings?.(op.path) ?? []).every(
+            (s) => s.kind !== 'set' || (s.value as { kind?: string } | null)?.kind !== 'human',
+          ),
+      },
+    });
+    const human = client(relay, 'wh', 'oh', { kind: 'human' });
+    human.hello();
+    human.env([set([], { wp: { assignee: null } })]);
+    const agent = client(relay, 'wa', 'oa', { kind: 'agent' });
+    agent.hello();
+    agent.env([set(['wp', 'assignee'], { kind: 'client', writer: 'wa' })]); // nobody held it: admitted
+    expect(agent.sock.closed).toBe(false);
+    human.env([set(['wp', 'assignee'], { kind: 'human', writer: 'wh' })]); // a person takes it
+    // the agent lost its acknowledgement and resends verbatim; the register now holds a person,
+    // so a rule that ran before the duplicate check would eject this honest retry
+    agent.env([set(['wp', 'assignee'], { kind: 'client', writer: 'wa' })], {
+      version: 1,
+      hlc: { p: 1, l: 0 },
+    });
+    expect(dropsTo(agent.sock).map((d) => d.reason)).toEqual(['duplicate']);
+    expect(agent.sock.closed).toBe(false);
+    expect(relay.room('r')?.seq).toBe(3);
+  });
+
   it('an envelope from another generation is refused "generation" before any other evidence answers', () => {
     const reasons: string[] = [];
     const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
@@ -2488,6 +2554,49 @@ describe('createRelay: the room sequence reaches the policy', () => {
     expect(relay.room('r')?.seq).toBe(3);
   });
 
+  it('siblings hand a rule what the relay holds at a path, so an op cannot talk its way past with its own prev', () => {
+    // an agent may take a record from nobody or from another client, never from a person; the
+    // rule reads the relay's register, not the op's claim of what it saw
+    const holderPolicy = {
+      validate: (op: StoreOp, ctx: PrincipalCtx, _room: string, info?: PolicyRoomInfo) => {
+        if (ctx.kind !== 'agent' || op.kind !== 'set') return true;
+        if (op.path.join('/') !== 'wp/assignee') return true;
+        return (info?.siblings?.(op.path) ?? []).every(
+          (s) => s.kind !== 'set' || (s.value as { kind?: string } | null)?.kind !== 'human',
+        );
+      },
+    };
+    const held = (by: unknown) => {
+      const relay = createRelay({ policy: holderPolicy });
+      const human = client(relay, 'wh', 'oh', { kind: 'human' });
+      human.hello();
+      human.env([set([], { wp: { assignee: null } })]);
+      human.env([set(['wp', 'assignee'], by)]);
+      expect(human.sock.closed).toBe(false);
+      const agent = client(relay, 'wa', 'oa', { kind: 'agent' });
+      agent.hello();
+      // the op's own prev claims nobody holds it, whatever the register says
+      agent.env([
+        {
+          kind: 'set',
+          path: ['wp', 'assignee'],
+          next: { kind: 'client', writer: 'wa' },
+          prev: null,
+          cites: [],
+          epoch: 0,
+        },
+      ]);
+      return agent;
+    };
+
+    const fromPerson = held({ kind: 'human', writer: 'wh' });
+    expect(last(fromPerson.sock)).toMatchObject({ t: 'eject', reason: 'validate' });
+    expect(fromPerson.sock.closed).toBe(true);
+
+    const fromClient = held({ kind: 'client', writer: 'wx' });
+    expect(fromClient.sock.closed).toBe(false);
+  });
+
   it('canBump sees the room sequence too', () => {
     const seen: number[] = [];
     const relay = createRelay({
@@ -2546,7 +2655,7 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
     const join = (origin: string) => {
       const got: ServerMsg[] = [];
       const conn = relay.connect(
-        { send: (m) => got.push(m), close: () => undefined },
+        { send: (m: ServerMsg) => got.push(m), close: () => undefined },
         {
           writer: origin,
         },
@@ -2579,7 +2688,7 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
     const join = (origin: string) => {
       const got: ServerMsg[] = [];
       const conn = relay.connect(
-        { send: (m) => got.push(m), close: () => undefined },
+        { send: (m: ServerMsg) => got.push(m), close: () => undefined },
         {
           writer: origin,
         },
@@ -2603,9 +2712,9 @@ describe('createRelay: a late joiner holds a waiting envelope once', () => {
     a.conn.receive({ t: 'env', room: 'r', env: envelope(relay, 'a', 1, 'x') });
 
     expect(countOf(a.got, 1)).toBe(1);
-    expect(c).toBeDefined();
-    expect(countOf(c!.got, 1)).toBe(1);
-    expect(c!.got.filter((m) => m.t === 'env')).toHaveLength(0);
+    if (c === undefined) throw new Error('the late member never joined');
+    expect(countOf(c.got, 1)).toBe(1);
+    expect(c.got.filter((m) => m.t === 'env')).toHaveLength(0);
   });
 });
 

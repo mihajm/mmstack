@@ -108,11 +108,15 @@ function relayModel(journalLimit: number) {
     },
     ingest: (m: string, env: Env) => {
       const reply = (msg: Msg) => inboxes.get(m)?.push(msg);
-      if (env.instance !== instance)
-        return reply({ t: 'drop', instance, id: env.id, reason: 'generation' });
+      if (env.instance !== instance) {
+        reply({ t: 'drop', instance, id: env.id, reason: 'generation' });
+        return;
+      }
       const set = ranges.get(env.origin) ?? new Set<number>();
-      if (set.has(env.version))
-        return reply({ t: 'drop', instance, id: env.id, reason: 'duplicate' });
+      if (set.has(env.version)) {
+        reply({ t: 'drop', instance, id: env.id, reason: 'duplicate' });
+        return;
+      }
       set.add(env.version);
       ranges.set(env.origin, set);
       const s: SeqEnv = { ...env, seq: ++seq };

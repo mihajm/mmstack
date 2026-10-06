@@ -46,6 +46,14 @@ export type RegisterStore = {
   /** Drop all register state (a migration establishes a fresh retention window). */
   reset(): void;
   /**
+   * The live retained siblings at `path`: every origin's best op there that no citation has
+   * superseded, in no particular order. This is the register as the relay holds it, UNFOLDED:
+   * two live siblings are a conflict the clients resolve, not a value. An admission rule that
+   * reads it must hold for every sibling it could be looking at (refuse when any one would make
+   * the write illegitimate), never pick a winner. Empty where nothing is retained.
+   */
+  siblings(path: readonly Key[]): readonly SyncSibling[];
+  /**
    * The max epoch across ALL retained siblings at `path` (0 when nothing is retained): the
    * room's observed epoch, the baseline an admission gate compares an incoming op's epoch
    * against. Superseded siblings count too, so a carry that superseded the
@@ -194,6 +202,17 @@ export function createRegisterStore(): RegisterStore {
     reset: () => {
       registers.clear();
       epochs.clear();
+    },
+
+    siblings: (path) => {
+      const reg = registers.get(keyOf(path));
+      if (!reg) return [];
+      const live: SyncSibling[] = [];
+      for (const s of reg.siblings.values()) {
+        const w = reg.water.get(s.origin);
+        if (!w || compareHlc(s.hlc, w) > 0) live.push(s);
+      }
+      return live;
     },
 
     maxEpoch: (path) => {

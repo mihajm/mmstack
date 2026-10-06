@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  inject,
   PLATFORM_ID,
   type ResourceRef,
   type ResourceStatus,
@@ -14,12 +15,15 @@ import {
   activeTransaction,
   createTransaction,
   injectStartTransaction,
+  type Transaction,
+  transactional,
 } from './transaction';
 import {
   createTransitionScope,
   injectTransitionScope,
   provideTransitionScope,
 } from './transition-scope';
+import { holdRegistrySize } from './hold-seed';
 
 type FakeRef = ResourceRef<unknown> & {
   status: WritableSignal<ResourceStatus>;
@@ -426,5 +430,721 @@ describe('recording mutable signals', () => {
     expect(host.scope.resources()).toContain(first);
     expect(host.scope.resources()).toContain(second);
     expect(host.scope.pending()).toBe(true);
+  });
+});
+
+describe('retain: the continuous hold', () => {
+  const flush = async (fixture: { detectChanges(): void }) => {
+    for (let i = 0; i < 4; i++) {
+      fixture.detectChanges();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r));
+    }
+    fixture.detectChanges();
+  };
+
+  it('a retain keeps a no-async transaction open past the first render until released', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    expect(host.display()).toBe(1);
+
+    let release!: () => void;
+    const t = host.start((tx) => {
+      host.write(2);
+      release = tx.retain();
+    });
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+    await flush(fixture);
+
+    expect(resolved).toBe(false);
+    expect(host.scope.holding()).toBe(true);
+    expect(host.display()).toBe(1); // still held past the render that used to commit it
+
+    release();
+    release(); // idempotent
+    await flush(fixture);
+    expect(resolved).toBe(true);
+    expect(host.scope.holding()).toBe(false);
+    expect(host.display()).toBe(2);
+  });
+
+  it('every retain must be released; attributed pending and retains compose', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    expect(host.display()).toBe(1); // baseline read before the txn
+    const releases: (() => void)[] = [];
+    const t = host.start((tx) => {
+      host.write(2);
+      releases.push(tx.retain(), tx.retain());
+      host.ref.status.set('loading');
+    });
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+
+    host.ref.status.set('resolved'); // the load drains, two retains still open
+    await flush(fixture);
+    releases[0]();
+    await flush(fixture);
+    expect([resolved, host.display()]).toEqual([false, 1]);
+
+    releases[1]();
+    await flush(fixture);
+    expect([resolved, host.display()]).toEqual([true, 2]);
+  });
+
+  it('abort ignores open retains: restores, releases and settles at once', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    let tx!: Transaction;
+    const t = host.start((x) => {
+      tx = x;
+      host.write(2);
+      x.retain();
+    });
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+    t.abort();
+    await flush(fixture);
+    expect([resolved, host.state(), host.scope.holding(), tx.closed]).toEqual([
+      true,
+      1,
+      false,
+      true,
+    ]);
+    expect(() => tx.retain()).toThrow('closed transaction');
+  });
+
+  it('a retain held across an await: enter records the late write into the same transaction', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    expect(host.display()).toBe(1); // baseline read before the txn
+    let tx!: Transaction;
+    let release!: () => void;
+    const t = host.start((x) => {
+      tx = x;
+      release = x.retain();
+    });
+    await flush(fixture);
+    tx.enter(() => host.write(3)); // the slice after the await
+    expect(host.display()).toBe(1);
+    t.abort();
+    release();
+    await flush(fixture);
+    expect(host.state()).toBe(1); // the late write was recorded and undone
+  });
+
+  it('on the server a retain defers the commit to its release', async () => {
+    const { fixture } = await render(Host, {
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const host = fixture.componentInstance;
+    let release!: () => void;
+    const t = host.start((tx) => {
+      host.write(5);
+      release = tx.retain();
+    });
+    let resolved = false;
+    void t.done.then(() => (resolved = true));
+    await flush(fixture);
+    expect(resolved).toBe(false);
+    release();
+    await flush(fixture);
+    expect(resolved).toBe(true);
+    expect(host.display()).toBe(5);
+  });
+});
+
+describe('slice claims through startTransaction', () => {
+  it('a load started inside A body is A own work, not B, though B started first', async () => {
+    const { fixture } = await render(Host);
+    const host = fixture.componentInstance;
+    const loads = signal(0);
+    const res = Object.assign(makeRef('resolved'), { loads });
+    host.scope.add(res, { suspends: false });
+    const kickoff = () => {
+      res.status.set('loading');
+      loads.update((n) => n + 1);
+    };
+
+    let bTx!: Transaction;
+    const b = host.start((tx) => {
+      bTx = tx;
+      tx.retain();
+    });
+    const a = host.start(() => kickoff());
+    expect([a.pending(), b.pending()]).toEqual([true, false]);
+
+    // a later kickoff inside B's re-entered slice is B's, and still not A's after A settles
+    res.status.set('resolved');
+    fixture.detectChanges();
+    bTx.enter(kickoff);
+    expect([a.pending(), b.pending()]).toEqual([false, true]);
+
+    // outside any slice: started since both checkpoints, so both see it
+    res.status.set('resolved');
+    kickoff();
+    expect([a.pending(), b.pending()]).toEqual([true, true]);
+    b.abort();
+    a.abort();
+  });
+});
+
+// ─── mid-hold readers: seeded from the ledger ──────────────────────────────────────────
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'seed-child',
+  template: `{{ view() }}`,
+})
+class SeedChild {
+  private readonly host = inject(SeedHost);
+  private readonly scope = injectTransitionScope();
+  readonly count = this.scope.hold(this.host.count);
+  readonly plain = this.scope.hold(this.host.plain);
+  runs = 0;
+  readonly view = computed(() => {
+    this.runs++;
+    return `${this.count()}|${this.plain()}`;
+  });
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'seed-host',
+  imports: [SeedChild],
+  template: `@if (show()) {
+    <seed-child />
+  }`,
+  providers: [provideTransitionScope()],
+})
+class SeedHost {
+  readonly scope = injectTransitionScope();
+  readonly start = injectStartTransaction();
+  readonly ref = makeRef('resolved');
+  readonly count = transactional(signal(1));
+  readonly plain = signal(10);
+  readonly show = signal(false);
+  /** a held reader that existed before any transaction: the rest of the page */
+  readonly page = this.scope.hold(this.count);
+  constructor() {
+    this.scope.add(this.ref, { suspends: false });
+  }
+}
+
+describe('a view mounted while a transaction holds', () => {
+  const flush = async (fixture: { detectChanges(): void }) => {
+    for (let i = 0; i < 4; i++) {
+      fixture.detectChanges();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r));
+    }
+    fixture.detectChanges();
+  };
+  const text = (el: HTMLElement) => el.textContent?.trim() ?? '';
+
+  it('shows the pre-transaction value of a recorded signal, the live value of an unrecorded one, and reveals live at commit', async () => {
+    const { fixture, container } = await render(SeedHost);
+    const host = fixture.componentInstance;
+    expect(host.page()).toBe(1);
+
+    host.start(() => {
+      host.count.set(2);
+      host.plain.set(11); // not recorded: the documented limit
+      host.ref.status.set('loading');
+    });
+    host.show.set(true);
+    await flush(fixture);
+    const child = fixture.debugElement.children[0]
+      .componentInstance as SeedChild;
+    expect([text(container), host.page(), child.runs]).toEqual(['1|11', 1, 1]);
+
+    host.count.set(3); // a later live write while held: no recomputation of the view
+    await flush(fixture);
+    expect([text(container), child.runs]).toEqual(['1|11', 1]);
+
+    host.ref.status.set('resolved');
+    await flush(fixture);
+    expect([text(container), host.page(), child.runs]).toEqual(['3|11', 3, 2]);
+  });
+
+  it('across an abort the mounted view shows the pre value throughout: no flash, no recomputation', async () => {
+    const { fixture, container } = await render(SeedHost);
+    const host = fixture.componentInstance;
+    expect(host.page()).toBe(1);
+
+    const t = host.start(() => {
+      host.count.set(2);
+      host.ref.status.set('loading');
+    });
+    host.show.set(true);
+    await flush(fixture);
+    const child = fixture.debugElement.children[0]
+      .componentInstance as SeedChild;
+    const frames = [text(container)];
+    t.abort();
+    frames.push(text(container));
+    await flush(fixture);
+    frames.push(text(container));
+    expect([frames, host.count(), host.scope.holding(), child.runs]).toEqual([
+      ['1|10', '1|10', '1|10'],
+      1,
+      false,
+      1,
+    ]);
+  });
+
+  it('two holding transactions: the first recorded write gives the pre', async () => {
+    const { fixture, container } = await render(SeedHost);
+    const host = fixture.componentInstance;
+    expect(host.page()).toBe(1);
+    const releases: (() => void)[] = [];
+    host.start((tx) => {
+      host.count.set(2);
+      releases.push(tx.retain());
+    });
+    host.start((tx) => {
+      host.count.set(3);
+      releases.push(tx.retain());
+    });
+    host.show.set(true);
+    await flush(fixture);
+    expect([text(container), host.page()]).toEqual(['1|10', 1]);
+    releases[0]();
+    await flush(fixture);
+    expect([text(container), host.scope.holding()]).toEqual(['1|10', true]);
+    releases[1]();
+    await flush(fixture);
+    expect([text(container), host.page()]).toEqual(['3|10', 3]);
+  });
+
+  it('cross-order: the older transaction records over a younger one; the seed is still the value before both', async () => {
+    const { fixture, container } = await render(SeedHost);
+    const host = fixture.componentInstance;
+    expect(host.page()).toBe(1);
+    let older!: Transaction;
+    const releases: (() => void)[] = [];
+    host.start((tx) => {
+      older = tx;
+      releases.push(tx.retain());
+    });
+    host.start((tx) => {
+      host.count.set(2);
+      releases.push(tx.retain());
+    });
+    older.enter(() => host.count.set(3));
+    host.show.set(true);
+    await flush(fixture);
+    expect([text(container), host.page()]).toEqual(['1|10', 1]);
+    releases.forEach((r) => r());
+    await flush(fixture);
+    expect(text(container)).toBe('3|10');
+  });
+
+  it('a transaction that settled inside the hold still seeds until the hold ends; after it, a new reader reads live', async () => {
+    const { fixture, container } = await render(SeedHost);
+    const host = fixture.componentInstance;
+    expect(host.page()).toBe(1);
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    host.start((tx) => {
+      host.count.set(2);
+      releaseA = tx.retain();
+    });
+    host.start((tx) => {
+      releaseB = tx.retain(); // holds, records nothing
+    });
+    releaseA();
+    await flush(fixture);
+    expect(host.scope.holding()).toBe(true);
+    host.show.set(true);
+    await flush(fixture);
+    // A committed, B still holds: the new view joins the held page
+    expect([text(container), host.page()]).toEqual(['1|10', 1]);
+    releaseB();
+    host.show.set(false);
+    await flush(fixture);
+    host.show.set(true);
+    await flush(fixture);
+    expect([text(container), host.page(), host.scope.holding()]).toEqual([
+      '2|10',
+      2,
+      false,
+    ]);
+  });
+});
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'nested-boundary',
+  template: ``,
+  providers: [provideTransitionScope()],
+})
+class NestedBoundary {
+  readonly scope = injectTransitionScope();
+  readonly ref = makeRef('resolved');
+  constructor() {
+    this.scope.add(this.ref, { suspends: false });
+  }
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'outer-page',
+  imports: [NestedBoundary],
+  template: `<nested-boundary />`,
+  providers: [provideTransitionScope()],
+})
+class OuterPage {
+  readonly scope = injectTransitionScope();
+  readonly start = injectStartTransaction();
+  readonly ref = makeRef('resolved');
+  constructor() {
+    this.scope.add(this.ref, { suspends: false });
+  }
+}
+
+describe('a hold on a scope holds the scopes created inside it', () => {
+  it('a nested boundary scope reports holding while the page holds; its pending stays its own', async () => {
+    const { fixture } = await render(OuterPage);
+    const page = fixture.componentInstance;
+    const nested = fixture.debugElement.children[0]
+      .componentInstance as NestedBoundary;
+    expect([nested.scope.holding(), nested.scope.pending()]).toEqual([
+      false,
+      false,
+    ]);
+
+    let release!: () => void;
+    page.start((tx) => {
+      release = tx.retain();
+    });
+    page.ref.status.set('loading');
+    expect([
+      page.scope.holding(),
+      nested.scope.holding(),
+      page.scope.pending(),
+      nested.scope.pending(),
+    ]).toEqual([true, true, true, false]);
+
+    nested.ref.status.set('loading');
+    page.ref.status.set('resolved');
+    expect([nested.scope.pending(), page.scope.pending()]).toEqual([
+      true,
+      false,
+    ]);
+
+    release();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect([page.scope.holding(), nested.scope.holding()]).toEqual([
+      false,
+      false,
+    ]);
+    nested.ref.status.set('resolved');
+  });
+
+  it('a hold on the nested scope does not hold the page', async () => {
+    const { fixture } = await render(OuterPage);
+    const page = fixture.componentInstance;
+    const nested = fixture.debugElement.children[0]
+      .componentInstance as NestedBoundary;
+    nested.scope.beginHold();
+    expect([page.scope.holding(), nested.scope.holding()]).toEqual([
+      false,
+      true,
+    ]);
+    nested.scope.endHold();
+  });
+});
+
+// ─── seeds across scopes and hold episodes ─────────────────────────────────────────────
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'chain-reader',
+  template: `{{ view() }}`,
+})
+class ChainReader {
+  readonly shown = injectTransitionScope().hold(inject(ChainPage).s);
+  runs = 0;
+  readonly view = computed(() => {
+    this.runs++;
+    return `r:${this.shown()}`;
+  });
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'chain-boundary',
+  imports: [ChainReader],
+  template: `@if (show()) {
+    <chain-reader />
+  }`,
+  providers: [provideTransitionScope()],
+})
+class ChainBoundary {
+  readonly scope = injectTransitionScope();
+  readonly start = injectStartTransaction();
+  readonly show = signal(false);
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'chain-page',
+  imports: [ChainBoundary],
+  template: `<chain-boundary />`,
+  providers: [provideTransitionScope()],
+})
+class ChainPage {
+  readonly scope = injectTransitionScope();
+  readonly start = injectStartTransaction();
+  readonly s = transactional(signal(1));
+  readonly page = this.scope.hold(this.s);
+}
+
+describe('seeds across scopes and hold episodes', () => {
+  const flush = async (fixture: { detectChanges(): void }) => {
+    for (let i = 0; i < 4; i++) {
+      fixture.detectChanges();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r));
+    }
+    fixture.detectChanges();
+  };
+  const setup = async () => {
+    const r = await render(ChainPage);
+    const page = r.fixture.componentInstance;
+    const boundary = r.fixture.debugElement.children[0]
+      .componentInstance as ChainBoundary;
+    expect(page.page()).toBe(1);
+    return { ...r, page, boundary };
+  };
+  const text = (el: HTMLElement) => el.textContent?.trim() ?? '';
+
+  it('a transaction on the child scope that settles under the page hold still seeds a reader mounted after it; the page release reveals live', async () => {
+    const { fixture, container, page, boundary } = await setup();
+    let releasePage!: () => void;
+    page.start((tx) => {
+      releasePage = tx.retain();
+    });
+    const t = boundary.start(() => page.s.set(2)); // the child scope's own transaction
+    let settled = false;
+    void t.done.then(() => (settled = true));
+    await flush(fixture);
+    expect([
+      settled,
+      page.scope.holding(),
+      boundary.scope.holding(),
+      page.s(),
+    ]).toEqual([true, true, true, 2]);
+
+    boundary.show.set(true);
+    await flush(fixture);
+    const reader = fixture.debugElement.query(
+      (d) => d.componentInstance instanceof ChainReader,
+    ).componentInstance as ChainReader;
+    expect([text(container), page.page(), reader.runs]).toEqual(['r:1', 1, 1]);
+
+    releasePage();
+    await flush(fixture);
+    expect([
+      text(container),
+      page.page(),
+      boundary.scope.holding(),
+      reader.runs,
+    ]).toEqual(['r:2', 2, false, 2]);
+  });
+
+  it('a later hold never seeds from an earlier one: the second episode seeds from its own transaction', async () => {
+    const { fixture, container, page, boundary } = await setup();
+    // episode 1: the page holds, a child transaction X writes 1 → 2 and settles under it
+    let releasePage!: () => void;
+    page.start((tx) => {
+      releasePage = tx.retain();
+    });
+    boundary.start(() => page.s.set(2));
+    await flush(fixture);
+    releasePage();
+    await flush(fixture);
+    expect([page.page(), page.scope.holding()]).toEqual([2, false]);
+
+    // episode 2: the page holds again, Y writes 2 → 3; X's kept seed (pre 1) must not win
+    let releaseY!: () => void;
+    page.start((tx) => {
+      page.s.set(3);
+      releaseY = tx.retain();
+    });
+    boundary.show.set(true);
+    await flush(fixture);
+    expect([text(container), page.page()]).toEqual(['r:2', 2]);
+    releaseY();
+    await flush(fixture);
+    expect(text(container)).toBe('r:3');
+  });
+
+  it('after a hold ends, a new hold that records nothing seeds nothing: a reader mounted in it reads live', async () => {
+    const { fixture, container, page, boundary } = await setup();
+    let release!: () => void;
+    boundary.start((tx) => {
+      page.s.set(2);
+      release = tx.retain();
+    });
+    await flush(fixture);
+    release();
+    await flush(fixture);
+    expect(boundary.scope.holding()).toBe(false);
+
+    let releaseAgain!: () => void;
+    boundary.start((tx) => {
+      releaseAgain = tx.retain();
+    });
+    boundary.show.set(true);
+    await flush(fixture);
+    expect([text(container), boundary.scope.holding()]).toEqual(['r:2', true]);
+    releaseAgain();
+    await flush(fixture);
+    expect(text(container)).toBe('r:2');
+  });
+});
+
+describe('after every hold in the tree ends', () => {
+  it('a reader mounted then reads live and the registry is empty', async () => {
+    const r = await render(ChainPage);
+    const page = r.fixture.componentInstance;
+    const boundary = r.fixture.debugElement.children[0]
+      .componentInstance as ChainBoundary;
+    const flush = async () => {
+      for (let i = 0; i < 4; i++) {
+        r.fixture.detectChanges();
+        await Promise.resolve();
+        await new Promise((res) => setTimeout(res));
+      }
+      r.fixture.detectChanges();
+    };
+    expect(page.page()).toBe(1);
+    let releasePage!: () => void;
+    let releaseChild!: () => void;
+    page.start((tx) => {
+      page.s.set(2);
+      releasePage = tx.retain();
+    });
+    boundary.start((tx) => {
+      page.s.set(3);
+      releaseChild = tx.retain();
+    });
+    expect(holdRegistrySize()).toBeGreaterThan(0);
+    releasePage();
+    await flush();
+    expect(holdRegistrySize()).toBeGreaterThan(0); // the child still holds
+    releaseChild();
+    await flush();
+    expect([
+      page.scope.holding(),
+      boundary.scope.holding(),
+      holdRegistrySize(),
+    ]).toEqual([false, false, 0]);
+    boundary.show.set(true);
+    await flush();
+    expect(r.container.textContent?.trim()).toBe('r:3');
+  });
+});
+
+describe('a scope destroyed while it holds', () => {
+  it('ends its own hold, so the registry is cleared once nothing else holds', async () => {
+    const r = await render(ChainPage);
+    const page = r.fixture.componentInstance;
+    page.scope.beginHold(); // never ended by hand
+    page.start(() => page.s.set(2));
+    expect(holdRegistrySize()).toBeGreaterThan(0);
+    r.fixture.destroy();
+    expect(holdRegistrySize()).toBe(0);
+  });
+});
+
+// ─── reclamation under overlapping unrelated holds ─────────────────────────────────────
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'sib-reader',
+  template: `{{ shown() }}`,
+})
+class SibReader {
+  readonly shown = injectTransitionScope().hold(inject(SibHost).s);
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'sib-area',
+  imports: [SibReader],
+  template: `@if (show()) {
+    <sib-reader />
+  }`,
+  providers: [provideTransitionScope()],
+})
+class SibArea {
+  readonly scope = injectTransitionScope();
+  readonly start = injectStartTransaction();
+  readonly show = signal(false);
+}
+
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector
+  selector: 'sib-host',
+  imports: [SibArea],
+  template: `<sib-area class="x" /><sib-area class="y" />`,
+})
+class SibHost {
+  readonly s = transactional(signal(0));
+}
+
+describe('two unrelated areas alternating overlapping saves', () => {
+  it('20 rounds: the registry never exceeds the entries of the live stretches, and a reader mounted each round shows its area pre', async () => {
+    const { fixture } = await render(SibHost);
+    const host = fixture.componentInstance;
+    const [x, y] = fixture.debugElement.children.map(
+      (d) => d.componentInstance as SibArea,
+    );
+    const flush = async () => {
+      for (let i = 0; i < 4; i++) {
+        fixture.detectChanges();
+        await Promise.resolve();
+        await new Promise((r) => setTimeout(r));
+      }
+      fixture.detectChanges();
+    };
+    const textOf = (a: SibArea) =>
+      (
+        fixture.debugElement.children[a === x ? 0 : 1]
+          .nativeElement as HTMLElement
+      ).textContent?.trim() ?? '';
+
+    let release = (() => undefined) as () => void;
+    const sizes: number[] = [];
+    const shown: string[] = [];
+    for (let round = 1; round <= 20; round++) {
+      const area = round % 2 ? x : y;
+      let next!: () => void;
+      area.start((tx) => {
+        host.s.set(round); // writes on top of the other area's still-held save
+        next = tx.retain();
+      });
+      release(); // the other area's save ends while this one holds: never zero holds
+      await flush();
+      sizes.push(holdRegistrySize());
+      area.show.set(true);
+      await flush();
+      shown.push(textOf(area));
+      area.show.set(false);
+      release = next;
+    }
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1);
+    expect(shown).toEqual(
+      Array.from({ length: 20 }, (_, i) => String(i)), // the value before the area's own write
+    );
+    release();
+    await flush();
+    expect(holdRegistrySize()).toBe(0);
   });
 });

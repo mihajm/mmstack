@@ -1,7 +1,9 @@
 import { Component, computed, Directive, input } from '@angular/core';
 import {
+  injectRevealSlot,
   injectTransitionScope,
   provideTransitionScope,
+  severReveal,
   type SuspendType,
 } from '@mmstack/primitives/core';
 
@@ -30,6 +32,10 @@ import {
  * anything inside the boundary that calls `injectTransitionScope()` gets this boundary's scope
  * (`errored()`, `retryAll()`, `dismiss()`). `mmRetryFailed` and `*mmSuspenseError` wrap that.
  *
+ * Inside an `<mm-reveal>`, a boundary with no other boundary between it and the reveal is one of
+ * its slots: while the reveal holds it back it shows its placeholder (or nothing when collapsed).
+ * Every boundary hides the reveal from its own content.
+ *
  * SSR: the server serializes whatever the scope reports at stabilization, so a registered resource
  * must keep the app unstable until it settles or the placeholder is what gets serialized (then
  * flashes/mismatches on hydration). HttpClient-backed resources, httpResource & all of `@mmstack/resource`
@@ -51,20 +57,34 @@ export abstract class SuspenseBoundaryBase {
   protected readonly hasErrored = computed(
     () => this.scope.errored().length > 0,
   );
+
+  private readonly revealSlot = injectRevealSlot(() =>
+    this.failed() ? 'failed' : this.suspended() ? 'pending' : 'ready',
+  );
+  protected readonly view = computed(() => {
+    const slot = this.revealSlot;
+    if (slot?.gated()) return slot.collapsed() ? 'none' : 'placeholder';
+    if (this.failed()) return 'error';
+    return this.suspended() ? 'placeholder' : 'content';
+  });
 }
 
 const SUSPENSE_TEMPLATE = `
-  @if (failed()) {
-    <ng-content select="[error]"><span>Failed to load.</span></ng-content>
-  } @else if (suspended()) {
-    <ng-content select="[placeholder]"><span>Loading…</span></ng-content>
-  } @else {
-    @if (pending()) {
-      <ng-content select="[busy]" />
+  @switch (view()) {
+    @case ('error') {
+      <ng-content select="[error]"><span>Failed to load.</span></ng-content>
     }
-    <ng-content />
-    @if (hasErrored()) {
-      <ng-content select="[failed]" />
+    @case ('placeholder') {
+      <ng-content select="[placeholder]"><span>Loading…</span></ng-content>
+    }
+    @case ('content') {
+      @if (pending()) {
+        <ng-content select="[busy]" />
+      }
+      <ng-content />
+      @if (hasErrored()) {
+        <ng-content select="[failed]" />
+      }
     }
   }
 `;
@@ -91,7 +111,7 @@ const SUSPENSE_HOST = {
   template: SUSPENSE_TEMPLATE,
   host: SUSPENSE_HOST,
   styles: SUSPENSE_STYLES,
-  providers: [provideTransitionScope()],
+  providers: [provideTransitionScope(), severReveal()],
 })
 export class SuspenseBoundary extends SuspenseBoundaryBase {}
 
@@ -106,5 +126,6 @@ export class SuspenseBoundary extends SuspenseBoundaryBase {}
   template: SUSPENSE_TEMPLATE,
   host: SUSPENSE_HOST,
   styles: SUSPENSE_STYLES,
+  providers: [severReveal()],
 })
 export class UnscopedSuspenseBoundary extends SuspenseBoundaryBase {}

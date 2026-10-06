@@ -60,6 +60,7 @@ import {
   toResourceObject,
 } from './util';
 import { type CacheEntry } from './util/cache/cache';
+import { countLoads } from './util/count-loads';
 import { type FlightEdge, trackFlights } from './util/flight';
 
 export { type RefreshOptions } from './util';
@@ -257,6 +258,12 @@ export type QueryResourceRef<TResult> = Omit<
    * A signal indicating whether the resource is currently disabled (due to circuit breaker, offline, or undefined request).
    */
   disabled: Signal<boolean>;
+  /**
+   * How many loads this resource has started: every new request and every accepted reload,
+   * retries included. A transition scope reads it to tell a transaction's own loads from ones
+   * already in flight.
+   */
+  readonly loads: Signal<number>;
   /**
    * Why the resource is currently disabled, or `null` if it is enabled.
    * Maps to one of: `'offline'`, `'circuit-open'`, `'no-request'`.
@@ -628,6 +635,10 @@ function createQueryResource<TResult, TRaw = TResult>(
 
   resource = catchValueError(resource, defaultValue);
 
+  // below every reload caller (retry, refresh, flight tracking), so each accepted reload counts
+  const counted = countLoads(cachedRequest, resource);
+  resource = counted.resource;
+
   const flight = options.onFlight
     ? trackFlights(
         options.onFlight,
@@ -774,6 +785,7 @@ function createQueryResource<TResult, TRaw = TResult>(
 
   const ref: QueryResourceRef<TResult | undefined> = {
     ...resource,
+    loads: counted.loads,
     value,
     hasContent: () => value() !== undefined,
     outcome: outcomeOf<TResult | undefined>({

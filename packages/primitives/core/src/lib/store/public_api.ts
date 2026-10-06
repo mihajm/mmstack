@@ -90,6 +90,11 @@ export {
   type PersistedStoreDefaults,
   type PersistedStoreOptions,
 } from './persisted-store';
+export {
+  optimisticStore,
+  type OptimisticStore,
+  type OptimisticStoreFork,
+} from './optimistic-store';
 export { isOpaque, opaque, setOpaqueSymbol, type Opaque } from './opaque';
 export {
   projection,

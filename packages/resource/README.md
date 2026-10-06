@@ -119,11 +119,11 @@ That's enough for caching, deduping, retries, circuit-breaker protection, and op
 
 The library exposes three resource flavors, all built on `httpResource`:
 
-| Function                | Use for                                         | Triggers on                |
-| ----------------------- | ----------------------------------------------- | -------------------------- |
-| `queryResource()`       | Reads. Cached, refreshable, retryable.          | Reactive request fn change |
-| `mutationResource()`    | Writes. Lifecycle hooks for optimistic updates. | Explicit `.mutate(value)`  |
-| `manualQueryResource()` | Reads that should only fire on demand.          | Explicit `.trigger()`      |
+| Function                | Use for                                                  | Triggers on                |
+| ----------------------- | -------------------------------------------------------- | -------------------------- |
+| `queryResource()`       | Reads. Cached, refreshable, retryable.                   | Reactive request fn change |
+| `mutationResource()`    | Writes. Lifecycle hooks, optimistic guesses that revert. | Explicit `.mutate(value)`  |
+| `manualQueryResource()` | Reads that should only fire on demand.                   | Explicit `.trigger()`      |
 
 All three return a signal-typed ref — `value()`, `status()`, `error()`, `headers()`, `statusCode()`, plus per-flavor extras (`prefetch`, `mutate`, `trigger`).
 
@@ -236,8 +236,8 @@ queryResource<TResult, TRaw = TResult>(
 | `statusCode`     | `WritableSignal<number \| undefined>`                         | –                                                                                                                                                                                                                                                                      |
 | `isLoading`      | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
 | `hasValue`       | `Signal<boolean>`                                             | –                                                                                                                                                                                                                                                                      |
-| `hasContent`     | `() => boolean`                                               | Whether `value()` has something to show. Unlike `hasValue()`, a value held through a failed reload counts. See [outcome as a value](#outcome-as-a-value).                                                                                                             |
-| `outcome`        | `Signal<T \| Loading \| ErrorSentinel>`                       | The value plane as one read: the value, `undefined`, or a `loading` / `error` sentinel. See [outcome as a value](#outcome-as-a-value).                                                                                                                                  |
+| `hasContent`     | `() => boolean`                                               | Whether `value()` has something to show. Unlike `hasValue()`, a value held through a failed reload counts. See [outcome as a value](#outcome-as-a-value).                                                                                                              |
+| `outcome`        | `Signal<T \| Loading \| ErrorSentinel>`                       | The value plane as one read: the value, `undefined`, or a `loading` / `error` sentinel. See [outcome as a value](#outcome-as-a-value).                                                                                                                                 |
 | `disabled`       | `Signal<boolean>`                                             | `true` when network is offline, circuit breaker is open, or `request()` returned `undefined`.                                                                                                                                                                          |
 | `disabledReason` | `Signal<'offline' \| 'circuit-open' \| 'no-request' \| null>` | Why the resource is disabled. `null` when enabled. Branch your UI on this rather than parsing combined state.                                                                                                                                                          |
 | `reload`         | `() => void`                                                  | Force a refetch (ignores `staleTime` for the next request).                                                                                                                                                                                                            |
@@ -252,7 +252,9 @@ queryResource<TResult, TRaw = TResult>(
 ```ts
 import { isError, isLoading } from '@mmstack/primitives';
 
-const user = queryResource<User>(() => `/api/users/${id()}`, { keepPrevious: true });
+const user = queryResource<User>(() => `/api/users/${id()}`, {
+  keepPrevious: true,
+});
 
 const label = computed(() => {
   const out = user.outcome();
@@ -262,18 +264,18 @@ const label = computed(() => {
 });
 ```
 
-| ref | status | content | `outcome()` |
-| --- | --- | --- | --- |
-| query | `error` | either | an `error` sentinel. With `keepPrevious`, `value()` keeps showing the held value and `hasContent()` stays true |
-| query | `loading` / `reloading` | no | a `loading` sentinel |
-| query | `loading` / `reloading` | yes | the value (a reload with a held value) |
-| query | `resolved` / `local` | yes | the value |
-| query | `idle` (disabled, paused, not requested yet) | no | `undefined`: absence is a value, not a trigger |
-| infinite | any | over `pages()` | the same rows, with content = at least one page loaded |
-| mutation | `idle` | – | `undefined`, before the first mutation and again after each one settles |
-| mutation | `loading` | – | a `loading` sentinel |
-| mutation | `resolved` | – | the result, or `DONE` when the result is `undefined` |
-| mutation | `error` | – | an `error` sentinel |
+| ref      | status                                       | content        | `outcome()`                                                                                                    |
+| -------- | -------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------- |
+| query    | `error`                                      | either         | an `error` sentinel. With `keepPrevious`, `value()` keeps showing the held value and `hasContent()` stays true |
+| query    | `loading` / `reloading`                      | no             | a `loading` sentinel                                                                                           |
+| query    | `loading` / `reloading`                      | yes            | the value (a reload with a held value)                                                                         |
+| query    | `resolved` / `local`                         | yes            | the value                                                                                                      |
+| query    | `idle` (disabled, paused, not requested yet) | no             | `undefined`: absence is a value, not a trigger                                                                 |
+| infinite | any                                          | over `pages()` | the same rows, with content = at least one page loaded                                                         |
+| mutation | `idle`                                       | –              | `undefined`, before the first mutation and again after each one settles                                        |
+| mutation | `loading`                                    | –              | a `loading` sentinel                                                                                           |
+| mutation | `resolved`                                   | –              | the result, or `DONE` when the result is `undefined`                                                           |
+| mutation | `error`                                      | –              | an `error` sentinel                                                                                            |
 
 Content is `hasContent()`. It differs from `hasValue()` in one row: `hasValue()` follows Angular and turns false on error even while a `keepPrevious` value is still displayed, while `hasContent()` stays true because `value()` still has something to show. A transition scope reads `hasContent()`, so a failed background reload keeps its content on screen and reports the failure beside it instead of blanking the boundary. With a `defaultValue`, `value()` is never `undefined`, so there is always content and `outcome()` never says `loading`.
 
@@ -380,6 +382,28 @@ mutationResource(
 
 The `TCTX` returned from `onMutate` flows into `onError` / `onSuccess` / `onSettled`. The optional `initialCtx` second arg to `.mutate(value, initialCtx)` flows into `onMutate` as its second argument.
 
+### Guesses that revert (`optimistic`)
+
+`onMutate` / `onError` is write-then-rollback: you write the guess and undo it yourself. The `optimistic` option is the other way round. Each run opens a transaction on the nearest transition scope and hands it to you with the mutation value; guesses laid on it are gone when the run settles, whether it succeeded, failed, was superseded by a newer `mutate()` or the resource was destroyed. Nothing to undo by hand, and a failed POST never leaves a phantom row.
+
+```typescript
+const liked = guessable(signal(false)); // from @mmstack/primitives
+
+const like = mutationResource(
+  (on: boolean) => ({
+    url: `/api/posts/${id}/like`,
+    method: 'POST',
+    body: { on },
+  }),
+  {
+    optimistic: (on, tx) => tx.guess(liked, on), // every reader sees it now
+    onSuccess: (res) => liked.set(res.on), // the server's answer replaces the guess
+  },
+);
+```
+
+Guesses go through either tier from `@mmstack/primitives`: `tx.guess(node, value)` on a `guessable` (every reader, including request functions, sees it) or `tx.overlay(view)` of an `optimistic` / `optimisticStore` (only readers of the view see it). On success the run completes after the result, a render, and the loads it started (an `invalidates` refetch) have landed, so the guess gives way to fresh data rather than to the old value. On failure the guesses go and authoritative writes made inside `optimistic` are undone; `lastFailure` latches as usual. Latest-wins aborts the older run the moment the newer one starts; with `queue` each run lays its guesses when it starts. `optimistic` runs after `onMutate`, and throwing from it cancels the mutation like a throwing `onMutate`. While a run is open the scope's display hold is on (`scope.hold`, `*mmTransition`), as for any transaction.
+
 ### Awaiting a mutation (`mutateAsync`)
 
 `.mutate()` is fire-and-forget. When you need to `await` the outcome — a form submit handler, an async validator — use `.mutateAsync()`, which returns a `Promise` that resolves with the result or rejects with the error. The lifecycle hooks still run exactly as with `.mutate()`.
@@ -398,7 +422,7 @@ If the mutation never completes — superseded by a newer one (latest-wins), dro
 
 ### Queuing
 
-By default, calling `.mutate()` while another mutation is in flight starts immediately — concurrent mutations run in parallel. With `queue: true`, mutations are serialized:
+By default a `.mutate()` call while another mutation is in flight supersedes it: the newer request goes out, the older one settles as cancelled (its `onSettled` runs, a `mutateAsync()` awaiting it rejects with a `MutationCancelledError` of type `'superseded'`), and dev mode warns. With `queue: true`, mutations run one after another instead and nothing is dropped:
 
 ```typescript
 mutationResource(request, { queue: true });
@@ -490,16 +514,17 @@ readonly pct = computed(() => {
 
 ### Return shape (`MutationResourceRef<T, TMutation>`)
 
-| Member                                        | Type                                     | Notes                                                                                 |
-| --------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| `mutate`                                      | `(value, ctx?) => void`                  | Trigger the mutation (fire-and-forget).                                               |
-| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`      | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`. |
-| `current`                                     | `Signal<TMutation \| null>`              | The value currently being mutated (or `null` if idle).                                |
-| `progress`                                    | `Signal<HttpProgressEvent \| undefined>` | Upload/download progress when `reportProgress: true`.                                 |
-| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                 | –                                                                                     |
-| `headers` / `statusCode`                      | as in `QueryResourceRef`                 | Response metadata, when available.                                                    |
+| Member                                        | Type                                            | Notes                                                                                                                                                                                 |
+| --------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mutate`                                      | `(value, ctx?) => void`                         | Trigger the mutation (fire-and-forget).                                                                                                                                               |
+| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`             | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`.                                                                                                 |
+| `current`                                     | `Signal<TMutation \| null>`                     | The value currently being mutated (or `null` if idle).                                                                                                                                |
+| `lastFailure`                                 | `Signal<MutationFailure \| undefined>`          | The last failed mutation's `{ error, generation }`, until the next `mutate()` starts (outlives `error()`, which clears with the request); `generation` grows by one per failure.      |
+| `progress`                                    | `Signal<HttpProgressEvent \| undefined>`        | Upload/download progress when `reportProgress: true`.                                                                                                                                 |
+| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                        | –                                                                                                                                                                                     |
+| `headers` / `statusCode`                      | as in `QueryResourceRef`                        | Response metadata, when available.                                                                                                                                                    |
 | `outcome`                                     | `Signal<T \| Loading \| ErrorSentinel \| Done>` | `undefined` while idle, a `loading` sentinel while running, then the result (`DONE` for an `undefined` result) or an `error` sentinel. See [outcome as a value](#outcome-as-a-value). |
-| `hasContent`                                  | `() => boolean`                          | Always `true`: a mutation never suspends or blanks a boundary.                         |
+| `hasContent`                                  | `() => boolean`                                 | Always `true`: a mutation never suspends or blanks a boundary.                                                                                                                        |
 
 (Mutations deliberately don't expose `value`, `hasValue`, `set`, `update`, or `prefetch` — those don't make sense for one-off writes.)
 
@@ -766,7 +791,7 @@ class UserPage {
 - `register: 'suspend'` — register as **suspending**: the boundary holds its placeholder until this resource has a value (full Suspense). The right choice for data the subtree can't render without.
 - `false` / omitted — don't register.
 
-A failed registration (query, manual or infinite) takes the boundary to its error slot (nothing to show) or keeps its held content and reports the failure beside it (`keepPrevious`), and the boundary's `retryAll()` re-runs it through `reload()`; see [Suspense & the census](https://www.npmjs.com/package/@mmstack/primitives#suspense--the-census). The boundary's error entries call a registration by its `displayName` option (`register: 'suspend', displayName: 'orders'`), or `'resource'` without one. A mutation registers activity only: its `hasContent()` is always true, so it drives `pending` and `aria-busy` but never suspends or blanks a boundary, even with `register: 'suspend'`.
+A failed registration (query, manual or infinite) takes the boundary to its error slot (nothing to show) or keeps its held content and reports the failure beside it (`keepPrevious`), and the boundary's `retryAll()` re-runs it through `reload()`; see [Suspense & the census](https://www.npmjs.com/package/@mmstack/primitives#suspense--the-census). The boundary's error entries call a registration by its `displayName` option (`register: 'suspend', displayName: 'orders'`), or `'resource'` without one. A registered mutation drives `pending` and `aria-busy` but never suspends or blanks a boundary (`register: 'suspend'` behaves as `'indicator'` and warns once in dev mode). Its last failure stays in the boundary's `errored()` after the mutation returns to idle, until it is dismissed or the next `mutate()` starts, and `retryAll()` does not re-send it. The same failure is on the ref as `lastFailure()`.
 
 Combine with `keepPrevious: true` so reloads hold the last value instead of flashing empty — then a `<mm-suspense>` shows the placeholder only on the genuine first load, and `startTransition` (from `@mmstack/primitives`) can reveal a multi-resource update in one frame. For navigation, `@mmstack/router-core`'s `<mm-transition-outlet>` keeps the current route on screen until the incoming route's registered resources settle.
 

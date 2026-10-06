@@ -58,6 +58,17 @@ export interface CensusMember {
   readonly inFlight: Signal<boolean>;
   readonly failure: Signal<CensusError | undefined>;
   readonly retry: RetryCapability | undefined;
+  /**
+   * The resource this member reads, when it reads one. Members of one census that share a
+   * `source` are one incident: the fold, `errored()` and `retryAll()` see a single member for them
+   * (the first readiness member registered, else the first).
+   */
+  readonly source?: object;
+  /**
+   * Whether the member has something on screen. A failing readiness member registered directly
+   * in the census counts as blank unless this says it holds content.
+   */
+  readonly content?: Signal<boolean>;
 }
 
 /**

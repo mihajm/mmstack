@@ -104,6 +104,23 @@ export function reduceFacade(
 
 const NEVER_PAUSED = signal(false).asReadonly();
 
+/** One member per `source`: the first readiness member registered for it, else the first. */
+function oneIncidentPerSource(
+  list: readonly CensusMember[],
+): readonly CensusMember[] {
+  let chosen: Map<object, CensusMember> | undefined;
+  for (const m of list) {
+    if (m.source === undefined) continue;
+    chosen ??= new Map();
+    const current = chosen.get(m.source);
+    if (!current || (!current.readiness && m.readiness))
+      chosen.set(m.source, m);
+  }
+  if (chosen === undefined) return list;
+  const pick = chosen;
+  return list.filter((m) => m.source === undefined || pick.get(m.source) === m);
+}
+
 function settleRound(
   invoked: ReadonlyMap<CensusMember, number>,
   roundSettled: () => boolean,
@@ -227,7 +244,9 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
     };
   };
 
-  const visible = computed(() => members().filter((m) => !m.paused()));
+  const visible = computed(() =>
+    oneIncidentPerSource(members().filter((m) => !m.paused())),
+  );
 
   const errorFirst =
     (options.precedence ?? DEFAULT_PRECEDENCE) === 'error-first';
@@ -309,6 +328,6 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
     errored,
     retry: (id: MemberId) =>
       runRound(untracked(members).filter((m) => m.id === id)),
-    retryAll: () => runRound(untracked(members)),
+    retryAll: () => runRound(oneIncidentPerSource(untracked(members))),
   };
 }

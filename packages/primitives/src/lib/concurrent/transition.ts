@@ -52,7 +52,9 @@ type Incoming<T> = {
  *
  * Semantics mirror the outlet: the first render is immediate (nothing to hold); an interrupting
  * value change mid-hold destroys the half-ready hidden view and re-targets; a branch that loads
- * nothing swaps right after its first render. Per-view scopes mean the outgoing branch's
+ * nothing swaps right after its first render. A transaction holding the incoming branch's scope,
+ * or the scope around the directive (a hold reaches the scopes created inside it), keeps the swap
+ * back until it releases, so the branch commits together with the rest of the held page. Per-view scopes mean the outgoing branch's
  * background work can never delay the swap. Set `mmTransitionImmediate` to skip holding, and
  * `mmTransitionViewTransition` to wrap the swap in `document.startViewTransition` (feature
  * detected). On the server every change swaps immediately.
@@ -130,14 +132,19 @@ export class MmTransition<T> {
 
     // Registration happens synchronously during view creation, so a resource already incl. later kickoffs are caught by the watcher.
     let sawPending = untracked(scope.pending);
+    // a transaction holding the incoming scope keeps the swap back until it releases
+    let sawHolding = untracked(scope.holding);
 
     const watcher = effect(
       () => {
         const pending = scope.pending();
+        const holding = scope.holding();
         untracked(() => {
           if (epoch !== this.swapEpoch) return;
           if (pending) sawPending = true;
-          if (sawPending && !pending) this.commitSwap(epoch, view);
+          if (holding) sawHolding = true;
+          if ((sawPending || sawHolding) && !pending && !holding)
+            this.commitSwap(epoch, view);
         });
       },
       { injector: this.parent },
@@ -150,7 +157,8 @@ export class MmTransition<T> {
         if (
           epoch === this.swapEpoch &&
           !sawPending &&
-          !untracked(scope.pending)
+          !untracked(scope.pending) &&
+          !untracked(scope.holding)
         ) {
           this.commitSwap(epoch, view);
         }

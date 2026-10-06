@@ -9,6 +9,12 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
+import {
+  declareRecordOptions,
+  isRecordedElsewhere,
+  recordWrite,
+} from '../concurrent/active-transaction';
+import type { RecordOptions } from '../concurrent/transaction';
 import { derived } from '../derived';
 import { isMutable, mutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
@@ -27,6 +33,7 @@ import {
   type ProxyCleanupRegistry,
   type StoreKind,
 } from './internals';
+import { merge3 } from './fork-store';
 import { markAsLeaf } from './leaf';
 import { isOpaque } from './opaque';
 import {
@@ -218,6 +225,29 @@ export function toStore<T extends AnyRecord>(
   const isWritableSource = isWritableSignal(source);
   const isMutableSource = isWritableSource && isMutable(writableSource);
 
+  // The root records itself into an active transaction: child writes reach it through their
+  // `derived` chain, and copy-on-write makes the pre-write root a plain reference, so abort
+  // undoes this transaction's paths with a 3-way merge and keeps paths a later writer changed.
+  // A mutable root is snapshotted instead (in-place writes defeat the merge).
+  const recordsRoot = isWritableSource && !isRecordedElsewhere(writableSource);
+  if (recordsRoot && !isMutableSource)
+    declareRecordOptions(writableSource as WritableSignal<unknown>, {
+      reconcile: merge3 as RecordOptions['reconcile'],
+    });
+  const rootWrites = new Map<PropertyKey, unknown>();
+  const recordingWrite = (prop: PropertyKey, fn: (...args: any[]) => any) => {
+    let w = rootWrites.get(prop);
+    if (!w)
+      rootWrites.set(
+        prop,
+        (w = (...args: any[]) => {
+          recordWrite(writableSource as WritableSignal<unknown>);
+          return fn(...args);
+        }),
+      );
+    return w;
+  };
+
   const kind = computed<'array' | 'record' | 'primitive'>(() => {
     const v = source();
     if (Array.isArray(v) && !isOpaque(v)) return 'array';
@@ -318,6 +348,16 @@ export function toStore<T extends AnyRecord>(
             }),
           );
         };
+
+      if (
+        recordsRoot &&
+        (prop === 'set' ||
+          prop === 'update' ||
+          prop === 'mutate' ||
+          prop === 'inline') &&
+        typeof target[prop] === 'function'
+      )
+        return recordingWrite(prop, target[prop]);
 
       if (
         (typeof prop === 'symbol' && prop !== Symbol.iterator) ||

@@ -6,6 +6,7 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
+import { recordsElsewhere, recordWrite } from './concurrent/active-transaction';
 import { isDerivation, type DerivedSignal } from './derived';
 import { isMutable, type MutableSignal } from './mutable';
 
@@ -73,13 +74,22 @@ export function keepPrevious<T, P>(
   });
 
   if (isWritableSignal(src)) {
-    persisted.set = src.set;
-    persisted.update = src.update;
+    const target = src as WritableSignal<unknown>;
+    persisted.set = (v) => {
+      recordWrite(target);
+      src.set(v);
+    };
+    persisted.update = (fn) => {
+      recordWrite(target);
+      src.update(fn);
+    };
+    recordsElsewhere(persisted);
 
     if (mutableSrc) {
       (persisted as MutableSignal<T>).mutate = (updater) => {
         cnt++;
         try {
+          recordWrite(target);
           src.mutate(updater);
           untracked(persisted);
         } finally {

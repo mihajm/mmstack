@@ -25,6 +25,7 @@ import {
   type TransitionRegistration,
 } from './options';
 import { injectNetworkStatus } from './util';
+import { countLoads } from './util/count-loads';
 import { type RetryOptions } from './util/retry-on-error';
 
 /**
@@ -236,6 +237,8 @@ export type BidiStreamResourceOptions<T, TOut> =
 export type StreamResourceRef<T> = ResourceRef<T> & {
   /** Live connection indicator — true between `open` and the next drop/close. */
   readonly connected: Signal<boolean>;
+  /** How many connections this resource has started: every new source and every accepted reload. */
+  readonly loads: Signal<number>;
   /** Disconnect and stay disconnected, keeping the current value. See type docs. */
   abort(): void;
 };
@@ -297,9 +300,12 @@ export function streamResource<T, TOut = never>(
   let activeSuspend: (() => void) | null = null;
   let activeSend: ((message: TOut) => boolean) | null = null;
 
+  const params = computed(() =>
+    isServer ? undefined : (source() ?? undefined),
+  );
   const res = resource<T, string | undefined>({
     injector,
-    params: () => (isServer ? undefined : (source() ?? undefined)),
+    params,
     equal: opt.equal,
     defaultValue: opt.defaultValue as T,
     stream: ({ params: url, abortSignal }) =>
@@ -440,8 +446,11 @@ export function streamResource<T, TOut = never>(
     { injector },
   );
 
+  const counted = countLoads(params, res);
   const ref: StreamResourceRef<T> = Object.assign(res, {
     connected: connected.asReadonly(),
+    loads: counted.loads,
+    reload: counted.resource.reload,
     abort: () => {
       if (!activeDispose) return;
       outbox?.splice(0);

@@ -1,12 +1,14 @@
 import { Component } from '@angular/core';
+import { FailedSaveDemo } from '@mmstack/demos';
 import { Link } from '@mmstack/router-core';
 import { CodeExample } from '../../../layout/code-example';
+import { DemoBox } from '../../../layout/demo-box';
 import { DocPage } from '../../../layout/doc-page';
 import { DocSection } from '../../../layout/doc-section';
 
 @Component({
   selector: 'docs-resource-mutation',
-  imports: [DocPage, DocSection, CodeExample, Link],
+  imports: [DocPage, DocSection, CodeExample, DemoBox, FailedSaveDemo, Link],
   template: `
     <docs-page
       title="mutationResource"
@@ -94,6 +96,13 @@ import { DocSection } from '../../../layout/doc-section';
           further, including patching cached lists and how rollback behaves when
           a mutation replays after coming back online.
         </p>
+        <p>
+          There is also a way to skip the undo entirely. With the
+          <code>optimistic</code> option each run opens a transaction and hands
+          it to you: a guess laid on it is shown at once and goes away by itself
+          when the run settles, success or failure. The same page covers when to
+          use which.
+        </p>
       </docs-section>
 
       <docs-section title="Refreshing queries after a write" id="invalidates">
@@ -125,11 +134,24 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Queuing and offline" id="queue">
         <p>
-          By default, calling <code>mutate()</code> while another is in flight
-          starts it immediately, so writes run in parallel. With
-          <code>queue: true</code> they serialize, one at a time. The queue
-          survives disabled states: if the circuit breaker opens or the network
-          drops, queued writes wait and run when the resource recovers.
+          By default a mutation is latest-wins. Calling <code>mutate()</code>
+          while another is in flight supersedes the older one: its
+          <code>onSettled</code> runs, a <code>mutateAsync()</code> awaiting it
+          rejects with a <code>MutationCancelledError</code> whose
+          <code>type</code> is <code>'superseded'</code>, and dev mode warns,
+          since it's usually a sign you wanted the other mode. That's right for
+          a write where only the last value matters, like a settings toggle.
+        </p>
+        <p>
+          With <code>queue: true</code> the writes run first in, first out, one
+          at a time, and none is dropped. That's the one for a list of separate
+          writes, like adding comments.
+          <code>queue: {{ '{' }} key {{ '}' }}</code> does the same and drops
+          the writes still waiting whenever the reactive
+          <code>key</code> changes (an in-flight one finishes), for a queue that
+          belongs to one selected item. The queue survives disabled states: if
+          the circuit breaker opens or the network drops, queued writes wait and
+          run when the resource recovers.
         </p>
         <docs-code [code]="queue" lang="ts" />
         <p>
@@ -187,11 +209,49 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
+      <docs-section title="Failed saves in a boundary" id="census">
+        <p>
+          A mutation can join the nearest
+          <a mmLink="/docs/primitives/transitions">suspense boundary</a> with
+          <code>register: 'indicator'</code>. While it runs it drives the
+          boundary's busy state. It never blanks the boundary, because hiding a
+          form while it saves is rarely what you want; to hold the screen during
+          a save, use a transaction. <code>register: 'suspend'</code> on a
+          mutation behaves as <code>'indicator'</code> and warns once in dev
+          mode.
+        </p>
+        <docs-code [code]="census" lang="ts" />
+        <p>
+          The useful part is what happens when it fails. A mutation goes back to
+          idle right after it settles, so its <code>error()</code> is gone a
+          moment later. A registered mutation keeps its last failure in the
+          boundary's <code>errored()</code> list until someone dismisses it or
+          the next <code>mutate()</code> starts. Tick "server rejects", save,
+          and the banner stays; save again and it clears as soon as the new
+          attempt is in flight.
+        </p>
+        <docs-demo title="A failed save that stays visible">
+          @defer (on viewport) {
+            <demo-failed-save />
+          } @placeholder {
+            <p class="defer-hint">Demo loads on scroll.</p>
+          }
+        </docs-demo>
+        <p>
+          The boundary's <code>retryAll()</code> skips it, since a write isn't
+          assumed safe to send twice. Outside a boundary the same failure is on
+          the ref as <code>lastFailure()</code>:
+          <code>{{ '{' }} error, generation {{ '}' }}</code
+          >, where <code>generation</code> counts failures so you can tell a new
+          one from the last one you showed.
+        </p>
+      </docs-section>
+
       <docs-section title="The return shape" id="ref">
         <p>
           A mutation ref is deliberately narrower than a query's. It has no
-          <code>value</code>, <code>hasValue</code>, or <code>prefetch</code>,
-          because those don't make sense for a one-off write.
+          <code>value</code> or <code>prefetch</code>, because those don't make
+          sense for a one-off write.
         </p>
         <table class="doc-table">
           <thead>
@@ -225,6 +285,33 @@ import { DocSection } from '../../../layout/doc-section';
               </td>
             </tr>
             <tr>
+              <td><code>outcome()</code></td>
+              <td>
+                The current operation's state as one value:
+                <code>undefined</code> while idle, a
+                <code>loading</code> sentinel in flight, the result (or
+                <code>DONE</code> when it resolved with no result), or an
+                <code>error</code> sentinel. It goes back to
+                <code>undefined</code> right after each run settles.
+              </td>
+            </tr>
+            <tr>
+              <td><code>lastFailure()</code></td>
+              <td>
+                The last failure as
+                <code>{{ '{' }} error, generation {{ '}' }}</code
+                >. Unlike <code>outcome()</code> it stays after the ref is back
+                to idle, until the next <code>mutate()</code> starts.
+              </td>
+            </tr>
+            <tr>
+              <td><code>loads()</code></td>
+              <td>
+                How many requests it has started. A transaction uses it to tell
+                its own work from work that was already running.
+              </td>
+            </tr>
+            <tr>
               <td>
                 <code>status()</code> / <code>error()</code> /
                 <code>isLoading()</code>
@@ -235,6 +322,13 @@ import { DocSection } from '../../../layout/doc-section';
         </table>
       </docs-section>
     </docs-page>
+  `,
+  styles: `
+    .defer-hint {
+      color: var(--fg-muted);
+      font-size: 0.9rem;
+      margin: 0;
+    }
   `,
 })
 export class MutationResourceDoc {
@@ -280,6 +374,11 @@ async onSubmit() {
 
   if (saved) this.router.navigate(['/users']);
 }`;
+
+  protected readonly census = `readonly save = mutationResource(
+  (note: Note) => ({ url: '/api/notes', method: 'POST', body: note }),
+  { register: 'indicator', displayName: 'Saving the note' },
+);`;
 
   protected readonly hooks = `mutationResource((post: Post) => ({ url: '/api/posts', method: 'POST', body: post }), {
   onMutate: (post) => {

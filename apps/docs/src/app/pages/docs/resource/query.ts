@@ -224,9 +224,9 @@ import { DocSection } from '../../../layout/doc-section';
           thread. Parsing a 20MB JSON body blocks the thread that paints.
           Fetching it as text or a buffer keeps your interceptors and auth
           intact while the parse moves to a
-          <a mmLink="/docs/worker/overview">Web Worker</a> that owns the
-          result; an <code>ArrayBuffer</code> even moves zero-copy. If you
-          combine the cache with a transfer, copy the buffer first
+          <a mmLink="/docs/worker/overview">Web Worker</a> that owns the result;
+          an <code>ArrayBuffer</code> even moves zero-copy. If you combine the
+          cache with a transfer, copy the buffer first
           (<code>buf.slice(0)</code>), since transferring detaches the cached
           copy. Dev mode warns if a detached buffer is ever served.
         </p>
@@ -245,6 +245,29 @@ import { DocSection } from '../../../layout/doc-section';
           re-fetches to get its own.
         </p>
         <docs-code [code]="setLocal" lang="ts" />
+      </docs-section>
+
+      <docs-section title="Outcome as a value" id="outcome">
+        <p>
+          <code>outcome()</code> reads the query's state as one value instead of
+          a set of flags. It is the data when there is something to show,
+          <code>undefined</code> when nothing was requested (disabled, paused,
+          not started), a <code>loading</code> sentinel while the first load
+          runs, and an <code>error</code> sentinel when the last load failed. A
+          reload that still has a held value reads as that value.
+        </p>
+        <docs-code [code]="outcome" lang="ts" />
+        <p>
+          The query also has <code>hasContent()</code>, which differs from
+          <code>hasValue()</code> in one case: after a failed reload with
+          <code>keepPrevious</code>, <code>hasValue()</code> follows Angular and
+          turns false while <code>value()</code> still shows the held data, and
+          <code>hasContent()</code> stays true. A
+          <a mmLink="/docs/primitives/transitions">suspense boundary</a> reads
+          <code>hasContent()</code>, which is why a failed reload keeps its rows
+          on screen and reports the failure beside them. A mutation's outcome is
+          <code>DONE</code> when it resolved with no result.
+        </p>
       </docs-section>
 
       <docs-section title="Escape hatches" id="escape-hatches">
@@ -367,6 +390,19 @@ readonly invoice = queryResource.blob(() => '/api/invoice.pdf');`;
 
 // updates memory only; skips IndexedDB persist and cross-tab broadcast
 this.user.setLocal(new User({ ...raw, seen: true }));`;
+
+  protected readonly outcome = `import { isError, isLoading } from '@mmstack/primitives';
+
+readonly user = queryResource<User>(() => \`/api/users/\${this.id()}\`, {
+  keepPrevious: true,
+});
+
+readonly label = computed(() => {
+  const out = this.user.outcome();
+  if (isLoading(out)) return 'Loading…';
+  if (isError(out)) return 'Could not load the user';
+  return out?.name ?? 'No user selected';
+});`;
 
   protected readonly noDedupe = `import { noDedupe } from '@mmstack/resource';
 

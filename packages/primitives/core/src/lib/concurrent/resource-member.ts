@@ -9,6 +9,22 @@ export type ResourceMemberOptions = {
   readonly displayName: string;
   /** Whether the resource blocks its boundary's first paint (a readiness member). */
   readonly suspends: boolean;
+  /**
+   * `'mutation'` projects a write: never a readiness member (whatever `suspends` says), no retry,
+   * and a failure that stays presented after the request clears. Defaults to `'resource'`.
+   */
+  readonly kind?: 'resource' | 'mutation';
+};
+
+/**
+ * What a mutation offers its member: the last failed settlement, a fresh object per failure, until
+ * the next mutation starts. `@mmstack/resource`'s `mutationResource` carries it.
+ */
+/** A mutation-shaped ref: its last settled failure, stamped with a per-failure generation. */
+type LatchedFailureSource = {
+  readonly lastFailure?: Signal<
+    { readonly error: unknown; readonly generation: number } | undefined
+  >;
 };
 
 const NEVER_PAUSED: Signal<boolean> = signal(false).asReadonly();
@@ -45,8 +61,9 @@ function errorMessage(error: unknown): string | undefined {
  */
 export function resourceMember(
   ref: ResourceLike,
-  { id, displayName, suspends }: ResourceMemberOptions,
+  { id, displayName, suspends, kind }: ResourceMemberOptions,
 ): CensusMember {
+  if (kind === 'mutation') return mutationMember(ref, id, displayName);
   return {
     id,
     displayName,
@@ -66,5 +83,49 @@ export function resourceMember(
         : undefined,
     ),
     retry: ref.reload ? { retry: () => void ref.reload?.() } : undefined,
+    source: ref,
+  };
+}
+
+/**
+ * A mutation as a member. It never holds first paint (`readiness` and `pending` are false),
+ * `inFlight` is `isLoading()`, and it has no `retry` (a write is not assumed idempotent).
+ *
+ * The failure is latched when the ref carries `lastFailure`: it stays presented after the
+ * mutation clears its request, until it is dismissed through the scope or the next mutation
+ * starts. Each failure carries its own `generation`, so a dismissal hides only that one. A ref
+ * without `lastFailure` reports `status() === 'error'` as it happens.
+ */
+function mutationMember(
+  ref: ResourceLike,
+  id: MemberId,
+  displayName: string,
+): CensusMember {
+  const latched = (ref as LatchedFailureSource).lastFailure;
+  return {
+    id,
+    displayName,
+    readiness: false,
+    paused: NEVER_PAUSED,
+    pending: NEVER_PAUSED,
+    inFlight: computed(() => ref.isLoading()),
+    failure: computed<CensusError | undefined>(() => {
+      if (latched) {
+        const last = latched();
+        return last === undefined
+          ? undefined
+          : {
+              id,
+              displayName,
+              message: errorMessage(last.error),
+              generation: last.generation,
+            };
+      }
+      return ref.status() === 'error'
+        ? { id, displayName, message: errorMessage(ref.error?.()) }
+        : undefined;
+    }),
+    retry: undefined,
+    source: ref,
   };
 }

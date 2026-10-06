@@ -74,6 +74,8 @@ export type InfiniteQueryResourceRef<TPage> = {
   isLoading: Signal<boolean>;
   status: QueryResourceRef<TPage | undefined>['status'];
   error: QueryResourceRef<TPage | undefined>['error'];
+  /** How many page loads have started (see `QueryResourceRef.loads`). */
+  loads: QueryResourceRef<TPage | undefined>['loads'];
   /**
    * The pages as one total read: `pages()` once any page is in (also while a later page
    * loads), a `loading` sentinel while the first page loads, an `error` sentinel when a request
@@ -190,6 +192,7 @@ export function infiniteQueryResource<
       hasContent: () => pages().length > 0 || resource.hasContent(),
       error: resource.error,
       reload: () => resource.reload(),
+      loads: resource.loads,
     } as unknown as ResourceRef<unknown>,
     options.register,
     injector,
@@ -205,6 +208,7 @@ export function infiniteQueryResource<
     isLoading: resource.isLoading,
     status: resource.status,
     error: resource.error,
+    loads: resource.loads,
     outcome: outcomeOf<TPage[]>({
       status: resource.status,
       value: pages,

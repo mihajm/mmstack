@@ -231,6 +231,15 @@ import { DocSection } from '../../../layout/doc-section';
           fresh one loads. Or use the <code>pause</code> option to hook into an
           activity boundary. All 3 inter-op gracefully.
         </p>
+        <p>
+          Query, mutation and stream refs also count the loads they start, as
+          <code>loads()</code>. You rarely read it yourself. A transaction uses
+          it to tell a request that started after it began from one that was
+          already running, even when that one is aborted and restarted in
+          between. It says "started since", not "caused by". A plain Angular
+          <code>resource()</code> has no counter, so for those the scope goes by
+          observed status changes, which can miss a restart.
+        </p>
       </docs-section>
     </docs-page>
   `,

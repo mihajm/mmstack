@@ -36,6 +36,8 @@ export type UseSource<T> = {
   hasContent?(): boolean;
   readonly error?: Signal<unknown>;
   readonly outcome?: Signal<T | undefined | Absorbing | Done>;
+  /** The source's load counter, when it keeps one (see `ResourceLike.loads`). */
+  readonly loads?: Signal<number | undefined>;
 };
 
 /**
@@ -73,6 +75,12 @@ export type LatestSignal<T> = Signal<T | undefined> & {
   readonly error: Signal<unknown>;
   /** Whether a value has ever been produced (and is therefore held). */
   hasValue(): boolean;
+  /**
+   * Loads started by the used members, summed, each counted from when this derivation first
+   * observes its counter (a read of `loads`). Monotone: a member that stops being used keeps what
+   * it added. `undefined` while any used member keeps no counter.
+   */
+  readonly loads: Signal<number | undefined>;
 };
 
 /**
@@ -328,8 +336,27 @@ export function latest<T>(
     return undefined;
   });
 
+  const seenLoads = new WeakMap<UseSource<unknown>, number>();
+  let loadsTotal = 0;
+  const loads = computed(() => {
+    let counted = true;
+    for (const d of evaluation().deps) {
+      const l = d.loads?.();
+      if (l === undefined) {
+        counted = false;
+        continue;
+      }
+      const last = seenLoads.get(d);
+      // only forward moves add, so re-running with the same counts is a no-op
+      if (last !== undefined && l > last) loadsTotal += l - last;
+      seenLoads.set(d, l);
+    }
+    return counted ? loadsTotal : undefined;
+  });
+
   const result = Object.assign(value, {
     value,
+    loads,
     outcome,
     status,
     pending,

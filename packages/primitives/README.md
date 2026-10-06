@@ -21,7 +21,7 @@ Everything that is not a directive or component is also exported from `@mmstack/
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
 - [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`, `projection`
 - [Effects](#effects) — `nestedEffect`
-- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense & the census (`mm-suspense`, error slots, `mmRetryFailed`, `*mmSuspenseError`, retry rounds), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use` / `useAll`), `deferredValue`, `startTransition` / `startTransaction`, `holdUntilReady`
+- [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense & the census (`mm-suspense`, error slots, `mmRetryFailed`, `*mmSuspenseError`, retry rounds), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use` / `useAll`), `deferredValue`, `startTransition` / `startTransaction`, optimistic writes (`guessable`, `optimistic`, `optimisticStore`), `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
 - [Sync & convergence](#sync--convergence) — `opSync`, `tabSync(store)`, merge policies (`lww`, `mergeThree`, `keyedArray`, `preserve`), `Conflicted`, keyed containers (`keyedContainer`, `wrappedContainer`, `orderedEntries`, `posBetween`), `rebaseOps`, `policyStrategy`, `syncedFork`
 - [Async state values & sentinels](#async-state-values--sentinels) — `loading` / `error` / `done`, `joined` / `settle`, precedence & `joinAbsorbers`, strict sentinels, the `/algebra` kit
@@ -440,6 +440,7 @@ With this provided, `stored(...)` / `chunked(...)` (off by default) start readin
 ```
 
 **Boundary tracking (the census).** The boundary provides a transition scope that coordinates all async tasks registered inside its subtree. Each registered task (a query, mutation, or `latest()` derivation) reports its status through a unified contract:
+
 - `readiness`: whether it blocks the boundary's first paint (`register: 'suspend'`).
 - `pending`: whether it currently has no content to display.
 - `inFlight`: whether a network request is currently active (drives `aria-busy` and the `[busy]` slot).
@@ -447,11 +448,13 @@ With this provided, `stored(...)` / `chunked(...)` (off by default) start readin
 - `retry`: a function to re-trigger the load.
 
 Anything async registers cleanly:
+
 - **Resources.** `@mmstack/resource`'s `register: 'suspend' | 'indicator'` option, or `registerResource(ref, { suspends, displayName })` for any `ResourceRef`. The scope adapts the ref: `pending` means "suspends, has no content, has not failed", `inFlight` is `isLoading()`, `failure` follows `status() === 'error'` and carries the error's `message`, and `retry` calls the ref's `reload()`.
 - **`latest()` derivations.** The same `register: 'indicator' | 'suspend'` option and adapter.
 - **Direct members.** `censusResource({ site, displayName, ...resourceOptions })` is an Angular `resource` that joins the nearest boundary's tracking automatically. `scope.census.register(member)` takes any custom task, and `scope.census.enroll(descriptor)` returns a handle you drive yourself (`started(generation)` / `settled(generation, outcome)`) for external asynchronous work.
 
 **Boundary state resolution.** `scope.census.foldState()` determines the aggregate boundary state:
+
 - `pending`: at least one readiness member has no content yet (the boundary shows the `[placeholder]`).
 - `error`: a readiness member failed with nothing to show (the boundary displays the `[error]` slot).
 - `idle`: all required data is ready.
@@ -483,7 +486,7 @@ A structural directive on an element that carries `error` or `failed` projects i
 
 **Retry rounds.** `scope.retryAll()` and `scope.retry(id)` each run one round: every member that can retry and is not already in flight runs again, once. The round returns `{ dispatched, settled() }`: how many members it re-ran, and a promise for when those runs finish. Each member counts its runs as generations, and a round waits only on the generation it started, so a later round that re-runs the same member takes that wait over. A duplicated retry cannot be constructed: a round skips any member already in flight, so a second click while the first round is still loading dispatches nothing (`dispatched: 0`). A `@mmstack/resource` registration (query, manual, infinite) retries through its `reload()`.
 
-**Dismissal.** `dismiss(entry)` hides one entry from `errored()` until that member fails again; `dismissAll()` hides every entry it can. Dismissal is keyed to the failure's generation, so the member's next failure shows. Only a member without a retry can be dismissed (a retryable failure is meant to be retried), and only a failure that carries a generation, which in practice means an enrolled facade. For a resource registration `dismiss` does nothing. `scope.failures()` lists every failure and ignores dismissal.
+**Dismissal.** `dismiss(entry)` hides one entry from `errored()` until that member fails again; `dismissAll()` hides every entry it can. Dismissal is keyed to the failure's generation, so the member's next failure shows. Only a member without a retry can be dismissed (a retryable failure is meant to be retried), and only a failure that carries a generation, which in practice means an enrolled facade or a failed mutation ([below](#mutations-in-the-census)). For any other resource registration `dismiss` does nothing. `scope.failures()` lists every failure and ignores dismissal.
 
 **Settlement and the deadline.** `await scope.settled()` resolves once the fold has left `pending` and the graph has drained: `'idle'` when everything settled cleanly, `'error'` when something failed. A member that never answers would hold its placeholder forever, so a scope can carry a backstop:
 
@@ -556,6 +559,41 @@ The same pattern coordinates resources registered _above_ a boundary: the outer 
 
 **SSR.** On the server a scope holds an Angular `PendingTask` while it has loads in flight, so serialization waits and custom (non-HTTP) loaders render settled. The `provide*TransitionScope()` factories wire this; call `bridgeScopeToPendingTasks(scope, injector)` yourself only for a scope from `createTransitionScope()`. Browser stability is not tied to loads.
 
+### Mutations in the census
+
+A mutation registered with `register: 'indicator'` is a member of its boundary that never holds first paint. While it runs it drives `pending()` (`aria-busy`, the `[busy]` slot) and `suspended()` does not change. When it fails, the failure stays in `errored()` after the mutation has returned to idle, until it is dismissed (`dismiss(entry)`, `dismissAll()`, or the `dismiss` in `*mmSuspenseError`'s context) or the next `mutate()` starts. `retryAll()` skips it, because a write is not assumed to be safe to send twice. The ref carries the same failure as `lastFailure()`.
+
+`register: 'suspend'` on a mutation behaves as `'indicator'` and warns once in dev mode. To hold the UI while a save runs, use a transaction (`injectStartTransaction`), not suspense.
+
+### In-place error boundary: `*mmErrored`
+
+`*mmErrored` catches a render error the way `@boundary` does, but keeps what it guards. The content renders from the directive's template. When rendering it throws, the content view is detached and hidden, its components and their state stay alive, and the fallback template renders in its place with the error and a `retry`:
+
+```html
+<form *mmErrored="failed; name: 'profile form'">
+  <profile-fields />
+</form>
+<ng-template #failed let-error let-retry="retry">
+  <p>{{ error.message }} <button (click)="retry()">Retry</button></p>
+</ng-template>
+```
+
+`retry()` re-attaches the kept view and renders it again, synchronously, with the same instances, so a half-filled form keeps what the user typed. A `computed` that cached the throw throws again until one of its dependencies changes, so a retry before the fix lands on the fallback again and nothing broken is shown. The view that threw renders on retry even when it is an OnPush component with nothing changed. The longhand is `<ng-template [mmErrored]="failed">`; without a fallback the content is only hidden.
+
+**When which.** `@boundary` destroys its block on a throw and builds it again on `$reset()`. Use it for widgets with nothing worth keeping. Use `*mmErrored` when the subtree holds state the user would lose: a form mid-edit, a scrolled list, an editor.
+
+**Hidden, not frozen.** The content is hidden while it is faulted (element roots get `display: none`, text roots are blanked) because its DOM is whatever the throwing pass wrote before the throw: some bindings new, some old. Prefer an element root.
+
+**Creation throws.** A throw while the content itself is first built (a constructor, a DOM instruction) leaves no view to keep, so the fallback shows and `retry()` builds the content again, with new instances. Anything the half-built view registered outside itself before the throw stays registered, as with `@boundary`.
+
+**Rebuilding.** `retry({ rebuild: true })` destroys the faulted content and builds it again from the template, the way `@boundary` resets, so the instances and their state are new. The fallback's `retry` takes the same option: `(click)="retry({ rebuild: true })"`. Use the plain `retry()` for faults that pass, such as a failed load or a value fixed since. Use a rebuild when the kept state is itself what throws, so every plain retry would land on the fallback again. A rebuild also brings back a block branch left empty by the limit below. The census member stays until the rebuilt view renders clean, and a fault in the rebuilt view is caught and reported like any other.
+
+**Reporting and the census.** Angular does not report errors a custom interceptor catches, so the directive reports each catch to your `ErrorHandler` once (`onViewError` when it has one, otherwise `handleError`). Inside a transition scope each fault also joins the scope's census as a member that does not block first paint: `errored()` lists it under the `name` (default `'view'`), `failed()` stays false, `retryAll()` retries it, and the member leaves once a retry renders clean.
+
+**Nesting.** The nearest boundary catches: an inner `@boundary` or `*mmErrored` wins, and a fallback that throws goes to the next boundary out. Inside `*mmTransition`, put the boundary in the branch template. A faulting incoming branch shows its fallback inside the branch and still commits.
+
+**Limits.** Init hooks (`ngOnInit` and friends) that already ran, or started and threw, do not run again on retry. A block (`@if`, `@for`, `@switch`) whose new branch threw while being built has already taken its new condition, so after a retry that branch stays empty until the condition changes again. Errors in event listeners, root effects, `afterRender` callbacks, promises and `@defer` loads are not caught, and a view effect that runs while its view is only traversed (not refreshed) throws past this boundary to the nearest boundary further up whose view is refreshing. Compare with Solid 2.0's `<Errored>`, whose reset re-runs the readers that threw rather than rebuilding the tree; that is the rule `retry()` follows.
+
 ### Hold-and-swap — `*mmTransition`
 
 The transition itself, for any branch change — tabs, wizard steps, master-detail. Suspense decides placeholder-vs-content _within_ a branch, but it can't stop an `@switch` from unmounting the old branch the instant the value flips. `*mmTransition` holds it: when the bound value changes, the **old view stays mounted and visible** (keeping its old value) while the **new view mounts hidden with its own transition scope**; resources created in the incoming subtree register there just by existing, and once they've gone in flight and settled the views swap in one frame.
@@ -570,7 +608,25 @@ The transition itself, for any branch change — tabs, wizard steps, master-deta
 </div>
 ```
 
-The first render is immediate (nothing to hold). An interrupting change mid-hold destroys the half-ready hidden view and re-targets — the stable view stays visible until the newest branch settles. A branch that loads nothing swaps right after its first render, and per-view scopes mean the outgoing branch's background work can never delay the swap. `immediate: true` skips holding; `viewTransition: true` wraps the swap in `document.startViewTransition` (feature detected). This is `@mmstack/router-core`'s `<mm-transition-outlet>` without the router — same semantics, any signal as the trigger.
+The first render is immediate (nothing to hold). An interrupting change mid-hold destroys the half-ready hidden view and re-targets — the stable view stays visible until the newest branch settles. A branch that loads nothing swaps right after its first render, and per-view scopes mean the outgoing branch's background work can never delay the swap. A transaction that holds the incoming branch's scope keeps the swap back until it releases, and the branch commits once. That includes a transaction on the page around it, since a hold on a scope also holds the scopes provided inside it, so a tab switched mid-save commits with the saved values, together with the rest of the page. `immediate: true` skips holding; `viewTransition: true` wraps the swap in `document.startViewTransition` (feature detected). This is `@mmstack/router-core`'s `<mm-transition-outlet>` without the router — same semantics, any signal as the trigger.
+
+### Reveal order with `<mm-reveal>`
+
+Sibling boundaries settle in whatever order their data lands, so a dashboard can fill in bottom-up. `<mm-reveal>` schedules when each of its boundaries shows its content:
+
+```html
+<mm-reveal order="forwards" collapsed>
+  <mm-suspense><app-profile /></mm-suspense>
+  <mm-suspense><app-feed /></mm-suspense>
+  <mm-suspense><app-suggestions /></mm-suspense>
+</mm-reveal>
+```
+
+With `order="forwards"` (the default) a boundary shows its content once it is ready and every boundary before it has shown. `"backwards"` is the mirror, and `"together"` shows them all in one frame once every one is ready. A boundary held back by an earlier one shows its placeholder; with `collapsed` it renders nothing, so only the next boundary in line shows a placeholder.
+
+Failures follow `onError`. Under `'settled'` (the default) a failed boundary shows its error slot and the ones after it carry on. Under `'blocks'` it shows its error and holds the rest until a retry succeeds, for flows where the order means "this needs that first". Once a boundary has shown its content it stays shown, even if it suspends again later; its own placeholder or busy state takes over as usual.
+
+Only the boundaries directly inside the reveal take part. A boundary nested inside one of them belongs to that boundary, and boundaries are ordered by creation, so one added later by an `@if` goes last. The reveal schedules display and nothing else: held content is created and loads as usual, and a reveal inside a held `*mmTransition` view does its ordering while hidden and shows up with the swap. Compare with Solid 2.0's `<Reveal>`, which this follows. Custom boundaries join through `injectRevealSlot()` and provide `severReveal()` for their content.
 
 ### Per-element morphs — `mmViewTransitionName`
 
@@ -627,7 +683,43 @@ const total = latest(() => use(a) + use(b), {
 
 Results are status-bearing, so they **nest** (a `latest` read by `use` inside another passes its `outcome()` through) and register into transition scopes with the same `register: 'indicator' | 'suspend'` vocabulary as resources. `use()` accepts anything structurally resource-shaped: Angular `resource()` / `httpResource`, `@mmstack/resource` refs, or another `latest`. A source with an `outcome()` is read through it; any other is read through `outcomeOf(source)`, which derives the same answer from `status`, content, `value` and `error`.
 
-Limit: the collector is a synchronous stack, so it covers derivations you own, not arbitrary template reads, and nothing after an `await`.
+Limit: the collector is a synchronous stack, so it covers derivations you own and nothing after an `await`. For a read in a template, see `*mmOutcome` below.
+
+### Reading a resource in a template with `*mmOutcome`
+
+A boundary learns about a resource when the resource registers in it. `*mmOutcome` lets a template read do the same. It takes the resource itself, renders its template with the value, and while the resource is loading or failed it joins the nearest boundary's census as a member of its own. A resource created above the boundary, where no registration can reach it, still holds the boundary once it is read inside:
+
+```html
+<mm-suspense>
+  <span placeholder>Loading…</span>
+  <h2 *mmOutcome="user; let u; error: failed; name: 'profile'">
+    {{ u?.name }}
+  </h2>
+  <ng-template #failed let-error let-retry="retry">
+    Could not load the profile. <button (click)="retry?.()">Retry</button>
+  </ng-template>
+</mm-suspense>
+```
+
+The template renders while `outcome()` is a value (`undefined` counts: nothing was requested). While it is `loading` the template is removed, the optional `loading` template renders instead, and the member is pending, so the boundary shows its placeholder. While it is `error` the optional `error` template renders with the error as `$implicit` and a `retry` that reloads the resource when it can; the member reports the failure under its `name` (`'resource'` without one), and the boundary blanks only when the resource has nothing to show. A `done` outcome renders nothing and is not pending. The member leaves when the directive is destroyed. A `latest()` works the same way, read through its `outcome()`.
+
+Each directive is its own member. A resource that is also registered in the same boundary counts once there: one member in the fold, one entry in `errored()`, one reload per retry round. Registered in an outer boundary and read under an inner one, both boundaries hold, each in its own census.
+
+Reach for `latest` where you would write `computed` over resources; reach for the directive where you would read a resource in a template.
+
+**Three readings.** The value, the activity and the boundary answer different questions, and they can disagree on purpose. Take a registered `latest` that reads a user and their orders, after the orders request failed while the user reloads:
+
+```typescript
+const summary = latest(() => `${use(user).name}: ${use(orders).length} orders`);
+
+summary.status(); // 'error': the last evaluation stopped at the failed orders
+scope.pending(); // true: the user is still reloading
+scope.suspended('value'); // false: the held summary stays on screen
+```
+
+`status()` and `outcome()` describe the result, `pending()` describes work in flight, and `suspended()` / `failed()` describe whether the boundary can show its content.
+
+Limit: under `type="loading"` a boundary reads only its registrations, so a resource that is only read does not suspend it there.
 
 ### `deferredValue`
 
@@ -663,9 +755,11 @@ A transactional generalization of the above. `startTransaction(fn)` **holds the 
 const startTransaction = injectStartTransaction();
 
 const t = startTransaction(() => applyBulkEdit()); // live state updates; the displayed grid stays put
-// later: t.abort()  → roll the writes back and release the hold
+// later: t.abort()  → roll back the recorded writes and release the hold
 await t.done; // committed, display revealed in one frame
 ```
+
+Rollback covers recorded writes, and only those. The store records its root on the first write inside a transaction, and `derived`, `keepPrevious` and the pausable signals record the source they forward to. A plain signal of your own records through `transactional(sig)`, or by calling `activeTransaction()?.record(sig)` before the write. Nothing is intercepted: a write made any other way stays after `abort()`, and an unrecorded writer that re-lands the same value is invisible to the rollback. A `mutable()` is snapshotted when it is recorded, so an in-place write cannot reach the rollback point.
 
 Every exit settles: a throwing body rolls back, and if the calling context is **destroyed
 mid-flight** the hold is released (writes kept) and `done` resolves — a transaction can never
@@ -674,7 +768,91 @@ leave a surviving ancestor scope frozen.
 Attribution is **per transaction**: a load already in flight when it starts is not adopted —
 it can neither commit the transaction early nor block its settle. (The same applies to
 `startTransition`.) A pre-existing flight re-triggered by the transaction's own writes counts
-once it restarts.
+once it restarts, provided the resource keeps a `loads` counter: `@mmstack/resource` queries,
+mutations and streams do, and `latest()` sums its members' counters. A load started inside the
+transaction's body, or inside a `tx.enter(...)` slice, belongs to that transaction and to no
+other. A load started anywhere else after the transaction began counts for every transaction
+open at the time: it says "started since", not "caused by". A plain Angular `resource` has no
+counter, so a load of it that restarts or settles and refires between two reads stays excluded.
+
+**After an await.** Pass an async body and you get back `{ pending, done, abort }`, where `done`
+resolves with how the transaction ended: `{ kind: 'completed' }`, `{ kind: 'aborted', reason }`
+(`'abort'`, `'superseded'` or `'destroyed'`) or `{ kind: 'failed', error }`. It never rejects.
+The hold lasts until the body's promise resolves, the loads attributed to the transaction drain
+and every `tx.retain()` is released.
+
+```typescript
+const t = startTransaction(async (tx) => {
+  draft.set(next); // before the first await: recorded as usual
+  const saved = await api.save(next);
+  tx.enter(() => revision.set(saved.revision)); // re-enter for writes after an await
+});
+const outcome = await t.done; // { kind: 'completed' } | { kind: 'aborted', ... } | { kind: 'failed', ... }
+```
+
+Code after an `await` runs outside the transaction. `tx.enter(() => ...)` puts it back in for one
+synchronous slice: writes and loads started in the slice are the transaction's. A write you forget
+to wrap still lands and the display stays held, but `abort()` does not undo it. A load Angular
+starts later in response to the slice's writes is attributed by time, like any load started while
+the transaction is open. A rejected body rolls back and settles `failed`; `abort()` or destroying
+the calling context rolls back and settles `aborted`. Once settled, `tx.enter` and `tx.retain`
+throw and the body's later result is ignored, but nothing stops a leftover continuation from
+writing a signal directly. A `startTransaction` called inside a slice joins the outer transaction:
+its writes, its `abort()` and its `done` are the outer one's. There is no re-trigger policy here;
+for latest-wins or a FIFO queue use `mutationResource`. Reject-while-running and parallel runs are
+not provided.
+
+A view that mounts while a transaction holds (an `@if` that opens mid-transaction, a branch
+swapped in below the page) reads through `scope.hold` like the rest of the page. It shows each
+recorded signal as it was before the first write since its scope's hold began, counting holds
+inherited from enclosing scopes. Any transaction's write counts, in any scope, settled or not, so
+the new view matches the held page and reveals with it when the hold ends, or keeps that value
+after an abort. A hold on a scope also holds the scopes provided inside it (nested boundaries,
+`*mmTransition` branches); their `pending` and census stay their own. The one exception is the
+fallback scope a forwarding scope uses while it has no target: it cannot take part in an
+observable hold. Anything else the view reads (an unrecorded signal, a derived value, a store
+leaf) shows the live value.
+
+The history this needs is reclaimed as holds end: once no held scope can read an entry any more,
+it is dropped, even while other, unrelated holds keep overlapping. A scope that stays held keeps
+every recorded entry since its hold began, since a view mounted there may still need it.
+
+### Optimistic writes
+
+A guess is a value shown before its truth is known. It is gone when its transaction settles, however it settles, so a failed save never leaves a phantom row behind. There are two tiers and no default: pick one per write.
+
+**Live (in place).** `guessable(sig)` wraps a writable signal; `tx.guess(node, value)` lays a guess owned by the transaction. The live signal shows the guess, with an undo log over a truth shadow beneath it and a stamp on every write. Every reader sees the guess: templates, derived values, request functions. Use it when you expect the write to succeed almost always (a like toggle).
+
+```typescript
+const liked = guessable(signal(false));
+
+const t = startTransaction(async (tx) => {
+  tx.guess(liked, true); // everyone sees true now
+  const saved = await api.like(postId);
+  tx.enter(() => liked.set(saved.liked)); // the server's answer, recorded
+});
+```
+
+Readers see the most recent open guess laid after the node's last authoritative write, else the truth. An authoritative write is a `set` or `update` on the guessable (from the body, a user, a refetch, another transaction) or a change of the wrapped signal itself, such as a `linkedSignal` recomputing after a refetch. It replaces every guess laid before it, for good: undoing that write later brings back the truth beneath, never the guess. Equal values count when written through the guessable, so a server confirming the guessed value is not mistaken for no change. A write made directly on the wrapped signal with an equal value is not seen. `update` applies to the truth, not to a guess on screen. Two transactions guessing the same node show the newer one's guess; when either settles the other's guess or the truth shows, never a settled guess.
+
+The frozen frame is the truth beneath the guess. `scope.hold(node)` and `scope.commit(node)` read a visible guess live and freeze only the truth, so a hold opened over a guess never keeps showing it after it reverts. A derived value under `hold()` freezes what it computed, guess included; hold the guessable itself where that matters.
+
+**Overlay (isolated).** `optimisticStore(base)` gives each transaction its own fork of a store, and `optimistic(sig)` does the same for a plain signal. Guesses go into `tx.overlay(view)`; only readers of the view see them. The base, and every request or derived value built on it, never sees a guess, and the fork is thrown away when the transaction settles, never written back. Use it for multi-field edits (modal forms, draft editors).
+
+```typescript
+const todos = store({ items: [] as Todo[] });
+const shown = optimisticStore(todos); // read shown.store in the template
+
+startTransaction(async (tx) => {
+  tx.overlay(shown).items.update((xs) => [...xs, draft]); // only shown.store sees it
+  await api.add(draft);
+  tx.enter(() => todos.items.update((xs) => [...xs, draft])); // the truth, through the base
+});
+```
+
+When the base moves while a fork is open, paths the fork did not change follow the base at once, and a path it did change keeps the guess until the fork is discarded. An array is one value, so a guessed list hides a refetch of that list until then; pass `optimisticStore(base, { reconcile })` (an array-by-id merge, say) to merge it in. A guess equal to the value it covers is no change. With several transactions open, the view folds their forks over the base in the order they opened, a later one winning a path both changed. `view.fork()` opens a fork you discard yourself.
+
+A request built from a guessed value fires like any other request; if that is not wanted, have the request function return `undefined` while the input is provisional. `mutationResource({ optimistic })` in `@mmstack/resource` opens one of these transactions per mutation and settles it on the result. Compare with Solid 2.0's optimistic writes, whose revert-by-construction rule the live tier follows.
 
 ### `holdUntilReady`
 
@@ -685,6 +863,20 @@ import { holdUntilReady } from '@mmstack/primitives';
 
 const shown = holdUntilReady(targetView, () => !scope.pending());
 ```
+
+### `heldEffect`
+
+An `effect` that waits out a transition. While its gate is held, a change to anything it read does not run it; it only marks it stale. When the hold ends, a stale effect runs once with the latest values, so side effects see the settled state rather than every step on the way to it. With nothing held it is a plain `effect`.
+
+```typescript
+import { heldEffect } from '@mmstack/primitives';
+
+heldEffect(() => analytics.track('cart', cart.total()));
+```
+
+The default gate is the nearest transition scope's `holding() || pending()`: held while a transaction holds the display or a load is in flight. Pass `scope` to read another scope, or `gate` for your own predicate. A held effect cannot tell one change from many, and a hold with no change in it runs nothing. `onCleanup` callbacks run right before the next run and on destroy; destroying a held effect runs nothing.
+
+The limit: only effects are held. Template bindings belong to Angular's compiler and update as usual, so hold what the template shows with `*mmTransition` or the scope's `hold` / `commit`.
 
 ### Putting it together
 
@@ -934,7 +1126,7 @@ Rather than managing disjoint `isLoading`, `error`, and `data` boolean flags ("b
 - `error`: an operation failed. The sentinel object itself is value-free (the actual error cause is delivered to telemetry once and not retained on the value to prevent memory leaks).
 - `done`: an operation settled successfully without a payload (`DONE`).
 
-`loading` and `error` are **absorbing**: any operation depending on an unresolved state yields that state rather than producing garbage data or throwing prematurely (similar to how `NaN` propagates through arithmetic). 
+`loading` and `error` are **absorbing**: any operation depending on an unresolved state yields that state rather than producing garbage data or throwing prematurely (similar to how `NaN` propagates through arithmetic).
 Use `isLoading(v)`, `isError(v)`, `isDone(v)`, and `isSentinel(v)` to narrow values, or `ifLoading(v, fallback)` and `ifError(v, fallback)` to provide defaults.
 
 ### Combining resources: `joined()`
@@ -956,17 +1148,13 @@ const card = joined(user, org, (u, o) => `${u.name} @ ${o.name}`);
 In templates, consume `joined()` using Angular `@switch`:
 
 ```html
-@switch (card().kind) {
-  @case ('value') {
-    <p>{{ card().value }}</p>
-  }
-  @case ('pending') {
-    <span class="spinner">Loading card…</span>
-  }
-  @case ('error') {
-    <p class="error">Failed: {{ card().error }}</p>
-  }
-}
+@switch (card().kind) { @case ('value') {
+<p>{{ card().value }}</p>
+} @case ('pending') {
+<span class="spinner">Loading card…</span>
+} @case ('error') {
+<p class="error">Failed: {{ card().error }}</p>
+} }
 ```
 
 `joined()` runs as a standard `computed()`: it never throws, joins pending/error states automatically, and maps any thrown exceptions inside your callback into an `error` result. To convert a single resource outcome to this tagged shape, use `settle(outcome)`.
@@ -988,9 +1176,9 @@ import { errorEdge, joinAbsorbers, loading } from '@mmstack/primitives';
 const failed = errorEdge('failed');
 const waiting = loading();
 
-joinAbsorbers([1, failed, waiting]);                  // waiting (pending outranks error by default)
-joinAbsorbers([1, failed, waiting], 'error-first');   // failed
-joinAbsorbers([1, 2]);                                // undefined (all values resolved)
+joinAbsorbers([1, failed, waiting]); // waiting (pending outranks error by default)
+joinAbsorbers([1, failed, waiting], 'error-first'); // failed
+joinAbsorbers([1, 2]); // undefined (all values resolved)
 ```
 
 ### Minting errors & telemetry
@@ -1013,9 +1201,10 @@ isError(failed); // true
 ### Template safety & coercion
 
 If a sentinel value is interpolated directly in a template (e.g. `{{ res.outcome() }}` or `{{ res.outcome() | json }}`):
+
 - By default, it safely renders as `[mmstack loading]`, `[mmstack error]`, or `[mmstack done]` (or `NaN` in numeric contexts and `{"$sentinel": "loading"}` with the `json` pipe), preventing change detection from throwing repeatedly.
 - The first time a sentinel is coerced, it reports an `origin: 'leak'` finding through the installed telemetry reporter so unintended template reads are visible in monitoring.
-- `setStrictSentinels(true)` switches the behavior to throw a `SentinelLeakError` immediately upon coercion, which is useful in compiler or expression-evaluation contexts that require strict containment.
+- `provideStrictSentinels()` at the application root makes coercion throw a `SentinelLeakError`, useful in compiler or expression-evaluation contexts that require strict containment. The policy is realm-wide: the most recently initialized live provider wins, including `provideStrictSentinels(false)`. Injectors can be destroyed in any order; each removes only its own override. With no providers, `setStrictSentinels(true)` controls the policy directly. While providers are active, that setter updates the fallback used after the last provider is destroyed.
 
 ### The compiler & expression kit (`@mmstack/primitives/algebra`)
 

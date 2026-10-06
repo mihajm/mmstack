@@ -6,6 +6,10 @@ import {
   type ValueEqualityFn,
   type WritableSignal,
 } from '@angular/core';
+import {
+  recordsElsewhere,
+  recordWrite,
+} from './concurrent/active-transaction';
 import { isMutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 import {
@@ -392,15 +396,22 @@ export function derived<T, U>(
 
   const sig = toWritable<U>(
     computed(() => from(source()), { ...rest, equal }),
-    (newVal) => onChange(newVal),
+    (newVal) => {
+      // a transaction undoes the source; this signal follows it
+      recordWrite(source as WritableSignal<unknown>);
+      onChange(newVal);
+    },
     undefined,
     { pure: false },
   ) as DerivedSignal<T, U> & MutableSignal<U>;
 
   sig.from = from;
+  recordsElsewhere(sig);
 
   if (isMutable(source)) {
     sig.mutate = (updater) => {
+      // before the updater: it writes in place, so a later record would snapshot the new value
+      recordWrite(source as WritableSignal<unknown>);
       cnt++;
       try {
         sig.update(updater);

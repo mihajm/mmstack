@@ -112,5 +112,6 @@ function memberOf(
         : { id, displayName, message: undefined },
     ),
     retry: { retry: () => void ref.reload() },
+    source: ref,
   };
 }

@@ -8,7 +8,19 @@ import {
   withNoXsrfProtection,
   type HttpRequest,
 } from '@angular/common/http';
-import { PLATFORM_ID, signal, type WritableSignal } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  PLATFORM_ID,
+  signal,
+  type WritableSignal,
+} from '@angular/core';
+import {
+  getTransitionScope,
+  provideTransitionScope,
+  until,
+  type TransitionScope,
+} from '@mmstack/primitives';
 import { TestBed } from '@angular/core/testing';
 import { delay, of, throwError } from 'rxjs';
 import { MutationCancelledError, mutationResource } from './mutation-resource';
@@ -175,7 +187,11 @@ describe('mutationResource', () => {
     const list = hashRequest({ url: '/api/posts' });
     const listPage2 = hashRequest({ url: '/api/posts', params: { page: '2' } });
     const detail = hashRequest({ url: '/api/posts/1' });
-    const search = hashRequest({ method: 'POST', url: '/api/posts', body: { q: 'x' } });
+    const search = hashRequest({
+      method: 'POST',
+      url: '/api/posts',
+      body: { q: 'x' },
+    });
     const users = hashRequest({ url: '/api/users' });
     cache.store(list, resp([1, 2]));
     cache.store(listPage2, resp([3]));
@@ -293,9 +309,7 @@ describe('mutationResource', () => {
 
     expect(settled).toEqual([{ forId: 1 }, { forId: 2 }]);
     expect(succeeded).toEqual([{ forId: 2 }]);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('superseded'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('superseded'));
     warnSpy.mockRestore();
   });
 
@@ -465,9 +479,12 @@ describe('mutationResource', () => {
         url: `https://example.com/noqueue/${body}`,
         method: 'POST',
         body,
-        context: createTestContext(() => {
-          /* noop */
-        }, { ok: true }),
+        context: createTestContext(
+          () => {
+            /* noop */
+          },
+          { ok: true },
+        ),
       })),
     );
 
@@ -803,9 +820,12 @@ describe('mutationResource', () => {
           url: `https://example.com/async/${body.id}`,
           method: 'POST',
           body,
-          context: createTestContext(() => {
-            /* noop */
-          }, { saved: true }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { saved: true },
+          ),
         })),
       );
 
@@ -845,9 +865,12 @@ describe('mutationResource', () => {
             url: `https://example.com/async-hooks/${body.id}`,
             method: 'POST',
             body,
-            context: createTestContext(() => {
-              /* noop */
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                /* noop */
+              },
+              { ok: true },
+            ),
           }),
           {
             onMutate: () => hooks.push('onMutate'),
@@ -905,9 +928,12 @@ describe('mutationResource', () => {
             url: `https://example.com/async-throw/${body.id}`,
             method: 'POST',
             body,
-            context: createTestContext(() => {
-              /* noop */
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                /* noop */
+              },
+              { ok: true },
+            ),
           }),
           {
             onMutate: () => {
@@ -931,9 +957,12 @@ describe('mutationResource', () => {
                 url: `https://example.com/async-undef/${body}`,
                 method: 'POST',
                 body,
-                context: createTestContext(() => {
-                  /* noop */
-                }, { ok: true }),
+                context: createTestContext(
+                  () => {
+                    /* noop */
+                  },
+                  { ok: true },
+                ),
               }
             : undefined,
         ),
@@ -1106,9 +1135,12 @@ describe('mutationResource', () => {
               url: 'https://example.com/resources/multipart',
               method: 'POST',
               body: fd,
-              context: createTestContext((req) => {
-                bodyWasFormData = req.body instanceof FormData;
-              }, { ok: true }),
+              context: createTestContext(
+                (req) => {
+                  bodyWasFormData = req.body instanceof FormData;
+                },
+                { ok: true },
+              ),
             };
           },
           {
@@ -1145,9 +1177,12 @@ describe('mutationResource', () => {
           (id: string) => ({
             url: `https://example.com/posts/${id}/publish`,
             method: 'POST',
-            context: createTestContext(() => {
-              fired = true;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                fired = true;
+              },
+              { ok: true },
+            ),
           }),
           { onSettled: () => resolve() },
         ),
@@ -1167,9 +1202,12 @@ describe('mutationResource', () => {
           (id: string) => ({
             url: `https://example.com/posts/${id}`,
             method: 'DELETE',
-            context: createTestContext(() => {
-              fired = true;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                fired = true;
+              },
+              { ok: true },
+            ),
           }),
           { onSettled: () => resolve() },
         ),
@@ -1179,5 +1217,207 @@ describe('mutationResource', () => {
       await promise;
       expect(fired).toBe(true);
     });
+  });
+});
+
+describe('mutationResource as a census member', () => {
+  let boundary: EnvironmentInjector;
+  let scope: TransitionScope;
+  let sent = 0;
+
+  beforeEach(() => {
+    sent = 0;
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PLATFORM_ID, useValue: 'browser' },
+        provideQueryCache(),
+        {
+          provide: ResourceSensors,
+          useValue: { networkStatus: signal(true) },
+        },
+        provideHttpClient(
+          withNoXsrfProtection(),
+          withInterceptors([testInterceptor]),
+        ),
+      ],
+    });
+    boundary = createEnvironmentInjector(
+      [provideTransitionScope()],
+      TestBed.inject(EnvironmentInjector),
+    );
+    scope = getTransitionScope(boundary) as TransitionScope;
+  });
+
+  afterEach(() => boundary.destroy());
+
+  const save = (register: 'indicator' | 'suspend' = 'indicator', delayMs = 0) =>
+    mutationResource<unknown, unknown, { fail: boolean }>(
+      (body) => ({
+        url: 'https://example.com/save',
+        method: 'POST',
+        body,
+        context: createTestContext(
+          () => {
+            sent++;
+          },
+          { ok: true },
+          body.fail,
+          delayMs,
+        ),
+      }),
+      { register, displayName: 'save', injector: boundary },
+    );
+
+  const tick = async () => {
+    TestBed.tick();
+    await new Promise((r) => setTimeout(r));
+    TestBed.tick();
+  };
+
+  type Reading = {
+    errored: readonly string[];
+    pending: boolean;
+    suspended: boolean;
+    suspendedLoading: boolean;
+    failed: boolean;
+  };
+  const read = (): Reading => ({
+    errored: scope.errored().map((e) => e.failure.displayName),
+    pending: scope.pending(),
+    suspended: scope.suspended('value'),
+    suspendedLoading: scope.suspended('loading'),
+    failed: scope.failed(),
+  });
+  const presented: Reading = {
+    errored: ['save'],
+    pending: false,
+    suspended: false,
+    suspendedLoading: false,
+    failed: false,
+  };
+  const quiet: Reading = { ...presented, errored: [] };
+
+  const failOnce = async (res: ReturnType<typeof save>) => {
+    const settled = until(res.lastFailure, (f) => f !== undefined, {
+      injector: boundary,
+    });
+    res.mutate({ fail: true });
+    await settled;
+    await tick();
+  };
+
+  it('a failed mutate() stays in errored() after the request clears', async () => {
+    const res = save();
+    await failOnce(res);
+    expect(res.current()).toBeNull();
+    expect(res.status()).not.toBe('error');
+    const trace: Reading[] = [];
+    for (let i = 0; i < 3; i++) {
+      await tick();
+      trace.push(read());
+    }
+    expect(trace).toEqual([presented, presented, presented]);
+    expect(res.lastFailure()?.error).toBeInstanceOf(HttpErrorResponse);
+    expect(scope.errored()[0].member.readiness).toBe(false);
+    expect(scope.errored()[0].failure.generation).toBeDefined();
+  });
+
+  it('dismiss clears it, and the next failure shows again', async () => {
+    const res = save();
+    await failOnce(res);
+    const [entry] = scope.errored();
+    scope.dismiss(entry);
+    expect(read()).toEqual(quiet);
+    await tick();
+    expect(read()).toEqual(quiet);
+    expect(scope.failures().length).toBe(1); // dismissal hides, it does not settle
+
+    await failOnce(res);
+    expect(read()).toEqual(presented);
+    expect(scope.errored()[0].failure.generation).not.toBe(
+      entry.failure.generation,
+    );
+    scope.dismissAll();
+    expect(read()).toEqual(quiet);
+  });
+
+  it('the next mutate() clears it as it starts', async () => {
+    const res = save('indicator', 20);
+    await failOnce(res);
+    expect(read()).toEqual(presented);
+    res.mutate({ fail: false });
+    expect(res.lastFailure()).toBeUndefined();
+    expect(scope.errored()).toEqual([]);
+    await until(res.current, (c) => c === null, { injector: boundary });
+    await tick();
+    expect(read()).toEqual(quiet);
+  });
+
+  it('retryAll() does not dispatch it', async () => {
+    const res = save();
+    await failOnce(res);
+    expect(sent).toBe(1);
+    const round = scope.retryAll();
+    expect(round.dispatched).toBe(0);
+    await tick();
+    expect(sent).toBe(1);
+    expect(read()).toEqual(presented);
+  });
+
+  it("register: 'suspend' never blanks and warns once in dev", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const a = save('suspend', 20);
+      save('suspend');
+      const suspendWarnings = () =>
+        warn.mock.calls.filter((c) => String(c[0]).includes("'suspend'"))
+          .length;
+      expect(suspendWarnings()).toBe(1); // same display name = same call site
+
+      // another call site warns again; a nameless mutation warns per instance
+      const elsewhere = (displayName?: string) =>
+        mutationResource<unknown, unknown, { fail: boolean }>(
+          (body) => ({
+            url: 'https://example.com/other',
+            method: 'POST',
+            body,
+          }),
+          { register: 'suspend', displayName, injector: boundary },
+        );
+      elsewhere('other');
+      elsewhere('other');
+      expect(suspendWarnings()).toBe(2);
+      elsewhere();
+      elsewhere();
+      expect(suspendWarnings()).toBe(4);
+
+      // rxjs `delay` does not delay an error, so the in-flight reading uses a success
+      a.mutate({ fail: false });
+      await tick();
+      expect(read()).toEqual({ ...quiet, pending: true });
+      await until(a.current, (c) => c === null, { injector: boundary });
+      await tick();
+      expect(read()).toEqual(quiet);
+
+      await failOnce(a);
+      expect(read()).toEqual(presented);
+      expect(scope.census.foldState().kind).toBe('error');
+      expect(suspendWarnings()).toBe(4); // no warning fires again on use, only at registration
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('in flight: the pending indicator is on, suspense is unchanged', async () => {
+    const res = save('indicator', 30);
+    expect(read()).toEqual(quiet);
+    res.mutate({ fail: false });
+    const trace: Reading[] = [];
+    await tick();
+    trace.push(read());
+    await until(res.current, (c) => c === null, { injector: boundary });
+    await tick();
+    trace.push(read());
+    expect(trace).toEqual([{ ...quiet, pending: true }, quiet]);
   });
 });

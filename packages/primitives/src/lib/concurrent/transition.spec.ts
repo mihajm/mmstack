@@ -1,5 +1,6 @@
 /* eslint-disable @angular-eslint/component-selector */
 import {
+  afterNextRender,
   Component,
   computed,
   inject,
@@ -12,7 +13,13 @@ import {
 import { render } from '@testing-library/angular';
 import { MmTransition } from './transition';
 import { UnscopedSuspenseBoundary } from './suspense-boundary';
-import { registerResource } from '@mmstack/primitives/core';
+import {
+  injectStartTransaction,
+  injectTransitionScope,
+  provideTransitionScope,
+  registerResource,
+  transactional,
+} from '@mmstack/primitives/core';
 
 type FakeRef = ResourceRef<unknown> & {
   status: WritableSignal<ResourceStatus>;
@@ -305,5 +312,239 @@ describe('MmTransition (A5: commit under error)', () => {
     expect(visibleText(container)).toBe('e-error');
     expect(container.textContent).not.toContain('branch-a'); // the stale branch is gone
     expect(container.textContent).not.toContain('e-content');
+  });
+});
+
+// ─── the swap waits for an open hold on the incoming scope ─────────────────────────────
+
+const RELEASES = new InjectionToken<(() => void)[]>('releases');
+
+// holds its own (incoming) scope from construction until released; loads nothing
+@Component({ selector: 'branch-held', template: `branch-held` })
+class BranchHeld {
+  constructor() {
+    const releases = inject(RELEASES);
+    injectStartTransaction()((tx) => {
+      releases.push(tx.retain());
+    });
+  }
+}
+
+// a synchronous transaction opened by a component the branch mounts in its first update pass
+@Component({ selector: 'late-txn', template: `` })
+class LateTxn {
+  constructor() {
+    injectStartTransaction()(() => undefined);
+  }
+}
+
+@Component({
+  selector: 'branch-late',
+  imports: [LateTxn],
+  template: `@if (on) {
+      <late-txn />
+    }
+    branch-late`,
+})
+class BranchLate {
+  readonly on = true;
+}
+
+@Component({
+  selector: 'tr-hold-host',
+  imports: [MmTransition, BranchA, BranchHeld, BranchLate],
+  template: `
+    <div class="wrap" *mmTransition="tab(); let t">
+      @switch (t) {
+        @case ('a') {
+          <branch-a />
+        }
+        @case ('held') {
+          <branch-held />
+        }
+        @case ('late') {
+          <branch-late />
+        }
+      }
+    </div>
+  `,
+})
+class HoldHost {
+  readonly tab = signal('a');
+}
+
+describe('MmTransition (the swap waits for an open hold)', () => {
+  const swaps = () =>
+    vi.spyOn(
+      MmTransition.prototype as unknown as { finishSwap: () => void },
+      'finishSwap',
+    );
+  afterEach(() => vi.restoreAllMocks());
+
+  it('an incoming branch with nothing pending under an open hold waits, then commits once at the release', async () => {
+    const releases: (() => void)[] = [];
+    const { fixture, container } = await render(HoldHost, {
+      providers: [{ provide: RELEASES, useValue: releases }],
+    });
+    await flush(() => fixture.detectChanges());
+    const spy = swaps();
+
+    fixture.componentInstance.tab.set('held');
+    await flush(() => fixture.detectChanges());
+    await flush(() => fixture.detectChanges());
+    expect([
+      visibleText(container),
+      releases.length,
+      spy.mock.calls.length,
+    ]).toEqual(['branch-a', 1, 0]);
+    expect(container.textContent).toContain('branch-held'); // mounted, hidden
+
+    releases[0]();
+    await flush(() => fixture.detectChanges());
+    expect([visibleText(container), spy.mock.calls.length]).toEqual([
+      'branch-held',
+      1,
+    ]);
+    await flush(() => fixture.detectChanges());
+    expect(spy.mock.calls.length).toBe(1);
+  });
+
+  it('a hold opened and closed inside the first render does not strand the swap; it commits once', async () => {
+    const { fixture, container } = await render(HoldHost, {
+      providers: [{ provide: RELEASES, useValue: [] }],
+    });
+    await flush(() => fixture.detectChanges());
+    const spy = swaps();
+
+    fixture.componentInstance.tab.set('late');
+    await flush(() => fixture.detectChanges());
+    expect([visibleText(container), spy.mock.calls.length]).toEqual([
+      'branch-late',
+      1,
+    ]);
+    expect(container.textContent).not.toContain('branch-a');
+  });
+});
+
+// a hold that opens in a render hook ahead of the swap fallback and closes right after the hooks
+@Component({ selector: 'hook-hold', template: `` })
+class HookHold {
+  constructor() {
+    const scope = injectTransitionScope();
+    afterNextRender(() => {
+      scope.beginHold();
+      queueMicrotask(() => scope.endHold());
+    });
+  }
+}
+
+@Component({
+  selector: 'tr-hook-host',
+  imports: [MmTransition, HookHold],
+  template: `
+    <div class="wrap" *mmTransition="tab(); let t"><hook-hold />{{ t }}</div>
+  `,
+})
+class HookHost {
+  readonly tab = signal('a');
+}
+
+describe('MmTransition (a hold between two watcher runs)', () => {
+  it('a hold that opens in a render hook ahead of the fallback and closes right after does not strand the swap', async () => {
+    const spy = vi.spyOn(
+      MmTransition.prototype as unknown as { finishSwap: () => void },
+      'finishSwap',
+    );
+    const { fixture, container } = await render(HookHost);
+    await flush(() => fixture.detectChanges());
+    fixture.componentInstance.tab.set('b');
+    await flush(() => fixture.detectChanges());
+    expect([visibleText(container), spy.mock.calls.length]).toEqual(['b', 1]);
+    spy.mockRestore();
+  });
+});
+
+// ─── a transaction on an outer scope does not hold the incoming branch ─────────────────
+
+@Component({ selector: 'outer-reader', template: `b:{{ shown() }}` })
+class OuterReader {
+  readonly shown = injectTransitionScope().hold(inject(OuterHost).count);
+}
+
+@Component({
+  selector: 'tr-outer-host',
+  imports: [MmTransition, OuterReader],
+  template: `
+    <div class="wrap" *mmTransition="tab(); let t">
+      @if (t === 'b') {
+        <outer-reader />
+      } @else {
+        branch-a
+      }
+    </div>
+  `,
+  providers: [provideTransitionScope()],
+})
+class OuterHost {
+  readonly tab = signal('a');
+  readonly start = injectStartTransaction();
+  readonly scope = injectTransitionScope();
+  readonly count = transactional(signal(1));
+  readonly page = this.scope.hold(this.count);
+}
+
+describe('MmTransition under a transaction on the enclosing scope', () => {
+  const setup = async () => {
+    const spy = vi.spyOn(
+      MmTransition.prototype as unknown as { finishSwap: () => void },
+      'finishSwap',
+    );
+    const r = await render(OuterHost);
+    const host = r.fixture.componentInstance;
+    await flush(() => r.fixture.detectChanges());
+    expect(host.page()).toBe(1);
+    let release!: () => void;
+    const t = host.start((tx) => {
+      host.count.set(2);
+      release = tx.retain();
+    });
+    host.tab.set('b');
+    const frames: string[] = [];
+    const step = async () => {
+      await flush(() => r.fixture.detectChanges());
+      frames.push(visibleText(r.container));
+    };
+    await step();
+    await step();
+    return { ...r, host, t, release, spy, frames, step };
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it('the incoming branch waits for the page hold, reads the pre value, and commits once at the release', async () => {
+    const { host, release, spy, frames, step, container } = await setup();
+    expect(frames).toEqual(['branch-a', 'branch-a']);
+    expect([host.page(), host.scope.holding(), spy.mock.calls.length]).toEqual([
+      1,
+      true,
+      0,
+    ]);
+    expect(container.textContent).toContain('b:1'); // mounted hidden, joined the held frame
+
+    release();
+    await step();
+    await step();
+    expect(frames.slice(2)).toEqual(['b:2', 'b:2']);
+    expect([host.page(), spy.mock.calls.length]).toEqual([2, 1]);
+  });
+
+  it('an abort during the hold: the branch commits with the restored value and never shows the aborted write', async () => {
+    const { host, t, spy, frames, step, container } = await setup();
+    expect(container.textContent).toContain('b:1');
+    t.abort();
+    await step();
+    await step();
+    expect(frames).toEqual(['branch-a', 'branch-a', 'b:1', 'b:1']);
+    expect([host.count(), spy.mock.calls.length]).toEqual([1, 1]);
+    expect(container.textContent).not.toContain('b:2');
   });
 });

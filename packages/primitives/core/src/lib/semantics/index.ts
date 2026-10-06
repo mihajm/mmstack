@@ -32,3 +32,4 @@ export {
   setErrorReporter,
   setStrictSentinels,
 } from './sentinel';
+export { provideStrictSentinels } from './strict-sentinels';

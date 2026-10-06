@@ -4,13 +4,14 @@ import {
   InjectionToken,
   type Injector,
   type Provider,
-  type ResourceRef,
   runInInjectionContext,
 } from '@angular/core';
 import {
   injectTransitionScope,
   type RegisterOptions,
+  type ResourceLike,
 } from '@mmstack/primitives';
+import { ResourceDevWarnings } from './util/dev-warnings';
 import { type CircuitBreakerOptions, type RetryOptions } from './util';
 import { type HttpResourceRequest } from '@angular/common/http';
 
@@ -149,23 +150,42 @@ export function provideTypedResourceOptions<T>(
  * transition scope and removes it when the context is destroyed OR the resource's own
  * `.destroy()` is called (a manually-destroyed resource must not linger in the scope). Runs in
  * the resource's injection context (or the provided `injector`), since registration needs
- * `TRANSITION_SCOPE` + `DestroyRef`. `displayName` names the registration's failures. Returns the
- * remover, for callers that manage a facade.
+ * `TRANSITION_SCOPE` + `DestroyRef`. `displayName` names the registration's failures; `kind` is
+ * passed through to the scope (`'mutation'` for writes). Returns the remover, for callers that
+ * manage a facade.
  */
+/** What a registration needs from a ref: the census reading, and `destroy` to hook. */
+export type RegistrableRef = ResourceLike & { destroy?: () => void };
+
+const SUSPEND_MUTATION_WARNING =
+  "[@mmstack/resource]: register: 'suspend' on a mutation registers it as 'indicator'. A mutation never suspends or blanks its boundary; hold the UI during a save with a transaction instead.";
+
 export function applyResourceRegistration(
-  ref: ResourceRef<unknown>,
+  ref: RegistrableRef,
   register: TransitionRegistration | undefined,
   injector?: Injector,
   displayName?: string,
+  kind?: RegisterOptions['kind'],
 ): () => void {
   if (!register) return () => undefined;
   const opt: RegisterOptions = {
     suspends: register === 'suspend',
     ...(displayName === undefined ? {} : { displayName }),
+    ...(kind === undefined ? {} : { kind }),
   };
   const run = <T>(fn: () => T): T =>
     injector ? runInInjectionContext(injector, fn) : fn();
   return run(() => {
+    if (kind === 'mutation' && register === 'suspend') {
+      const warnings = inject(ResourceDevWarnings);
+      if (displayName === undefined)
+        warnings.warnOnceFor(ref, SUSPEND_MUTATION_WARNING);
+      else
+        warnings.warnOnce(
+          `suspend-mutation:${displayName}`,
+          SUSPEND_MUTATION_WARNING,
+        );
+    }
     const scope = injectTransitionScope();
     const destroyRef = inject(DestroyRef);
     scope.add(ref, opt);

@@ -18,6 +18,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { nestedEffect } from '../effect';
+import { recordsElsewhere, recordWrite } from './active-transaction';
 import { PAUSED_CONTEXT } from './paused';
 
 /**
@@ -178,8 +179,15 @@ export function pausableSignal<T>(
     equal: options?.equal,
   });
 
-  read.set = src.set;
-  read.update = src.update;
+  read.set = (v) => {
+    recordWrite(src as WritableSignal<unknown>);
+    src.set(v);
+  };
+  read.update = (fn) => {
+    recordWrite(src as WritableSignal<unknown>);
+    src.update(fn);
+  };
+  recordsElsewhere(read);
   // NOTE: `asReadonly` deliberately stays the linkedSignal's own (the held view) — the
   // source's readonly view would show live values while the signal itself shows held ones.
 

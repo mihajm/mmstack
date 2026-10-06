@@ -6,6 +6,11 @@ const SENTINEL_PROTOCOL = 2;
 /** How a sentinel answers a coercion. Mutable on purpose: the one record every copy shares. */
 export interface SentinelPolicy {
   strict: boolean;
+  /** Shared across package copies; present only while providers own the policy. */
+  providers?: {
+    base: boolean;
+    readonly entries: Map<object, boolean>;
+  };
 }
 
 export interface SentinelRegistry {
@@ -100,9 +105,30 @@ const POLICY: SentinelPolicy = REGISTRY.policy ?? { strict: false };
  * coercion gives `NaN`, `JSON.stringify` gives `{ "$sentinel": kind }`, and the first coercion of
  * each sentinel is reported once through the error reporter (origin `'leak'`). On: every coercion
  * throws `SentinelLeakError`, the law an expression evaluator is proven against.
+ * While providers are active, sets the base policy restored after the last provider leaves;
+ * the most recently initialized live provider continues to determine coercion behavior.
  */
 export function setStrictSentinels(on: boolean): void {
-  POLICY.strict = on;
+  if (POLICY.providers) POLICY.providers.base = on;
+  else POLICY.strict = on;
+}
+
+/** @internal Register an injector's override; removing it never restores a destroyed owner. */
+export function registerStrictSentinels(strict: boolean): () => void {
+  const providers = (POLICY.providers ??= {
+    base: POLICY.strict,
+    entries: new Map<object, boolean>(),
+  });
+  const owner = {};
+  providers.entries.set(owner, strict);
+  POLICY.strict = strict;
+  return () => {
+    if (!providers.entries.delete(owner)) return;
+    let current = providers.base;
+    for (const value of providers.entries.values()) current = value;
+    POLICY.strict = current;
+    if (!providers.entries.size) delete POLICY.providers;
+  };
 }
 
 export function isStrictSentinels(): boolean {

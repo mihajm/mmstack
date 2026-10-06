@@ -6,11 +6,11 @@ import {
   type EffectRef,
   inject,
   InjectionToken,
-  type Injector,
+  Injector,
   isDevMode,
   linkedSignal,
   type Provider,
-  type ResourceRef,
+  runInInjectionContext,
   type Signal,
   signal,
   untracked,
@@ -18,7 +18,16 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { DONE, type Done, type Outcome, outcomeOf } from '@mmstack/primitives';
+import {
+  abortTransaction,
+  type AsyncTransactionRef,
+  DONE,
+  type Done,
+  injectStartTransaction,
+  type Outcome,
+  outcomeOf,
+  type Transaction,
+} from '@mmstack/primitives';
 import { catchError, combineLatestWith, filter, map, of } from 'rxjs';
 import {
   applyResourceRegistration,
@@ -43,6 +52,13 @@ import {
 } from './util';
 
 const NULL_VALUE = Symbol('@mmstack/resource:null');
+
+/** A settled failure of a mutation: its error and a counter that grows with every failure. */
+export type MutationFailure = {
+  readonly error: unknown;
+  /** Distinct per failure of this mutation, so a presented failure can be told from the next one. */
+  readonly generation: number;
+};
 
 /** @internal A mutation's persisted-row identity, carried through its lifecycle. */
 type PersistedRef = { readonly id: string; readonly replayed: boolean };
@@ -227,6 +243,18 @@ export type MutationResourceOptions<
    */
   persist?: PersistMutationsOptions<NoInfer<TMutation>, NoInfer<TICTX>>;
   equal?: ValueEqualityFn<TMutation>;
+  /**
+   * Optimistic guesses that revert by construction. Each run opens a transaction on the nearest
+   * transition scope and calls this with the mutation value and the transaction: lay guesses with
+   * `tx.guess(node, value)` on a `guessable` (every reader sees it) or write them into
+   * `tx.overlay(view)` of an `optimistic` / `optimisticStore` (only the view's readers see it).
+   * The transaction completes after the mutation succeeds and the loads it started (an
+   * `invalidates` refetch) have landed; it aborts when the mutation fails or is superseded, or the
+   * resource is destroyed. Either way every guess is gone at that point. Authoritative writes made
+   * inside are undone on failure. Runs after `onMutate`; throwing here cancels the mutation like a
+   * throwing `onMutate`. While the transaction is open the scope's display hold is on.
+   */
+  optimistic?: (value: NoInfer<TMutation>, tx: Transaction) => void;
 };
 
 const MUTATION_RESOURCE_OPTIONS = new InjectionToken<
@@ -288,6 +316,8 @@ export type MutationResourceRef<
   | 'abort'
   | 'outcome'
 > & {
+  /** Whether a settled result is held: false while idle on the default, after the request clears. */
+  hasValue(): boolean;
   /**
    * The mutation's value plane as one total read, following `status()`: a `loading` sentinel
    * while the request runs, the result once it succeeds, `DONE` when it succeeds with no payload
@@ -320,6 +350,13 @@ export type MutationResourceRef<
    * This can be useful for tracking the state of the mutation or for displaying loading indicators.
    */
   current: Signal<TMutation | null>;
+  /**
+   * The last mutation that settled as a failure, with a `generation` that grows by one per
+   * failure, until the next mutation starts. Unlike `error()`, it outlives the request clearing
+   * after settle. A registered mutation presents it in its boundary's `errored()` until dismissed;
+   * the generation is what tells a dismissed failure from the next one.
+   */
+  lastFailure: Signal<MutationFailure | undefined>;
   /**
    * Drops all *pending* queued mutations; an in-flight mutation is unaffected.
    * Noops when `queue` is not enabled.
@@ -411,8 +448,47 @@ export function mutationResource<
     invalidates,
     invalidateMatcher,
     persist,
+    optimistic,
     ...rest
   } = options;
+
+  const startTransaction = optimistic
+    ? runInInjectionContext(
+        options.injector ?? inject(Injector),
+        injectStartTransaction,
+      )
+    : undefined;
+  type OptimisticRun = {
+    readonly ref: AsyncTransactionRef;
+    resolve(): void;
+    reject(e: unknown): void;
+  };
+  let currentRun: OptimisticRun | undefined;
+  const openRun = (value: TMutation): void => {
+    if (!startTransaction || !optimistic) return;
+    const settled = Promise.withResolvers<void>();
+    // a queued run begins inside the queue's effect; the transaction creates its own
+    const ref = untracked(() =>
+      startTransaction((tx) => {
+        optimistic(value, tx);
+        return settled.promise;
+      }),
+    );
+    currentRun = { ref, resolve: settled.resolve, reject: settled.reject };
+  };
+  const endRun = (
+    how:
+      | { ok: true }
+      | { ok: false; error: unknown }
+      | { reason: 'abort' | 'superseded' | 'destroyed' },
+  ) => {
+    const run = currentRun;
+    currentRun = undefined;
+    if (!run) return;
+    if ('reason' in how) abortTransaction(run.ref, how.reason);
+    else if (how.ok) run.resolve();
+    else run.reject(how.error);
+  };
 
   const cache = invalidates ? injectQueryCache(options.injector) : undefined;
 
@@ -511,6 +587,9 @@ export function mutationResource<
     },
   );
 
+  const lastFailure = signal<MutationFailure | undefined>(undefined);
+  let failures = 0;
+
   let ctx: TCTX = undefined as TCTX;
   let currentDeferred: PromiseWithResolvers<TResult> | undefined;
   let currentPersisted: PersistedRef | undefined;
@@ -521,6 +600,7 @@ export function mutationResource<
     deferred: PromiseWithResolvers<TResult> | undefined,
     persisted: PersistedRef | undefined,
   ) => {
+    lastFailure.set(undefined);
     let nextCtx: TCTX;
     try {
       nextCtx = onMutate?.(value, ictx) as TCTX;
@@ -537,11 +617,28 @@ export function mutationResource<
       return;
     }
 
+    try {
+      openRun(value);
+    } catch (optimisticErr) {
+      ctx = undefined as TCTX;
+      next.set(NULL_VALUE);
+      if (persisted) persistence?.remove(persisted.id);
+      deferred?.reject(optimisticErr);
+      if (isDevMode())
+        console.error(
+          '[@mmstack/resource]: error thrown in optimistic, mutation was not applied',
+          optimisticErr,
+        );
+      return;
+    }
+
     ctx = nextCtx;
     currentDeferred = deferred;
     currentPersisted = persisted;
     next.set(value);
 
+    // nothing will be sent, so nothing will settle the run
+    if (untracked(req) === undefined) endRun({ reason: 'abort' });
     if (deferred && untracked(req) === undefined) {
       ctx = undefined as TCTX;
       currentDeferred = undefined;
@@ -572,6 +669,7 @@ export function mutationResource<
           settleErr,
         );
     }
+    endRun({ reason: 'superseded' });
     currentDeferred?.reject(
       new MutationCancelledError(
         'superseded',
@@ -689,7 +787,15 @@ export function mutationResource<
         if (!keep) persistence?.remove(persisted.id);
       }
 
+      // settles on a later microtask, so the callbacks below still see the guesses
+      endRun(
+        result.status === 'error'
+          ? { ok: false, error: result.error }
+          : { ok: true },
+      );
+
       if (result.status === 'error') {
+        lastFailure.set({ error: result.error, generation: (failures += 1) });
         onError?.(result.error, ctx, {
           replayed: persisted?.replayed ?? false,
         });
@@ -839,6 +945,7 @@ export function mutationResource<
       );
       currentDeferred?.reject(cancelled);
       currentDeferred = undefined;
+      endRun({ reason: 'destroyed' });
       for (const [, , deferred] of untracked(queue)())
         deferred?.reject(cancelled);
       resource.destroy();
@@ -863,6 +970,7 @@ export function mutationResource<
       }
       return deferred.promise;
     },
+    lastFailure: lastFailure.asReadonly(),
     current: computed(() => {
       const nv = next();
       return nv === NULL_VALUE ? null : nv;
@@ -885,10 +993,11 @@ export function mutationResource<
   };
 
   applyResourceRegistration(
-    ref as unknown as ResourceRef<unknown>,
+    ref,
     register,
     options0.injector,
     options.displayName,
+    'mutation',
   );
 
   return ref;

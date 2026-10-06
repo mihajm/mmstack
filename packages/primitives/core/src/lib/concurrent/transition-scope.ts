@@ -15,6 +15,7 @@ import {
   type Provider,
   type ResourceStatus,
   type Signal,
+  type WritableSignal,
 } from '@angular/core';
 import { mutable } from '../mutable';
 import {
@@ -30,6 +31,18 @@ import {
 } from './census';
 import { createCensus } from './census-registry';
 import { BOUNDARY_CENSUS } from './census-token';
+import {
+  beginOwnHold,
+  endOwnHold,
+  inheritHoldSeeds,
+  preHoldValueOf,
+  redirectHoldSeeds,
+} from './hold-seed';
+import {
+  guessableInternals,
+  type GuessableInternals,
+  truthOfCell,
+} from './optimistic-seam';
 import {
   dismissableEntries,
   dismissAllEntries,
@@ -75,6 +88,14 @@ export type ResourceLike = {
    * never blanks content the user is reading. Falls back to `hasValue()`.
    */
   hasContent?(): boolean;
+  /**
+   * How many loads this resource has started, counting every request change and reload,
+   * including one that aborts and replaces a load in flight. Monotone. When present, a
+   * transaction tells its own loads apart from ones already in flight when it started, however
+   * quickly they settle and restart; without it (or while it reads `undefined`) that is
+   * best-effort.
+   */
+  readonly loads?: Signal<number | undefined>;
 };
 
 /**
@@ -96,6 +117,12 @@ export type RegisterOptions = {
   readonly suspends?: boolean;
   /** What the boundary calls this resource when it fails (`errored` entries). Defaults to `'resource'`. */
   readonly displayName?: string;
+  /**
+   * `'mutation'` registers a write: it drives `pending` but never suspends (`suspends` is
+   * ignored), has no retry, and its last failure stays in `errored` until dismissed or the next
+   * mutation starts. Defaults to `'resource'`.
+   */
+  readonly kind?: 'resource' | 'mutation';
 };
 
 /**
@@ -168,6 +195,12 @@ export type TransitionScope = {
    * Whether a transaction is currently HOLDING this scope's synchronous display reads (Tier 3).
    * A counter under the hood, so nested transactions compose. Distinct from `pending` (a resource
    * is in flight): `holding` brackets a whole transaction from start to settle.
+   *
+   * A hold on a scope also holds the scopes provided inside it (`provideTransitionScope`, nested
+   * boundaries, `*mmTransition` branches): they report `holding()` too, so a view mounted there
+   * stays with the held page. Only the hold is shared; `pending` and the census stay per scope.
+   * One exception: the fallback scope a forwarding scope uses while it has no target is not
+   * linked to anything around it and cannot take part in an observable hold.
    */
   readonly holding: Signal<boolean>;
   /** Begin a transaction hold (increment the counter). */
@@ -179,6 +212,10 @@ export type TransitionScope = {
    * `holding`, then reveals the live value when the hold ends. Unlike `commit` (gates on
    * `pending`), this brackets the whole transaction — so a *synchronous* state write made inside
    * the transaction stays visually held until the transaction settles, with no torn frame.
+   *
+   * A reader first read while the scope is held shows a recorded signal as it was before the
+   * first write since that hold began, counting holds inherited from enclosing scopes, so it
+   * joins the frame the rest of the held page shows. Anything not recorded reads live.
    */
   hold<T>(value: Signal<T>): Signal<T>;
   /**
@@ -283,7 +320,7 @@ export function createTransitionScope(
 
   // Blanks the boundary: the fold is `error` and some failing readiness member has no content.
   // Registrations answer `hasContent()`; a member registered directly in the census
-  // (`censusResource`) has no content witness, so its failure counts as no content.
+  // (`censusResource`) counts as no content unless it carries its own `content` witness.
   const failed = computed(() => {
     if (census.foldState().kind !== 'error') return false;
     const listed = new Set<MemberId>();
@@ -297,7 +334,10 @@ export function createTransitionScope(
       .errored()
       .some(
         ({ member }) =>
-          member.readiness && (!listed.has(member.id) || blank.has(member.id)),
+          member.readiness &&
+          (listed.has(member.id)
+            ? blank.has(member.id)
+            : !(member.content?.() ?? false)),
       );
   });
 
@@ -307,14 +347,15 @@ export function createTransitionScope(
   );
 
   const holdCount = signal(0);
-  const holding = computed(() => holdCount() > 0);
+  const holdParent = signal<TransitionScope | null>(null);
+  const holding = computed(() => holdCount() > 0 || !!holdParent()?.holding());
 
   const reportRound = (round: RetryRound): RetryRound => {
     inst?.retryRound?.({ scope: name, dispatched: round.dispatched, at: at() });
     return round;
   };
 
-  return {
+  const self: TransitionScope = {
     resources: computed(() => list().map((e) => e.ref)),
     pending,
     suspended: (type) =>
@@ -329,11 +370,12 @@ export function createTransitionScope(
             )),
     add: (ref, o) =>
       untracked(() => {
-        const suspends = o?.suspends ?? true;
+        const suspends = o?.kind === 'mutation' ? false : (o?.suspends ?? true);
         const member = resourceMember(ref, {
           id: memberId(MEMBER_SITE, ordinalOf(ref)),
           displayName: o?.displayName ?? DEFAULT_DISPLAY_NAME,
           suspends,
+          kind: o?.kind,
         });
         const unregister = census.register(member);
         list.inline((c) => c.push({ ref, member, unregister, suspends }));
@@ -349,11 +391,7 @@ export function createTransitionScope(
         inst?.resourceRemoved?.({ scope: name });
       }),
     commit: <T>(value: Signal<T>): Signal<T> =>
-      linkedSignal<{ v: T; settled: boolean }, T>({
-        source: () => ({ v: value(), settled: !pending() }),
-        computation: (curr, prev) =>
-          curr.settled || prev === undefined ? curr.v : prev.value,
-      }),
+      committedReader(value, () => !pending()),
     abortPending: () =>
       untracked(() => {
         let aborted = 0;
@@ -368,15 +406,18 @@ export function createTransitionScope(
         return aborted;
       }),
     holding,
-    beginHold: () => untracked(() => holdCount.update((c) => c + 1)),
-    endHold: () =>
-      untracked(() => holdCount.update((c) => (c > 0 ? c - 1 : 0))),
-    hold: <T>(value: Signal<T>): Signal<T> =>
-      linkedSignal<{ v: T; held: boolean }, T>({
-        source: () => ({ v: value(), held: holding() }),
-        computation: (curr, prev) =>
-          prev !== undefined && curr.held ? prev.value : curr.v,
+    beginHold: () =>
+      untracked(() => {
+        if (holdCount() === 0) beginOwnHold(self);
+        holdCount.update((c) => c + 1);
       }),
+    endHold: () =>
+      untracked(() => {
+        if (holdCount() === 0) return;
+        holdCount.update((c) => c - 1);
+        if (holdCount() === 0) endOwnHold(self);
+      }),
+    hold: <T>(value: Signal<T>): Signal<T> => heldReader(self, value, holding),
     failed,
     errored,
     failures: census.failures,
@@ -411,6 +452,78 @@ export function createTransitionScope(
     settled: () => censusSettled(census, { injector: opt?.injector }),
     census,
   };
+  holdParents.set(self, holdParent);
+  holdResets.set(self, () =>
+    untracked(() => {
+      if (holdCount() === 0) return;
+      holdCount.set(0);
+      endOwnHold(self);
+    }),
+  );
+  return self;
+}
+
+/** Ends a scope's own hold outright (the scope is destroyed while holding). */
+const holdResets = new WeakMap<TransitionScope, () => void>();
+
+/**
+ * A frozen frame over a guessable is taken from the truth beneath its guesses; a visible guess
+ * reads through it live, and a reverted one is never kept by the frame.
+ */
+function overGuess<T>(g: GuessableInternals, frozen: Signal<T>): Signal<T> {
+  return computed(() => {
+    const f = frozen();
+    const [has, v] = g.visible();
+    return (has ? v : f) as T;
+  });
+}
+
+/** `hold()`: freezes at the pre-hold value while `held()`; a mid-hold first read is seeded. */
+function heldReader<T>(
+  self: object,
+  value: Signal<T>,
+  held: () => boolean,
+): Signal<T> {
+  const g = guessableInternals(value);
+  const src = (g ? g.truth : value) as Signal<T>;
+  const frozen = linkedSignal<{ v: T; held: boolean }, T>({
+    source: () => ({ v: src(), held: held() }),
+    computation: (curr, prev) => {
+      if (prev !== undefined) return curr.held ? prev.value : curr.v;
+      if (!curr.held) return curr.v;
+      const seed = preHoldValueOf(self, g ? g.port : value);
+      if (!seed) return curr.v;
+      return (g ? truthOfCell(seed.value) : seed.value) as T;
+    },
+  });
+  return g ? overGuess(g, frozen) : frozen;
+}
+
+/** `commit()`: freezes at the last settled value while `settled()` is false. */
+function committedReader<T>(
+  value: Signal<T>,
+  settled: () => boolean,
+): Signal<T> {
+  const g = guessableInternals(value);
+  const src = (g ? g.truth : value) as Signal<T>;
+  const frozen = linkedSignal<{ v: T; settled: boolean }, T>({
+    source: () => ({ v: src(), settled: settled() }),
+    computation: (curr, prev) =>
+      curr.settled || prev === undefined ? curr.v : prev.value,
+  });
+  return g ? overGuess(g, frozen) : frozen;
+}
+
+/** Each plain scope's link to the scope it inherits its hold from. */
+const holdParents = new WeakMap<
+  TransitionScope,
+  WritableSignal<TransitionScope | null>
+>();
+
+/** A hold on `parent` also holds `scope` (and seeds its mid-hold readers). */
+function inheritHold(scope: TransitionScope, parent: TransitionScope): void {
+  holdParents.get(scope)?.set(parent);
+  inheritHoldSeeds(scope, parent);
 }
 
 function createNoopScope(): TransitionScope {
@@ -595,6 +708,13 @@ function scopeProvider(opt?: CreateTransitionScopeOptions): Provider {
         precedence: opt?.precedence,
         injector: opt?.injector ?? inject(Injector),
       });
+      const parent = inject(TRANSITION_SCOPE, {
+        skipSelf: true,
+        optional: true,
+      });
+      if (parent) inheritHold(scope, parent);
+      // a scope destroyed while it holds must not keep the shared hold registry alive
+      inject(DestroyRef).onDestroy(() => holdResets.get(scope)?.());
       bridgeScopeToPendingTasks(scope);
       bridgeScopeToInstrumentation(scope, opt?.name ?? 'scope', listener);
       return scope;
@@ -646,7 +766,7 @@ export function createForwardingScope(
   // drops the ref, instead of this map pinning every stranded pair forever.
   const owners = new WeakMap<ResourceLike, TransitionScope>();
 
-  return {
+  const self: ForwardingTransitionScope = {
     setTarget: (t) => target.set(t),
     resources: computed(() => eff().resources()),
     pending: computed(() => eff().pending()),
@@ -662,21 +782,13 @@ export function createForwardingScope(
       owners.delete(ref);
     },
     commit: <T>(value: Signal<T>): Signal<T> =>
-      linkedSignal<{ v: T; settled: boolean }, T>({
-        source: () => ({ v: value(), settled: !eff().pending() }),
-        computation: (curr, prev) =>
-          curr.settled || prev === undefined ? curr.v : prev.value,
-      }),
+      committedReader(value, () => !eff().pending()),
     abortPending: () => (untracked(target) ?? own).abortPending(),
     holding: computed(() => eff().holding()),
     beginHold: () => (untracked(target) ?? own).beginHold(),
     endHold: () => (untracked(target) ?? own).endHold(),
     hold: <T>(value: Signal<T>): Signal<T> =>
-      linkedSignal<{ v: T; held: boolean }, T>({
-        source: () => ({ v: value(), held: eff().holding() }),
-        computation: (curr, prev) =>
-          prev !== undefined && curr.held ? prev.value : curr.v,
-      }),
+      heldReader(self, value, () => eff().holding()),
     failed: computed(() => eff().failed()),
     errored: computed(() => eff().errored()),
     failures: computed(() => eff().failures()),
@@ -690,6 +802,9 @@ export function createForwardingScope(
       () => current().census,
     ),
   };
+  // seeders follow the hold to the scope it lands on
+  redirectHoldSeeds(self, () => untracked(target) ?? own);
+  return self;
 }
 
 /**
@@ -741,35 +856,146 @@ export function getTransitionScope(injector: Injector): TransitionScope | null {
   return injector.get(TRANSITION_SCOPE, null);
 }
 
+type FlightClaims = {
+  readonly byRef: Map<ResourceLike, Map<number, object>>;
+  readonly version: ReturnType<typeof signal<number>>;
+};
+const flightClaims = new WeakMap<TransitionScope, FlightClaims>();
+
+/** Owner of record for a claimed load whose transaction has settled: nobody live adopts it. */
+const SETTLED_OWNER: object = {};
+
+/** Drop claims on loads a later start has already replaced; only the current load of a resource can be in flight. */
+function pruneClaims(
+  claims: FlightClaims,
+  current: Map<ResourceLike, number>,
+): boolean {
+  let changed = false;
+  for (const [ref, byCount] of claims.byRef) {
+    const now = current.get(ref);
+    for (const n of byCount.keys())
+      if (now === undefined || n < now) {
+        byCount.delete(n);
+        changed = true;
+      }
+    if (!byCount.size) claims.byRef.delete(ref);
+  }
+  return changed;
+}
+
+function claimsOf(scope: TransitionScope): FlightClaims {
+  let c = flightClaims.get(scope);
+  if (!c)
+    flightClaims.set(scope, (c = { byRef: new Map(), version: signal(0) }));
+  return c;
+}
+
+/** @internal The `loads` count of every resource in the scope that exposes one. */
+export function snapshotLoads(
+  scope: TransitionScope,
+): Map<ResourceLike, number> {
+  return untracked(() => {
+    const out = new Map<ResourceLike, number>();
+    for (const ref of scope.resources()) {
+      const loads = ref.loads?.();
+      if (loads !== undefined) out.set(ref, loads);
+    }
+    return out;
+  });
+}
+
+/**
+ * @internal Claim for `owner` every load started since `before` (a {@link snapshotLoads} taken
+ * at the start of a synchronous slice). A load another owner already claimed stays theirs.
+ */
+export function claimLoads(
+  scope: TransitionScope,
+  owner: object,
+  before: Map<ResourceLike, number>,
+): void {
+  const claims = claimsOf(scope);
+  const current = snapshotLoads(scope);
+  let changed = pruneClaims(claims, current);
+  for (const [ref, after] of current) {
+    const from = before.get(ref) ?? 0;
+    if (after <= from) continue;
+    let byCount = claims.byRef.get(ref);
+    if (!byCount) claims.byRef.set(ref, (byCount = new Map()));
+    for (let n = from + 1; n <= after; n++) {
+      if (byCount.has(n)) continue;
+      byCount.set(n, owner);
+      changed = true;
+    }
+  }
+  if (changed) claims.version.update((v) => v + 1);
+}
+
+/**
+ * @internal `owner` settled. Its claims stay on record under a settled owner, so a load it
+ * started that is still in flight is not adopted by another transaction's window; claims on
+ * loads already replaced by a later start are dropped.
+ */
+export function releaseClaims(scope: TransitionScope, owner: object): void {
+  const claims = flightClaims.get(scope);
+  if (!claims) return;
+  let changed = pruneClaims(claims, snapshotLoads(scope));
+  for (const byCount of claims.byRef.values())
+    for (const [n, o] of byCount)
+      if (o === owner) {
+        byCount.set(n, SETTLED_OWNER);
+        changed = true;
+      }
+  if (changed) claims.version.update((v) => v + 1);
+}
+
 /**
  * @internal Transaction-attributed pending for `startTransition`/`startTransaction`: like
- * `scope.pending`, but loads already in flight when the tracker is created are NOT attributed —
- * a pre-existing background load can neither settle the transaction early nor block its settle
- * forever. A pre-existing flight is excluded only until it first settles; a later re-trigger of
- * the same resource (e.g. the transaction's write changed its request) counts as the
- * transaction's own work.
+ * `scope.pending`, but loads already in flight when the tracker is created are NOT attributed,
+ * so a pre-existing background load can neither settle the transaction early nor block its
+ * settle forever.
+ *
+ * With `loads` on a resource: a load counts when it was claimed by `owner` (started inside one
+ * of its synchronous slices), or started after the tracker was created and not claimed by
+ * another owner. That is "started since the checkpoint", not "caused by this writer", for loads
+ * started outside a slice. Without `loads`: a pre-existing flight is excluded until a read
+ * sees it settled (best-effort: a load that restarts, or settles and refires between two reads,
+ * stays excluded).
  */
 export function createAttributedPending(
   scope: TransitionScope,
+  owner?: object,
 ): Signal<boolean> {
-  const isInFlight = (ref: ResourceLike): boolean => {
-    const s = untracked(ref.status);
-    return s === 'loading' || s === 'reloading';
-  };
-  const preexisting = new Set(untracked(scope.resources).filter(isInFlight));
+  const inFlight = (s: ResourceStatus) => s === 'loading' || s === 'reloading';
+  const loads0 = snapshotLoads(scope);
+  const preexisting = new Set(
+    untracked(scope.resources).filter((ref) => inFlight(untracked(ref.status))),
+  );
+  const claims = claimsOf(scope);
 
   return computed(() => {
+    claims.version();
     let pending = false;
     for (const ref of scope.resources()) {
-      const s = ref.status();
-      const loading = s === 'loading' || s === 'reloading';
-      if (preexisting.has(ref)) {
-        // deletes are monotonic, so this stays sound under re-computation
-        if (loading) continue;
-        preexisting.delete(ref);
+      const loading = inFlight(ref.status());
+      const loads = ref.loads?.();
+      if (loads === undefined) {
+        if (preexisting.has(ref)) {
+          // deletes are monotonic, so this stays sound under re-computation
+          if (!loading) preexisting.delete(ref);
+          continue;
+        }
+        if (loading) pending = true;
         continue;
       }
-      if (loading) pending = true;
+      if (!loading) continue;
+      const claimedBy = claims.byRef.get(ref)?.get(loads);
+      if (claimedBy !== undefined) {
+        if (claimedBy === owner) pending = true;
+        continue;
+      }
+      const l0 = loads0.get(ref);
+      if (!preexisting.has(ref) || (l0 !== undefined && loads > l0))
+        pending = true;
     }
     return pending;
   });

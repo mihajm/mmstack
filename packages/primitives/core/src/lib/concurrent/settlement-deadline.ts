@@ -60,5 +60,7 @@ export function withSettlementDeadline(
         : undefined;
     }),
     retry: member.retry,
+    ...(member.source === undefined ? {} : { source: member.source }),
+    ...(member.content === undefined ? {} : { content: member.content }),
   };
 }

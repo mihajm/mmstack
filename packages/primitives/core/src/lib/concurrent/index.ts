@@ -23,3 +23,12 @@ export * from './dismiss';
 export * from './settlement';
 export * from './settlement-deadline';
 export { resourceMember, type ResourceMemberOptions } from './resource-member';
+export * from './reveal';
+export * from './held-effect';
+export { guessable, type Guessable } from './optimistic';
+export {
+  optimistic,
+  type Optimistic,
+  type OptimisticFork,
+} from './optimistic-overlay';
+export { abortTransaction } from './transaction-driver';

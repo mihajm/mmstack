@@ -31,17 +31,17 @@
       "@mmstack/primitives": ["packages/primitives/src/index.ts"],
       "@mmstack/primitives/core": ["packages/primitives/core/src/index.ts"],
       "@mmstack/primitives/algebra": [
-        "packages/primitives/algebra/src/index.ts",
+        "packages/primitives/algebra/src/index.ts"
       ],
       "@mmstack/primitives/testing": [
-        "packages/primitives/testing/src/index.ts",
+        "packages/primitives/testing/src/index.ts"
       ],
       "@mmstack/resource": ["packages/resource/src/index.ts"],
       "@mmstack/router-core": ["packages/router/core/src/index.ts"],
       "@mmstack/telemetry-core": ["packages/telemetry/core/src/index.ts"],
       "@mmstack/telemetry-otel": ["packages/telemetry/otel/src/index.ts"],
       "@mmstack/telemetry-devtools": [
-        "packages/telemetry/devtools/src/index.ts",
+        "packages/telemetry/devtools/src/index.ts"
       ],
       "@mmstack/telemetry-posthog": ["packages/telemetry/posthog/src/index.ts"],
       "@mmstack/telemetry-sentry": ["packages/telemetry/sentry/src/index.ts"],
@@ -52,14 +52,14 @@
       "@mmstack/forms": ["packages/forms/src/index.ts"],
       "@mmstack/worker": ["packages/worker/src/index.ts"],
       "@mmstack/worker/host": ["packages/worker/host/src/index.ts"],
-      "@mmstack/worker/protocol": ["packages/worker/protocol/src/index.ts"],
-    },
+      "@mmstack/worker/protocol": ["packages/worker/protocol/src/index.ts"]
+    }
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true,
-    "strictTemplates": true,
+    "strictTemplates": true
   },
-  "exclude": ["node_modules", "tmp"],
+  "exclude": ["node_modules", "tmp"]
 }

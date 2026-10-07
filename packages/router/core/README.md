@@ -547,6 +547,18 @@ export const appConfig: ApplicationConfig = {
 };
 ```
 
+#### Your own preload lane
+
+`PreloadRequester` is the root service `Link` and `injectTriggerPreload` report to. Subscribe to `preloadRequested$` to warm your own resources for a requested url. It emits `{ path, scope }`, where `path` is the full serialized url with its param values, whether or not `withPreloading(PreloadStrategy)` is provided.
+
+```typescript
+import { PreloadRequester } from '@mmstack/router-core';
+
+inject(PreloadRequester)
+  .preloadRequested$.pipe(takeUntilDestroyed())
+  .subscribe(({ path, scope }) => warm(path, scope));
+```
+
 ### `Link` (`mmLink`)
 
 The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds preloading. All standard `routerLink` inputs (`queryParams`, `fragment`, `state`, `relativeTo`, etc.) are supported.

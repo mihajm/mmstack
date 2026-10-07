@@ -28,6 +28,11 @@ export const appRoutes: Route[] = [
       ),
   },
   {
+    path: 'touch-dnd',
+    loadComponent: () =>
+      import('./examples/touch-dnd-example').then((m) => m.TouchDndExample),
+  },
+  {
     path: 'pointer-engine',
     loadComponent: () =>
       import('./examples/pointer-engine-example').then(

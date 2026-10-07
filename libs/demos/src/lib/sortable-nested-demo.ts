@@ -6,13 +6,27 @@ import {
   reorderable,
   sortableGroup,
 } from '@mmstack/dnd';
+import { DemoReset } from './demo-reset';
 
 type Step = { id: number; label: string };
 
+const STEPS: Record<number, () => Step[]> = {
+  1: () => [
+    { id: 11, label: 'Step A' },
+    { id: 12, label: 'Step B' },
+  ],
+  2: () => [{ id: 21, label: 'Step C' }],
+  3: () => [
+    { id: 31, label: 'Step D' },
+    { id: 32, label: 'Step E' },
+  ],
+};
+
 @Component({
   selector: 'demo-sortable-nested',
-  imports: [Reorderable, ReorderableItem, ReorderableHandle],
+  imports: [Reorderable, ReorderableItem, ReorderableHandle, DemoReset],
   template: `
+    <demo-reset (restore)="reset()" />
     <ul class="list" [mmReorderable]="outer">
       @for (card of outer.items(); track card.id) {
         <li class="card" [mmReorderableItem]="card">
@@ -90,8 +104,11 @@ type Step = { id: number; label: string };
 export class SortableNestedDemo {
   private readonly checkGroup = sortableGroup<Step>();
 
-  private card(id: number, title: string, items: Step[]) {
-    const sig: WritableSignal<Step[]> = signal(items);
+  private readonly steps = new Map<number, WritableSignal<Step[]>>();
+
+  private card(id: number, title: string) {
+    const sig: WritableSignal<Step[]> = signal(STEPS[id]());
+    this.steps.set(id, sig);
     return {
       id,
       title,
@@ -103,20 +120,20 @@ export class SortableNestedDemo {
     };
   }
 
-  private readonly cards = signal([
-    this.card(1, 'Backlog', [
-      { id: 11, label: 'Step A' },
-      { id: 12, label: 'Step B' },
-    ]),
-    this.card(2, 'In progress', [{ id: 21, label: 'Step C' }]),
-    this.card(3, 'Done', [
-      { id: 31, label: 'Step D' },
-      { id: 32, label: 'Step E' },
-    ]),
-  ]);
+  private readonly initial = [
+    this.card(1, 'Backlog'),
+    this.card(2, 'In progress'),
+    this.card(3, 'Done'),
+  ];
+  private readonly cards = signal(this.initial);
 
   protected readonly outer = reorderable(this.cards, {
     engine: 'pointer',
     key: (c) => c.id,
   });
+
+  protected reset() {
+    this.cards.set(this.initial);
+    for (const [id, sig] of this.steps) sig.set(STEPS[id]());
+  }
 }

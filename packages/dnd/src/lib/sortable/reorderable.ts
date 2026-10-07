@@ -13,6 +13,7 @@ import {
   signal,
 } from '@angular/core';
 
+import { surfaceTouchAction } from '../internal/touch-activation';
 import { connectNativeContainer, connectNativeItem } from './native';
 import { connectPointerContainer, connectPointerItem } from './pointer';
 import type {
@@ -20,6 +21,25 @@ import type {
   ReorderableController,
   ReorderableItemBinding,
 } from './types';
+
+/**
+ * The `touch-action` of a whole-item drag surface. A single linear list drags
+ * along its axis only, so the other axis stays free for page panning (`'x'`
+ * lists allow `pan-y`, `'y'` lists allow `pan-x`); grouped and wrap lists drag
+ * in 2D and get `none`. A touch long-press turns every surface into
+ * `manipulation`, since the page may scroll until the press activates.
+ */
+export function reorderableItemTouchAction(
+  controller: Pick<ReorderableController<unknown, unknown>, 'axis' | 'group' | 'touchActivation'>,
+): string {
+  const linear =
+    !controller.group && controller.axis !== 'wrap'
+      ? controller.axis === 'x'
+        ? 'pan-y'
+        : 'pan-x'
+      : 'none';
+  return surfaceTouchAction(controller.touchActivation, linear);
+}
 
 /**
  * Wire a container element up as a sortable list: own the single delegated
@@ -124,8 +144,10 @@ export function connectReorderableItem<T, K = unknown>(
 
 /**
  * A thin DOM adapter: one input + one hookup call. By default the whole item is
- * the drag surface; add a `[mmReorderableHandle]` child to scope dragging — and
- * `touch-action:none` — to just the handle, leaving the body scrollable on touch.
+ * the drag surface and carries the `touch-action` from
+ * {@link reorderableItemTouchAction}; add a `[mmReorderableHandle]` child to
+ * scope dragging (and the `touch-action`) to just the handle, leaving the body
+ * scrollable on touch.
  */
 @Directive({
   selector: '[mmReorderableItem]',
@@ -133,7 +155,7 @@ export function connectReorderableItem<T, K = unknown>(
     'data-mm-reorderable-item': '',
     '[attr.data-mm-reorderable-handle]': 'hasHandle() ? null : ""',
     '[attr.tabindex]': 'state.tabIndex()',
-    '[style.touch-action]': 'hasHandle() ? null : "none"',
+    '[style.touch-action]': 'hasHandle() ? null : surfaceTouchAction()',
     '[style.user-select]': "'none'",
     '[style.position]': "'relative'",
     '[style.transform]': 'state.transformCss()',
@@ -146,6 +168,16 @@ export function connectReorderableItem<T, K = unknown>(
 export class ReorderableItem<T, K = unknown> {
   readonly item = input.required<T>({ alias: 'mmReorderableItem' });
   protected readonly state = connectReorderableItem<T, K>(() => this.item());
+  private readonly parent = inject<Reorderable<T, K>>(Reorderable);
+  protected readonly surfaceTouchAction = computed(() =>
+    reorderableItemTouchAction(
+      this.parent.controller() as ReorderableController<unknown, unknown>,
+    ),
+  );
+  /** @internal the handle's `touch-action`: `none`, or `manipulation` under a touch long-press. */
+  readonly handleTouchAction = computed(() =>
+    surfaceTouchAction(this.parent.controller().touchActivation, 'none'),
+  );
 
   protected readonly hasHandle = signal(false);
   registerHandle(): void {
@@ -158,22 +190,22 @@ export class ReorderableItem<T, K = unknown> {
 
 /**
  * Marks a child of a `[mmReorderableItem]` as the drag handle: only it starts a
- * drag and carries `touch-action:none`. Optional — without it the whole item is
- * the handle.
+ * drag and carries `touch-action: none` (`manipulation` under a touch
+ * long-press). Optional: without it the whole item is the handle.
  */
 @Directive({
   selector: '[mmReorderableHandle]',
   host: {
     'data-mm-reorderable-handle': '',
-    '[style.touch-action]': "'none'",
+    '[style.touch-action]': 'item.handleTouchAction()',
     '[style.cursor]': "'grab'",
   },
 })
 export class ReorderableHandle {
+  protected readonly item = inject(ReorderableItem);
   constructor() {
-    const item = inject(ReorderableItem);
-    item.registerHandle();
-    inject(DestroyRef).onDestroy(() => item.unregisterHandle());
+    this.item.registerHandle();
+    inject(DestroyRef).onDestroy(() => this.item.unregisterHandle());
   }
 }
 

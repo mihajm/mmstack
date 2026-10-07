@@ -1,4 +1,10 @@
-import { Component, computed, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  type ElementRef,
+  signal,
+  viewChild,
+} from '@angular/core';
 import {
   Canvas,
   CanvasItem,
@@ -6,18 +12,41 @@ import {
   injectCanvas,
   type CanvasFrame,
 } from '@mmstack/dnd';
+import { DemoReset } from './demo-reset';
 
 type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
 
+const seed = (): Widget[] => [
+  {
+    id: 'a',
+    label: 'Hero',
+    hue: 222,
+    frame: { x: 24, y: 24, width: 130, height: 74 },
+  },
+  {
+    id: 'b',
+    label: 'Card',
+    hue: 262,
+    frame: { x: 200, y: 48, width: 96, height: 96 },
+  },
+  {
+    id: 'c',
+    label: 'Note',
+    hue: 320,
+    frame: { x: 72, y: 160, width: 110, height: 64 },
+  },
+];
+
 @Component({
   selector: 'demo-canvas-board',
-  imports: [Canvas, CanvasItem, CanvasResizeHandle],
+  imports: [Canvas, CanvasItem, CanvasResizeHandle, DemoReset],
   template: `
-    <div class="board" [mmCanvas]="ctrl">
+    <demo-reset (restore)="reset()" />
+    <div class="board" #board [mmCanvas]="ctrl">
       @for (w of ctrl.items(); track w.id) {
         <div
           class="widget"
-          [style.background]="'hsl(' + w.hue + ' 60% 58%)'"
+          [style.background]="'hsl(' + w.hue + ' 60% 50%)'"
           [mmCanvasItem]="w"
         >
           {{ w.label }}
@@ -29,7 +58,7 @@ type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
           }
         </div>
       }
-      <svg class="overlay">
+      <svg class="overlay" aria-hidden="true">
         @for (g of ctrl.session.guides(); track $index) {
           @if (g.axis === 'x') {
             <line
@@ -67,9 +96,12 @@ type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
       border: 1px dashed var(--border, #e5e7eb);
       border-radius: 10px;
       overflow: hidden;
-      background:
-        radial-gradient(circle, var(--border, #e5e7eb) 1px, transparent 1px) 0 0 /
-        20px 20px;
+      background: radial-gradient(
+          circle,
+          var(--border, #e5e7eb) 1px,
+          transparent 1px
+        )
+        0 0 / 20px 20px;
     }
 
     .widget {
@@ -100,10 +132,26 @@ type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
       border: 2px solid var(--accent, #6366f1);
       border-radius: 2px;
     }
-    .handle.nw { top: -6px; left: -6px; cursor: nwse-resize; }
-    .handle.ne { top: -6px; right: -6px; cursor: nesw-resize; }
-    .handle.sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
-    .handle.se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+    .handle.nw {
+      top: -6px;
+      left: -6px;
+      cursor: nwse-resize;
+    }
+    .handle.ne {
+      top: -6px;
+      right: -6px;
+      cursor: nesw-resize;
+    }
+    .handle.sw {
+      bottom: -6px;
+      left: -6px;
+      cursor: nesw-resize;
+    }
+    .handle.se {
+      bottom: -6px;
+      right: -6px;
+      cursor: nwse-resize;
+    }
 
     .overlay {
       position: absolute;
@@ -126,21 +174,36 @@ type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
   `,
 })
 export class CanvasBoardDemo {
-  private readonly data = signal<readonly Widget[]>([
-    { id: 'a', label: 'Hero', hue: 222, frame: { x: 24, y: 24, width: 130, height: 74 } },
-    { id: 'b', label: 'Card', hue: 262, frame: { x: 200, y: 48, width: 96, height: 96 } },
-    { id: 'c', label: 'Note', hue: 320, frame: { x: 72, y: 160, width: 110, height: 64 } },
-  ]);
+  private readonly board = viewChild<ElementRef<HTMLElement>>('board');
+  private readonly data = signal<readonly Widget[]>(seed());
 
   protected readonly ctrl = injectCanvas<Widget, string>(this.data, {
     key: (w) => w.id,
     frame: (w) => w.frame,
     patch: (w, frame) => ({ ...w, frame }),
     grid: { size: 4 },
+    // keep every widget (and its resize handles) on the board, big enough to grab again
+    bounds: () => {
+      const el = this.board()?.nativeElement;
+      if (!el) return undefined;
+      const inset = 8;
+      return {
+        x: inset,
+        y: inset,
+        width: el.clientWidth - inset * 2,
+        height: el.clientHeight - inset * 2,
+      };
+    },
+    resize: { min: { width: 48, height: 32 } },
   });
 
   protected readonly solo = computed(() => {
     const ids = this.ctrl.selection.ids();
     return ids.length === 1 ? ids[0] : null;
   });
+
+  protected reset() {
+    this.ctrl.selection.clear();
+    this.data.set(seed());
+  }
 }

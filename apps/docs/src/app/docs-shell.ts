@@ -1,4 +1,12 @@
-import { Component, effect, inject } from '@angular/core';
+import {
+  afterNextRender,
+  Component,
+  effect,
+  type ElementRef,
+  inject,
+  Injector,
+  viewChild,
+} from '@angular/core';
 import { mediaQuery } from '@mmstack/primitives';
 import {
   injectNavItems,
@@ -22,7 +30,12 @@ import { DocsMenu } from './layout/docs-menu';
           aria-label="Close documentation menu"
         ></button>
       }
-      <aside id="docs-nav" [class.open]="menu.open()">
+      <aside
+        #aside
+        id="docs-nav"
+        [class.open]="menu.open()"
+        [attr.inert]="mobile() && !menu.open() ? '' : null"
+      >
         <nav aria-label="Documentation">
           @for (group of nav(); track group.id()) {
             <section>
@@ -45,10 +58,10 @@ import { DocsMenu } from './layout/docs-menu';
           }
         </nav>
       </aside>
-      <main>
+      <div id="docs-content" class="docs-main" tabindex="-1">
         <mm-transition-outlet />
         <docs-footer-nav />
-      </main>
+      </div>
     </div>
   `,
   styles: `
@@ -98,6 +111,12 @@ import { DocsMenu } from './layout/docs-menu';
       color: var(--fg);
     }
 
+    @media (pointer: coarse) {
+      aside a {
+        padding-block: 0.65rem;
+      }
+    }
+
     aside a.active {
       color: var(--fg);
       text-decoration: underline;
@@ -106,21 +125,25 @@ import { DocsMenu } from './layout/docs-menu';
       text-underline-offset: 4px;
     }
 
-    main {
+    .docs-main {
       min-width: 0;
       padding: 2rem 2.5rem 4rem;
+    }
+
+    .docs-main:focus {
+      outline: none;
     }
 
     .backdrop {
       display: none;
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 900px) {
       .docs-layout {
         grid-template-columns: minmax(0, 1fr);
       }
 
-      main {
+      .docs-main {
         padding: 1.5rem 1.15rem 3rem;
       }
 
@@ -131,8 +154,12 @@ import { DocsMenu } from './layout/docs-menu';
         right: 0;
         bottom: 0;
         left: auto;
+        /* the desktop align-self: start would shrink-wrap the fixed box and
+           pin it to y=0 over the header */
+        align-self: stretch;
         width: min(82vw, 20rem);
-        max-height: 100%;
+        max-height: none;
+        overscroll-behavior: contain;
         padding: 1.25rem 1.15rem;
         background: var(--bg);
         border-right: none;
@@ -170,10 +197,21 @@ import { DocsMenu } from './layout/docs-menu';
 export class DocsShell {
   protected readonly nav = injectNavItems('docs');
   protected readonly menu = inject(DocsMenu);
-  protected readonly mobile = mediaQuery('(max-width: 760px)');
+  protected readonly mobile = mediaQuery('(max-width: 900px)');
+  private readonly aside = viewChild<ElementRef<HTMLElement>>('aside');
 
   constructor() {
     const currentUrl = url();
+    const injector = inject(Injector);
+    // Keep the active link in view inside the sidebar (or the drawer when it
+    // opens). Instant, and only the sidebar scrolls, never the page.
+    effect(() => {
+      currentUrl();
+      this.menu.open();
+      const aside = this.aside()?.nativeElement;
+      if (!aside) return;
+      afterNextRender(() => revealActive(aside), { injector });
+    });
     // Close the drawer whenever the route changes (drawer link, footer nav,
     // or browser back), so it never lingers over the new page.
     effect(() => {
@@ -181,4 +219,15 @@ export class DocsShell {
       this.menu.close();
     });
   }
+}
+
+function revealActive(aside: HTMLElement): void {
+  const link = aside.querySelector<HTMLElement>('a.active');
+  if (!link) return;
+  const box = aside.getBoundingClientRect();
+  const item = link.getBoundingClientRect();
+  const pad = 48;
+  if (item.top < box.top) aside.scrollTop += item.top - box.top - pad;
+  else if (item.bottom > box.bottom)
+    aside.scrollTop += item.bottom - box.bottom + pad;
 }

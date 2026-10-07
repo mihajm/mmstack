@@ -100,6 +100,11 @@ export {
 
 export { deriveHit } from './lib/internal/hit';
 
+export {
+  type ResolvedTouchActivation,
+  type TouchActivation,
+} from './lib/internal/touch-activation';
+
 export * from './lib/sortable';
 
 export * from './lib/grid';

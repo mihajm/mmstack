@@ -144,40 +144,42 @@ import { DocSection } from '../../../layout/doc-section';
           <code>linkedSignal</code>, so it holds local writes until the base
           changes underneath it, then runs a <code>strategy</code> to reconcile.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>strategy</th>
-              <th>Behavior</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>'fine'</code></td>
-              <td>
-                Per-path 3-way merge. Keep the paths the fork edited, take the
-                base's live values for the rest. Default for an immutable base.
-                Unsupported on a mutable base (it falls back to
-                <code>'coarse'</code>).
-              </td>
-            </tr>
-            <tr>
-              <td><code>'coarse'</code></td>
-              <td>
-                Any base change resets the whole fork. Cheapest, and correct
-                when the base is held for the fork's lifetime. Default for a
-                mutable base.
-              </td>
-            </tr>
-            <tr>
-              <td><code>ReconcileFn&lt;T&gt;</code></td>
-              <td>
-                <code>(ancestor, mine, theirs) =&gt; merged</code>, for a
-                bring-your-own merge (array-by-id, Immer patches, CRDT-ish).
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>strategy</th>
+                <th>Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>'fine'</code></td>
+                <td>
+                  Per-path 3-way merge. Keep the paths the fork edited, take the
+                  base's live values for the rest. Default for an immutable base.
+                  Unsupported on a mutable base (it falls back to
+                  <code>'coarse'</code>).
+                </td>
+              </tr>
+              <tr>
+                <td><code>'coarse'</code></td>
+                <td>
+                  Any base change resets the whole fork. Cheapest, and correct
+                  when the base is held for the fork's lifetime. Default for a
+                  mutable base.
+                </td>
+              </tr>
+              <tr>
+                <td><code>ReconcileFn&lt;T&gt;</code></td>
+                <td>
+                  <code>(ancestor, mine, theirs) =&gt; merged</code>, for a
+                  bring-your-own merge (array-by-id, Immer patches, CRDT-ish).
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           The fork inherits the base's <code>vivify</code> and
           <code>noUnionLeaves</code> automatically. Pass them explicitly only to

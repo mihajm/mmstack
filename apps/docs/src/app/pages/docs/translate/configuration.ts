@@ -59,45 +59,47 @@ import { DocSection } from '../../../layout/doc-section';
           Beyond the two required keys, <code>provideIntlConfig</code> takes a
           few optional ones:
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Option</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>localeParamName</code></td>
-              <td>Drives the active locale from a route parameter.</td>
-            </tr>
-            <tr>
-              <td><code>localeStorage</code></td>
-              <td>
-                Persists a user-picked locale across reloads. Mutually exclusive
-                with <code>localeParamName</code>, since the URL would only
-                fight it.
-              </td>
-            </tr>
-            <tr>
-              <td><code>preloadDefaultLocale</code></td>
-              <td>
-                Eagerly loads the default bundle so it is available as a
-                synchronous fallback.
-              </td>
-            </tr>
-            <tr>
-              <td><code>releaseCachedSignals</code></td>
-              <td>
-                Holds cached translation signals weakly so they can be collected
-                once the component that read them is destroyed. Off by default,
-                since translation keys are a bounded set for most apps. Turn it
-                on only for large apps under measured memory pressure, or ones
-                that build keys dynamically.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>localeParamName</code></td>
+                <td>Drives the active locale from a route parameter.</td>
+              </tr>
+              <tr>
+                <td><code>localeStorage</code></td>
+                <td>
+                  Persists a user-picked locale across reloads. Mutually exclusive
+                  with <code>localeParamName</code>, since the URL would only
+                  fight it.
+                </td>
+              </tr>
+              <tr>
+                <td><code>preloadDefaultLocale</code></td>
+                <td>
+                  Eagerly loads the default bundle so it is available as a
+                  synchronous fallback.
+                </td>
+              </tr>
+              <tr>
+                <td><code>releaseCachedSignals</code></td>
+                <td>
+                  Holds cached translation signals weakly so they can be collected
+                  once the component that read them is destroyed. Off by default,
+                  since translation keys are a bounded set for most apps. Turn it
+                  on only for large apps under measured memory pressure, or ones
+                  that build keys dynamically.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           The runtime switching side, including
           <code>injectDynamicLocale</code> and a language switcher, lives on the

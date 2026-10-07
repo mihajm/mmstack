@@ -11,6 +11,7 @@ Low-level signal utilities: deep reactive stores, timing helpers, sensors, persi
 - [Overview](https://mihajm.github.io/mmstack/docs/primitives)
 - [Signal variants](https://mihajm.github.io/mmstack/docs/primitives/signals): mutable, derived, toWritable
 - [Store](https://mihajm.github.io/mmstack/docs/primitives/store): deep reactive store, extendStore, forkStore, projection, opLog, opaque
+- [Sync and convergence](https://mihajm.github.io/mmstack/docs/primitives/sync): op-log, tabSync, per-path merge policies, rebase
 - [Mapped collections](https://mihajm.github.io/mmstack/docs/primitives/collections): indexArray, keyArray, mapObject
 - [Timing](https://mihajm.github.io/mmstack/docs/primitives/timing): debounced, throttled, until
 - [Storage and history](https://mihajm.github.io/mmstack/docs/primitives/storage): stored, tabSync, withHistory
@@ -18,6 +19,7 @@ Low-level signal utilities: deep reactive stores, timing helpers, sensors, persi
 - [Pipelines](https://mihajm.github.io/mmstack/docs/primitives/pipelines): piped and operators
 - [Performance](https://mihajm.github.io/mmstack/docs/primitives/performance): chunked, pooled
 - [Transitions and suspense](https://mihajm.github.io/mmstack/docs/primitives/transitions): mmTransition, mm-suspense, latest, deferredValue, transactions
+- [Observability](https://mihajm.github.io/mmstack/docs/primitives/observability): optional listener for transition, suspense, and transaction events
 - [Keep-alive and pausing](https://mihajm.github.io/mmstack/docs/primitives/pausing): mmActivity, pausable primitives
 
 ## @mmstack/resource
@@ -43,6 +45,8 @@ Signal-based helpers for the Angular router: reactive URL state, preloading link
 - [Preloading](https://mihajm.github.io/mmstack/docs/router-core/preloading): mmLink, PreloadStrategy
 - [Route data](https://mihajm.github.io/mmstack/docs/router-core/route-data): provideRouteData, createRouteData, withPrefetch
 - [Transition outlet](https://mihajm.github.io/mmstack/docs/router-core/transition-outlet): mm-transition-outlet, holdThroughNavigation
+- [Visual commit](https://mihajm.github.io/mmstack/docs/router-core/visual-commit): the moment the new route is on screen, for scroll, focus, and announcements
+- [Runtime route config](https://mihajm.github.io/mmstack/docs/router-core/runtime-config): reload a lazy subtree or swap a route definition at runtime
 - [Titles, breadcrumbs, and nav](https://mihajm.github.io/mmstack/docs/router-core/route-ui)
 
 ## @mmstack/translate
@@ -64,6 +68,8 @@ Signals-first drag and drop with a native HTML5 engine and a pointer engine with
 - [Overview](https://mihajm.github.io/mmstack/docs/dnd)
 - [Draggables and drop targets](https://mihajm.github.io/mmstack/docs/dnd/elements)
 - [Sortable lists](https://mihajm.github.io/mmstack/docs/dnd/reorderable)
+- [Grids](https://mihajm.github.io/mmstack/docs/dnd/grids): wrapping galleries and placementGrid dashboards
+- [Canvas](https://mihajm.github.io/mmstack/docs/dnd/canvas): free-form move, resize, rotate, marquee select, and snap
 - [Advanced](https://mihajm.github.io/mmstack/docs/dnd/advanced): monitor, file drops, preview, accessibility, DI defaults
 
 ## @mmstack/di
@@ -93,7 +99,23 @@ Split-graph state and compute. The main thread renders while a Web Worker owns s
 - [Replicas and writes](https://mihajm.github.io/mmstack/docs/worker/store): read-only replicas, routed writes, published derivations
 - [Host and typing](https://mihajm.github.io/mmstack/docs/worker/setup): createWorkerHost, connectWorker, manifest typing, SSR
 
+## @mmstack/telemetry
+
+Headless, signals-native telemetry: one facade for spans, events, errors, metrics, and logs, sent to capability-based sinks. With no configuration the facade is a noop.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/telemetry)
+- [Adapters](https://mihajm.github.io/mmstack/docs/telemetry/adapters): OpenTelemetry (OTLP), Sentry, and PostHog adapters
+- [Consent](https://mihajm.github.io/mmstack/docs/telemetry/consent): reactive, category-based consent gating
+
+## @mmstack/mesh
+
+Multiplayer for signal stores. meshSync replicates a store across clients through a relay, and a synced store reads exactly like a local one.
+
+- [Overview](https://mihajm.github.io/mmstack/docs/mesh)
+- [The client](https://mihajm.github.io/mmstack/docs/mesh/client): meshSync, status, presence, merge policies, reconnection, peer-to-peer
+- [Agents](https://mihajm.github.io/mmstack/docs/mesh/agents): agentSeat, agents writing through the same protocol as people
+- [The relay](https://mihajm.github.io/mmstack/docs/mesh/relay): the reference relay from @mmstack/mesh-protocol
+
 ## Optional
 
-- [What's new](https://mihajm.github.io/mmstack/updates)
 - [GitHub repository](https://github.com/mihajm/mmstack)

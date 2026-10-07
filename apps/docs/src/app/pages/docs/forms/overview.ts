@@ -31,32 +31,34 @@ import { DocSection } from '../../../layout/doc-section';
       </p>
 
       <docs-section title="Three pieces" id="pieces">
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Reach for</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Attach typed metadata (a label, options) to a field</td>
-              <td>
-                <a mmLink="/docs/forms/field-metadata">Field metadata</a>
-              </td>
-            </tr>
-            <tr>
-              <td>Define a reusable field type once and apply it everywhere</td>
-              <td><a mmLink="/docs/forms/composition">Composition</a></td>
-            </tr>
-            <tr>
-              <td>Know what changed from a baseline, for diffs and guards</td>
-              <td>
-                <a mmLink="/docs/forms/change-tracking">Change tracking</a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Reach for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Attach typed metadata (a label, options) to a field</td>
+                <td>
+                  <a mmLink="/docs/forms/field-metadata">Field metadata</a>
+                </td>
+              </tr>
+              <tr>
+                <td>Define a reusable field type once and apply it everywhere</td>
+                <td><a mmLink="/docs/forms/composition">Composition</a></td>
+              </tr>
+              <tr>
+                <td>Know what changed from a baseline, for diffs and guards</td>
+                <td>
+                  <a mmLink="/docs/forms/change-tracking">Change tracking</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           Each piece is independent. You can add field metadata without
           touching composition, or track changes on a plain Signal Form.

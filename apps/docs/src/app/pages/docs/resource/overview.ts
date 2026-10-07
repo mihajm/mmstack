@@ -77,60 +77,62 @@ import { DocSection } from '../../../layout/doc-section';
           <code>value()</code>, <code>status()</code>, and <code>error()</code>.
           The difference is what makes them run.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Reach for</th>
-              <th>It runs on</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Read data, cached and refreshable</td>
-              <td>
-                <a mmLink="/docs/resource/query"><code>queryResource</code></a>
-              </td>
-              <td>Its request function returning a new value</td>
-            </tr>
-            <tr>
-              <td>Read, but only when asked</td>
-              <td>
-                <a mmLink="/docs/resource/query"
-                  ><code>manualQueryResource</code></a
-                >
-              </td>
-              <td>An explicit <code>.trigger()</code></td>
-            </tr>
-            <tr>
-              <td>Write data, optimistically</td>
-              <td>
-                <a mmLink="/docs/resource/mutation"
-                  ><code>mutationResource</code></a
-                >
-              </td>
-              <td>An explicit <code>.mutate(value)</code></td>
-            </tr>
-            <tr>
-              <td>Paginate, accumulating pages</td>
-              <td>
-                <a mmLink="/docs/resource/infinite-query"
-                  ><code>infiniteQueryResource</code></a
-                >
-              </td>
-              <td><code>.fetchNextPage()</code></td>
-            </tr>
-            <tr>
-              <td>Read a live connection (SSE or WebSocket)</td>
-              <td>
-                <a mmLink="/docs/resource/streaming"
-                  ><code>streamResource</code></a
-                >
-              </td>
-              <td>Every message on the wire</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Reach for</th>
+                <th>It runs on</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Read data, cached and refreshable</td>
+                <td>
+                  <a mmLink="/docs/resource/query"><code>queryResource</code></a>
+                </td>
+                <td>Its request function returning a new value</td>
+              </tr>
+              <tr>
+                <td>Read, but only when asked</td>
+                <td>
+                  <a mmLink="/docs/resource/query"
+                    ><code>manualQueryResource</code></a
+                  >
+                </td>
+                <td>An explicit <code>.trigger()</code></td>
+              </tr>
+              <tr>
+                <td>Write data, optimistically</td>
+                <td>
+                  <a mmLink="/docs/resource/mutation"
+                    ><code>mutationResource</code></a
+                  >
+                </td>
+                <td>An explicit <code>.mutate(value)</code></td>
+              </tr>
+              <tr>
+                <td>Paginate, accumulating pages</td>
+                <td>
+                  <a mmLink="/docs/resource/infinite-query"
+                    ><code>infiniteQueryResource</code></a
+                  >
+                </td>
+                <td><code>.fetchNextPage()</code></td>
+              </tr>
+              <tr>
+                <td>Read a live connection (SSE or WebSocket)</td>
+                <td>
+                  <a mmLink="/docs/resource/streaming"
+                    ><code>streamResource</code></a
+                  >
+                </td>
+                <td>Every message on the wire</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           When in doubt, start with <code>queryResource</code>. It is the one
           you will reach for most, and the others are variations on the same

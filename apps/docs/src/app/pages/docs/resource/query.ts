@@ -101,82 +101,84 @@ import { DocSection } from '../../../layout/doc-section';
           refreshes on tab focus, and retries on failure.
         </p>
         <docs-code [code]="options" lang="ts" />
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Option</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>defaultValue</code></td>
-              <td>
-                Initial value before the first request resolves. With it set,
-                <code>value()</code> is <code>T</code> rather than
-                <code>T | undefined</code>, so you skip the undefined check in
-                templates.
-              </td>
-            </tr>
-            <tr>
-              <td><code>keepPrevious</code></td>
-              <td>
-                Hold the previous value, status, and headers while a refresh is
-                in flight, so a reload doesn't flash empty.
-              </td>
-            </tr>
-            <tr>
-              <td><code>refresh</code></td>
-              <td>
-                A number polls every n ms. The object form adds
-                <code>onFocus</code> (refetch when the tab becomes visible) and
-                <code>onReconnect</code> (when the browser comes back online).
-              </td>
-            </tr>
-            <tr>
-              <td><code>retry</code></td>
-              <td>
-                Retry N times on failure with exponential backoff (default
-                1000ms times 2 to the power of the attempt).
-              </td>
-            </tr>
-            <tr>
-              <td><code>cache</code></td>
-              <td>
-                Opt this resource into the shared cache. See
-                <a mmLink="/docs/resource/caching">caching</a>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>circuitBreaker</code></td>
-              <td>
-                Stop hitting a failing endpoint after a threshold. See
-                <a mmLink="/docs/resource/caching">circuit breakers</a>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>onError</code></td>
-              <td>
-                Called on every failed attempt with
-                <code>(err, retryCount, isFinal)</code>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>register</code></td>
-              <td>
-                Join the nearest transition scope. See
-                <a mmLink="/docs/primitives/transitions">transitions</a>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>pause</code></td>
-              <td>
-                Join the nearest paused context.
-                <a mmLink="/docs/primitives/pausing">pausing</a>.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>defaultValue</code></td>
+                <td>
+                  Initial value before the first request resolves. With it set,
+                  <code>value()</code> is <code>T</code> rather than
+                  <code>T | undefined</code>, so you skip the undefined check in
+                  templates.
+                </td>
+              </tr>
+              <tr>
+                <td><code>keepPrevious</code></td>
+                <td>
+                  Hold the previous value, status, and headers while a refresh is
+                  in flight, so a reload doesn't flash empty.
+                </td>
+              </tr>
+              <tr>
+                <td><code>refresh</code></td>
+                <td>
+                  A number polls every n ms. The object form adds
+                  <code>onFocus</code> (refetch when the tab becomes visible) and
+                  <code>onReconnect</code> (when the browser comes back online).
+                </td>
+              </tr>
+              <tr>
+                <td><code>retry</code></td>
+                <td>
+                  Retry N times on failure with exponential backoff (default
+                  1000ms times 2 to the power of the attempt).
+                </td>
+              </tr>
+              <tr>
+                <td><code>cache</code></td>
+                <td>
+                  Opt this resource into the shared cache. See
+                  <a mmLink="/docs/resource/caching">caching</a>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>circuitBreaker</code></td>
+                <td>
+                  Stop hitting a failing endpoint after a threshold. See
+                  <a mmLink="/docs/resource/caching">circuit breakers</a>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>onError</code></td>
+                <td>
+                  Called on every failed attempt with
+                  <code>(err, retryCount, isFinal)</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>register</code></td>
+                <td>
+                  Join the nearest transition scope. See
+                  <a mmLink="/docs/primitives/transitions">transitions</a>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>pause</code></td>
+                <td>
+                  Join the nearest paused context.
+                  <a mmLink="/docs/primitives/pausing">pausing</a>.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="onError fires on every attempt" id="on-error">
@@ -224,7 +226,7 @@ import { DocSection } from '../../../layout/doc-section';
           thread. Parsing a 20MB JSON body blocks the thread that paints.
           Fetching it as text or a buffer keeps your interceptors and auth
           intact while the parse moves to a
-          <a mmLink="/docs/worker/overview">Web Worker</a> that owns the result;
+          <a mmLink="/docs/worker">Web Worker</a> that owns the result;
           an <code>ArrayBuffer</code> even moves zero-copy. If you combine the
           cache with a transfer, copy the buffer first
           (<code>buf.slice(0)</code>), since transferring detaches the cached

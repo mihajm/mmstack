@@ -54,7 +54,7 @@ import { DocSection } from '../../../layout/doc-section';
       </docs-section>
 
       <docs-section title="What do you need?" id="needs">
-        <ul>
+        <ul class="link-list">
           <li>
             <a mmLink="/docs/primitives/transitions" fragment="suspense"
               >Keep content visible while the next data loads</a
@@ -401,9 +401,12 @@ import { DocSection } from '../../../layout/doc-section';
           have finished, and every <code>tx.retain()</code> has been released.
           The catch is the usual one with async functions: code after an
           <code>await</code> runs outside whatever was active when the body
-          started. <code>tx.enter(() =&gt; ...)</code> puts it back in for one
-          synchronous slice, so writes and loads started there belong to this
-          transaction.
+          started. Write through the transaction instead:
+          <code>tx.set(sig, value)</code> and <code>tx.update(sig, fn)</code>
+          are recorded wherever they run, plain signals included, so an abort
+          undoes them. <code>tx.enter(() =&gt; ...)</code> puts a whole
+          synchronous block back in, so writes and loads started there belong
+          to this transaction.
         </p>
         <docs-code [code]="asyncTxEx" lang="ts" />
         <p>
@@ -487,7 +490,14 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           The frozen frame is the truth beneath the guess: a
           <code>hold</code> over a guessable shows the guess live and freezes
-          only the truth, so a held view never keeps a guess after it reverts. A
+          only the truth, so a held view never keeps a guess after it reverts.
+          Recording the server's answer inside the transaction, as the example
+          does, resolves the guess to that answer: held and unheld readers both
+          move from the guess to the answer, and none drops back to the value
+          from before the save. A write from outside the transaction, like the
+          user typing over the field, replaces the guess at once. After an
+          <code>await</code>, write with <code>tx.set</code>; a plain
+          <code>set</code> there counts as outside. A
           <code>computed</code> over a guessed value doesn't get that for free.
           Held, it freezes what it computed, guess included, so hold the
           guessable itself or read <code>node.truth()</code> inside the
@@ -622,9 +632,17 @@ import { DocSection } from '../../../layout/doc-section';
         </docs-demo>
         <p>
           The optional <code>loading</code> and <code>error</code> templates
-          render in place of the content, and the error one gets a
-          <code>retry</code> that reloads the resource. If the same resource is
-          also registered in that boundary it still counts once. A
+          render in place of the content when nothing above the directive
+          handles that state. Inside a boundary, a first load shows the
+          boundary's placeholder, and a failed first load shows the boundary's
+          <code>[error]</code> slot, because there is no content to keep yet.
+          Put a <code>mmRetryFailed</code> button in that slot to retry. The
+          directive's own <code>error</code> template, with a
+          <code>retry</code> that reloads the resource, renders where nothing
+          above handles the failure: with no boundary around it, or when a
+          refresh fails while the resource still holds its last value (with
+          <code>keepPrevious</code>) and the boundary keeps the content up. If the same resource is also
+          registered in that boundary it still counts once. A
           <code>latest</code> works here too. The rule of thumb: reach for
           <code>latest</code> where you'd write a <code>computed</code> over
           resources, and for <code>*mmOutcome</code> where you'd read one in a
@@ -752,7 +770,7 @@ class Report {
   const release = tx.retain(); // stay open past the first render
   setTimeout(() => {
     try {
-      tx.enter(() => this.debouncedSearch.set(q)); // the load starts in the transaction
+      tx.set(this.debouncedSearch, q); // the load starts in the transaction
     } finally {
       release(); // now it settles once that load is done
     }
@@ -769,7 +787,7 @@ save(next: string) {
   const t = this.startTransaction(async (tx) => {
     this.name.set(next); // before the first await: part of the transaction
     const saved = await api.rename(next);
-    tx.enter(() => this.revision.set(saved.revision)); // back in for this slice
+    tx.set(this.revision, saved.revision); // still the transaction's after the await
   });
   return t.done; // { kind: 'completed' | 'aborted' | 'failed', ... }, never rejects
 }`;
@@ -783,17 +801,17 @@ save() {
   this.startTransaction(async (tx) => {
     tx.guess(this.name, nextName); // shows at once, gone when this settles
     const saved = await this.rename.mutateAsync({ name: nextName });
-    tx.enter(() => this.name.set(saved.name));
+    tx.set(this.name, saved.name);
     try {
       await this.setAddress.mutateAsync(nextAddress); // invalidates orders
     } catch {
       return; // its failure stays in errored(), the old list stays up
     }
-    tx.enter(() => this.address.set(nextAddress));
+    tx.set(this.address, nextAddress);
     const release = tx.retain(); // the orders refresh is debounced
     setTimeout(() => {
       try {
-        tx.enter(() => this.ordersFor.set(nextAddress));
+        tx.set(this.ordersFor, nextAddress);
       } finally {
         release();
       }
@@ -848,9 +866,12 @@ heldEffect(() => analytics.track('cart', cart.total()));`;
 
   protected readonly outcomeEx = `<mm-suspense>
   <span placeholder>Loading…</span>
+  <!-- a failed first load: the boundary has nothing to keep -->
+  <p error>Could not load the user. <button mmRetryFailed>Retry</button></p>
   <h2 *mmOutcome="user; let u; error: failed">{{ u?.name }}</h2>
+  <!-- a failed refresh: the boundary keeps the content up -->
   <ng-template #failed let-error let-retry="retry">
-    Could not load the user. <button (click)="retry?.()">Retry</button>
+    Could not refresh the user. <button (click)="retry?.()">Retry</button>
   </ng-template>
 </mm-suspense>`;
 
@@ -859,7 +880,7 @@ heldEffect(() => analytics.track('cart', cart.total()));`;
 startTransaction(async (tx) => {
   tx.guess(liked, true); // everyone sees true now
   const saved = await api.like(postId);
-  tx.enter(() => liked.set(saved.liked)); // the server's answer, recorded
+  tx.set(liked, saved.liked); // the server's answer, recorded
 }); // the guess is gone once this settles, success or not`;
 
   protected readonly viewNameEx = `<!-- list view -->

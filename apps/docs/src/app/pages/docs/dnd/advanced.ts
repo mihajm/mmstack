@@ -211,8 +211,9 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="provideDndEx" lang="ts" />
         <p>
           <code>provideDndDefaults()</code> holds the cross-primitive defaults
-          (currently <code>engine</code>), so one line flips your whole app to
-          the pointer engine. Each primitive also has its own provider for
+          (<code>engine</code> and <code>touchActivation</code>), so one line
+          flips your whole app to the pointer engine or turns on long-press
+          everywhere. Each primitive also has its own provider for
           options only it understands, and it inherits the common defaults
           unless it sets that key itself.
         </p>
@@ -224,6 +225,40 @@ import { DocSection } from '../../../layout/doc-section';
           matching reader (<code>injectDndDefaults</code> and friends) that
           returns the resolved defaults or <code>null</code>. Pass an
           <code>Injector</code> to read outside an injection context.
+        </p>
+      </docs-section>
+
+      <docs-section title="Long-press on touch" id="touch">
+        <p>
+          On a phone, a page full of draggable cards leaves little room to
+          scroll: every swipe that lands on a card starts a drag. Set
+          <code>touchActivation</code> and a touch press has to be held before
+          it becomes a drag, the way native mobile lists work. A quick swipe
+          scrolls the page as usual. Mouse and pen are never delayed.
+        </p>
+        <docs-code [code]="touchEx" lang="ts" />
+        <p>
+          Moving more than <code>tolerance</code> pixels (5 by default) before
+          the delay ends, lifting the finger, or the browser taking the gesture
+          for a scroll all cancel the pending drag. Once it starts, the page
+          stays still for the rest of that touch. The option works on pointer
+          reorderables and draggables, placement grids, the canvas and
+          <code>movable</code>. It is off by default; turn it on for the whole
+          app with <code>provideDndDefaults</code>, and pass
+          <code>false</code> to opt a single list out. The board demo on
+          <a mmLink="/docs/dnd/reorderable">sortable lists</a> and the
+          wrap-grid and placement-grid demos on
+          <a mmLink="/docs/dnd/grids">grids</a> use it.
+        </p>
+        <p>
+          Without it, a list item takes the touch only along the list's axis:
+          a vertical list leaves sideways swipes to the page and a horizontal
+          one leaves vertical swipes. Lists that drag in two directions, and
+          items without a handle in a group, claim the whole touch. The
+          <a href="https://github.com/mihajm/mmstack/tree/master/packages/dnd#touch"
+            >README</a
+          >
+          lists every case.
         </p>
       </docs-section>
 
@@ -363,6 +398,18 @@ bootstrapApplication(App, {
 provideDndDefaults({ engine: 'pointer' }); // every primitive goes pointer
 provideDraggableDefaults({ engine: 'native' }); // except draggables, kept native
 provideDropTargetDefaults({ sticky: true, dropEffect: 'copy' });`;
+
+  protected readonly touchEx = `import { provideDndDefaults, reorderable } from '@mmstack/dnd';
+
+// one list: hold for 250ms before a touch drag starts
+readonly cards = reorderable(this.items, {
+  engine: 'pointer',
+  key: (c) => c.id,
+  touchActivation: { delay: 250 },
+});
+
+// or every pointer-driven primitive in the app
+provideDndDefaults({ touchActivation: { delay: 250 } });`;
 
   protected readonly autoScrollEx = `<!-- directive on a scrollable container -->
 <div mmAutoScroll style="overflow:auto; max-height:300px">…</div>

@@ -91,44 +91,46 @@ import { DocSection } from '../../../layout/doc-section';
       </docs-section>
 
       <docs-section title="Where to go next" id="pick">
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Read</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Wire up locales (one build for all, or one per language)</td>
-              <td>
-                <a mmLink="/docs/translate/configuration">Configuration</a>
-              </td>
-            </tr>
-            <tr>
-              <td>Define translations and register them for lazy loading</td>
-              <td><a mmLink="/docs/translate/namespaces">Namespaces</a></td>
-            </tr>
-            <tr>
-              <td>
-                Read a key in code or a template, switch language at runtime
-              </td>
-              <td>
-                <a mmLink="/docs/translate/reading">Reading translations</a>
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Format a price, a date, or a relative time like "3 days ago"
-              </td>
-              <td><a mmLink="/docs/translate/formatters">Formatters</a></td>
-            </tr>
-            <tr>
-              <td>Round-trip JSON with translators and gate CI on shape</td>
-              <td><a mmLink="/docs/translate/tooling">Tooling</a></td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Read</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Wire up locales (one build for all, or one per language)</td>
+                <td>
+                  <a mmLink="/docs/translate/configuration">Configuration</a>
+                </td>
+              </tr>
+              <tr>
+                <td>Define translations and register them for lazy loading</td>
+                <td><a mmLink="/docs/translate/namespaces">Namespaces</a></td>
+              </tr>
+              <tr>
+                <td>
+                  Read a key in code or a template, switch language at runtime
+                </td>
+                <td>
+                  <a mmLink="/docs/translate/reading">Reading translations</a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Format a price, a date, or a relative time like "3 days ago"
+                </td>
+                <td><a mmLink="/docs/translate/formatters">Formatters</a></td>
+              </tr>
+              <tr>
+                <td>Round-trip JSON with translators and gate CI on shape</td>
+                <td><a mmLink="/docs/translate/tooling">Tooling</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
     </docs-page>
   `,

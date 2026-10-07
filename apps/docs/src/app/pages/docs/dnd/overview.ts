@@ -66,7 +66,7 @@ import { DocSection } from '../../../layout/doc-section';
           signal once per gesture, which is what op-log stores, undo history
           and realtime sync want.
         </p>
-        <ul>
+        <ul class="link-list">
           <li>
             <a mmLink="/docs/dnd/elements">Draggables and drop targets</a>
           </li>

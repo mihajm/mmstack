@@ -86,8 +86,8 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Horizontal" id="axis">
         <p>
-          Set <code>axis: 'x'</code> for a horizontal list. The gap and the
-          drop position follow the axis.
+          Set <code>axis: 'x'</code> for a horizontal list. The gap and the drop
+          position follow the axis.
         </p>
         <docs-demo title="Drag a chip sideways">
           @defer (on viewport) {
@@ -111,21 +111,23 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="reorderable or injectReorderable" id="inject">
         <p>
-          <code>reorderable</code> is a pure factory. It reads no DI, which keeps
-          it easy to test but means it does not see the app-wide
-          <a mmLink="/docs/dnd/advanced">defaults</a> you may have set. To have a
-          list pick up <code>provideDndDefaults</code> and
+          <code>reorderable</code> is a pure factory. It reads no DI, which
+          keeps it easy to test but means it does not see the app-wide
+          <a mmLink="/docs/dnd/advanced">defaults</a> you may have set. To have
+          a list pick up <code>provideDndDefaults</code> and
           <code>provideReorderableDefaults</code>, call
-          <code>injectReorderable</code> instead. Same signature: it captures the
-          current <code>Injector</code> and hands it to <code>reorderable</code>
+          <code>injectReorderable</code> instead. Same signature: it captures
+          the current <code>Injector</code> and hands it to
+          <code>reorderable</code>
           for you. A per-call option still wins over any default.
         </p>
         <docs-code [code]="injectEx" label="component" lang="ts" />
         <p>
-          Set the defaults with <code>provideReorderableDefaults</code>, and read
-          the resolved value back with <code>injectReorderableDefaults</code>
-          (pass an <code>Injector</code> to read outside an injection context).
-          These cover the reorderable-only options; the shared
+          Set the defaults with <code>provideReorderableDefaults</code>, and
+          read the resolved value back with
+          <code>injectReorderableDefaults</code> (pass an
+          <code>Injector</code> to read outside an injection context). These
+          cover the reorderable-only options; the shared
           <code>engine</code> comes from <code>provideDndDefaults</code> unless
           this provider sets it.
         </p>
@@ -135,85 +137,89 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Options" id="options">
         <p>
           Beyond <code>key</code>, <code>engine</code>, <code>axis</code>, and
-          <code>group</code> above, the rest of the surface tunes when the insert
-          flips, gates cross-list and external drops, and lets you react to each
-          kind of move.
+          <code>group</code> above, the rest of the surface tunes when the
+          insert flips, gates cross-list and external drops, and lets you react
+          to each kind of move.
         </p>
-        <table class="opts">
-          <thead>
-            <tr>
-              <th>Option</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>deadband</code></td>
-              <td>
-                Px a center must be cleared by before the insert index flips.
-                Higher values calm a jittery reorder. Default <code>4</code>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>activationThreshold</code></td>
-              <td>
-                Px the pointer must travel before a drag activates, so a row
-                stays clickable. Pointer engine only. Default <code>5</code>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>jumpModifier</code></td>
-              <td>
-                Predicate over the keyboard event that decides the jump-to-end
-                key for the built-in handler. Default Cmd on macOS, Ctrl
-                elsewhere.
-              </td>
-            </tr>
-            <tr>
-              <td><code>canReceive</code></td>
-              <td>
-                Cross-list drop guard. Return <code>false</code> to reject an
-                item from another list in the group, and the engine tries the
-                next innermost accepting container. Rejects a tree node dropped
-                into its own subtree, for one.
-              </td>
-            </tr>
-            <tr>
-              <td><code>insert</code></td>
-              <td>
-                Accept a payload dragged from outside any list, like a palette
-                <code>draggable</code>. <code>accepts</code> qualifies the raw
-                payload and <code>create(data, index)</code> maps it to a list
-                item. Native engine only.
-              </td>
-            </tr>
-            <tr>
-              <td><code>animation</code></td>
-              <td>
-                The during-drag reflow glide (<code
-                  >{{ '{' }} duration, easing {{ '}' }}</code
-                >), or <code>false</code> for instant reflow. This is not a drop
-                animation: the drop commit is instant. Default a decisive 200ms.
-              </td>
-            </tr>
-            <tr>
-              <td><code>autoScroll</code></td>
-              <td>
-                Opt-in edge auto-scroll while dragging, as
-                <code
-                  >{{ '{' }} edge, speed, edgeProportion?, maxSpeedAt? {{ '}' }}</code
-                >. Needs an auto-scroll plugin (see the
-                <a mmLink="/docs/dnd/advanced">advanced page</a>); without one a
-                dev warning fires and scrolling no-ops.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="opts">
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>deadband</code></td>
+                <td>
+                  Px a center must be cleared by before the insert index flips.
+                  Higher values calm a jittery reorder. Default <code>4</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>activationThreshold</code></td>
+                <td>
+                  Px the pointer must travel before a drag activates, so a row
+                  stays clickable. Pointer engine only. Default <code>5</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>jumpModifier</code></td>
+                <td>
+                  Predicate over the keyboard event that decides the jump-to-end
+                  key for the built-in handler. Default Cmd on macOS, Ctrl
+                  elsewhere.
+                </td>
+              </tr>
+              <tr>
+                <td><code>canReceive</code></td>
+                <td>
+                  Cross-list drop guard. Return <code>false</code> to reject an
+                  item from another list in the group, and the engine tries the
+                  next innermost accepting container. Rejects a tree node
+                  dropped into its own subtree, for one.
+                </td>
+              </tr>
+              <tr>
+                <td><code>insert</code></td>
+                <td>
+                  Accept a payload dragged from outside any list, like a palette
+                  <code>draggable</code>. <code>accepts</code> qualifies the raw
+                  payload and <code>create(data, index)</code> maps it to a list
+                  item. Native engine only.
+                </td>
+              </tr>
+              <tr>
+                <td><code>animation</code></td>
+                <td>
+                  The during-drag reflow glide (<code
+                    >{{ '{' }} duration, easing {{ '}' }}</code
+                  >), or <code>false</code> for instant reflow. This is not a
+                  drop animation: the drop commit is instant. Default a decisive
+                  200ms.
+                </td>
+              </tr>
+              <tr>
+                <td><code>autoScroll</code></td>
+                <td>
+                  Opt-in edge auto-scroll while dragging, as
+                  <code
+                    >{{ '{' }} edge, speed, edgeProportion?, maxSpeedAt?
+                    {{ '}' }}</code
+                  >. Needs an auto-scroll plugin (see the
+                  <a mmLink="/docs/dnd/advanced">advanced page</a>); without one
+                  a dev warning fires and scrolling no-ops.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           Four callbacks report each kind of move after it commits:
-          <code>onReorder</code> for a same-list move
-          (<code>{{ '{' }} from, to, items {{ '}' }}</code>),
-          <code>onItemLeft</code> on the source when an item is dragged into
+          <code>onReorder</code> for a same-list move (<code
+            >{{ '{' }} from, to, items {{ '}' }}</code
+          >), <code>onItemLeft</code> on the source when an item is dragged into
           another list, <code>onItemArrived</code> on the target when one
           arrives, and <code>onItemInserted</code> after an external
           <code>insert</code> lands.
@@ -225,11 +231,12 @@ import { DocSection } from '../../../layout/doc-section';
           Keyboard reordering is on by default. Focus a row, arrow keys move it
           one step along the axis, and the jump modifier plus an arrow moves it
           to an end. Pass <code>jumpModifier</code> to change the jump key. To
-          take over the keys entirely, with your own bindings and behaviour, pass
-          <code>onKeyboardKeydown</code>. It runs instead of the built-in handler
-          and receives an <code>api</code> whose <code>api.move(to)</code> reuses
-          the built-in commit, announce, and focus-restore, so you only decide
-          when to move. Ignore <code>api.move</code> to do something else. Set
+          take over the keys entirely, with your own bindings and behaviour,
+          pass <code>onKeyboardKeydown</code>. It runs instead of the built-in
+          handler and receives an <code>api</code> whose
+          <code>api.move(to)</code> reuses the built-in commit, announce, and
+          focus-restore, so you only decide when to move. Ignore
+          <code>api.move</code> to do something else. Set
           <code>keyboard: false</code> to drop the keys and the tabindex
           altogether.
         </p>

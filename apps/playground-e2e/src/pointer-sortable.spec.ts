@@ -97,11 +97,11 @@ test.describe('pointer sortable — single vertical list', () => {
     expect(animating).toBe(false);
   });
 
-  test('items declare touch-action:none so a touch-drag never scrolls the page', async ({ page }) => {
+  test('items of a vertical list declare touch-action:pan-x so a touch-drag never scrolls the page vertically', async ({ page }) => {
     const ta = await rows(page)
       .first()
       .evaluate((el) => getComputedStyle(el).touchAction);
-    expect(ta).toBe('none');
+    expect(ta).toBe('pan-x');
   });
 
   test('reorders via a real touch drag (pointerType: touch)', async ({ page, browserName }) => {

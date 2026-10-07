@@ -167,34 +167,36 @@ import { DocSection } from '../../../layout/doc-section';
           <code>ignoreCacheControl</code>, the <code>cache</code> object carries
           two situational flags.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Option</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>skipTabSync</code></td>
-              <td>
-                Don't broadcast this resource's writes to other tabs even when
-                <code>syncTabs</code> is on globally. Lets you opt into cross-tab
-                sync app-wide and opt one resource out. Pair with
-                <code>persist: true</code> for "persist but don't sync".
-              </td>
-            </tr>
-            <tr>
-              <td><code>bustBrowserCache</code></td>
-              <td>
-                Append a unique query parameter so the browser's own HTTP cache
-                is bypassed and the request always reaches the server. The
-                parameter is stripped before the cache key is computed, so it
-                doesn't fragment your entries.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>skipTabSync</code></td>
+                <td>
+                  Don't broadcast this resource's writes to other tabs even when
+                  <code>syncTabs</code> is on globally. Lets you opt into cross-tab
+                  sync app-wide and opt one resource out. Pair with
+                  <code>persist: true</code> for "persist but don't sync".
+                </td>
+              </tr>
+              <tr>
+                <td><code>bustBrowserCache</code></td>
+                <td>
+                  Append a unique query parameter so the browser's own HTTP cache
+                  is bypassed and the request always reaches the server. The
+                  parameter is stripped before the cache key is computed, so it
+                  doesn't fragment your entries.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="Circuit breakers" id="circuit-breakers">
@@ -205,34 +207,36 @@ import { DocSection } from '../../../layout/doc-section';
           timeout passes, then lets one probe through to test the waters.
         </p>
         <p>Three states:</p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>State</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>CLOSED</code></td>
-              <td>Normal. Requests go through.</td>
-            </tr>
-            <tr>
-              <td><code>OPEN</code></td>
-              <td>
-                Threshold hit. New requests are short-circuited and the
-                resource's <code>disabled()</code> is <code>true</code>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>HALF_OPEN</code></td>
-              <td>
-                After the timeout, one probe is allowed. Success closes the
-                breaker; failure reopens it.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>CLOSED</code></td>
+                <td>Normal. Requests go through.</td>
+              </tr>
+              <tr>
+                <td><code>OPEN</code></td>
+                <td>
+                  Threshold hit. New requests are short-circuited and the
+                  resource's <code>disabled()</code> is <code>true</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>HALF_OPEN</code></td>
+                <td>
+                  After the timeout, one probe is allowed. Success closes the
+                  breaker; failure reopens it.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <docs-code [code]="cb" lang="ts" />
         <p>
           Share one breaker across every resource hitting the same service and

@@ -65,7 +65,7 @@ class FakeShopServer extends HttpHandler {
     <button type="button" (click)="save()">Save name &amp; address</button>
     <mm-unscoped-suspense class="card">
       <span placeholder class="muted">Loading…</span>
-      <span busy class="muted">saving…</span>
+      <span busy class="muted saving">saving…</span>
       <strong>{{ shownName() }}</strong>
       <p class="muted">Ships to {{ shownAddress() }}</p>
       <ul>
@@ -94,6 +94,10 @@ class FakeShopServer extends HttpHandler {
       border-radius: 8px;
     }
 
+    .saving {
+      margin-right: 0.5rem;
+    }
+
     .muted {
       margin: 0.25rem 0;
       color: var(--fg-muted, #6b7280);
@@ -110,8 +114,31 @@ class FakeShopServer extends HttpHandler {
       margin: 0.5rem 0 0;
       padding: 0.4rem 0.75rem;
       border-radius: 6px;
+      border: 1px solid var(--danger-line, #e2a8a5);
       background: var(--danger-soft, #fdecea);
+      color: var(--danger-fg, #8a1c1c);
       font-size: 0.85rem;
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
+      }
     }
   `,
 })
@@ -159,17 +186,17 @@ export class ComposedSaveDemo {
     this.startTransaction(async (tx) => {
       tx.guess(this.name, nextName); // shows at once, gone when this settles
       const saved = await this.rename.mutateAsync({ name: nextName });
-      tx.enter(() => this.name.set(saved.name)); // the truth, recorded
+      tx.set(this.name, saved.name); // the truth, recorded
       try {
         await this.setAddress.mutateAsync(nextAddress);
       } catch {
         return; // the failure stays in errored(), the old list stays up
       }
-      tx.enter(() => this.address.set(nextAddress));
+      tx.set(this.address, nextAddress);
       const release = tx.retain(); // the orders refresh is debounced
       setTimeout(() => {
         try {
-          tx.enter(() => this.ordersFor.set(nextAddress));
+          tx.set(this.ordersFor, nextAddress);
         } finally {
           release();
         }

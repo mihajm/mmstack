@@ -1,6 +1,7 @@
 import {
   booleanAttribute,
   Component,
+  computed,
   effect,
   inject,
   input,
@@ -13,7 +14,8 @@ import { Meta } from '@angular/platform-browser';
     <article>
       <header>
         <h1>
-          {{ title() }}
+          <!-- one line: whitespace between the parts would show as gaps -->
+          @for (part of titleParts(); track $index) {@if (!$first) {<wbr />}{{ part }}}
           @if (experimental()) {
             <span class="badge">Experimental</span>
           }
@@ -24,12 +26,9 @@ import { Meta } from '@angular/platform-browser';
         @if (pkg()) {
           <p class="pkg">
             <code>{{ pkg() }}</code>
-            <a
-              [href]="'https://www.npmjs.com/package/' + pkg()"
-              target="_blank"
-              rel="noopener"
-              >npm</a
-            >
+            @if (npmUrl(); as href) {
+              <a [href]="href" target="_blank" rel="noopener">npm</a>
+            }
           </p>
         }
         @if (experimental()) {
@@ -61,8 +60,9 @@ import { Meta } from '@angular/platform-browser';
       letter-spacing: 0.04em;
       padding: 0.15rem 0.5rem;
       border-radius: 999px;
-      background: var(--warn-bg, #fef9c3);
-      color: var(--warn-fg, #854d0e);
+      background: var(--warn-soft);
+      color: var(--warn-fg);
+      border: 1px solid var(--warn-line);
     }
 
     .experimental-note {
@@ -94,8 +94,23 @@ import { Meta } from '@angular/platform-browser';
 })
 export class DocPage {
   readonly title = input.required<string>();
+  /** The title split at camelCase seams, so a long identifier breaks there, not mid-word. */
+  protected readonly titleParts = computed(() =>
+    // lower→Upper, acronym→Word (HTMLElement), digit→letter (base64Encode)
+    this.title().split(
+      /(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=\d)(?=[A-Za-z])/,
+    ),
+  );
   readonly lead = input<string>();
   readonly pkg = input<string>();
+  /** npm package to link to. Defaults to `pkg`, unless that is a pattern. */
+  readonly npm = input<string>();
+  protected readonly npmUrl = computed(() => {
+    const name = this.npm() ?? this.pkg();
+    return name && !name.includes('*')
+      ? 'https://www.npmjs.com/package/' + name
+      : null;
+  });
   readonly experimental = input(false, { transform: booleanAttribute });
 
   private readonly meta = inject(Meta);

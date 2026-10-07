@@ -78,6 +78,19 @@ import { DocSection } from '../../../layout/doc-section';
           demo draws the drop-target outline you see while dragging.
         </p>
         <docs-code [code]="targetEx" label="drop-target chrome" lang="ts" />
+        <p>
+          A move released outside the grid cancels. As soon as the pointer
+          leaves, the preview shows the original layout again,
+          <code>dropOutside()</code> turns <code>true</code> and
+          <code>projectedCell()</code> turns <code>null</code>, so the outline
+          above goes away. Let go there and nothing is written; bring the
+          pointer back over the grid to carry on with the move. Outside means
+          outside the grid's box as it was when the drag started, so a preview
+          that grows under the pointer can't flip the answer. Resizes are
+          exempt (pulling the grip past the edge is how you reach the widest
+          span), Escape cancels any gesture, and over another member of the
+          grid's group a release is a transfer, covered below.
+        </p>
       </docs-section>
 
       <docs-section title="Two compaction modes" id="compaction">

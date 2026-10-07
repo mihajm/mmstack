@@ -134,9 +134,7 @@ export function applyResize(
     const yDriven = hasS || hasN;
     // corners: the axis the pointer moved most drives; edges: the handle's axis
     const widthDrives =
-      xDriven && yDriven
-        ? Math.abs(delta.x) >= Math.abs(delta.y)
-        : xDriven;
+      xDriven && yDriven ? Math.abs(delta.x) >= Math.abs(delta.y) : xDriven;
     if (widthDrives) {
       const h = (right - left) / cfg.aspect;
       if (cfg.fromCenter || !yDriven) {
@@ -167,33 +165,52 @@ export function applyResize(
   const maxW = cfg.max?.width ?? Infinity;
   const maxH = cfg.max?.height ?? Infinity;
 
-  let width = clamp(right - left, minW, maxW);
-  let height = clamp(bottom - top, minH, maxH);
-  // re-anchor the stationary edge after clamping
+  const width = clamp(right - left, minW, maxW);
+  const height = clamp(bottom - top, minH, maxH);
+  // re-anchor the stationary edge after clamping (only the origin is kept)
   if (hasW && !cfg.fromCenter) left = right - width;
-  else if (cfg.fromCenter) {
-    const midX = (left + right) / 2;
-    left = midX - width / 2;
-    right = midX + width / 2;
-  } else right = left + width;
+  else if (cfg.fromCenter) left = (left + right) / 2 - width / 2;
   if (hasN && !cfg.fromCenter) top = bottom - height;
-  else if (cfg.fromCenter) {
-    const midY = (top + bottom) / 2;
-    top = midY - height / 2;
-    bottom = midY + height / 2;
-  } else bottom = top + height;
+  else if (cfg.fromCenter) top = (top + bottom) / 2 - height / 2;
 
-  if (cfg.bounds) {
-    const b = cfg.bounds;
-    left = Math.max(left, b.x);
-    top = Math.max(top, b.y);
-    right = Math.min(right, b.x + b.width);
-    bottom = Math.min(bottom, b.y + b.height);
-    width = right - left;
-    height = bottom - top;
+  const box = { x: left, y: top, width, height };
+  return cfg.bounds
+    ? clampResizeToBounds(box, base, cfg.bounds, minW, minH)
+    : box;
+}
+
+/**
+ * Bounds stop a resizing edge from moving out past them. An edge of `from` (the
+ * box the gesture started with) that is already outside may only stay or move
+ * in, and an axis the bounds would squeeze below its minimum keeps `from`'s
+ * extent, so shrunk bounds never yield a negative or collapsed size.
+ */
+function clampResizeToBounds(
+  box: Box,
+  from: Box,
+  b: Box,
+  minW: number,
+  minH: number,
+): Box {
+  let left = Math.max(box.x, Math.min(b.x, from.x));
+  let right = Math.min(
+    box.x + box.width,
+    Math.max(b.x + b.width, from.x + from.width),
+  );
+  let top = Math.max(box.y, Math.min(b.y, from.y));
+  let bottom = Math.min(
+    box.y + box.height,
+    Math.max(b.y + b.height, from.y + from.height),
+  );
+  if (right - left < Math.max(minW, 0)) {
+    left = from.x;
+    right = from.x + from.width;
   }
-
-  return { x: left, y: top, width, height };
+  if (bottom - top < Math.max(minH, 0)) {
+    top = from.y;
+    bottom = from.y + from.height;
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 export type ResolveResizeConfig = ApplyResizeConfig & {
@@ -235,12 +252,25 @@ export function resolveResize(
       snapToCanvas ? apply.bounds : undefined,
     );
     guides = snapped.guides.length ? snapped.guides : NO_GUIDES;
-    // re-clamp the snapped box to min/max/bounds (zero-delta pass)
-    box = applyResize(snapped.box, direction, { x: 0, y: 0 }, {
-      min: apply.min,
-      max: apply.max,
-      bounds: apply.bounds,
-    });
+    // re-clamp the snapped box to min/max (zero-delta pass), then to bounds
+    // relative to the box the gesture started with, not the snapped one
+    box = applyResize(
+      snapped.box,
+      direction,
+      { x: 0, y: 0 },
+      {
+        min: apply.min,
+        max: apply.max,
+      },
+    );
+    if (apply.bounds)
+      box = clampResizeToBounds(
+        box,
+        base,
+        apply.bounds,
+        apply.min?.width ?? 0,
+        apply.min?.height ?? 0,
+      );
   }
 
   return { box, guides };

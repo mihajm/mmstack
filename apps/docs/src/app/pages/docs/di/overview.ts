@@ -22,46 +22,48 @@ import { DocSection } from '../../../layout/doc-section';
       </p>
 
       <docs-section title="Picking one" id="picking">
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Reach for</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>A typed token with a provide/inject pair, no boilerplate</td>
-              <td><a mmLink="/docs/di/injectable"><code>injectable</code></a></td>
-            </tr>
-            <tr>
-              <td>Defer constructing an already-bundled service until first use</td>
-              <td><a mmLink="/docs/di/lazy-async"><code>injectLazy</code></a></td>
-            </tr>
-            <tr>
-              <td>Lazy-load the code for a non-root service, or support v19 to v21</td>
-              <td><a mmLink="/docs/di/lazy-async"><code>injectAsync</code></a></td>
-            </tr>
-            <tr>
-              <td>Declare a lazy dependency in providers, inject it deep below</td>
-              <td><a mmLink="/docs/di/lazy-async"><code>provideLazy</code></a></td>
-            </tr>
-            <tr>
-              <td>A factory-built app-wide singleton</td>
-              <td><a mmLink="/docs/di/scopes"><code>rootInjectable</code></a></td>
-            </tr>
-            <tr>
-              <td>Factory-built singletons scoped to a component subtree</td>
-              <td><a mmLink="/docs/di/scopes"><code>createScope</code></a></td>
-            </tr>
-            <tr>
-              <td>Run <code>inject()</code> later, in a callback that lost context</td>
-              <td>
-                <a mmLink="/docs/di/scopes"><code>createRunInInjectionContext</code></a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Reach for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>A typed token with a provide/inject pair, no boilerplate</td>
+                <td><a mmLink="/docs/di/injectable"><code>injectable</code></a></td>
+              </tr>
+              <tr>
+                <td>Defer constructing an already-bundled service until first use</td>
+                <td><a mmLink="/docs/di/lazy-async"><code>injectLazy</code></a></td>
+              </tr>
+              <tr>
+                <td>Lazy-load the code for a non-root service, or support v19 to v21</td>
+                <td><a mmLink="/docs/di/lazy-async"><code>injectAsync</code></a></td>
+              </tr>
+              <tr>
+                <td>Declare a lazy dependency in providers, inject it deep below</td>
+                <td><a mmLink="/docs/di/lazy-async"><code>provideLazy</code></a></td>
+              </tr>
+              <tr>
+                <td>A factory-built app-wide singleton</td>
+                <td><a mmLink="/docs/di/scopes"><code>rootInjectable</code></a></td>
+              </tr>
+              <tr>
+                <td>Factory-built singletons scoped to a component subtree</td>
+                <td><a mmLink="/docs/di/scopes"><code>createScope</code></a></td>
+              </tr>
+              <tr>
+                <td>Run <code>inject()</code> later, in a callback that lost context</td>
+                <td>
+                  <a mmLink="/docs/di/scopes"><code>createRunInInjectionContext</code></a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           On Angular v22 and up, if the service you want to lazy-load is
           auto-provided (<code>providedIn: 'root'</code> or <code>&#64;Service()</code>),

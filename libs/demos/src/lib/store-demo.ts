@@ -1,8 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
 import { store } from '@mmstack/primitives';
 
 type Profile = {
@@ -59,8 +55,12 @@ type Profile = {
 
     .split {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 1.25rem;
+    }
+
+    .out {
+      min-width: 0;
     }
 
     .editor {
@@ -89,6 +89,7 @@ type Profile = {
       color: inherit;
       font: inherit;
       font-size: 0.85rem;
+      min-width: 0;
     }
 
     .cap {
@@ -106,7 +107,8 @@ type Profile = {
       border-radius: 6px;
       font-size: 0.78rem;
       line-height: 1.5;
-      overflow-x: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .note {
@@ -117,7 +119,28 @@ type Profile = {
 
     @media (max-width: 560px) {
       .split {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,

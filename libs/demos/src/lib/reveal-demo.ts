@@ -13,7 +13,9 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 @Component({
   selector: 'demo-reveal-panel',
   template: `<strong>{{ label() }}</strong>
-    <span class="muted">arrived after {{ data.value() }}ms</span>`,
+    <span class="muted"
+      >arrived after {{ data.hasValue() ? data.value() : '' }}ms</span
+    >`,
   styles: `
     :host {
       display: flex;
@@ -151,6 +153,27 @@ const PANELS = [
       margin: 0;
       color: var(--fg-muted, #6b7280);
       font-size: 0.85rem;
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
+      }
     }
   `,
 })

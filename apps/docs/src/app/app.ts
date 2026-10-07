@@ -3,10 +3,12 @@ import {
   Component,
   computed,
   effect,
+  type ElementRef,
   inject,
   PLATFORM_ID,
+  viewChild,
 } from '@angular/core';
-import { RouterLinkActive } from '@angular/router';
+import { Router } from '@angular/router';
 import { stored } from '@mmstack/primitives';
 import { Link, TransitionRouterOutlet, url } from '@mmstack/router-core';
 import { DocsMenu } from './layout/docs-menu';
@@ -28,23 +30,23 @@ const THEME_ICON: Record<ThemeSetting, string> = {
 
 @Component({
   selector: 'docs-root',
-  imports: [TransitionRouterOutlet, Link, RouterLinkActive, Logo],
+  imports: [TransitionRouterOutlet, Link, Logo],
+  host: { '(document:keydown.escape)': 'closeMenu()' },
   template: `
-    <a class="skip-link" href="#main-content">Skip to content</a>
+    <a class="skip-link" [href]="skipHref()" (click)="skipToContent($event)"
+      >Skip to content</a
+    >
     <header class="site-header">
       <a mmLink="/" class="brand" aria-label="mmstack home">
         <docs-logo [size]="22" />
         <span>mmstack</span>
       </a>
       <nav aria-label="Primary">
-        <a mmLink="/docs" routerLinkActive="active" ariaCurrentWhenActive="page"
-          >Docs</a
-        >
         <a
-          mmLink="/updates"
-          routerLinkActive="active"
-          ariaCurrentWhenActive="page"
-          >Updates</a
+          mmLink="/docs"
+          [class.active]="isDocs()"
+          [attr.aria-current]="isDocs() ? 'page' : null"
+          >Docs</a
         >
       </nav>
       <span class="spacer"></span>
@@ -55,7 +57,8 @@ const THEME_ICON: Record<ThemeSetting, string> = {
         [attr.aria-label]="'Theme: ' + theme() + '. Click to change.'"
         [title]="'Theme: ' + theme()"
       >
-        <span aria-hidden="true">{{ icon() }}</span> {{ theme() }}
+        <span aria-hidden="true">{{ icon() }}</span>
+        <span class="theme-label">{{ theme() }}</span>
       </button>
       <a
         href="https://github.com/mihajm/mmstack"
@@ -80,6 +83,7 @@ const THEME_ICON: Record<ThemeSetting, string> = {
       </a>
       @if (isDocs()) {
         <button
+          #menuToggle
           type="button"
           class="menu-toggle"
           (click)="menu.toggle()"
@@ -106,7 +110,12 @@ const THEME_ICON: Record<ThemeSetting, string> = {
         </button>
       }
     </header>
-    <main id="main-content" tabindex="-1" class="content">
+    <main
+      id="main-content"
+      tabindex="-1"
+      class="content"
+      [class.locked]="menu.open()"
+    >
       <mm-transition-outlet />
     </main>
   `,
@@ -245,7 +254,7 @@ const THEME_ICON: Record<ThemeSetting, string> = {
       color: var(--fg);
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 900px) {
       .site-header {
         gap: 0.85rem;
         padding: 0 0.85rem;
@@ -263,6 +272,63 @@ const THEME_ICON: Record<ThemeSetting, string> = {
         display: inline-flex;
       }
     }
+
+    @media (max-width: 400px) {
+      .theme-label {
+        display: none;
+      }
+    }
+
+    @media (max-width: 900px) {
+      /* the open drawer owns scrolling; the page behind it stays put */
+      .content.locked {
+        overflow: hidden;
+      }
+    }
+
+    /* Touch: 44px hit areas. The text links grow their box with padding
+       and give it back with a negative margin, so nothing moves. */
+    @media (pointer: coarse) {
+      .site-header {
+        gap: 0.35rem;
+      }
+
+      .brand,
+      nav a {
+        padding: 0.6rem 0.4rem;
+        margin: -0.6rem -0.4rem;
+      }
+
+      nav {
+        margin-left: 0.75rem;
+      }
+
+      .theme-toggle,
+      .gh,
+      .menu-toggle {
+        min-width: 44px;
+        min-height: 44px;
+        justify-content: center;
+      }
+
+      /* at 44px the hairline box reads as a stuck focus ring next to the bare
+         GitHub icon; keep the hit area, drop the outline */
+      .theme-toggle,
+      .menu-toggle {
+        border-color: transparent;
+      }
+    }
+
+    @media (pointer: coarse) and (max-width: 400px) {
+      .site-header {
+        gap: 0.25rem;
+        padding: 0 0.6rem;
+      }
+
+      nav {
+        margin-left: 0.3rem;
+      }
+    }
   `,
 })
 export class App {
@@ -270,10 +336,21 @@ export class App {
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
 
   protected readonly menu = inject(DocsMenu);
+  private readonly menuToggle =
+    viewChild<ElementRef<HTMLButtonElement>>('menuToggle');
+  private readonly router = inject(Router);
   private readonly currentUrl = url();
-  protected readonly isDocs = computed(() =>
-    this.currentUrl().split(/[?#]/)[0].startsWith('/docs'),
-  );
+  private readonly path = computed(() => this.currentUrl().split(/[?#]/)[0]);
+  // From the matched route, not the URL: an unknown /docs/... path renders
+  // the top-level 404, which has no docs shell.
+  protected readonly isDocs = computed(() => {
+    this.currentUrl();
+    return (
+      this.router.routerState.snapshot.root.firstChild?.routeConfig?.path ===
+      'docs'
+    );
+  });
+  protected readonly skipHref = computed(() => this.path() + '#main-content');
 
   protected readonly theme = stored<ThemeSetting>('auto', {
     key: 'mmstack-docs-theme',
@@ -294,6 +371,22 @@ export class App {
         this.document.documentElement.setAttribute('data-theme', theme);
       }
     });
+  }
+
+  // Bare "#main-content" would resolve against <base href="/">, so move focus
+  // here instead of navigating. Inside the docs, skip the sidebar too.
+  protected skipToContent(event: Event) {
+    event.preventDefault();
+    const target =
+      this.document.getElementById('docs-content') ??
+      this.document.getElementById('main-content');
+    target?.focus(); // and bring the start of the content into view
+  }
+
+  protected closeMenu() {
+    if (!this.menu.open()) return;
+    this.menu.close();
+    this.menuToggle()?.nativeElement.focus();
   }
 
   protected cycleTheme() {

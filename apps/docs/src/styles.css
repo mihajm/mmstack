@@ -21,6 +21,14 @@
   --accent-fg: light-dark(#faf9f7, #131312);
   --code-bg: light-dark(#f1f0ec, #1d1d1b);
 
+  /* status colours, shared with the demos (which fall back to the light values) */
+  --danger-soft: light-dark(#fbeaea, #3a1a19);
+  --danger-fg: light-dark(#8a1c1c, #ffb3ab);
+  --danger-line: light-dark(#e2a8a5, #7d3631);
+  --warn-soft: light-dark(#fbf1d5, #33290f);
+  --warn-fg: light-dark(#6e4a05, #f0cf7a);
+  --warn-line: light-dark(#dfc177, #6d5622);
+
   --header-h: 3.5rem;
   --sidebar-w: 16rem;
   --content-w: 46rem;
@@ -40,6 +48,8 @@
 html {
   height: 100%;
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -86,8 +96,9 @@ h2,
 h3,
 h4 {
   line-height: 1.25;
-  scroll-margin-top: calc(var(--header-h) + 1rem);
+  scroll-margin-top: 1rem;
   letter-spacing: -0.01em;
+  overflow-wrap: break-word;
 }
 
 code {
@@ -100,6 +111,13 @@ code {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0.1em 0.35em;
+  /* long identifiers break instead of pushing a phone page sideways */
+  overflow-wrap: anywhere;
+}
+
+/* except in tables, which scroll instead of chopping names into columns */
+.table-wrap code {
+  overflow-wrap: normal;
 }
 
 pre {
@@ -134,12 +152,42 @@ pre {
   background-color: var(--code-bg) !important;
 }
 
-/* doc content tables: hairline, mono headers */
+/* doc content tables: hairline, mono headers. Wide ones scroll inside
+   their wrapper so the page never scrolls sideways. */
+.table-wrap {
+  margin: 1.25rem 0;
+  overflow-x: auto;
+  /* Scroll hint: an edge shadow shows only on a side with more table to see.
+     The bg-coloured covers scroll with the content and hide the shadow once
+     that edge is reached. */
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 2.5rem 100%
+      no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 2.5rem 100%
+      no-repeat local,
+    radial-gradient(
+        farthest-side at 0 50%,
+        color-mix(in srgb, var(--fg) 15%, transparent),
+        transparent
+      )
+      left / 0.75rem 100% no-repeat scroll,
+    radial-gradient(
+        farthest-side at 100% 50%,
+        color-mix(in srgb, var(--fg) 15%, transparent),
+        transparent
+      )
+      right / 0.75rem 100% no-repeat scroll;
+}
+
 .doc-table {
   width: 100%;
   border-collapse: collapse;
   margin: 1.25rem 0;
   font-size: 0.9rem;
+}
+
+.table-wrap > .doc-table {
+  margin: 0;
 }
 
 .doc-table th {
@@ -171,4 +219,16 @@ pre {
 
 .doc-list li {
   margin: 0.3rem 0;
+}
+
+/* Lists of in-page links: give each a finger-sized target on touch. */
+@media (pointer: coarse) {
+  .link-list li {
+    margin: 0;
+  }
+
+  .link-list a {
+    display: block;
+    padding-block: 0.6rem;
+  }
 }

@@ -15,6 +15,7 @@ import {
 
 import { injectAnnounce } from '../a11y/a11y';
 import { driveGesture } from '../internal/gesture';
+import { surfaceTouchAction } from '../internal/touch-activation';
 import { resolveAutoScroll } from '../provide';
 import { arbitrate, CANVAS_ITEM_ATTR } from './arbiter';
 import type { CanvasController, CanvasItemState } from './controller';
@@ -125,6 +126,10 @@ export function connectCanvasSurface<T, K = unknown>(
           },
           {
             activationThreshold: untracked(controller).activationThreshold,
+            touchActivation: untracked(controller).touchActivation ?? false,
+            // resize and rotate grips are small and deliberate: no long-press
+            touchImmediateSelector:
+              '[data-mm-canvas-resize],[data-mm-canvas-rotate]',
             stopPropagation: true,
           },
         ),
@@ -217,6 +222,8 @@ export function connectCanvasItem<T, K = unknown>(
 /**
  * The canvas surface: `<div [mmCanvas]="ctrl">`. Owns the single delegated
  * gesture; render items (and your selection chrome / guides SVG) inside it.
+ * Carries `touch-action: none` (`manipulation` under a touch long-press), and
+ * so do the handles below.
  * The controller input settles on first render; swap controllers by
  * recreating the element, not by rebinding.
  */
@@ -225,13 +232,17 @@ export function connectCanvasItem<T, K = unknown>(
   exportAs: 'mmCanvas',
   host: {
     '[style.position]': "'relative'",
-    '[style.touch-action]': "'none'",
+    '[style.touch-action]': 'touchAction()',
   },
 })
 export class Canvas<T, K = unknown> {
   readonly controller = input.required<CanvasController<T, K>>({
     alias: 'mmCanvas',
   });
+  /** @internal the surface's (and its handles') `touch-action`. */
+  readonly touchAction = computed(() =>
+    surfaceTouchAction(this.controller().touchActivation, 'none'),
+  );
   constructor() {
     connectCanvasSurface<T, K>(() => this.controller());
   }
@@ -270,12 +281,22 @@ export class CanvasItem<T, K = unknown> {
   );
 }
 
+function handleTouchAction(): Signal<string> {
+  const surface = inject<Canvas<unknown>>(Canvas, { optional: true });
+  return computed(() => surface?.touchAction() ?? 'none');
+}
+
 /** A move handle inside an item — scopes dragging to itself. */
 @Directive({
   selector: '[mmCanvasHandle]',
-  host: { 'data-mm-canvas-handle': '', '[style.touch-action]': "'none'" },
+  host: {
+    'data-mm-canvas-handle': '',
+    '[style.touch-action]': 'touchAction()',
+  },
 })
-export class CanvasHandle {}
+export class CanvasHandle {
+  protected readonly touchAction = handleTouchAction();
+}
 
 /**
  * A resize handle (selection chrome): `<div mmCanvasResizeHandle="se">`.
@@ -285,6 +306,7 @@ export class CanvasHandle {}
   selector: '[mmCanvasResizeHandle]',
   host: {
     '[attr.data-mm-canvas-resize]': 'direction()',
+    // starts at once even under a touch long-press, so it always claims the touch
     '[style.touch-action]': "'none'",
   },
 })

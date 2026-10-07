@@ -55,7 +55,7 @@ class FakeNotesServer extends HttpHandler {
   ],
   template: `
     <mm-unscoped-suspense class="card">
-      <span busy class="muted">Saving…</span>
+      <span busy class="muted busy">Saving…</span>
       <div class="bar">
         <input
           [value]="text()"
@@ -72,7 +72,10 @@ class FakeNotesServer extends HttpHandler {
           server rejects</label
         >
       </div>
-      <p class="muted">Last saved: {{ saved() || 'nothing yet' }}</p>
+      <p class="muted last">
+        Last saved:
+        {{ saved() === null ? 'nothing yet' : saved() || 'an empty note' }}
+      </p>
       <div
         failed
         class="banner"
@@ -86,14 +89,19 @@ class FakeNotesServer extends HttpHandler {
     </mm-unscoped-suspense>
   `,
   styles: `
+    /* fixed rows, so the busy text never pushes the input around */
     .card {
-      display: block;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 0.75rem;
       padding: 0.75rem 1rem;
       border: 1px solid var(--border, #e5e7eb);
       border-radius: 8px;
     }
 
     .bar {
+      grid-row: 1;
+      grid-column: 1 / -1;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -118,21 +126,74 @@ class FakeNotesServer extends HttpHandler {
       font-size: 0.85rem;
     }
 
+    .last {
+      grid-row: 2;
+      grid-column: 1;
+      margin: 0.75rem 0 0;
+      overflow-wrap: anywhere;
+    }
+
+    .busy {
+      grid-row: 2;
+      grid-column: 2;
+      align-self: end;
+    }
+
     .banner {
+      grid-row: 3;
+      grid-column: 1 / -1;
       display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 0.5rem;
       margin-top: 0.5rem;
       padding: 0.4rem 0.75rem;
       border-radius: 6px;
+      border: 1px solid var(--danger-line, #e2a8a5);
       background: var(--danger-soft, #fdecea);
+      color: var(--danger-fg, #8a1c1c);
       font-size: 0.85rem;
+    }
+
+    .banner button {
+      flex-shrink: 0;
+      padding: 0.1rem 0.6rem;
+      border: 1px solid var(--danger-line, #e2a8a5);
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .banner button:hover {
+      border-color: currentColor;
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
+      }
     }
   `,
 })
 export class FailedSaveDemo {
   protected readonly text = signal('Call the supplier');
-  protected readonly saved = signal('');
+  protected readonly saved = signal<string | null>(null);
   protected readonly reject = inject(FakeNotesServer).reject;
 
   // A registered mutation: it drives the busy slot while it runs, and a failure stays in

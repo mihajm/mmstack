@@ -24,7 +24,7 @@ const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
       <div class="panel loading">Loading {{ tab() }}…</div>
     } @else {
       <div class="panel">
-        <h4>{{ tab() }}</h4>
+        <p class="title">{{ tab() }}</p>
         <ul>
           @for (line of data.value(); track line) {
             <li>{{ line }}</li>
@@ -48,8 +48,9 @@ const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
       background: var(--bg-soft, #f9fafb);
     }
 
-    h4 {
+    .title {
       margin: 0 0 0.5rem;
+      font-weight: 600;
     }
 
     ul {
@@ -149,6 +150,27 @@ export class TabPanel {
     @media (max-width: 600px) {
       .compare {
         grid-template-columns: 1fr;
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,

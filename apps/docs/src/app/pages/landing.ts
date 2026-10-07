@@ -88,7 +88,6 @@ const PACKAGES: Pkg[] = [
       </p>
       <div class="cta">
         <a mmLink="/docs" class="primary">Read the docs</a>
-        <a mmLink="/updates">What's new</a>
       </div>
     </section>
 
@@ -237,8 +236,9 @@ const PACKAGES: Pkg[] = [
       padding: 0.1rem 0.4rem;
       margin-left: 0.4rem;
       border-radius: 999px;
-      background: var(--warn-bg, #fef9c3);
-      color: var(--warn-fg, #854d0e);
+      background: var(--warn-soft);
+      color: var(--warn-fg);
+      border: 1px solid var(--warn-line);
       vertical-align: middle;
     }
   `,

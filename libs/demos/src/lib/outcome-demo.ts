@@ -1,5 +1,9 @@
 import { Component, resource, signal } from '@angular/core';
-import { MmOutcome, SuspenseBoundary } from '@mmstack/primitives';
+import {
+  MmOutcome,
+  MmRetryFailed,
+  SuspenseBoundary,
+} from '@mmstack/primitives';
 
 type User = { id: string; name: string; role: string };
 
@@ -13,7 +17,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 @Component({
   selector: 'demo-outcome',
-  imports: [SuspenseBoundary, MmOutcome],
+  imports: [SuspenseBoundary, MmOutcome, MmRetryFailed],
   template: `
     <div class="bar">
       @for (id of ids; track id) {
@@ -41,19 +45,22 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           <span placeholder class="muted">Loading…</span>
           <!-- a plain resource throws from value() on error -->
           <strong>{{ user.hasValue() ? user.value().name : '' }}</strong>
+          @if (user.status() === 'error') {
+            <span class="muted"
+              >Blank: the error never reached the boundary.</span
+            >
+          }
         </mm-suspense>
       </div>
       <div>
         <p class="caption">*mmOutcome, the read holds the boundary</p>
         <mm-suspense class="card">
           <span placeholder class="muted">Loading…</span>
-          <strong *mmOutcome="user; let u; error: failed; name: 'user'">
-            {{ u?.name }}
-          </strong>
-          <ng-template #failed let-error let-retry="retry">
-            <span class="muted">{{ error.message }}</span>
-            <button type="button" (click)="retry?.()">Retry</button>
-          </ng-template>
+          <p error class="muted">
+            Could not load the user.
+            <button type="button" mmRetryFailed>Retry</button>
+          </p>
+          <strong *mmOutcome="user; let u; name: 'user'">{{ u?.name }}</strong>
         </mm-suspense>
       </div>
     </div>
@@ -107,13 +114,40 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     }
 
     .muted {
+      margin: 0;
       color: var(--fg-muted, #6b7280);
+      font-size: 0.85rem;
+    }
+
+    .card button {
+      font: inherit;
       font-size: 0.85rem;
     }
 
     @media (max-width: 600px) {
       .compare {
         grid-template-columns: 1fr;
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,

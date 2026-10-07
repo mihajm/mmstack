@@ -11,7 +11,11 @@ import {
   untracked,
 } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
-import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
+import {
+  createHighlighterCore,
+  type HighlighterCore,
+  type ThemeRegistration,
+} from 'shiki/core';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 
 type Lang = 'ts' | 'html' | 'bash' | 'json';
@@ -23,8 +27,12 @@ let highlighter: Promise<HighlighterCore> | null = null;
 function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= createHighlighterCore({
     themes: [
-      import('shiki/themes/github-light.mjs'),
-      import('shiki/themes/github-dark.mjs'),
+      import('shiki/themes/github-light.mjs').then((m) =>
+        retint(m.default, LIGHT_FIXES),
+      ),
+      import('shiki/themes/github-dark.mjs').then((m) =>
+        retint(m.default, DARK_FIXES),
+      ),
     ],
     langs: [
       import('shiki/langs/typescript.mjs'),
@@ -35,6 +43,34 @@ function getHighlighter(): Promise<HighlighterCore> {
     engine: createOnigurumaEngine(import('shiki/wasm')),
   });
   return highlighter;
+}
+
+// A few github theme tokens fall under 4.5:1 on our code background
+// (#f1f0ec light, #1d1d1b dark). Swap them for darker/lighter neighbours.
+const LIGHT_FIXES: Record<string, string> = {
+  '#6a737d': '#57606a', // comments
+  '#22863a': '#1a7431', // tags, inserted
+  '#d73a49': '#cf222e', // keywords
+  '#e36209': '#953800', // parameters, attributes
+};
+
+const DARK_FIXES: Record<string, string> = {
+  '#6a737d': '#8b949e', // comments
+};
+
+function retint(
+  theme: ThemeRegistration,
+  fixes: Record<string, string>,
+): ThemeRegistration {
+  return {
+    ...theme,
+    tokenColors: theme.tokenColors?.map((rule) => {
+      const fg = rule.settings.foreground?.toLowerCase();
+      return fg && fixes[fg]
+        ? { ...rule, settings: { ...rule.settings, foreground: fixes[fg] } }
+        : rule;
+    }),
+  };
 }
 
 const LANG_ID: Record<Lang, string> = {
@@ -141,8 +177,24 @@ async function highlight(code: string, lang: Lang): Promise<string> {
       opacity: 1;
     }
 
+    /* No hover on touch screens: keep the button visible. */
+    @media (hover: none) {
+      .copy {
+        opacity: 1;
+      }
+    }
+
     .copy:hover {
       color: var(--fg);
+    }
+
+    /* A 44px tall hit area on touch without covering more code. */
+    @media (pointer: coarse) {
+      .copy::after {
+        content: '';
+        position: absolute;
+        inset: -0.7rem -0.25rem;
+      }
     }
   `,
 })

@@ -13,7 +13,12 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { isMutable } from '../mutable';
-import { currentRecorder, swapRecorder } from './active-transaction';
+import {
+  currentRecorder,
+  recordWrite,
+  swapRecorder,
+} from './active-transaction';
+import { isStore } from '../store/internals';
 import { recordHoldEntry } from './hold-seed';
 import { bindAbort } from './transaction-driver';
 import { LAY_GUESS, OPEN_OVERLAY } from './optimistic-seam';
@@ -92,6 +97,16 @@ export type Transaction = {
    * to re-enter after an `await`. Nested `enter` calls are fine. Throws once the transaction is closed.
    */
   enter<R>(fn: () => R): R;
+  /**
+   * Write `target` as part of this transaction, before or after any `await`: the write is recorded
+   * here, so `restore()` undoes it, whether `target` is a plain signal, a `transactional` one, a
+   * store node or a guessable (where it resolves this transaction's guess to the written value).
+   * The same as `enter(() => target.set(value))`, except that a plain signal is recorded too.
+   * Throws once the transaction is closed.
+   */
+  set<T>(target: WritableSignal<T>, value: T): void;
+  /** {@link Transaction.set} with an updater applied to the current value. */
+  update<T>(target: WritableSignal<T>, fn: (value: T) => T): void;
   /**
    * Keep the transaction open: its display hold and its `done` wait until every release function
    * has been called. Releasing twice is harmless. Throws once the transaction is closed.
@@ -210,6 +225,15 @@ export function activeTransaction(): Transaction | null {
   return currentRecorder() as Transaction | null;
 }
 
+/**
+ * Record a target written through `tx.set` / `tx.update` when nothing else would: a store node
+ * records at its root, and `recordWrite` already skips signals that record themselves
+ * (`transactional`, guessables), so only a plain signal is recorded here.
+ */
+function recordPlain(target: WritableSignal<unknown>): void {
+  if (!isStore(target)) recordWrite(target);
+}
+
 export function createTransaction(): Transaction {
   let log: Entry[] = [];
   let generation = 0;
@@ -277,6 +301,16 @@ export function createTransaction(): Transaction {
         }
       }
     },
+    set: (target, value) =>
+      txn.enter(() => {
+        recordPlain(target);
+        target.set(value);
+      }),
+    update: (target, fn) =>
+      txn.enter(() => {
+        recordPlain(target);
+        target.update(fn);
+      }),
     retain: () => {
       if (closed)
         throw new Error('transaction: retain() on a closed transaction');

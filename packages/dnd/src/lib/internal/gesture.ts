@@ -1,4 +1,10 @@
-import { nestedEffect, pointerDrag } from '@mmstack/primitives';
+import { nestedEffect } from '@mmstack/primitives';
+
+import {
+  gatedPointerDrag,
+  resolveTouchActivation,
+  type TouchActivation,
+} from './touch-activation';
 
 /**
  * The engine-agnostic delegated-gesture chassis: ONE `pointerDrag`
@@ -6,7 +12,8 @@ import { nestedEffect, pointerDrag } from '@mmstack/primitives';
  * receives move/end/cancel, and a live pointer ref for auto-scroll plugins to
  * chase. Shared by the pointer sortable, the placement grid and the canvas
  * surface so gesture ownership rules (innermost claims via `stopPropagation`,
- * Escape cancels, activation threshold) never fork. Injection context only.
+ * Escape cancels, activation threshold, touch long-press) never fork.
+ * Injection context only.
  */
 export type GestureModifiers = {
   readonly shift: boolean;
@@ -48,6 +55,19 @@ export type DriveGestureOptions = {
    * shields). See {@link PointerDragOptions.capture}. @default false
    */
   capture?: boolean;
+  /**
+   * Touch presses wait for a long-press before they can start a drag (mouse
+   * and pen never wait). See {@link TouchActivation}. Pair it with
+   * `touch-action: manipulation` on the surface. @default off
+   */
+  touchActivation?: TouchActivation | false;
+  /**
+   * With `touchActivation` on, a touch press that starts inside an element
+   * matching this selector skips the long-press and starts at once, like a
+   * mouse press. Meant for small deliberate grips (resize, rotate) that carry
+   * `touch-action: none` themselves.
+   */
+  touchImmediateSelector?: string;
 };
 
 export type GestureDriver = {
@@ -60,7 +80,11 @@ export function driveGesture(
   adapter: GestureAdapter,
   opts: DriveGestureOptions = {},
 ): GestureDriver {
-  const drag = pointerDrag({
+  const drag = gatedPointerDrag({
+    touchActivation: resolveTouchActivation(opts.touchActivation),
+    touchImmediate: opts.touchImmediateSelector
+      ? (origin) => !!origin?.closest(opts.touchImmediateSelector as string)
+      : undefined,
     target: element,
     handleSelector: opts.handleSelector,
     activationThreshold: opts.activationThreshold,

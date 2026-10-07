@@ -95,48 +95,50 @@ import { DocSection } from '../../../layout/doc-section';
           <code>selectPluralCategory</code> pairs alongside them over
           <code>Intl.PluralRules</code>.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Formatter</th>
-              <th>Wraps</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>formatDate</code></td>
-              <td><code>Intl.DateTimeFormat</code></td>
-            </tr>
-            <tr>
-              <td><code>formatNumber</code></td>
-              <td><code>Intl.NumberFormat</code></td>
-            </tr>
-            <tr>
-              <td><code>formatCurrency</code></td>
-              <td><code>Intl.NumberFormat</code> (currency style)</td>
-            </tr>
-            <tr>
-              <td><code>formatPercent</code></td>
-              <td><code>Intl.NumberFormat</code> (percent style)</td>
-            </tr>
-            <tr>
-              <td><code>formatList</code></td>
-              <td><code>Intl.ListFormat</code></td>
-            </tr>
-            <tr>
-              <td><code>formatUnit</code></td>
-              <td><code>Intl.NumberFormat</code> (unit style)</td>
-            </tr>
-            <tr>
-              <td><code>formatRelativeTime</code></td>
-              <td><code>Intl.RelativeTimeFormat</code></td>
-            </tr>
-            <tr>
-              <td><code>formatDisplayName</code></td>
-              <td><code>Intl.DisplayNames</code></td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Formatter</th>
+                <th>Wraps</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>formatDate</code></td>
+                <td><code>Intl.DateTimeFormat</code></td>
+              </tr>
+              <tr>
+                <td><code>formatNumber</code></td>
+                <td><code>Intl.NumberFormat</code></td>
+              </tr>
+              <tr>
+                <td><code>formatCurrency</code></td>
+                <td><code>Intl.NumberFormat</code> (currency style)</td>
+              </tr>
+              <tr>
+                <td><code>formatPercent</code></td>
+                <td><code>Intl.NumberFormat</code> (percent style)</td>
+              </tr>
+              <tr>
+                <td><code>formatList</code></td>
+                <td><code>Intl.ListFormat</code></td>
+              </tr>
+              <tr>
+                <td><code>formatUnit</code></td>
+                <td><code>Intl.NumberFormat</code> (unit style)</td>
+              </tr>
+              <tr>
+                <td><code>formatRelativeTime</code></td>
+                <td><code>Intl.RelativeTimeFormat</code></td>
+              </tr>
+              <tr>
+                <td><code>formatDisplayName</code></td>
+                <td><code>Intl.DisplayNames</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="App-wide defaults" id="defaults">

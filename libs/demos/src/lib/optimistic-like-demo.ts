@@ -66,9 +66,9 @@ class FakeLikeServer extends HttpHandler {
         }
       </span>
     </div>
-    @if (like.lastFailure(); as f) {
+    @if (like.lastFailure()) {
       <p class="banner">
-        Save #{{ f.generation }} failed, the guess went back to the truth.
+        That save failed, so the guess went back to the truth.
       </p>
     }
     <p class="muted">Every second request to the server fails.</p>
@@ -90,8 +90,8 @@ class FakeLikeServer extends HttpHandler {
     }
 
     .like.on {
-      color: #c2185b;
-      border-color: #c2185b;
+      color: light-dark(#c2185b, #f48fb1);
+      border-color: currentColor;
     }
 
     .muted {
@@ -103,8 +103,31 @@ class FakeLikeServer extends HttpHandler {
       margin: 0.75rem 0 0;
       padding: 0.4rem 0.75rem;
       border-radius: 6px;
+      border: 1px solid var(--danger-line, #e2a8a5);
       background: var(--danger-soft, #fdecea);
+      color: var(--danger-fg, #8a1c1c);
       font-size: 0.85rem;
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
+      }
     }
   `,
 })

@@ -126,41 +126,43 @@ import { DocSection } from '../../../layout/doc-section';
           <code>swapCommit</code> output, one event per swap it performs.
         </p>
         <docs-code [code]="swapCommitOutput" lang="html" />
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Outcome</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>committed</code></td>
-              <td>
-                a held view was swapped out and the incoming view is on screen
-              </td>
-            </tr>
-            <tr>
-              <td><code>immediate</code></td>
-              <td>
-                the outlet activated without holding (nothing to hold,
-                <code>immediateTransition</code>, or a
-                <code>RouteReuseStrategy</code> re-attach) and has rendered
-              </td>
-            </tr>
-            <tr>
-              <td><code>superseded</code></td>
-              <td>
-                an armed hold was dropped or re-targeted before it could
-                commit; the outlet re-arms under the interrupting navigation
-              </td>
-            </tr>
-            <tr>
-              <td><code>outlet-destroyed</code></td>
-              <td>the outlet was destroyed while still holding a view</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Outcome</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>committed</code></td>
+                <td>
+                  a held view was swapped out and the incoming view is on screen
+                </td>
+              </tr>
+              <tr>
+                <td><code>immediate</code></td>
+                <td>
+                  the outlet activated without holding (nothing to hold,
+                  <code>immediateTransition</code>, or a
+                  <code>RouteReuseStrategy</code> re-attach) and has rendered
+                </td>
+              </tr>
+              <tr>
+                <td><code>superseded</code></td>
+                <td>
+                  an armed hold was dropped or re-targeted before it could
+                  commit; the outlet re-arms under the interrupting navigation
+                </td>
+              </tr>
+              <tr>
+                <td><code>outlet-destroyed</code></td>
+                <td>the outlet was destroyed while still holding a view</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           <code>committed</code> and <code>immediate</code> fire after the view
           is actually on screen, which under a hold is well after
@@ -266,7 +268,9 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Three tools, three scopes" id="three-tools">
         <p>
           These stack, and each holds a different thing. The
-          <a mmLink="/docs/router-core/transition-outlet#transition-outlet"
+          <a
+            mmLink="/docs/router-core/transition-outlet"
+            fragment="transition-outlet"
             >transition outlet</a
           >
           holds the outgoing <em>view</em> across a cross-route navigation.

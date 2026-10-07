@@ -226,7 +226,7 @@ describe('concurrency demos', () => {
     await flush(f, 50);
     expect(text(f)).toContain('on screen: true, truth: true');
     expect(btn().textContent).toContain('Liked');
-    expect(text(f)).toContain('Save #1 failed');
+    expect(text(f)).toContain('That save failed');
   });
 
   it('composed save: guess, failed second write beside held content, then a clean retry', async () => {

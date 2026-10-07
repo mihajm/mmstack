@@ -5,13 +5,15 @@ import {
   ReorderableItem,
   reorderable,
 } from '@mmstack/dnd';
+import { DemoReset } from './demo-reset';
 
 type Task = { id: number; label: string };
 
 @Component({
   selector: 'demo-sortable-list',
-  imports: [Reorderable, ReorderableItem, ReorderableHandle],
+  imports: [Reorderable, ReorderableItem, ReorderableHandle, DemoReset],
   template: `
+    <demo-reset (restore)="data.set(seed())" />
     <ul class="list" [mmReorderable]="list">
       @for (task of list.items(); track task.id) {
         <li class="item" [mmReorderableItem]="task">
@@ -64,13 +66,14 @@ type Task = { id: number; label: string };
   `,
 })
 export class SortableListDemo {
-  private readonly data = signal<Task[]>([
+  protected readonly seed = (): Task[] => [
     { id: 1, label: 'Auth flow' },
     { id: 2, label: 'Billing page' },
     { id: 3, label: 'Search filters' },
     { id: 4, label: 'Dashboard charts' },
     { id: 5, label: 'Settings panel' },
-  ]);
+  ];
+  protected readonly data = signal<Task[]>(this.seed());
 
   protected readonly list = reorderable(this.data, {
     engine: 'pointer',

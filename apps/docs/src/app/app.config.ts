@@ -22,6 +22,7 @@ import {
   provideTitleConfig,
 } from '@mmstack/router-core';
 import { appRoutes } from './app.routes';
+import { provideContentScroller } from './content-scroller';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -36,8 +37,10 @@ export const appConfig: ApplicationConfig = {
         anchorScrolling: 'enabled',
       }),
     ),
+    provideContentScroller(),
     provideTitleConfig({
-      prefix: (title) => `${title} • mmstack`,
+      // The landing page is just "mmstack", not "mmstack • mmstack".
+      prefix: (title) => (title === 'mmstack' ? title : `${title} • mmstack`),
       initialTitle: 'mmstack',
     }),
     // Exact matching so a parent page (e.g. /docs/primitives) stops being

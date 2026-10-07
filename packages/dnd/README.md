@@ -226,7 +226,7 @@ protected readonly zone = dropTarget<Card>({
 
 `closestEdge` and `edges` need the hitbox plugin (see [Plugins](#plugins)); without it, drops still work — you just get no edge (`closestEdge()` stays `null`), plus a one-time dev warning. `dropTarget` also supports `sticky` (stay the active target after the pointer leaves) and `dropEffect` (`'move' | 'copy' | 'link'`), both pragmatic element-adapter features.
 
-Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. Edge detection (`edges` / `hitbox`) works on either engine, since the hitbox is pure geometry over the pointer position; `sticky` / `dropEffect` are native-only and compile-time-forbidden when `engine: 'pointer'`, and conversely `activationThreshold` (px before the drag activates, default 5) is pointer-only.
+Both `draggable` and `dropTarget` accept `engine: 'pointer'` to drive via pointer events instead of native HTML5 DnD (see [Sortable lists](#sortable-lists-reorderable) for the engine trade-offs). In pointer mode `draggable` moves the element itself (there's no browser drag image), so `preview` renders a floating follower; native `preview` uses the browser's custom drag preview. The `engine` is resolved at creation. Edge detection (`edges` / `hitbox`) works on either engine, since the hitbox is pure geometry over the pointer position; `sticky` / `dropEffect` are native-only and compile-time-forbidden when `engine: 'pointer'`, and conversely `activationThreshold` (px before the drag activates, default 5) and `touchActivation` (see [Touch](#touch)) are pointer-only.
 
 ## fileDropTarget (external / files)
 
@@ -357,7 +357,7 @@ reorderable(this.items, {
 
 ### Options
 
-`key` (required identity), `engine`, `axis` (`'y'` \| `'x'` \| `'wrap'`), `deadband` (px a center must be cleared before the insert flips), `activationThreshold` (px before a drag activates — pointer engine), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insertSize` (px an arriving foreign item's gap should occupy here, when this list renders arrivals smaller than they were at home), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
+`key` (required identity), `engine`, `axis` (`'y'` \| `'x'` \| `'wrap'`), `deadband` (px a center must be cleared before the insert flips), `activationThreshold` (px before a drag activates, pointer engine), `touchActivation` (long-press on touch, pointer engine, see [Touch](#touch)), `group`, `keyboard` (or `false`), `jumpModifier`, `onKeyboardKeydown` (own the keys), `announceMove` (custom message or `false` to silence), `animation` (FLIP-on-commit / pointer glide, or `false`), `autoScroll` (opt-in `{ edge, speed, edgeProportion?, maxSpeedAt? }` — needs an auto-scroll plugin, see below), `canReceive` (cross-list drop guard), `insertSize` (px an arriving foreign item's gap should occupy here, when this list renders arrivals smaller than they were at home), `insert` (foreign-payload mapping, native engine), and the callbacks `onReorder` / `onItemLeft` / `onItemArrived` / `onItemInserted`.
 
 ### Wrap grids (`axis: 'wrap'`)
 
@@ -421,6 +421,8 @@ Two compaction modes cover the two grid personalities:
 
 - `compact: 'vertical'` (default): colliding items push down and gravity pulls everything up, the classic dashboard reflow.
 - `compact: 'none'`: nothing moves. A cell is either free or the move is rejected (the projection sticks to the last valid cell). `grid.targetMask()` exposes the validity mask during a drag (`mask[y * cols + x]`), so you can render drop-cell affordances; a `canPlace` predicate layers your own rules on top. This is the mode for form builders with fixed slots.
+
+A move released with the pointer outside the grid cancels: as soon as the pointer leaves, the preview shows the original layout again (`dropOutside()` turns `true`, `projectedCell()` turns `null`) and releasing there writes nothing (over another member of the grid's `sortableGroup` it is a transfer instead, see below). "Outside" means outside the grid's box as it was when the drag started: the preview can grow or shrink the rendered grid, but it never moves that line, so the same pointer position always gives the same result. Bring the pointer back over the grid to resume the move. Resizes are exempt, since dragging a grip past the edge is how you reach the maximum span, and Escape cancels any gesture.
 
 The details that keep it honest: the projection only fires when the pointer crosses a cell, untouched items keep reference identity through both preview and commit (so a keyed `@for` and an op-log diff see minimal change), resize grips (`'e' | 's' | 'se'`) preview spans the same way, arrows move the focused widget one cell and Shift+arrows resize it, and edge auto-scroll works on both axes. `injectPlacementGrid` + `providePlacementGridDefaults` follow the usual DI-defaults pattern.
 
@@ -524,6 +526,43 @@ One schema note for collaborative apps: array insert/remove diffs coarsely (a le
 
 If you are building a node-and-edge editor (BPMN, CMMN, data flows), you do not need to hand-roll edges, connection dragging and minimaps on top of `canvas`. [ngx-vflow](https://www.ngx-vflow.org/) is an excellent signal-native diagram shell, and it composes with the same store seam: keep the document in your store, mint vflow nodes from it, and commit drag ends in one write (`nodesChanges.position` marks dirty nodes, `nodeDragEnd` commits, `connect` appends edges). The playground's `/vflow-store` route is a complete working recipe, including undo. Note that ngx-vflow is browser-only, so render its route with `RenderMode.Client` under SSR.
 
+## Touch
+
+Every drag surface the library renders sets a `touch-action`, which decides whether a finger on it scrolls the page or drags:
+
+| Surface | `touch-action` |
+| --- | --- |
+| `mmReorderableItem` (no handle), single list, `axis: 'y'` | `pan-x` |
+| `mmReorderableItem` (no handle), single list, `axis: 'x'` | `pan-y` |
+| `mmReorderableItem` (no handle), `axis: 'wrap'` or in a `sortableGroup` | `none` |
+| `mmReorderableHandle`, placement grid items, the canvas surface and its move handles | `none` |
+| any of the above with `touchActivation` set | `manipulation` |
+| placement grid resize grips, canvas resize and rotate handles | `none`, always |
+
+A single list drags along its axis only, so the other axis is left to the page: on a vertical list a sideways swipe can still pan, while a swipe along the list drags the item instead of scrolling. Grouped and wrap lists drag in two dimensions and claim the whole touch. With a handle, only the handle claims the touch and the item body scrolls normally. Building your own item directive on `connectReorderableItem`? `reorderableItemTouchAction(controller)` returns the same value. A pointer `draggable` or `movable` sets no `touch-action` of its own: give the element `touch-action: none` for touch drags, or use `touchActivation`.
+
+### Long-press to drag
+
+A phone screen full of draggable cards leaves little room to scroll the page. `touchActivation` makes a touch press wait before it can become a drag, the way native mobile lists behave:
+
+```ts
+provideDndDefaults({ touchActivation: { delay: 250 } }); // every pointer-driven primitive
+
+injectReorderable(this.tasks, {
+  key: (t) => t.id,
+  engine: 'pointer',
+  touchActivation: { delay: 300, tolerance: 8 }, // or false to opt this list out
+});
+```
+
+- Only touch waits (`pointerType === 'touch'`). Mouse and pen start at once.
+- The finger has to rest for `delay` ms. Moving more than `tolerance` px (default 5) before that gives the touch back to the browser, so it scrolls. Lifting the finger, or the browser cancelling the pointer, before that ends the press too.
+- After the delay the drag starts as usual, once the pointer passes `activationThreshold`, and the page stops scrolling for the rest of that touch. The context menu a long press would open is suppressed while a touch press is held.
+- The surfaces switch to `touch-action: manipulation`, so the page can scroll until the press activates. A pointer `draggable` or `movable` needs no `touch-action` at all in this mode.
+- Resize and rotate grips (placement grid and canvas) never wait: they are small, deliberate targets, so a touch on one starts at once and keeps `touch-action: none`. Building on `driveGesture`? Its `touchImmediateSelector` option gives your own grips the same treatment.
+
+It covers pointer-engine `reorderable` and `draggable`, `placementGrid`, `canvas` (move, resize, rotate and marquee alike) and `movable`. Native-engine lists and draggables ignore it, since the browser owns touch there. It is off by default. Turn it on app-wide with `provideDndDefaults`, per primitive with `provideReorderableDefaults` / `provideDraggableDefaults` / `providePlacementGridDefaults` / `provideCanvasDefaults`, or per call. `touchActivation: false` opts a primitive or a single call back out.
+
 ## Plugins
 
 Edge-aware drops (`hitbox`) and auto-scroll are **opt-in plugins**, registered once via `provideDnd` (per-call options take precedence). You can use our **zero-dependency** first-party plugins from `@mmstack/dnd/plugins` (no `@atlaskit/*` needed — great for pointer-only apps), or plug in the pragmatic sub-libraries:
@@ -570,7 +609,7 @@ bootstrapApplication(App, {
 });
 ```
 
-`provideDndDefaults` holds the **cross-primitive** defaults (currently `engine`). Each primitive also has its own provider for options only it understands, and it **inherits** the common defaults unless it sets that key itself:
+`provideDndDefaults` holds the **cross-primitive** defaults (`engine` and `touchActivation`). Each primitive also has its own provider for options only it understands, and it **inherits** the common defaults unless it sets that key itself:
 
 ```ts
 import {

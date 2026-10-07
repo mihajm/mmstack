@@ -79,6 +79,9 @@ const TEMPLATE = `
       </div>
     </div>
   </div>
+  <p class="caption note">
+    Each break also logs the error to the console, on purpose.
+  </p>
   <ng-template #fallback let-error let-retry="retry">
     <p class="fallback">
       {{ error.message }}.
@@ -96,8 +99,9 @@ const TEMPLATE = `
   styles: `
     .bar {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.5rem 0.75rem;
       margin-bottom: 1rem;
     }
 
@@ -109,7 +113,15 @@ const TEMPLATE = `
       background: var(--bg, #fff);
       font: inherit;
       font-size: 0.85rem;
+      white-space: nowrap;
+      color: var(--fg, #161616);
       cursor: pointer;
+    }
+
+    .bar button:disabled {
+      color: var(--fg-muted, #6b7280);
+      border-style: dashed;
+      cursor: default;
     }
 
     .hint,
@@ -120,6 +132,10 @@ const TEMPLATE = `
 
     .caption {
       margin: 0 0 0.5rem;
+    }
+
+    .note {
+      margin: 0.75rem 0 0;
     }
 
     .compare {
@@ -143,6 +159,27 @@ const TEMPLATE = `
     @media (max-width: 600px) {
       .compare {
         grid-template-columns: 1fr;
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,

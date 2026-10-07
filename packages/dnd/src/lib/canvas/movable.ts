@@ -15,13 +15,15 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import {
-  pointerDrag,
-  type PointerDragState,
-  isServer,
-} from '@mmstack/primitives';
+import { type PointerDragState, isServer } from '@mmstack/primitives';
 
 import { resolveElement, resolveSignal } from '../internal/resolve';
+import {
+  gatedPointerDrag,
+  resolveTouchActivation,
+  type TouchActivation,
+} from '../internal/touch-activation';
+import { injectDndDefaults } from '../provide';
 import type { DragHandleLike, Resolvable } from '../internal/types';
 import type { Point } from '../sortable/geometry';
 import {
@@ -44,6 +46,14 @@ export type MovableOptions = {
   disabled?: Resolvable<boolean>;
   /** Pixels before a drag starts (vs a click). @default 3 */
   activationThreshold?: number;
+  /**
+   * Touch presses wait for a long-press before they can drag; mouse and pen
+   * start immediately. Until the press activates the page scrolls, so the
+   * element needs no `touch-action: none` of its own. See {@link TouchActivation}.
+   * Falls back to `provideDndDefaults({ touchActivation })`; `false` opts out.
+   * @default off
+   */
+  touchActivation?: TouchActivation | false;
   /**
    * Supplies the base position captured at gesture start (defaults to the bound
    * signal's current value). Use when the *rendered* position differs from the
@@ -148,9 +158,12 @@ export function movable(
     ? computed(() => resolveElement(handleSig()) ?? null)
     : host;
 
-  const drag = pointerDrag({
+  const drag = gatedPointerDrag({
     target,
     activationThreshold: opts.activationThreshold ?? 3,
+    touchActivation: resolveTouchActivation(
+      opts.touchActivation ?? injectDndDefaults()?.touchActivation,
+    ),
   });
 
   const moving = computed(

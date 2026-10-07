@@ -253,73 +253,75 @@ import { DocSection } from '../../../layout/doc-section';
           <code>value</code> or <code>prefetch</code>, because those don't make
           sense for a one-off write.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>What it is</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>mutate(value, ctx?)</code></td>
-              <td>Trigger it, fire-and-forget.</td>
-            </tr>
-            <tr>
-              <td><code>mutateAsync(value, ctx?)</code></td>
-              <td>Trigger and await the result.</td>
-            </tr>
-            <tr>
-              <td><code>current()</code></td>
-              <td>The value being mutated, or <code>null</code> when idle.</td>
-            </tr>
-            <tr>
-              <td><code>progress()</code></td>
-              <td>Upload progress when <code>reportProgress: true</code>.</td>
-            </tr>
-            <tr>
-              <td><code>clearQueue()</code></td>
-              <td>
-                Drop all pending queued mutations. Awaiters reject with
-                <code>MutationCancelledError</code>.
-              </td>
-            </tr>
-            <tr>
-              <td><code>outcome()</code></td>
-              <td>
-                The current operation's state as one value:
-                <code>undefined</code> while idle, a
-                <code>loading</code> sentinel in flight, the result (or
-                <code>DONE</code> when it resolved with no result), or an
-                <code>error</code> sentinel. It goes back to
-                <code>undefined</code> right after each run settles.
-              </td>
-            </tr>
-            <tr>
-              <td><code>lastFailure()</code></td>
-              <td>
-                The last failure as
-                <code>{{ '{' }} error, generation {{ '}' }}</code
-                >. Unlike <code>outcome()</code> it stays after the ref is back
-                to idle, until the next <code>mutate()</code> starts.
-              </td>
-            </tr>
-            <tr>
-              <td><code>loads()</code></td>
-              <td>
-                How many requests it has started. A transaction uses it to tell
-                its own work from work that was already running.
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <code>status()</code> / <code>error()</code> /
-                <code>isLoading()</code>
-              </td>
-              <td>The same status surface as a query.</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>What it is</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>mutate(value, ctx?)</code></td>
+                <td>Trigger it, fire-and-forget.</td>
+              </tr>
+              <tr>
+                <td><code>mutateAsync(value, ctx?)</code></td>
+                <td>Trigger and await the result.</td>
+              </tr>
+              <tr>
+                <td><code>current()</code></td>
+                <td>The value being mutated, or <code>null</code> when idle.</td>
+              </tr>
+              <tr>
+                <td><code>progress()</code></td>
+                <td>Upload progress when <code>reportProgress: true</code>.</td>
+              </tr>
+              <tr>
+                <td><code>clearQueue()</code></td>
+                <td>
+                  Drop all pending queued mutations. Awaiters reject with
+                  <code>MutationCancelledError</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>outcome()</code></td>
+                <td>
+                  The current operation's state as one value:
+                  <code>undefined</code> while idle, a
+                  <code>loading</code> sentinel in flight, the result (or
+                  <code>DONE</code> when it resolved with no result), or an
+                  <code>error</code> sentinel. It goes back to
+                  <code>undefined</code> right after each run settles.
+                </td>
+              </tr>
+              <tr>
+                <td><code>lastFailure()</code></td>
+                <td>
+                  The last failure as
+                  <code>{{ '{' }} error, generation {{ '}' }}</code
+                  >. Unlike <code>outcome()</code> it stays after the ref is back
+                  to idle, until the next <code>mutate()</code> starts.
+                </td>
+              </tr>
+              <tr>
+                <td><code>loads()</code></td>
+                <td>
+                  How many requests it has started. A transaction uses it to tell
+                  its own work from work that was already running.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>status()</code> / <code>error()</code> /
+                  <code>isLoading()</code>
+                </td>
+                <td>The same status surface as a query.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
     </docs-page>
   `,

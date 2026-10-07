@@ -10,6 +10,7 @@ import {
   InjectionToken,
   input,
   output,
+  type OnChanges,
   type Provider,
   untracked,
 } from '@angular/core';
@@ -23,6 +24,45 @@ import {
 } from '@angular/router';
 import { elementVisibility } from '@mmstack/primitives';
 import { PreloadRequester } from './preloading';
+
+type ResolvedLinkParts = {
+  link: string | any[] | UrlTree | null;
+  queryParams: Params | undefined;
+  fragment: string | undefined;
+};
+
+/**
+ * Splits a string link's inline `?query` and `#fragment` off its path, so they reach the
+ * UrlTree as real query params / fragment instead of being encoded into the last segment.
+ * An explicit `fragment` wins over the inline one; explicit `queryParams` are merged over
+ * the inline ones (explicit keys win). Arrays and UrlTrees pass through untouched.
+ */
+function resolveLinkParts(
+  router: Router,
+  link: string | any[] | UrlTree | null,
+  queryParams?: Params,
+  fragment?: string,
+): ResolvedLinkParts {
+  if (typeof link !== 'string') return { link, queryParams, fragment };
+
+  const cut = link.search(/[?#]/);
+  if (cut === -1) return { link, queryParams, fragment };
+
+  const inline = router.parseUrl(link.slice(cut));
+  const inlineParams = inline.queryParams;
+  const hasInlineParams = Object.keys(inlineParams).length > 0;
+
+  const path = link.slice(0, cut);
+
+  return {
+    // A bare '?…' / '#…' targets the current route (relativeTo), like `[]` commands.
+    link: path === '' ? [] : path,
+    queryParams: hasInlineParams
+      ? { ...inlineParams, ...queryParams }
+      : queryParams,
+    fragment: fragment ?? inline.fragment ?? undefined,
+  };
+}
 
 function inputToUrlTree(
   router: Router,
@@ -38,12 +78,14 @@ function inputToUrlTree(
 
   if (link instanceof UrlTree) return link;
 
-  const arr = Array.isArray(link) ? link : [link];
+  const parts = resolveLinkParts(router, link, queryParams, fragment);
+  const commands = parts.link as string | any[];
+  const arr = Array.isArray(commands) ? commands : [commands];
 
   return router.createUrlTree(arr, {
     relativeTo,
-    queryParams,
-    fragment,
+    queryParams: parts.queryParams,
+    fragment: parts.fragment,
     queryParamsHandling,
   });
 }
@@ -80,7 +122,8 @@ function isAnchorLikeHost(el: HTMLElement): boolean {
  * just like the directive.
  *
  * @returns A function accepting the same link descriptor shape as `mmLink` (`string`,
- * commands array, `UrlTree`, or `null`). Passing `null` or an unresolvable link is a no-op.
+ * commands array, `UrlTree`, or `null`), with the same inline `?query#fragment` handling for
+ * strings. Passing `null` or an unresolvable link is a no-op.
  *
  * @example
  * ```typescript
@@ -205,7 +248,15 @@ function injectConfig() {
  * Drop-in replacement for `[routerLink]` that adds preloading on hover or
  * visibility, optional mousedown-triggered navigation, and a `beforeNavigate`
  * hook. Composes with Angular's `RouterLink` via `hostDirectives`, so every
- * `RouterLink` input (`target`, `queryParams`, `fragment`, etc.) is forwarded.
+ * `RouterLink` input (`target`, `queryParams`, `fragment`, etc.) is supported.
+ *
+ * Accepted link forms: a commands array, a `UrlTree`, or a string. Unlike `routerLink`, a
+ * string may carry an inline query and fragment (`'/docs/page?tab=api#install'`, or
+ * `'#install'` for the route hosting the link); they become real query params and a real
+ * fragment instead of being percent-encoded into the path. An explicit `fragment` input
+ * wins over the inline fragment, and explicit `queryParams` are merged over the inline ones
+ * (explicit keys win). Commands arrays are not parsed, so use one when a path segment
+ * itself must contain `?` or `#`.
  *
  * Preload behavior:
  * - `preloadOn: 'hover'` (default) — preload when the user hovers the link
@@ -228,6 +279,9 @@ function injectConfig() {
  * ```html
  * <a [mmLink]="['/users', userId()]">View profile</a>
  *
+ * <!-- Inline query and fragment -->
+ * <a mmLink="/docs/page?tab=api#install">Install</a>
+ *
  * <!-- Override per-link -->
  * <a [mmLink]="'/heavy-page'" preloadOn="visible" useMouseDown>Heavy page</a>
  *
@@ -244,12 +298,10 @@ function injectConfig() {
   hostDirectives: [
     {
       directive: RouterLink,
-      // Full RouterLink input forwarding; parity enforced by link.parity.spec.ts.
+      // routerLink/queryParams/fragment are owned by Link (inline ?query#fragment parsing) and
+      // pushed in ngOnChanges; the rest forward directly. Parity enforced by link.parity.spec.ts.
       inputs: [
-        'routerLink: mmLink',
         'target',
-        'queryParams',
-        'fragment',
         'queryParamsHandling',
         'preserveFragment',
         'state',
@@ -262,7 +314,7 @@ function injectConfig() {
     },
   ],
 })
-export class Link {
+export class Link implements OnChanges {
   private readonly routerLink =
     inject(RouterLink, {
       self: true,
@@ -311,6 +363,21 @@ export class Link {
   });
 
   private suppressNextClick = false;
+
+  ngOnChanges() {
+    const rl = this.routerLink;
+    if (!rl) return;
+    const parts = resolveLinkParts(
+      this.router,
+      this.mmLink(),
+      this.queryParams(),
+      this.fragment(),
+    );
+    rl.routerLink = parts.link;
+    rl.queryParams = parts.queryParams;
+    rl.fragment = parts.fragment;
+    rl.ngOnChanges({});
+  }
 
   onHover() {
     if (untracked(this.preloadOn) !== 'hover') return;

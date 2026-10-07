@@ -28,121 +28,123 @@ import { DocSection } from '../../../layout/doc-section';
           If you are new, the reactive state helpers are the gentlest entry
           point; the transition outlet is the one people remember.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Reach for</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Read the current URL or a query param as a signal</td>
-              <td>
-                <a mmLink="/docs/router-core/state"
-                  ><code>url</code>, <code>queryParam</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>Recompute per navigation, even same-URL reloads</td>
-              <td>
-                <a mmLink="/docs/router-core/state"
-                  ><code>navigationEndTick</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>Preload a lazy route's chunk on hover or visibility</td>
-              <td>
-                <a mmLink="/docs/router-core/preloading"
-                  ><code>mmLink</code>, <code>PreloadStrategy</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>Preload imperatively, from an effect or a shortcut</td>
-              <td>
-                <a mmLink="/docs/router-core/preloading"
-                  ><code>injectTriggerPreload</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Fetch a route's data at the resolve phase, before the component
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/route-data"
-                  ><code>createRouteData</code>, <code>injectRouteData</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Hold the old view on screen until the new one's data settles
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/transition-outlet"
-                  ><code>mm-transition-outlet</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Stabilize a persisted resource so it never flashes
-                mid-navigation
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/transition-outlet"
-                  ><code>holdThroughNavigation</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Run scroll, focus, or analytics work when the new route is
-                actually on screen
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/visual-commit"
-                  ><code>injectVisualCommit</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Restore scroll and announce route changes after the swap
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/visual-commit"
-                  ><code>provideTransitionScrollRestoration</code>,
-                  <code>provideRouteA11y</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>Rebuild a lazy subtree or swap a route's definition at runtime</td>
-              <td>
-                <a mmLink="/docs/router-core/runtime-config"
-                  ><code>injectRemountHandle</code>,
-                  <code>mountSwitchRoute</code></a
-                >
-              </td>
-            </tr>
-            <tr>
-              <td>
-                Set the document title, breadcrumbs, or nav menus from routes
-              </td>
-              <td>
-                <a mmLink="/docs/router-core/route-ui"
-                  ><code>createTitle</code>, <code>createBreadcrumb</code>,
-                  <code>createNavItems</code></a
-                >
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Reach for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Read the current URL or a query param as a signal</td>
+                <td>
+                  <a mmLink="/docs/router-core/state"
+                    ><code>url</code>, <code>queryParam</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Recompute per navigation, even same-URL reloads</td>
+                <td>
+                  <a mmLink="/docs/router-core/state"
+                    ><code>navigationEndTick</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Preload a lazy route's chunk on hover or visibility</td>
+                <td>
+                  <a mmLink="/docs/router-core/preloading"
+                    ><code>mmLink</code>, <code>PreloadStrategy</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Preload imperatively, from an effect or a shortcut</td>
+                <td>
+                  <a mmLink="/docs/router-core/preloading"
+                    ><code>injectTriggerPreload</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Fetch a route's data at the resolve phase, before the component
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/route-data"
+                    ><code>createRouteData</code>, <code>injectRouteData</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Hold the old view on screen until the new one's data settles
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/transition-outlet"
+                    ><code>mm-transition-outlet</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Stabilize a persisted resource so it never flashes
+                  mid-navigation
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/transition-outlet"
+                    ><code>holdThroughNavigation</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Run scroll, focus, or analytics work when the new route is
+                  actually on screen
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/visual-commit"
+                    ><code>injectVisualCommit</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Restore scroll and announce route changes after the swap
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/visual-commit"
+                    ><code>provideTransitionScrollRestoration</code>,
+                    <code>provideRouteA11y</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Rebuild a lazy subtree or swap a route's definition at runtime</td>
+                <td>
+                  <a mmLink="/docs/router-core/runtime-config"
+                    ><code>injectRemountHandle</code>,
+                    <code>mountSwitchRoute</code></a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Set the document title, breadcrumbs, or nav menus from routes
+                </td>
+                <td>
+                  <a mmLink="/docs/router-core/route-ui"
+                    ><code>createTitle</code>, <code>createBreadcrumb</code>,
+                    <code>createNavItems</code></a
+                  >
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="Built for any resource" id="no-resource-dep">

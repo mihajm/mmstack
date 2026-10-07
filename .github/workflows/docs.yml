@@ -40,7 +40,7 @@ jobs:
         run: |
           test -s dist/apps/docs/browser/index.html
           grep -q 'mmstack' dist/apps/docs/browser/index.html
-          grep -q 'Updates' dist/apps/docs/browser/updates/index.html
+          grep -q 'Transitions' dist/apps/docs/browser/docs/primitives/transitions/index.html
 
       # GH Pages SPA fallback: serve the prerendered 404 page for unknown paths.
       - name: Copy 404 fallback

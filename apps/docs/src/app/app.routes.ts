@@ -9,11 +9,6 @@ export const appRoutes: Route[] = [
     loadComponent: () => import('./pages/landing').then((m) => m.Landing),
   },
   {
-    path: 'updates',
-    title: createTitle('Updates'),
-    loadComponent: () => import('./pages/updates').then((m) => m.Updates),
-  },
-  {
     path: 'docs',
     loadComponent: () => import('./docs-shell').then((m) => m.DocsShell),
     resolve: {
@@ -163,7 +158,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'primitives/sync',
-        title: createTitle('Sync & convergence'),
+        title: createTitle('Sync and convergence'),
         loadComponent: () =>
           import('./pages/docs/primitives/sync').then((m) => m.SyncDoc),
       },
@@ -211,7 +206,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'primitives/transitions',
-        title: createTitle('Transitions & suspense'),
+        title: createTitle('Transitions and suspense'),
         loadComponent: () =>
           import('./pages/docs/primitives/transitions').then(
             (m) => m.TransitionsDoc,
@@ -309,7 +304,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'router-core/state',
-        title: createTitle('Reactive state'),
+        title: createTitle('Router state'),
         loadComponent: () =>
           import('./pages/docs/router-core/state').then(
             (m) => m.RouterStateDoc,
@@ -375,7 +370,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'translate/configuration',
-        title: createTitle('Configuration'),
+        title: createTitle('Translate configuration'),
         loadComponent: () =>
           import('./pages/docs/translate/configuration').then(
             (m) => m.ConfigurationDoc,
@@ -383,7 +378,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'translate/namespaces',
-        title: createTitle('Namespaces'),
+        title: createTitle('Translate namespaces'),
         loadComponent: () =>
           import('./pages/docs/translate/namespaces').then(
             (m) => m.NamespacesDoc,
@@ -397,7 +392,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'translate/formatters',
-        title: createTitle('Formatters'),
+        title: createTitle('Translate formatters'),
         loadComponent: () =>
           import('./pages/docs/translate/formatters').then(
             (m) => m.FormattersDoc,
@@ -405,7 +400,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'translate/tooling',
-        title: createTitle('Tooling'),
+        title: createTitle('Translate tooling'),
         loadComponent: () =>
           import('./pages/docs/translate/tooling').then((m) => m.ToolingDoc),
       },
@@ -441,13 +436,13 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'dnd/grids',
-        title: createTitle('Grids'),
+        title: createTitle('Drag and drop grids'),
         loadComponent: () =>
           import('./pages/docs/dnd/grids').then((m) => m.DndGridsDoc),
       },
       {
         path: 'dnd/canvas',
-        title: createTitle('Canvas'),
+        title: createTitle('Drag and drop canvas'),
         loadComponent: () =>
           import('./pages/docs/dnd/canvas').then((m) => m.DndCanvasDoc),
       },
@@ -501,7 +496,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'forms/composition',
-        title: createTitle('Composition'),
+        title: createTitle('Forms composition'),
         loadComponent: () =>
           import('./pages/docs/forms/composition').then(
             (m) => m.CompositionDoc,
@@ -509,7 +504,7 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'forms/change-tracking',
-        title: createTitle('Change tracking'),
+        title: createTitle('Forms change tracking'),
         loadComponent: () =>
           import('./pages/docs/forms/change-tracking').then(
             (m) => m.ChangeTrackingDoc,
@@ -529,13 +524,13 @@ export const appRoutes: Route[] = [
       },
       {
         path: 'worker/store',
-        title: createTitle('Replicas & writes'),
+        title: createTitle('Replicas and writes'),
         loadComponent: () =>
           import('./pages/docs/worker/store').then((m) => m.WorkerStoreDoc),
       },
       {
         path: 'worker/setup',
-        title: createTitle('Host & typing'),
+        title: createTitle('Host and typing'),
         loadComponent: () =>
           import('./pages/docs/worker/setup').then((m) => m.WorkerSetupDoc),
       },

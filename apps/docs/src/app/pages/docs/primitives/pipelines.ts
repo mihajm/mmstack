@@ -110,56 +110,58 @@ import { DocSection } from '../../../layout/doc-section';
           <code>Injector</code> when you build the pipeline outside one, and do
           not use it to write other signals.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Operator</th>
-              <th>Purpose</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>map(fn)</code></td>
-              <td>Pure value-to-value transform.</td>
-            </tr>
-            <tr>
-              <td><code>select(fn, opt?)</code></td>
-              <td>Projection with <code>CreateSignalOptions</code> passed through.</td>
-            </tr>
-            <tr>
-              <td><code>combineWith(other, fn)</code></td>
-              <td>Project two signals together; recomputes on either change.</td>
-            </tr>
-            <tr>
-              <td><code>distinct(equal?)</code></td>
-              <td>Suppress an emission when <code>equal(prev, next)</code> is true.</td>
-            </tr>
-            <tr>
-              <td><code>filter(predicate)</code></td>
-              <td>Keep passing values; <code>undefined</code> until the first match.</td>
-            </tr>
-            <tr>
-              <td><code>filterWith(predicate, initial)</code></td>
-              <td><code>filter</code> with a seed instead of <code>undefined</code>.</td>
-            </tr>
-            <tr>
-              <td><code>scan(reducer, seed)</code></td>
-              <td>Fold each value into a running accumulator.</td>
-            </tr>
-            <tr>
-              <td><code>pairwise()</code></td>
-              <td>Emit <code>[prev, curr]</code> tuples.</td>
-            </tr>
-            <tr>
-              <td><code>startWith(initial)</code></td>
-              <td>Emit a seed first, then mirror the source.</td>
-            </tr>
-            <tr>
-              <td><code>tap(fn, injector?)</code></td>
-              <td>Run a side effect via <code>effect()</code>; value passes through.</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Operator</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>map(fn)</code></td>
+                <td>Pure value-to-value transform.</td>
+              </tr>
+              <tr>
+                <td><code>select(fn, opt?)</code></td>
+                <td>Projection with <code>CreateSignalOptions</code> passed through.</td>
+              </tr>
+              <tr>
+                <td><code>combineWith(other, fn)</code></td>
+                <td>Project two signals together; recomputes on either change.</td>
+              </tr>
+              <tr>
+                <td><code>distinct(equal?)</code></td>
+                <td>Suppress an emission when <code>equal(prev, next)</code> is true.</td>
+              </tr>
+              <tr>
+                <td><code>filter(predicate)</code></td>
+                <td>Keep passing values; <code>undefined</code> until the first match.</td>
+              </tr>
+              <tr>
+                <td><code>filterWith(predicate, initial)</code></td>
+                <td><code>filter</code> with a seed instead of <code>undefined</code>.</td>
+              </tr>
+              <tr>
+                <td><code>scan(reducer, seed)</code></td>
+                <td>Fold each value into a running accumulator.</td>
+              </tr>
+              <tr>
+                <td><code>pairwise()</code></td>
+                <td>Emit <code>[prev, curr]</code> tuples.</td>
+              </tr>
+              <tr>
+                <td><code>startWith(initial)</code></td>
+                <td>Emit a seed first, then mirror the source.</td>
+              </tr>
+              <tr>
+                <td><code>tap(fn, injector?)</code></td>
+                <td>Run a side effect via <code>effect()</code>; value passes through.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
     </docs-page>
   `,

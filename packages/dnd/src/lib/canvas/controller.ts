@@ -8,11 +8,17 @@ import {
   type WritableSignal,
 } from '@angular/core';
 
+import {
+  resolveTouchActivation,
+  type ResolvedTouchActivation,
+  type TouchActivation,
+} from '../internal/touch-activation';
 import { withDefaults } from '../provide';
 import type { Point } from '../sortable/geometry';
 import type { Arbitration } from './arbiter';
 import { injectCanvasDefaults } from './defaults';
 import {
+  clampBox,
   gridStep,
   intersects,
   unionBox,
@@ -93,10 +99,23 @@ export type CanvasOptions<T, K> = {
   readonly lockAxisOnShift?: boolean;
   /** Opt-in edge auto-scroll of the surface's scroll parent. */
   readonly autoScroll?:
-    | { edge?: number; speed?: number; edgeProportion?: number; maxSpeedAt?: number }
+    | {
+        edge?: number;
+        speed?: number;
+        edgeProportion?: number;
+        maxSpeedAt?: number;
+      }
     | false;
   /** Px the pointer must travel before a drag activates. @default 3 */
   readonly activationThreshold?: number;
+  /**
+   * Touch presses wait for a long-press before any gesture (move, resize,
+   * rotate, marquee) can start; mouse and pen start immediately. The surface
+   * and its handles then use `touch-action: manipulation` so the page scrolls
+   * until the press activates. See {@link TouchActivation}. `false` opts out
+   * of a DI default. @default off
+   */
+  readonly touchActivation?: TouchActivation | false;
   /**
    * Remote peers' in-flight frames (mesh presence), in the same space as your
    * `frame` lens — rendered instead of the source frame while present. Pair
@@ -128,8 +147,7 @@ export type CanvasOptions<T, K> = {
   readonly onReparent?: (event: CanvasReparentEvent<T, K>) => void;
   /** Screen-reader message after a keyboard transform, `false` to disable. */
   readonly announceTransform?:
-    | false
-    | ((event: { item: T; frame: CanvasFrame; count: number }) => string);
+    false | ((event: { item: T; frame: CanvasFrame; count: number }) => string);
 };
 
 export type CanvasItemState<K = unknown> = {
@@ -165,6 +183,8 @@ export type CanvasController<T, K = unknown> = {
     maxSpeedAt?: number;
   } | null;
   readonly activationThreshold: number;
+  /** Resolved touch long-press, or `null` when off. */
+  readonly touchActivation: ResolvedTouchActivation | null;
   readonly marquee: boolean;
   itemState(item: () => T): CanvasItemState<K>;
   /** Selection semantics for a plain (non-drag) press. */
@@ -237,7 +257,8 @@ export function canvas<T, K>(
     false;
   const resizeOn = options.resize !== false;
   const resizeCfg = typeof options.resize === 'object' ? options.resize : {};
-  const rotateOn = options.rotate === true || typeof options.rotate === 'object';
+  const rotateOn =
+    options.rotate === true || typeof options.rotate === 'object';
   const rotateSnap =
     typeof options.rotate === 'object' ? options.rotate.snap : undefined;
   const marquee = options.marquee ?? true;
@@ -249,6 +270,7 @@ export function canvas<T, K>(
         ? options.keyboard
         : {};
   const activationThreshold = options.activationThreshold ?? 3;
+  const touchActivation = resolveTouchActivation(options.touchActivation);
   const autoScroll = options.autoScroll
     ? {
         edge: options.autoScroll.edge ?? DEFAULT_AUTOSCROLL.edge,
@@ -688,7 +710,9 @@ export function canvas<T, K>(
         // the session angle is normalized — a zero-sweep release on a
         // non-normalized lens rotation must stay a no-op
         if (normalizeAngle(f.rotation ?? 0) !== angle) {
-          const patches = new Map<K, CanvasFrame>([[k, { ...f, rotation: angle }]]);
+          const patches = new Map<K, CanvasFrame>([
+            [k, { ...f, rotation: angle }],
+          ]);
           applyPatches(patches);
           options.onCommit?.({
             patches,
@@ -855,6 +879,7 @@ export function canvas<T, K>(
     keyboard,
     autoScroll,
     activationThreshold,
+    touchActivation,
     marquee,
     itemState,
     press: (k, shift) => {
@@ -868,7 +893,7 @@ export function canvas<T, K>(
       const s = step(large);
       const map = untracked(indexMap);
       const patches = new Map<K, CanvasFrame>();
-      let last: { item: T; frame: CanvasFrame } | null = null;
+      let last: { key: K; item: T } | null = null;
       for (const k of untracked(sel.ids)) {
         if (isLocked(k)) continue;
         const it = map.get(k);
@@ -876,12 +901,25 @@ export function canvas<T, K>(
         const f = frame(it);
         const next = { ...f, x: f.x + dx * s, y: f.y + dy * s };
         patches.set(k, next);
-        last = { item: it, frame: next };
+        last = { key: k, item: it };
+      }
+      // same rule as a pointer move: the selection's union box stays within bounds
+      const b = untracked(bounds);
+      const union = b ? unionBox([...patches.values()]) : null;
+      if (b && union) {
+        const fit = clampBox(union, b);
+        const [ox, oy] = [fit.x - union.x, fit.y - union.y];
+        if (ox || oy)
+          for (const [k, f] of patches)
+            patches.set(k, { ...f, x: f.x + ox, y: f.y + oy });
+        // pinned against the edge: the clamp undid the whole step
+        if (ox === -dx * s && oy === -dy * s) return false;
       }
       const ok = nudgeCommit(patches, 'keyboard');
       if (ok && last && announceTransform) {
+        const f = patches.get(last.key) as CanvasFrame;
         announceRef?.(
-          announceTransform({ ...last, count: patches.size }),
+          announceTransform({ item: last.item, frame: f, count: patches.size }),
         );
       }
       return ok;
@@ -896,12 +934,36 @@ export function canvas<T, K>(
       if (!it || !gate(it, 'keyboard')) return false;
       const s = step(large);
       const f = frame(it);
-      const clampDim = (v: number, min: number | undefined, max: number | undefined) =>
-        Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? 1, v));
+      const clampDim = (
+        v: number,
+        min: number | undefined,
+        max: number | undefined,
+      ) => Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? 1, v));
+      // bounds stop a resize from growing past them but never shrink an item:
+      // one already past a (shrunk) edge keeps its size and can still shrink
+      const b = untracked(bounds);
+      const fit = (size: number, want: number, room: number) =>
+        want > size ? Math.max(size, Math.min(want, room)) : want;
       const next = {
         ...f,
-        width: clampDim(f.width + dw * s, resizeCfg.min?.width, resizeCfg.max?.width),
-        height: clampDim(f.height + dh * s, resizeCfg.min?.height, resizeCfg.max?.height),
+        width: fit(
+          f.width,
+          clampDim(
+            f.width + dw * s,
+            resizeCfg.min?.width,
+            resizeCfg.max?.width,
+          ),
+          b ? b.x + b.width - f.x : Number.POSITIVE_INFINITY,
+        ),
+        height: fit(
+          f.height,
+          clampDim(
+            f.height + dh * s,
+            resizeCfg.min?.height,
+            resizeCfg.max?.height,
+          ),
+          b ? b.y + b.height - f.y : Number.POSITIVE_INFINITY,
+        ),
       };
       if (next.width === f.width && next.height === f.height) return false;
       const patches = new Map<K, CanvasFrame>([[k, next]]);

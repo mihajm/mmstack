@@ -80,7 +80,14 @@ const NAMES = ['Atlas', 'Borealis', 'Cobalt', 'Dune'];
       background: var(--bg, #fff);
       font: inherit;
       font-size: 0.85rem;
+      color: var(--fg, #161616);
       cursor: pointer;
+    }
+
+    .bar button:disabled {
+      color: var(--fg-muted, #6b7280);
+      border-style: dashed;
+      cursor: default;
     }
 
     .compare {
@@ -112,6 +119,27 @@ const NAMES = ['Atlas', 'Borealis', 'Cobalt', 'Dune'];
     @media (max-width: 600px) {
       .compare {
         grid-template-columns: 1fr;
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,
@@ -153,7 +181,7 @@ export class AsyncTransactionDemo {
       await wait(1200);
       if (this.fail()) throw new Error('rejected');
       // after an await, re-enter so the write belongs to this transaction
-      tx.enter(() => this.revision.update((r) => r + 1));
+      tx.update(this.revision, (r) => r + 1);
     });
     this.ref = ref;
     void ref.done.then((o) => {

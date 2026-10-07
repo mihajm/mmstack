@@ -110,6 +110,42 @@ test.describe('placement grid — spanning dashboard', () => {
     await expect(widget(page, 'Notes')).toBeVisible();
   });
 
+  test('a move released outside the grid cancels; re-entering first commits', async ({ page }) => {
+    const grid = page.locator('[data-grid="dashboard"]');
+    const g = await grid.boundingBox();
+    if (!g) throw new Error('no grid box');
+    const before = {
+      chart: await cellOf(page, 'Chart'),
+      kpis: await cellOf(page, 'KPIs'),
+    };
+    const kpisBox = await widget(page, 'KPIs').boundingBox();
+    if (!kpisBox) throw new Error('no KPIs box');
+    const overKpis = { x: kpisBox.x + 20, y: kpisBox.y + 20 };
+    const farRight = { x: g.x + g.width + 160, y: g.y + 40 };
+    const farBelow = { x: g.x + g.width / 2, y: g.y + g.height + 600 };
+
+    // a real preview first, then out: the preview reverts and release is a no-op
+    for (const out of [farRight, farBelow]) {
+      await drag(page, widget(page, 'Chart'), [overKpis, out], {
+        settle: 80,
+        release: false,
+      });
+      await expect
+        .poll(async () => (await cellOf(page, 'KPIs')))
+        .toEqual(before.kpis);
+      await page.mouse.up();
+      await page.waitForTimeout(250);
+      expect(await cellOf(page, 'Chart')).toEqual(before.chart);
+      expect(await cellOf(page, 'KPIs')).toEqual(before.kpis);
+    }
+
+    // out and back in before release: the move commits
+    await drag(page, widget(page, 'Chart'), [farRight, overKpis], { settle: 80 });
+    await expect
+      .poll(async () => (await cellOf(page, 'Chart')).x)
+      .not.toBe(before.chart.x);
+  });
+
   test('compact none: valid cells light up and occupied cells reject', async ({ page }) => {
     const masked = page.locator('[data-grid="masked"]');
     const a = masked.locator('.widget', { hasText: 'A' });

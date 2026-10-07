@@ -29,7 +29,7 @@ import { pausableComputed } from '@mmstack/primitives';
         <p class="label">Pausable frame</p>
         <p class="num">{{ held() }}</p>
         <p class="hint">
-          {{ paused() ? 'frozen, catches up on resume' : 'tracking' }}
+          {{ paused() ? 'frozen until resume' : 'tracking' }}
         </p>
       </div>
     </div>
@@ -73,19 +73,23 @@ import { pausableComputed } from '@mmstack/primitives';
     .frame {
       border: 1px solid var(--border, #e5e7eb);
       border-radius: 8px;
-      padding: 1rem;
+      padding: 1rem 0.5rem;
       text-align: center;
     }
 
     .frame.dim {
-      opacity: 0.55;
+      border-style: dashed;
+    }
+
+    .frame.dim .num {
+      color: var(--fg-muted, #6b7280);
     }
 
     .label {
       margin: 0;
       font-size: 0.75rem;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
       color: var(--fg-muted, #6b7280);
     }
 
@@ -100,7 +104,29 @@ import { pausableComputed } from '@mmstack/primitives';
       margin: 0;
       font-size: 0.75rem;
       color: var(--fg-muted, #6b7280);
-      min-height: 1.5em;
+      line-height: 1.3;
+      min-height: 2.6em;
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
+      }
     }
   `,
 })

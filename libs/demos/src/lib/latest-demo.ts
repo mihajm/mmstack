@@ -100,8 +100,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       border-radius: 8px;
     }
 
-    .card.busy {
-      opacity: 0.7;
+    .card.busy strong {
+      color: var(--fg-muted, #6b7280);
     }
 
     .muted {
@@ -113,13 +113,35 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       position: absolute;
       top: 0.5rem;
       right: 0.75rem;
-      font-size: 0.7rem;
-      color: var(--fg-muted, #6b7280);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent, #2456d6);
     }
 
     @media (max-width: 600px) {
       .compare {
         grid-template-columns: 1fr;
+      }
+    }
+
+    @media (pointer: coarse) {
+      button,
+      select,
+      input:not([type='checkbox']) {
+        min-height: 44px;
+      }
+
+      label:has(input[type='checkbox']) {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+      }
+
+      input[type='checkbox'] {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0;
       }
     }
   `,

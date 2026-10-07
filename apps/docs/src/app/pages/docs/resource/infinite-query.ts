@@ -69,53 +69,55 @@ import { DocSection } from '../../../layout/doc-section';
           Four methods and two signals cover the surface. Each does the least
           surprising thing.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>pages()</code></td>
-              <td>The array of loaded pages, in order.</td>
-            </tr>
-            <tr>
-              <td><code>fetchNextPage()</code></td>
-              <td>
-                Load the next page onto the end. A no-op while a page is in
-                flight or when there are no more pages.
-              </td>
-            </tr>
-            <tr>
-              <td><code>hasNextPage()</code></td>
-              <td>
-                <code>false</code> once <code>getNextPageParam</code> returns
-                <code>null</code>. Bind a button's disabled state to it.
-              </td>
-            </tr>
-            <tr>
-              <td><code>isFetchingNextPage()</code></td>
-              <td><code>true</code> while a next-page request is in flight.</td>
-            </tr>
-            <tr>
-              <td><code>reload()</code></td>
-              <td>
-                Refetch the current page in place. The result replaces its slot
-                rather than appending a duplicate.
-              </td>
-            </tr>
-            <tr>
-              <td><code>reset()</code></td>
-              <td>
-                Drop every page and refetch from
-                <code>initialPageParam</code>. Use it when the underlying query
-                changes, for example a new filter.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>pages()</code></td>
+                <td>The array of loaded pages, in order.</td>
+              </tr>
+              <tr>
+                <td><code>fetchNextPage()</code></td>
+                <td>
+                  Load the next page onto the end. A no-op while a page is in
+                  flight or when there are no more pages.
+                </td>
+              </tr>
+              <tr>
+                <td><code>hasNextPage()</code></td>
+                <td>
+                  <code>false</code> once <code>getNextPageParam</code> returns
+                  <code>null</code>. Bind a button's disabled state to it.
+                </td>
+              </tr>
+              <tr>
+                <td><code>isFetchingNextPage()</code></td>
+                <td><code>true</code> while a next-page request is in flight.</td>
+              </tr>
+              <tr>
+                <td><code>reload()</code></td>
+                <td>
+                  Refetch the current page in place. The result replaces its slot
+                  rather than appending a duplicate.
+                </td>
+              </tr>
+              <tr>
+                <td><code>reset()</code></td>
+                <td>
+                  Drop every page and refetch from
+                  <code>initialPageParam</code>. Use it when the underlying query
+                  changes, for example a new filter.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="Pausing" id="pause">

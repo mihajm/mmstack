@@ -16,6 +16,7 @@ import {
 } from './active-transaction';
 import { type Cell, guessableRegistry, LAY_GUESS } from './optimistic-seam';
 import {
+  activeTransaction,
   onTransactionClose,
   openOrderOf,
   type Transaction,
@@ -23,9 +24,13 @@ import {
 
 /**
  * A writable signal that can carry optimistic guesses (see `Transaction.guess`). Reading it gives
- * the most recent open guess laid after the last authoritative write, else the truth. `set` and
- * `update` are authoritative writes: they land on the wrapped signal, are recorded in the active
- * transaction like any write, and bury every guess laid before them, for good.
+ * the most recent open guess, else the truth. `set` and `update` are authoritative writes: they land
+ * on the wrapped signal and are recorded in the active transaction like any write. A write from
+ * outside a transaction that guessed here buries every open guess, for good. A write inside the
+ * transaction that laid a guess here resolves that guess instead (and buries every other open guess
+ * here, as any write does): the guess takes the written value and stays until the transaction settles, so held readers move with it rather than dropping back
+ * to the value before the transaction. A resolved guess equals the truth beneath it and never hides
+ * a guess laid after it.
  */
 export type Guessable<T> = WritableSignal<T> & {
   /** The authoritative value beneath any guess. */
@@ -36,8 +41,9 @@ type GuessEntry = {
   readonly txn: Transaction;
   readonly order: number;
   readonly seq: number;
-  readonly laidAt: number;
   readonly value: unknown;
+  /** Resolved by its transaction's own write: equal to the truth, ranked below every other guess. */
+  readonly refined?: boolean;
 };
 
 let ids = 0;
@@ -62,9 +68,13 @@ function writeUnrecorded<T>(sig: WritableSignal<T>, value: T): void {
  * the truth: it never holds a guess, so undo logs and held frames read the truth beneath one.
  *
  * Authoritative writes are `set`/`update` on the guessable (each one counts, even with an equal
- * value; `update` applies to the truth, not to a guess on screen) and any change of the wrapped signal's own value from upstream (a `linkedSignal` that
- * recomputes after a refetch). Write through the guessable, not the wrapped signal: a direct
- * `set` with an equal value is not seen. A mutable signal is not supported.
+ * value; `update` applies to the truth, not to a guess on screen) and any change of the wrapped
+ * signal's own value from upstream (a `linkedSignal` that recomputes after a refetch). An upstream
+ * change and a write from outside the guessing transaction bury every open guess; a write inside
+ * the transaction that laid a guess resolves it to the written value (see {@link Guessable}). A
+ * write after an `await` that is not wrapped in `tx.enter` is outside the transaction. Write
+ * through the guessable, not the wrapped signal: a direct `set` with an equal value is not seen.
+ * A mutable signal is not supported.
  */
 export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
   if (isMutable(sig))
@@ -74,7 +84,7 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
   const bump = () => rev.update((n) => n + 1);
   let cur: Cell = { value: untracked(sig), id: ++ids };
   let known = versionOf(sig);
-  let authSeq = 0;
+  // open, unburied guesses only: burial removes an entry for good
   let hist: GuessEntry[] = [];
 
   /** Brings `cur` up to date with the wrapped signal; an upstream change is authoritative. */
@@ -86,22 +96,23 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
     if (changed) {
       known = ver;
       cur = { value: v, id: ++ids };
-      authSeq++;
+      hist = []; // an upstream change buries every guess
     }
-    if (hist.length && hist.some((g) => g.laidAt !== authSeq))
-      hist = hist.filter((g) => g.laidAt === authSeq); // buried for good
     return cur;
   };
 
   const top = (): GuessEntry | undefined => {
     let best: GuessEntry | undefined;
-    for (const g of hist)
-      if (
-        !best ||
+    for (const g of hist) {
+      if (!best) best = g;
+      else if (!!g.refined !== !!best.refined) {
+        if (best.refined) best = g;
+      } else if (
         g.order > best.order ||
         (g.order === best.order && g.seq > best.seq)
       )
         best = g;
+    }
     return best;
   };
 
@@ -126,9 +137,16 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
     recordWrite(port);
     writeUnrecorded(sig, v);
     known = versionOf(sig);
-    cur = { value: v, id: ++ids };
-    authSeq++;
-    hist = [];
+    // the value the signal kept: a custom `equal` may have rejected `v`
+    const accepted = untracked(sig);
+    cur = { value: accepted, id: ++ids };
+    // inside the transaction that guessed here: its latest guess takes the stored value
+    const txn = activeTransaction();
+    let own: GuessEntry | undefined;
+    if (txn)
+      for (const g of hist)
+        if (g.txn === txn && (!own || g.seq > own.seq)) own = g;
+    hist = own ? [{ ...own, value: accepted, refined: true }] : [];
     bump();
   };
 
@@ -160,7 +178,6 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
       txn,
       order: openOrderOf(txn),
       seq: ++guessSeq,
-      laidAt: authSeq,
       value,
     });
     bump();

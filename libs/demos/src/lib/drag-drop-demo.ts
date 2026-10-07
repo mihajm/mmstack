@@ -1,5 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { Draggable, DropTarget } from '@mmstack/dnd';
+import { DemoReset } from './demo-reset';
 
 type Column = 'todo' | 'done';
 type Card = { id: number; title: string };
@@ -9,35 +10,42 @@ const isCard = (d: unknown): d is Card =>
 
 @Component({
   selector: 'demo-drag-drop',
-  imports: [Draggable, DropTarget],
+  imports: [Draggable, DropTarget, DemoReset],
   template: `
-    @for (col of columns; track col) {
-      <section
-        mmDropTarget
-        #zone="mmDropTarget"
-        [accepts]="isCard"
-        [class.over]="zone.isDragOver()"
-        (dropped)="move(col, $event.data)"
-      >
-        <h3>{{ col }}</h3>
-        @for (card of board()[col]; track card.id) {
-          <article
-            mmDraggable
-            #d="mmDraggable"
-            [data]="card"
-            [class.dragging]="d.dragging()"
-          >
-            {{ card.title }}
-          </article>
-        }
-      </section>
-    }
+    <demo-reset (restore)="board.set(seed())" />
+    <div class="cols">
+      @for (col of columns; track col) {
+        <section
+          mmDropTarget
+          #zone="mmDropTarget"
+          [accepts]="isCard"
+          [class.over]="zone.isDragOver()"
+          (dropped)="move(col, $event.data)"
+        >
+          <p class="col-title">{{ col }}</p>
+          @for (card of board()[col]; track card.id) {
+            <article
+              mmDraggable
+              #d="mmDraggable"
+              [data]="card"
+              [class.dragging]="d.dragging()"
+            >
+              {{ card.title }}
+            </article>
+          }
+        </section>
+      }
+    </div>
   `,
   styles: `
     :host {
+      display: block;
+      max-width: 30rem;
+    }
+
+    .cols {
       display: flex;
       gap: 1rem;
-      max-width: 30rem;
     }
 
     section {
@@ -53,8 +61,9 @@ const isCard = (d: unknown): d is Card =>
       background: var(--bg-soft, #eff6ff);
     }
 
-    h3 {
+    .col-title {
       margin: 0 0 0.5rem;
+      font-weight: 600;
       text-transform: capitalize;
       font-size: 0.9rem;
     }
@@ -78,13 +87,14 @@ export class DragDropDemo {
   protected readonly isCard = isCard;
   protected readonly columns: Column[] = ['todo', 'done'];
 
-  protected readonly board = signal<Record<Column, Card[]>>({
+  protected readonly seed = (): Record<Column, Card[]> => ({
     todo: [
       { id: 1, title: 'Design' },
       { id: 2, title: 'Build' },
     ],
     done: [{ id: 3, title: 'Kickoff' }],
   });
+  protected readonly board = signal(this.seed());
 
   protected move(to: Column, card: Card): void {
     this.board.update((b) => {

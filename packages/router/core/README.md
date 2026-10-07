@@ -549,7 +549,9 @@ export const appConfig: ApplicationConfig = {
 
 ### `Link` (`mmLink`)
 
-The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds preloading. All standard `routerLink` inputs (`queryParams`, `fragment`, `state`, `relativeTo`, etc.) are proxied through unchanged.
+The `Link` directive (used as `mmLink`) wraps Angular's `RouterLink` and adds preloading. All standard `routerLink` inputs (`queryParams`, `fragment`, `state`, `relativeTo`, etc.) are supported.
+
+`mmLink` accepts a commands array, a `UrlTree`, or a string. Unlike `routerLink`, a string may carry an inline query and fragment: `mmLink="/docs/page?tab=api#install"` navigates to that path with the `tab` query param and the `install` fragment, where `routerLink` would percent-encode the `?` and `#` into the path. A bare `"#install"` or `"?tab=api"` targets the route hosting the link. An explicit `fragment` input wins over the inline fragment, and explicit `queryParams` are merged over the inline ones (explicit keys win). Commands arrays are passed through as-is, so use one (`['/files', 'a#b']`) when a path segment really contains `?` or `#`.
 
 - **`preloadOn`** — `input<'hover' | 'visible' | null>()` (default: `'hover'`). `null` disables preloading. This is the WHEN.
 - **`preload`** — `input<'all' | 'code'>()` (default: `'all'`). The WHAT: `'all'` warms the lazy chunk AND the route's data ([`withRouteData`](#prefetch-on-hover)); `'code'` warms only the chunk — for links to routes whose data is expensive or shouldn't fire speculatively. (Per-KEY opt-out belongs in the factory via `ctx.isPrefetch`.)

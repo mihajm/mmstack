@@ -115,102 +115,104 @@ import { DocSection } from '../../../layout/doc-section';
           <code>focusWithin</code>, <code>pointerDrag</code>), defaults
           <code>target</code> to the host so it is drop-in inside a component.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Returns</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>networkStatus</code></td>
-              <td><code>Signal&lt;boolean&gt;</code> + <code>.since</code></td>
-              <td>Online/offline. <code>.since</code> is the last transition.</td>
-            </tr>
-            <tr>
-              <td><code>pageVisibility</code></td>
-              <td><code>Signal&lt;DocumentVisibilityState&gt;</code></td>
-              <td><code>'visible' | 'hidden' | 'prerender'</code>.</td>
-            </tr>
-            <tr>
-              <td><code>mediaQuery</code></td>
-              <td><code>Signal&lt;boolean&gt;</code></td>
-              <td>Generic CSS media query. <code>query</code> is required.</td>
-            </tr>
-            <tr>
-              <td><code>dark-mode</code></td>
-              <td><code>Signal&lt;boolean&gt;</code></td>
-              <td>Shorthand for <code>(prefers-color-scheme: dark)</code>.</td>
-            </tr>
-            <tr>
-              <td><code>reduced-motion</code></td>
-              <td><code>Signal&lt;boolean&gt;</code></td>
-              <td>Shorthand for <code>(prefers-reduced-motion: reduce)</code>.</td>
-            </tr>
-            <tr>
-              <td><code>windowSize</code></td>
-              <td><code>Signal&lt;{{ '{' }} width, height {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
-              <td>Throttled 100ms.</td>
-            </tr>
-            <tr>
-              <td><code>scrollPosition</code></td>
-              <td><code>Signal&lt;{{ '{' }} x, y {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
-              <td>Window or element scroll, throttled 100ms.</td>
-            </tr>
-            <tr>
-              <td><code>mousePosition</code></td>
-              <td><code>Signal&lt;{{ '{' }} x, y {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
-              <td>Throttled 100ms. <code>coordinateSpace: 'client' | 'page'</code>.</td>
-            </tr>
-            <tr>
-              <td><code>pointerDrag</code></td>
-              <td><code>Signal&lt;PointerDragState&gt;</code> + <code>.unthrottled</code> + <code>.cancel()</code></td>
-              <td>Pointer gesture with <code>activationThreshold</code> and <code>delta</code>.</td>
-            </tr>
-            <tr>
-              <td><code>elementSize</code></td>
-              <td><code>Signal&lt;{{ '{' }} width, height {{ '}' }} | undefined&gt;</code></td>
-              <td><code>ResizeObserver</code>-based. Defaults to the host.</td>
-            </tr>
-            <tr>
-              <td><code>elementVisibility</code></td>
-              <td><code>Signal&lt;IntersectionObserverEntry?&gt;</code> + <code>.visible</code></td>
-              <td><code>IntersectionObserver</code>-based; <code>.visible</code> is a boolean.</td>
-            </tr>
-            <tr>
-              <td><code>focusWithin</code></td>
-              <td><code>Signal&lt;boolean&gt;</code></td>
-              <td>Mirrors <code>:focus-within</code>.</td>
-            </tr>
-            <tr>
-              <td><code>geolocation</code></td>
-              <td><code>Signal&lt;GeolocationPosition?&gt;</code> + <code>.error</code> + <code>.loading</code></td>
-              <td>One-shot by default; <code>watch: true</code> for continuous.</td>
-            </tr>
-            <tr>
-              <td><code>clipboard</code></td>
-              <td><code>Signal&lt;string&gt;</code> + <code>.copy(v)</code> + <code>.isSupported</code></td>
-              <td>Mirrors clipboard contents; <code>.copy</code> writes through.</td>
-            </tr>
-            <tr>
-              <td><code>orientation</code></td>
-              <td><code>Signal&lt;{{ '{' }} angle, type {{ '}' }}&gt;</code></td>
-              <td>Tracks <code>screen.orientation</code>.</td>
-            </tr>
-            <tr>
-              <td><code>batteryStatus</code></td>
-              <td><code>Signal&lt;BatteryStatus | null&gt;</code></td>
-              <td><code>null</code> until (or unless) the API resolves.</td>
-            </tr>
-            <tr>
-              <td><code>idle</code></td>
-              <td><code>Signal&lt;boolean&gt;</code> + <code>.since</code></td>
-              <td>Flips <code>true</code> after <code>ms</code> of inactivity.</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Returns</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>networkStatus</code></td>
+                <td><code>Signal&lt;boolean&gt;</code> + <code>.since</code></td>
+                <td>Online/offline. <code>.since</code> is the last transition.</td>
+              </tr>
+              <tr>
+                <td><code>pageVisibility</code></td>
+                <td><code>Signal&lt;DocumentVisibilityState&gt;</code></td>
+                <td><code>'visible' | 'hidden' | 'prerender'</code>.</td>
+              </tr>
+              <tr>
+                <td><code>mediaQuery</code></td>
+                <td><code>Signal&lt;boolean&gt;</code></td>
+                <td>Generic CSS media query. <code>query</code> is required.</td>
+              </tr>
+              <tr>
+                <td><code>dark-mode</code></td>
+                <td><code>Signal&lt;boolean&gt;</code></td>
+                <td>Shorthand for <code>(prefers-color-scheme: dark)</code>.</td>
+              </tr>
+              <tr>
+                <td><code>reduced-motion</code></td>
+                <td><code>Signal&lt;boolean&gt;</code></td>
+                <td>Shorthand for <code>(prefers-reduced-motion: reduce)</code>.</td>
+              </tr>
+              <tr>
+                <td><code>windowSize</code></td>
+                <td><code>Signal&lt;{{ '{' }} width, height {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
+                <td>Throttled 100ms.</td>
+              </tr>
+              <tr>
+                <td><code>scrollPosition</code></td>
+                <td><code>Signal&lt;{{ '{' }} x, y {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
+                <td>Window or element scroll, throttled 100ms.</td>
+              </tr>
+              <tr>
+                <td><code>mousePosition</code></td>
+                <td><code>Signal&lt;{{ '{' }} x, y {{ '}' }}&gt;</code> + <code>.unthrottled</code></td>
+                <td>Throttled 100ms. <code>coordinateSpace: 'client' | 'page'</code>.</td>
+              </tr>
+              <tr>
+                <td><code>pointerDrag</code></td>
+                <td><code>Signal&lt;PointerDragState&gt;</code> + <code>.unthrottled</code> + <code>.cancel()</code></td>
+                <td>Pointer gesture with <code>activationThreshold</code> and <code>delta</code>.</td>
+              </tr>
+              <tr>
+                <td><code>elementSize</code></td>
+                <td><code>Signal&lt;{{ '{' }} width, height {{ '}' }} | undefined&gt;</code></td>
+                <td><code>ResizeObserver</code>-based. Defaults to the host.</td>
+              </tr>
+              <tr>
+                <td><code>elementVisibility</code></td>
+                <td><code>Signal&lt;IntersectionObserverEntry?&gt;</code> + <code>.visible</code></td>
+                <td><code>IntersectionObserver</code>-based; <code>.visible</code> is a boolean.</td>
+              </tr>
+              <tr>
+                <td><code>focusWithin</code></td>
+                <td><code>Signal&lt;boolean&gt;</code></td>
+                <td>Mirrors <code>:focus-within</code>.</td>
+              </tr>
+              <tr>
+                <td><code>geolocation</code></td>
+                <td><code>Signal&lt;GeolocationPosition?&gt;</code> + <code>.error</code> + <code>.loading</code></td>
+                <td>One-shot by default; <code>watch: true</code> for continuous.</td>
+              </tr>
+              <tr>
+                <td><code>clipboard</code></td>
+                <td><code>Signal&lt;string&gt;</code> + <code>.copy(v)</code> + <code>.isSupported</code></td>
+                <td>Mirrors clipboard contents; <code>.copy</code> writes through.</td>
+              </tr>
+              <tr>
+                <td><code>orientation</code></td>
+                <td><code>Signal&lt;{{ '{' }} angle, type {{ '}' }}&gt;</code></td>
+                <td>Tracks <code>screen.orientation</code>.</td>
+              </tr>
+              <tr>
+                <td><code>batteryStatus</code></td>
+                <td><code>Signal&lt;BatteryStatus | null&gt;</code></td>
+                <td><code>null</code> until (or unless) the API resolves.</td>
+              </tr>
+              <tr>
+                <td><code>idle</code></td>
+                <td><code>Signal&lt;boolean&gt;</code> + <code>.since</code></td>
+                <td>Flips <code>true</code> after <code>ms</code> of inactivity.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
 
       <docs-section title="Several at once" id="bulk">

@@ -55,4 +55,5 @@ export {
   connectReorderableContainer,
   connectReorderableItem,
   reorderable,
+  reorderableItemTouchAction,
 } from './reorderable';

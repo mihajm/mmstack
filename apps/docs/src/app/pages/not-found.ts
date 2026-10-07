@@ -8,7 +8,10 @@ import { Link } from '@mmstack/router-core';
     <section>
       <h1>404</h1>
       <p>That page doesn't exist (or moved).</p>
-      <p><a mmLink="/">Back to the start</a></p>
+      <p class="links">
+        <a mmLink="/docs">Browse the docs</a>
+        <a mmLink="/">Back to the start</a>
+      </p>
     </section>
   `,
   styles: `
@@ -24,6 +27,13 @@ import { Link } from '@mmstack/router-core';
 
     p {
       color: var(--fg-muted);
+    }
+
+    .links {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 1.5rem;
     }
   `,
 })

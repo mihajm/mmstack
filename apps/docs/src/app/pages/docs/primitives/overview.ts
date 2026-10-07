@@ -39,85 +39,87 @@ import { DocSection } from '../../../layout/doc-section';
           one that matches what you are trying to do; each row links to its
           page.
         </p>
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>You want to</th>
-              <th>Reach for</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Write into a big object in place, or bind a slice of a signal two-way</td>
-              <td>
-                <a mmLink="/docs/primitives/signals">Signal variants</a>:
-                <code>mutable</code>, <code>derived</code>, <code>toWritable</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Turn a whole object into a tree of independently reactive signals</td>
-              <td>
-                <a mmLink="/docs/primitives/store">Store</a>:
-                <code>store</code>, <code>mutableStore</code>,
-                <code>forkStore</code>, <code>opLog</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Map an array or record into stable, per-item derived values</td>
-              <td>
-                <a mmLink="/docs/primitives/collections">Mapped collections</a>:
-                <code>indexArray</code>, <code>keyArray</code>, <code>mapObject</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Debounce or throttle a signal, or wait for a condition</td>
-              <td>
-                <a mmLink="/docs/primitives/timing">Timing</a>:
-                <code>debounced</code>, <code>throttled</code>, <code>until</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Persist a signal, sync it across tabs, or add undo and redo</td>
-              <td>
-                <a mmLink="/docs/primitives/storage">Storage &amp; history</a>:
-                <code>stored</code>, <code>tabSync</code>, <code>withHistory</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Read browser state (media query, element size, network, pointer) as signals</td>
-              <td><a mmLink="/docs/primitives/sensors">Sensors</a></td>
-            </tr>
-            <tr>
-              <td>Compose signal transforms without reaching for RxJS or effects</td>
-              <td>
-                <a mmLink="/docs/primitives/pipelines">Pipelines</a>:
-                <code>piped</code> + operators
-              </td>
-            </tr>
-            <tr>
-              <td>Time-slice heavy work or reuse allocations on a hot path</td>
-              <td>
-                <a mmLink="/docs/primitives/performance">Performance</a>:
-                <code>chunked</code>, <code>pooled</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Hold the UI through async work so it stops flashing spinners</td>
-              <td>
-                <a mmLink="/docs/primitives/transitions">Transitions &amp; suspense</a>:
-                <code>*mmTransition</code>, <code>&lt;mm-suspense&gt;</code>,
-                <code>latest</code>, <code>deferredValue</code>
-              </td>
-            </tr>
-            <tr>
-              <td>Keep a hidden tab mounted and pause its background work</td>
-              <td>
-                <a mmLink="/docs/primitives/pausing">Keep-alive &amp; pausing</a>:
-                <code>*mmActivity</code>, <code>pausable*</code>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>You want to</th>
+                <th>Reach for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Write into a big object in place, or bind a slice of a signal two-way</td>
+                <td>
+                  <a mmLink="/docs/primitives/signals">Signal variants</a>:
+                  <code>mutable</code>, <code>derived</code>, <code>toWritable</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Turn a whole object into a tree of independently reactive signals</td>
+                <td>
+                  <a mmLink="/docs/primitives/store">Store</a>:
+                  <code>store</code>, <code>mutableStore</code>,
+                  <code>forkStore</code>, <code>opLog</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Map an array or record into stable, per-item derived values</td>
+                <td>
+                  <a mmLink="/docs/primitives/collections">Mapped collections</a>:
+                  <code>indexArray</code>, <code>keyArray</code>, <code>mapObject</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Debounce or throttle a signal, or wait for a condition</td>
+                <td>
+                  <a mmLink="/docs/primitives/timing">Timing</a>:
+                  <code>debounced</code>, <code>throttled</code>, <code>until</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Persist a signal, sync it across tabs, or add undo and redo</td>
+                <td>
+                  <a mmLink="/docs/primitives/storage">Storage &amp; history</a>:
+                  <code>stored</code>, <code>tabSync</code>, <code>withHistory</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Read browser state (media query, element size, network, pointer) as signals</td>
+                <td><a mmLink="/docs/primitives/sensors">Sensors</a></td>
+              </tr>
+              <tr>
+                <td>Compose signal transforms without reaching for RxJS or effects</td>
+                <td>
+                  <a mmLink="/docs/primitives/pipelines">Pipelines</a>:
+                  <code>piped</code> + operators
+                </td>
+              </tr>
+              <tr>
+                <td>Time-slice heavy work or reuse allocations on a hot path</td>
+                <td>
+                  <a mmLink="/docs/primitives/performance">Performance</a>:
+                  <code>chunked</code>, <code>pooled</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Hold the UI through async work so it stops flashing spinners</td>
+                <td>
+                  <a mmLink="/docs/primitives/transitions">Transitions &amp; suspense</a>:
+                  <code>*mmTransition</code>, <code>&lt;mm-suspense&gt;</code>,
+                  <code>latest</code>, <code>deferredValue</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Keep a hidden tab mounted and pause its background work</td>
+                <td>
+                  <a mmLink="/docs/primitives/pausing">Keep-alive &amp; pausing</a>:
+                  <code>*mmActivity</code>, <code>pausable*</code>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </docs-section>
     </docs-page>
   `,

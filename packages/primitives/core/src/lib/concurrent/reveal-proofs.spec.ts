@@ -37,6 +37,8 @@ type Slot = {
   readonly conn?: boolean;
   /** The tree the host lives in: 0 the document, 1+ a shadow root. */
   readonly tree?: number;
+  /** `track(item())` of the slot's boundary; absent when it has no item. */
+  readonly key?: number;
 };
 type Fold = {
   readonly released: ReadonlySet<number>;
@@ -45,12 +47,17 @@ type Fold = {
   /** Two participants could not be ordered: the fold kept the previous one, and every unreleased slot is gated. */
   readonly held: boolean;
 };
-type State = { readonly slots: readonly Slot[] } & Fold;
+/** `items` present = keyed mode (the tracked keys of the reveal's `items`), absent = positional. */
+type State = {
+  readonly slots: readonly Slot[];
+  readonly items?: readonly number[];
+} & Fold;
 type Cfg = { readonly order: Order; readonly onError: OnError };
 type Placement = {
   readonly pos?: number;
   readonly conn?: boolean;
   readonly tree?: number;
+  readonly key?: number;
 };
 type Ev =
   | { readonly t: 'set'; readonly id: number; readonly r: R }
@@ -64,9 +71,16 @@ type Ev =
   | { readonly t: 'remove'; readonly id: number }
   | { readonly t: 'connect'; readonly id: number }
   | { readonly t: 'disconnect'; readonly id: number }
-  | { readonly t: 'move'; readonly id: number; readonly pos: number };
+  | { readonly t: 'move'; readonly id: number; readonly pos: number }
+  | { readonly t: 'rekey'; readonly id: number; readonly key?: number }
+  | { readonly t: 'items'; readonly items?: readonly number[] };
 type Display = 'content' | 'placeholder' | 'error' | 'gated';
-type Release = (slots: readonly Slot[], prev: Fold, cfg: Cfg) => Fold;
+type Release = (
+  slots: readonly Slot[],
+  prev: Fold,
+  cfg: Cfg,
+  items?: readonly number[],
+) => Fold;
 type Init = {
   readonly id?: number;
   readonly r: R;
@@ -94,7 +108,25 @@ type OrderRule = 'doc' | 'registration' | 'fallback' | 'holdAll' | 'last';
 function participants(
   slots: readonly Slot[],
   rule: OrderRule = 'doc',
+  items?: readonly number[],
 ): { list: Slot[]; hold: boolean } {
+  if (items !== undefined) {
+    // keyed: order is the items order over the keys that have a slot; a duplicate key ties by
+    // registration (the sort is stable); hosts are ignored; nothing can hold
+    const index = new Map<number, number>();
+    items.forEach((key, i) => {
+      if (!index.has(key)) index.set(key, i);
+    });
+    const list = slots.filter((s) => s.key !== undefined && index.has(s.key));
+    return {
+      list: [...list].sort(
+        (a, b) =>
+          (index.get(a.key as number) as number) -
+          (index.get(b.key as number) as number),
+      ),
+      hold: false,
+    };
+  }
   if (!slots.some(hasHost)) return { list: [...slots], hold: false };
   const placed = slots.filter((s) => hasHost(s) && s.conn);
   const out = slots.filter((s) => !(hasHost(s) && s.conn));
@@ -113,10 +145,10 @@ function participants(
 
 const makeRelease =
   (rule: OrderRule = 'doc'): Release =>
-  (slots, prev, { order, onError }) => {
+  (slots, prev, { order, onError }, items) => {
     const live = new Set(slots.map((s) => s.id));
     const out = new Set([...prev.released].filter((id) => live.has(id)));
-    const { list, hold } = participants(slots, rule);
+    const { list, hold } = participants(slots, rule, items);
     if (hold)
       return {
         released: out,
@@ -158,6 +190,7 @@ function display(st: State, id: number, cfg: Cfg): Display {
 
 function apply(st: State, ev: Ev, cfg: Cfg, rel: Release = release): State {
   let slots = st.slots;
+  let items = st.items;
   if (ev.t === 'add') {
     slots = [
       ...slots,
@@ -168,18 +201,21 @@ function apply(st: State, ev: Ev, cfg: Cfg, rel: Release = release): State {
         pos: ev.pos,
         conn: ev.conn,
         tree: ev.tree,
+        key: ev.key,
       },
     ];
   } else if (ev.t === 'remove') slots = slots.filter((s) => s.id !== ev.id);
+  else if (ev.t === 'items') items = ev.items;
   else
     slots = slots.map((s) => {
       if (s.id !== ev.id) return s;
       if (ev.t === 'connect') return { ...s, conn: true };
       if (ev.t === 'disconnect') return { ...s, conn: false };
       if (ev.t === 'move') return { ...s, pos: ev.pos };
+      if (ev.t === 'rekey') return { ...s, key: ev.key };
       return { ...s, r: ev.r, m: s.m || ev.t === 'mount' };
     });
-  return { slots, ...rel(slots, st, cfg) };
+  return { slots, items, ...rel(slots, st, cfg, items) };
 }
 
 /** Plain readiness values are mounted slots; `Init` entries say whether they have mounted yet. */
@@ -188,11 +224,12 @@ function run(
   evs: readonly Ev[],
   cfg: Cfg,
   rel: Release = release,
+  items?: readonly number[],
 ) {
   const slots: Slot[] = initial.map((x, i) =>
     typeof x === 'string' ? { id: i, r: x, m: true } : { ...x, id: x.id ?? i },
   );
-  const trace: State[] = [{ slots, ...rel(slots, EMPTY, cfg) }];
+  const trace: State[] = [{ slots, items, ...rel(slots, EMPTY, cfg, items) }];
   for (const ev of evs)
     trace.push(apply(trace[trace.length - 1], ev, cfg, rel));
   return trace;
@@ -215,6 +252,8 @@ type Shape = {
   readonly ties?: boolean;
   /** Some hosts live in a shadow root. */
   readonly shadow?: boolean;
+  /** Keyed mode: slots carry keys, the reveal has `items`; no hosts. */
+  readonly keyed?: boolean;
 };
 
 /**
@@ -226,9 +265,27 @@ function generate(
   seed: number,
   mounting = true,
   shape: Shape = {},
-): { initial: Init[]; evs: Ev[] } {
+): { initial: Init[]; evs: Ev[]; items?: number[] } {
   const rnd = mulberry32(seed);
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)];
+  const shuffle = <T>(xs: readonly T[]): T[] => {
+    const a = [...xs];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  // keyed shapes: a key per slot (some none, some shared under `ties`), and the reveal's items
+  let nextKey = 0;
+  const keyOf = new Map<number, number>();
+  const freshKey = () => nextKey++;
+  const someKey = (): number | undefined => {
+    if (!shape.keyed || rnd() < 0.08) return undefined;
+    const existing = [...keyOf.values()];
+    if (shape.ties && existing.length && rnd() < 0.15) return pick(existing);
+    return freshKey();
+  };
   const used = new Set<number>();
   const place = (): Placement => {
     if (!shape.positional) return {};
@@ -255,6 +312,20 @@ function generate(
     }),
   );
   const ids = initial.map((_, i) => i);
+  initial.forEach((x, i) => {
+    const key = someKey();
+    if (key === undefined) return;
+    initial[i] = { ...x, key };
+    keyOf.set(i, key);
+  });
+  let items: number[] | undefined;
+  if (shape.keyed) {
+    // most present keys, shuffled; sometimes a key no slot has
+    items = shuffle([...new Set(keyOf.values())].filter(() => rnd() < 0.8));
+    if (rnd() < 0.3)
+      items.splice(Math.floor(rnd() * (items.length + 1)), 0, freshKey());
+  }
+  const initialItems = items ? [...items] : undefined;
   const hosted = new Set(ids.filter((i) => initial[i].pos !== undefined));
   const unmounted = new Set(ids.filter((i) => !initial[i].m));
   let next = ids.length;
@@ -264,7 +335,9 @@ function generate(
     if (roll < 0.08) {
       const id = next++;
       const p = place();
-      evs.push({ t: 'add', id, r: pick(RS), m: !mounting, ...p });
+      const key = someKey();
+      if (key !== undefined) keyOf.set(id, key);
+      evs.push({ t: 'add', id, r: pick(RS), m: !mounting, ...p, key });
       ids.push(id);
       if (p.pos !== undefined) hosted.add(id);
       if (mounting) unmounted.add(id);
@@ -272,11 +345,48 @@ function generate(
       const id = ids.splice(Math.floor(rnd() * ids.length), 1)[0];
       unmounted.delete(id);
       hosted.delete(id);
+      keyOf.delete(id);
       evs.push({ t: 'remove', id });
     } else if (roll < 0.3 && unmounted.size) {
       const id = pick([...unmounted]);
       unmounted.delete(id);
       evs.push({ t: 'mount', id, r: pick(RS) });
+    } else if (shape.keyed && items && roll < 0.42) {
+      const kind = rnd();
+      if (kind < 0.3) {
+        items = shuffle(items);
+      } else if (kind < 0.5 && items.length) {
+        // one key leaves, the rest keep their order
+        const gone = items[Math.floor(rnd() * items.length)];
+        items = items.filter((key) => key !== gone);
+      } else if (kind < 0.7) {
+        // a key returns (a slot has it), or a key no slot has arrives
+        const absent = [...new Set(keyOf.values())].filter(
+          (key) => !(items as number[]).includes(key),
+        );
+        const key = absent.length && rnd() < 0.8 ? pick(absent) : freshKey();
+        items = [...items];
+        items.splice(Math.floor(rnd() * (items.length + 1)), 0, key);
+      } else if (ids.length) {
+        // the boundary's item changed: same key, a shared key, or a new one
+        const id = pick(ids);
+        const same = keyOf.get(id);
+        const held = new Set(keyOf.values());
+        const unoccupied = items.filter((key) => !held.has(key));
+        const r = rnd();
+        const key =
+          r < 0.3 && same !== undefined
+            ? same
+            : shape.ties && r < 0.5 && keyOf.size
+              ? pick([...keyOf.values()])
+              : r < 0.8 && unoccupied.length
+                ? pick(unoccupied) // a key the items already list, no slot has
+                : freshKey();
+        keyOf.set(id, key);
+        evs.push({ t: 'rekey', id, key });
+        continue;
+      }
+      evs.push({ t: 'items', items });
     } else if (shape.positional && hosted.size && roll < 0.42) {
       const id = pick([...hosted]);
       const kind = rnd();
@@ -296,7 +406,7 @@ function generate(
       evs.push({ t: 'set', id: pick(ids), r: pick(RS) });
     }
   }
-  return { initial, evs };
+  return { initial, evs, items: initialItems };
 }
 
 /**
@@ -343,7 +453,21 @@ const SHAPES: readonly [string, Shape][] = [
  * otherwise the slots whose host is in the document, by position, a shared host by registration;
  * a hold when they span more than one tree.
  */
-function refOrder(slots: readonly Slot[]): { ids: number[]; hold: boolean } {
+function refOrder(
+  slots: readonly Slot[],
+  items?: readonly number[],
+): { ids: number[]; hold: boolean } {
+  if (items !== undefined) {
+    // keyed: the items order over the keys that have a slot, a shared key by registration
+    const at = (key: number) => items.indexOf(key);
+    const keyed = slots
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => s.key !== undefined && at(s.key) !== -1);
+    keyed.sort(
+      (a, b) => at(a.s.key as number) - at(b.s.key as number) || a.i - b.i,
+    );
+    return { ids: keyed.map(({ s }) => s.id), hold: false };
+  }
   if (slots.every((s) => s.pos === undefined))
     return { ids: slots.map((s) => s.id), hold: false };
   const inDoc = slots
@@ -370,7 +494,7 @@ function violation(prev: State, next: State, cfg: Cfg): string | null {
   for (const s of next.slots)
     if (next.released.has(s.id) && !s.m) return `unmounted released: ${s.id}`;
   const fresh = [...next.released].filter((id) => !prev.released.has(id));
-  const ref = refOrder(next.slots);
+  const ref = refOrder(next.slots, next.items);
   const truth = { list: ref.ids.map((id) => slotOf(next, id)), hold: ref.hold };
   const inTruth = new Set(ref.ids);
   for (const id of fresh) {
@@ -463,9 +587,9 @@ function firstViolation(
   shape: Shape = {},
 ): string | null {
   for (let seed = 1; seed <= SEEDS; seed++) {
-    const { initial, evs } = generate(seed, true, shape);
-    const trace = run(initial, evs, cfg, rel);
-    const empty: State = { slots: trace[0].slots, ...EMPTY };
+    const { initial, evs, items } = generate(seed, true, shape);
+    const trace = run(initial, evs, cfg, rel, items);
+    const empty: State = { slots: trace[0].slots, items, ...EMPTY };
     for (let i = 0; i < trace.length; i++) {
       const v = violation(i === 0 ? empty : trace[i - 1], trace[i], cfg);
       if (v) return `seed ${seed} step ${i}: ${v}`;
@@ -482,10 +606,10 @@ function firstNoiseLeak(
 ): string | null {
   for (let seed = 1; seed <= SEEDS; seed++) {
     const hist = generate(seed, true, shape);
-    const base = run(hist.initial, hist.evs, cfg, rel);
+    const base = run(hist.initial, hist.evs, cfg, rel, hist.items);
     for (let k = 1; k <= 4; k++) {
       const noisy = withNoise(hist, seed * 7919 + k);
-      const alt = run(noisy.initial, noisy.evs, cfg, rel);
+      const alt = run(noisy.initial, noisy.evs, cfg, rel, hist.items);
       for (let i = 0; i < base.length; i++) {
         if (ids(base[i]).join() !== ids(alt[i]).join())
           return `seed ${seed}/${k} step ${i}: released ${ids(base[i])} vs ${ids(alt[i])}`;
@@ -529,7 +653,7 @@ describe('reveal model: properties over generated sequences', () => {
         for (let seed = 1; seed <= SEEDS; seed++) {
           const { initial, evs } = generate(seed, true, shape);
           for (const st of run(initial, evs, cfg)) {
-            const ref = refOrder(st.slots);
+            const ref = refOrder(st.slots, st.items);
             const open = st.slots.filter(
               (s) => !st.released.has(s.id) && !gated(st, s.id, cfg),
             );
@@ -1309,6 +1433,9 @@ describe('reveal coordinator conforms to the model', () => {
           };
           check(trace[0]);
           evs.forEach((ev, i) => {
+            // keyed events do not occur in host histories
+            if (ev.t === 'items' || ev.t === 'rekey')
+              return check(trace[i + 1]);
             const l = live.get(ev.id);
             if (ev.t === 'add') join(ev.id, { ...ev, m: ev.m ?? false });
             else if (ev.t === 'remove') {
@@ -1322,7 +1449,7 @@ describe('reveal coordinator conforms to the model', () => {
               // placement changed with no slot changing: what MmReveal observes after a render
               if (ev.t === 'connect') l.host.conn = true;
               else if (ev.t === 'disconnect') l.host.conn = false;
-              else {
+              else if (ev.t === 'move') {
                 l.host.pos = ev.pos;
                 moves++;
               }
@@ -1381,5 +1508,468 @@ describe('reveal coordinator conforms to the model', () => {
     c.mount();
     expect(c.released()).toBe(true);
     expect(a.released()).toBe(false);
+  });
+});
+
+describe('reveal model: keyed, order from the data (Part 3)', () => {
+  const KEYED: readonly [string, Shape][] = [
+    ['keys', { keyed: true }],
+    ['keys, duplicate keys', { keyed: true, ties: true }],
+  ];
+  const fwd: Cfg = { order: 'forwards', onError: 'settled' };
+  const keyed = (
+    key: number | undefined,
+    r: R,
+    extra: Partial<Init> = {},
+  ): Init => ({
+    r,
+    m: true,
+    key,
+    ...extra,
+  });
+  const items = (...keys: number[]): Ev => ({ t: 'items', items: keys });
+  const same = (a: State, b: State, cfg: Cfg, except?: number) => {
+    for (const s of a.slots) {
+      if (s.id === except) continue;
+      expect([s.id, a.released.has(s.id), gated(a, s.id, cfg)]).toEqual([
+        s.id,
+        b.released.has(s.id),
+        gated(b, s.id, cfg),
+      ]);
+    }
+  };
+
+  for (const [name, shape] of KEYED)
+    for (const cfg of CFGS)
+      it(`${name}, ${cfg.order} / ${cfg.onError}: every fold property holds and pre-mount noise never leaks (${SEEDS} seeds)`, () => {
+        expect(firstViolation(cfg, release, shape)).toBeNull();
+        expect(firstNoiseLeak(cfg, release, shape)).toBeNull();
+      });
+
+  it('K-P1: at every step the order IS the items order over present keys (ties by registration), and nothing ever holds', () => {
+    let steps = 0;
+    for (const [, shape] of KEYED)
+      for (const cfg of CFGS)
+        for (let seed = 1; seed <= SEEDS; seed++) {
+          const hist = generate(seed, true, shape);
+          for (const st of run(
+            hist.initial,
+            hist.evs,
+            cfg,
+            release,
+            hist.items,
+          )) {
+            steps++;
+            expect(st.held).toBe(false);
+            expect([...st.ordered]).toEqual(refOrder(st.slots, st.items).ids);
+          }
+        }
+    expect(steps).toBeGreaterThan(KEYED.length * CFGS.length * SEEDS * 5);
+  });
+
+  /** K-P2: histories that differ only in registration order agree at every step (unique keys). */
+  function firstRegistrationLeak(cfg: Cfg): string | null {
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const hist = generate(seed, true, { keyed: true });
+      const withIds = hist.initial.map((x, id) => ({ ...x, id }));
+      const a = run(withIds, hist.evs, cfg, release, hist.items);
+      const b = run([...withIds].reverse(), hist.evs, cfg, release, hist.items);
+      for (let i = 0; i < a.length; i++) {
+        if (ids(a[i]).join() !== ids(b[i]).join())
+          return `seed ${seed} step ${i}: released ${ids(a[i])} vs ${ids(b[i])}`;
+        for (const s of a[i].slots)
+          if (gated(a[i], s.id, cfg) !== gated(b[i], s.id, cfg))
+            return `seed ${seed} step ${i}: gated(${s.id}) differs`;
+      }
+    }
+    return null;
+  }
+  for (const cfg of CFGS)
+    it(`${cfg.order} / ${cfg.onError}: registration order never matters under unique keys (K-P2)`, () => {
+      expect(firstRegistrationLeak(cfg)).toBeNull();
+    });
+
+  it('K-P3: a key leaving items is a removal for every other slot; the leaver is gated, keeps its release, and returns with it', () => {
+    let leaves = 0;
+    let returns = 0;
+    for (const cfg of CFGS)
+      for (let seed = 1; seed <= SEEDS; seed++) {
+        const hist = generate(seed, true, { keyed: true });
+        const trace = run(hist.initial, hist.evs, cfg, release, hist.items);
+        hist.evs.forEach((ev, i) => {
+          if (ev.t !== 'items' || !ev.items) return;
+          const before = trace[i];
+          const after = trace[i + 1];
+          const prev = before.items as readonly number[];
+          const gone = prev.filter((key) => !ev.items?.includes(key));
+          const kept = prev.filter((key) => ev.items?.includes(key));
+          if (gone.length === 1 && kept.join() === ev.items.join()) {
+            const leaving = before.slots.filter((s) => s.key === gone[0]);
+            if (leaving.length !== 1) return;
+            leaves++;
+            const removed = apply(
+              before,
+              { t: 'remove', id: leaving[0].id },
+              cfg,
+            );
+            same(after, removed, cfg, leaving[0].id);
+            // the leaver: release kept; gated unless released (a released slot keeps its content)
+            const wasReleased = before.released.has(leaving[0].id);
+            expect(after.released.has(leaving[0].id)).toBe(wasReleased);
+            expect(gated(after, leaving[0].id, cfg)).toBe(!wasReleased);
+          }
+          const came = ev.items.filter((key) => !prev.includes(key));
+          if (came.length === 1) {
+            const back = before.slots.filter(
+              (s) => s.key === came[0] && before.released.has(s.id),
+            );
+            for (const s of back) {
+              returns++;
+              expect(after.released.has(s.id)).toBe(true);
+              expect(gated(after, s.id, cfg)).toBe(false);
+            }
+          }
+        });
+      }
+    expect(leaves).toBeGreaterThan(CFGS.length * 40);
+    expect(returns).toBeGreaterThan(CFGS.length * 10);
+  });
+
+  it('K-P4: a rekey is ONE fold: same key changes nothing; a released slot stays released at its new place; nothing the new order holds is released on the way (remove + add would)', () => {
+    let sameKey = 0;
+    let kept = 0;
+    let moved = 0;
+    let removeAddDiffers = 0;
+    for (const [, shape] of KEYED)
+      for (const cfg of CFGS)
+        for (let seed = 1; seed <= SEEDS; seed++) {
+          const hist = generate(seed, true, shape);
+          const trace = run(hist.initial, hist.evs, cfg, release, hist.items);
+          hist.evs.forEach((ev, i) => {
+            if (ev.t !== 'rekey') return;
+            const before = trace[i];
+            const after = trace[i + 1];
+            const s = slotOf(before, ev.id);
+            if (s.key === ev.key) {
+              sameKey++;
+              expect(ids(after)).toEqual(ids(before));
+              expect([...after.ordered]).toEqual([...before.ordered]);
+              return;
+            }
+            if (before.released.has(ev.id)) {
+              kept++;
+              expect(after.released.has(ev.id)).toBe(true);
+            }
+            moved++;
+            // atomic: a slot released by this step is settled and every predecessor in the NEW
+            // order is released too; no intermediate order ever existed
+            const seq = inOrder(orderedSlots(after), cfg.order);
+            for (const o of after.slots) {
+              if (
+                o.id === ev.id ||
+                before.released.has(o.id) ||
+                !after.released.has(o.id)
+              )
+                continue;
+              expect(settledNow(effective(o), cfg.onError)).toBe(true);
+              const k = seq.findIndex((x) => x.id === o.id);
+              expect(
+                seq.slice(0, k).every((x) => after.released.has(x.id)),
+              ).toBe(true);
+            }
+            // the killed reading: remove then add has an intermediate fold whose releases stick
+            const re = apply(
+              apply(before, { t: 'remove', id: ev.id }, cfg),
+              { t: 'add', id: ev.id, r: s.r, m: s.m, key: ev.key },
+              cfg,
+            );
+            if (
+              after.slots.some(
+                (o) =>
+                  o.id !== ev.id &&
+                  after.released.has(o.id) !== re.released.has(o.id),
+              )
+            )
+              removeAddDiffers++;
+          });
+        }
+    expect(sameKey).toBeGreaterThan(CFGS.length * 20);
+    expect(kept).toBeGreaterThan(CFGS.length * 10);
+    expect(moved).toBeGreaterThan(CFGS.length * 40);
+    expect(removeAddDiffers).toBeGreaterThan(CFGS.length); // the generator reaches the counterexample (12 hits at 600 seeds)
+  });
+
+  it('a rekey into an unoccupied item key never releases a slot the new order still holds (remove + add would, permanently)', () => {
+    const t = run(
+      [keyed(1, 'pending'), keyed(3, 'ready')],
+      [{ t: 'rekey', id: 0, key: 2 }],
+      fwd,
+      release,
+      [1, 2, 3],
+    );
+    expect(ids(t[0])).toEqual([]);
+    expect([...t[1].ordered]).toEqual([0, 1]);
+    expect(ids(t[1])).toEqual([]); // slot 0, pending at key 2, still holds slot 1
+    expect(gated(t[1], 1, fwd)).toBe(true);
+    const re = apply(
+      apply(t[0], { t: 'remove', id: 0 }, fwd),
+      { t: 'add', id: 0, r: 'pending', m: true, key: 2 },
+      fwd,
+    );
+    expect(ids(re)).toEqual([1]); // the intermediate fold released 1, and release is sticky
+  });
+
+  it('rekeying into a key another slot holds orders by the original registration, not as a fresh add (K4)', () => {
+    const t = run(
+      [keyed(1, 'pending'), keyed(2, 'ready'), keyed(1, 'ready')],
+      [{ t: 'rekey', id: 0, key: 2 }],
+      fwd,
+      release,
+      [2, 1],
+    );
+    expect([...t[0].ordered]).toEqual([1, 0, 2]);
+    expect(ids(t[0])).toEqual([1]); // key 2 first, ready: released
+    expect([...t[1].ordered]).toEqual([0, 1, 2]); // slot 0 (registered first) now precedes 1 under key 2
+    expect(ids(t[1])).toEqual([1]); // 1 stays released (sticky); 0, pending, holds 2
+    expect(gated(t[1], 2, fwd)).toBe(true);
+  });
+
+  it('two slots with one key order by registration (K4)', () => {
+    const t = run(
+      [keyed(1, 'pending'), keyed(1, 'ready'), keyed(2, 'ready')],
+      [set(0, 'ready')],
+      fwd,
+      release,
+      [1, 2],
+    );
+    expect([...t[0].ordered]).toEqual([0, 1, 2]);
+    expect(ids(t[0])).toEqual([]);
+    expect([gated(t[0], 1, fwd), gated(t[0], 2, fwd)]).toEqual([true, true]);
+    expect(ids(t[1])).toEqual([0, 1, 2]);
+  });
+
+  it('a slot with no item, or whose key is not in items, is gated and never blocks (K3, K4)', () => {
+    const t = run(
+      [
+        keyed(1, 'pending'),
+        keyed(undefined, 'ready'),
+        keyed(7, 'ready'),
+        keyed(2, 'ready'),
+      ],
+      [set(0, 'ready')],
+      fwd,
+      release,
+      [1, 2],
+    );
+    expect([...t[0].ordered]).toEqual([0, 3]);
+    expect([gated(t[0], 1, fwd), gated(t[0], 2, fwd)]).toEqual([true, true]);
+    expect(ids(t[1])).toEqual([0, 3]);
+    expect([gated(t[1], 1, fwd), gated(t[1], 2, fwd)]).toEqual([true, true]);
+  });
+
+  it('a key in items with no slot is a gap: order unaffected (K4)', () => {
+    const t = run(
+      [keyed(1, 'ready'), keyed(2, 'ready')],
+      [],
+      fwd,
+      release,
+      [9, 1, 8, 2],
+    );
+    expect([...t[0].ordered]).toEqual([0, 1]);
+    expect(ids(t[0])).toEqual([0, 1]);
+  });
+
+  it('reordering items while slots wait moves the frontier at once: the collapsed placeholder changes slot in the same step (K2; the Part 2 A5 gap, fixed)', () => {
+    const t = run(
+      [keyed(1, 'pending'), keyed(2, 'pending')],
+      [items(2, 1)],
+      fwd,
+      release,
+      [1, 2],
+    );
+    expect([gated(t[0], 0, fwd), gated(t[0], 1, fwd)]).toEqual([false, true]);
+    expect([gated(t[1], 0, fwd), gated(t[1], 1, fwd)]).toEqual([true, false]);
+  });
+
+  it('leaving keyed mode falls back to registration order (no hosts) at the next fold; releases stay (K1)', () => {
+    const t = run(
+      [keyed(1, 'ready'), keyed(2, 'pending')],
+      [{ t: 'items', items: undefined }, set(1, 'ready')],
+      { order: 'backwards', onError: 'settled' },
+      release,
+      [2, 1],
+    );
+    expect(ids(t[0])).toEqual([0]); // backwards over items [2,1]: slot 0 (key 1) is first
+    expect([...t[1].ordered]).toEqual([0, 1]); // registration order now; 0 stays released
+    expect(ids(t[1])).toEqual([0]);
+    expect(ids(t[2])).toEqual([0, 1]);
+  });
+
+  it('the generator reaches every keyed shape (non-vacuity of the sweep)', () => {
+    const seen = new Set<string>();
+    for (const [, shape] of KEYED)
+      for (let seed = 1; seed <= SEEDS; seed++) {
+        const hist = generate(seed, true, shape);
+        const trace = run(hist.initial, hist.evs, fwd, release, hist.items);
+        for (let i = 1; i < trace.length; i++) {
+          const ev = hist.evs[i - 1];
+          const [p, n] = [trace[i - 1], trace[i]];
+          const list = n.items as readonly number[];
+          if (n.slots.some((s) => s.key === undefined)) seen.add('no key');
+          if (n.slots.some((s) => s.key !== undefined && !list.includes(s.key)))
+            seen.add('absent key');
+          if (list.some((key) => !n.slots.some((s) => s.key === key)))
+            seen.add('phantom key');
+          if (new Set(n.slots.map((s) => s.key)).size < n.slots.length)
+            seen.add('duplicate key');
+          if (ev.t === 'rekey')
+            seen.add(
+              slotOf(p, ev.id).key === ev.key ? 'rekey same' : 'rekey new',
+            );
+          if (ev.t === 'items' && ev.items) {
+            const prev = p.items as readonly number[];
+            if (
+              prev.length === ev.items.length &&
+              prev.join() !== ev.items.join()
+            )
+              seen.add('items reorder');
+            if (prev.length > ev.items.length) seen.add('items drop');
+            if (prev.length < ev.items.length) seen.add('items return');
+          }
+          if (ev.t === 'items' && n.released.size > p.released.size)
+            seen.add('items event releases');
+        }
+      }
+    expect([...seen].sort()).toEqual(
+      [
+        'absent key',
+        'duplicate key',
+        'items drop',
+        'items event releases',
+        'items reorder',
+        'items return',
+        'no key',
+        'phantom key',
+        'rekey new',
+        'rekey same',
+      ].sort(),
+    );
+  });
+
+  it('conformance: createRevealCoordinator({ keyed: { items, track } }) + register(state, host, item) matches the model on keyed histories (released, gated, ordered), every config, every seed', () => {
+    let steps = 0;
+    let rekeys = 0;
+    let itemsChanges = 0;
+    for (const [, shape] of KEYED)
+      for (const cfg of CFGS)
+        for (let seed = 1; seed <= SEEDS; seed++) {
+          const hist = generate(seed, true, shape);
+          const trace = run(hist.initial, hist.evs, cfg, release, hist.items);
+          const itemsSig = signal<readonly number[] | undefined>(hist.items);
+          const coordinator = createRevealCoordinator({
+            order: () => cfg.order,
+            onError: () => cfg.onError,
+            keyed: { items: () => itemsSig(), track: (key) => key },
+          });
+          const live = new Map<
+            number,
+            {
+              r: WritableSignal<R>;
+              key: WritableSignal<number | undefined>;
+              slot: RevealSlot;
+            }
+          >();
+          const join = (id: number, x: Init) => {
+            const r = signal(x.r);
+            // a slot with no key reads an item of undefined: never a key of items; a rekey may give it one
+            const key = signal(x.key);
+            const slot = coordinator.register(r, null, () => key());
+            if (x.m) slot.mount();
+            live.set(id, { r, key, slot });
+          };
+          hist.initial.forEach((x, id) => join(id, x));
+          const check = (st: State) => {
+            steps++;
+            for (const s of st.slots) {
+              const { slot } = live.get(s.id) as { slot: RevealSlot };
+              expect([s.id, slot.released()]).toEqual([
+                s.id,
+                st.released.has(s.id),
+              ]);
+              expect([s.id, slot.gated()]).toEqual([
+                s.id,
+                gated(st, s.id, cfg),
+              ]);
+            }
+          };
+          check(trace[0]);
+          hist.evs.forEach((ev, i) => {
+            if (ev.t === 'items') {
+              itemsSig.set(ev.items);
+              itemsChanges++;
+            } else if (ev.t === 'rekey') {
+              live.get(ev.id)?.key.set(ev.key);
+              rekeys++;
+            } else if (ev.t === 'add') join(ev.id, { ...ev, m: ev.m ?? false });
+            else if (ev.t === 'remove') {
+              live.get(ev.id)?.slot.unregister();
+              live.delete(ev.id);
+            } else if (ev.t === 'mount') {
+              const l = live.get(ev.id);
+              l?.r.set(ev.r);
+              l?.slot.mount();
+            } else if (ev.t === 'set') live.get(ev.id)?.r.set(ev.r);
+            // connect / disconnect / move do not occur in keyed histories
+            check(trace[i + 1]);
+          });
+        }
+    expect(steps).toBeGreaterThan(KEYED.length * CFGS.length * SEEDS * 5);
+    expect(rekeys).toBeGreaterThan(CFGS.length * 100);
+    expect(itemsChanges).toBeGreaterThan(CFGS.length * 100);
+  });
+
+  it('conformance: in keyed mode the coordinator never reads a host (no compareDocumentPosition / isConnected) and relayout() is never needed for a reorder', () => {
+    class ThrowingHost {
+      get isConnected(): boolean {
+        throw new Error('isConnected read in keyed mode');
+      }
+      compareDocumentPosition(): number {
+        throw new Error('compareDocumentPosition called in keyed mode');
+      }
+    }
+    const init = [
+      keyed(1, 'pending'),
+      keyed(2, 'pending'),
+      keyed(3, 'ready'),
+      keyed(undefined, 'ready'),
+    ];
+    for (const cfg of CFGS) {
+      const t = run(init, [items(3, 1, 2)], cfg, release, [1, 2, 3]);
+      const itemsSig = signal<readonly number[] | undefined>([1, 2, 3]);
+      const coordinator = createRevealCoordinator({
+        order: () => cfg.order,
+        onError: () => cfg.onError,
+        keyed: { items: () => itemsSig(), track: (key) => key },
+      });
+      const slots = init.map((x) =>
+        coordinator.register(
+          () => x.r,
+          new ThrowingHost(),
+          x.key === undefined ? null : () => x.key,
+        ),
+      );
+      for (const s of slots) s.mount();
+      const read = () => slots.map((s) => [s.released(), s.gated()]);
+      const model = (st: State) =>
+        init.map((_, id) => [st.released.has(id), gated(st, id, cfg)]);
+      expect(read).not.toThrow();
+      expect(read()).toEqual(model(t[0]));
+      itemsSig.set([3, 1, 2]); // the reorder alone, no relayout()
+      expect(read).not.toThrow();
+      expect(read()).toEqual(model(t[1]));
+      // the hosts are real: back in positional mode the next fold reads them
+      itemsSig.set(undefined);
+      expect(read).toThrow(/keyed mode/);
+    }
   });
 });

@@ -1,6 +1,7 @@
 /* eslint-disable @angular-eslint/component-selector */
 import { Component, input, resource, signal } from '@angular/core';
 import { render } from '@testing-library/angular';
+import { vi } from 'vitest';
 import { registerResource } from '@mmstack/primitives/core';
 import type { RevealOnError, RevealOrder } from '@mmstack/primitives/core';
 import { MmReveal } from './reveal';
@@ -281,5 +282,170 @@ describe('<mm-reveal>: placement changes with no slot changing', () => {
     showOnly.set(false);
     await settle(fixture);
     expect(shown(container, ['a', 'b'])).toBe('-C');
+  });
+});
+
+type Row = { readonly id: string };
+const keyedRows = signal<readonly Row[]>([]);
+const keyedCollapsed = signal(false);
+
+@Component({
+  selector: 'keyed-host',
+  imports: [MmReveal, SuspenseBoundary, GatedPanel],
+  template: `
+    <mm-reveal
+      [order]="order()"
+      [onError]="onError()"
+      [collapsed]="collapsed()"
+      [items]="rows()"
+      [track]="byId"
+    >
+      @for (row of rows(); track row.id) {
+        <mm-suspense [item]="row">
+          <i placeholder>ph-{{ row.id }}</i>
+          <gated-panel [label]="row.id" />
+        </mm-suspense>
+      }
+    </mm-reveal>
+  `,
+})
+class KeyedHost {
+  protected readonly order = order;
+  protected readonly onError = onError;
+  protected readonly collapsed = keyedCollapsed;
+  protected readonly rows = keyedRows;
+  protected readonly byId = (row: Row) => row.id;
+}
+
+const rowsOf = (...ids: string[]) => ids.map((id) => ({ id }));
+
+describe('<mm-reveal>: order from the data with [items]', () => {
+  beforeEach(() => {
+    keyedRows.set(rowsOf('a', 'b', 'c'));
+    keyedCollapsed.set(false);
+  });
+
+  it('rows reordered while waiting, collapsed: the placeholder moves to the new first row in the same tick, no relayout', async () => {
+    order.set('forwards');
+    onError.set('settled');
+    keyedCollapsed.set(true);
+    const relayout = vi.spyOn(MmReveal.prototype, 'relayout');
+    try {
+      const { container, fixture } = await render(KeyedHost, {
+        autoDetectChanges: false,
+      });
+      await settle(fixture);
+      expect(shown(container)).toBe('p--');
+      keyedRows.set(rowsOf('c', 'a', 'b')); // new row objects, same keys
+      fixture.detectChanges();
+      expect(shown(container)).toBe('--p');
+      expect(relayout).not.toHaveBeenCalled();
+    } finally {
+      relayout.mockRestore();
+    }
+  });
+
+  it('backwards: b then c then a', async () => {
+    expect(
+      await traceOf(KeyedHost, 'backwards', 'settled', ['b', 'c', 'a']),
+    ).toEqual(['ppp', 'ppp', 'pCC', 'CCC']);
+  });
+
+  it('forwards: b then c then a', async () => {
+    expect(
+      await traceOf(KeyedHost, 'forwards', 'settled', ['b', 'c', 'a']),
+    ).toEqual(['ppp', 'ppp', 'ppp', 'CCC']);
+  });
+
+  it('a row that leaves the array stops holding the rest and comes back with what it had', async () => {
+    order.set('forwards');
+    onError.set('settled');
+    const { container, fixture } = await render(KeyedHost, {
+      autoDetectChanges: false,
+    });
+    await settle(fixture);
+    gates['b']();
+    await settle(fixture);
+    expect(shown(container)).toBe('ppp'); // b waits on a
+    keyedRows.set(rowsOf('b', 'c'));
+    fixture.detectChanges();
+    expect(shown(container)).toBe('-Cp');
+    keyedRows.set(rowsOf('a', 'b', 'c'));
+    await settle(fixture);
+    expect(shown(container)).toBe('pCp'); // b stays shown, c waits on a again
+  });
+});
+
+@Component({
+  selector: 'dup-keys-host',
+  imports: [MmReveal, SuspenseBoundary, GatedPanel],
+  template: `
+    <mm-reveal [items]="keys">
+      @for (row of rows(); track row.id) {
+        <mm-suspense [item]="row.id">
+          <i placeholder>ph-{{ row.id }}</i>
+          <gated-panel [label]="row.id" />
+        </mm-suspense>
+      }
+    </mm-reveal>
+  `,
+})
+class DupKeysHost {
+  protected readonly rows = keyedRows;
+  protected readonly keys = ['a', 'b', 'a', 'c'];
+}
+
+@Component({
+  selector: 'no-item-host',
+  imports: [MmReveal, SuspenseBoundary, GatedPanel],
+  template: `
+    <mm-reveal [items]="rows()" [track]="byId">
+      @for (row of rows(); track row.id) {
+        <mm-suspense>
+          <i placeholder>ph-{{ row.id }}</i>
+          <gated-panel [label]="row.id" />
+        </mm-suspense>
+      }
+    </mm-reveal>
+  `,
+})
+class NoItemHost {
+  protected readonly rows = keyedRows;
+  protected readonly byId = (row: Row) => row.id;
+}
+
+describe('<mm-reveal>: keyed dev warnings, once per reveal', () => {
+  const warnings = (spy: { mock: { calls: unknown[][] } }, text: string) =>
+    spy.mock.calls.filter((c) => String(c[0]).includes(text)).length;
+
+  beforeEach(() => keyedRows.set(rowsOf('a', 'b', 'c')));
+
+  it('duplicate keys in items', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { fixture } = await render(DupKeysHost, {
+        autoDetectChanges: false,
+      });
+      await settle(fixture);
+      expect(warnings(warn, 'duplicate key')).toBe(1);
+      expect(warnings(warn, 'no [item]')).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a boundary without [item] under a reveal with [items]', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { container, fixture } = await render(NoItemHost, {
+        autoDetectChanges: false,
+      });
+      await settle(fixture);
+      expect(warnings(warn, 'no [item]')).toBe(1);
+      expect(warnings(warn, 'duplicate key')).toBe(0);
+      expect(shown(container)).toBe('ppp'); // held: no slot takes part
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

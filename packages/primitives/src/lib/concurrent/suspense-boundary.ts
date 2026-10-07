@@ -40,7 +40,8 @@ import {
  *
  * Inside an `<mm-reveal>`, a boundary with no other boundary between it and the reveal is one of
  * its slots: while the reveal holds it back it shows its placeholder (or nothing when collapsed).
- * Every boundary hides the reveal from its own content.
+ * When the reveal has `[items]`, bind the boundary's row to `[item]` so it takes its place in the
+ * data. Every boundary hides the reveal from its own content.
  *
  * SSR: the server serializes whatever the scope reports at stabilization, so a registered resource
  * must keep the app unstable until it settles or the placeholder is what gets serialized (then
@@ -54,6 +55,8 @@ export abstract class SuspenseBoundaryBase implements AfterViewInit {
 
   /** What counts as "not ready" for the first-load placeholder. Defaults to value-presence. */
   readonly type = input<SuspendType>('value');
+  /** The row this boundary shows, for a reveal ordered by `[items]`. Its key is the reveal's `track` of it. */
+  readonly item = input<unknown>();
 
   protected readonly pending = this.scope.pending;
   protected readonly suspended = computed(() =>
@@ -64,8 +67,9 @@ export abstract class SuspenseBoundaryBase implements AfterViewInit {
     () => this.scope.errored().length > 0,
   );
 
-  private readonly revealSlot = injectRevealSlot(() =>
-    this.failed() ? 'failed' : this.suspended() ? 'pending' : 'ready',
+  private readonly revealSlot = injectRevealSlot(
+    () => (this.failed() ? 'failed' : this.suspended() ? 'pending' : 'ready'),
+    { item: () => this.item() },
   );
   protected readonly view = computed(() => {
     const slot = this.revealSlot;

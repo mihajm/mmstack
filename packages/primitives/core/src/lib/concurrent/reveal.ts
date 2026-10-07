@@ -29,6 +29,18 @@ export type RevealOptions = {
   readonly order?: () => RevealOrder;
   readonly onError?: () => RevealOnError;
   readonly collapsed?: () => boolean;
+  /**
+   * Order and membership from data instead of the document. While `items()` returns an array the
+   * coordinator is keyed: a slot takes part when it has an item whose key (`track(item)`, identity
+   * by default) is a key of `items()`, in the order of its first appearance there; slots sharing a
+   * key order by registration. Hosts are not read at all. A slot with no item, or with a key not in
+   * `items()`, is gated and holds nothing; it keeps a release it already has. `items()` returning
+   * `undefined` means positional order, the default.
+   */
+  readonly keyed?: {
+    readonly items: () => readonly unknown[] | undefined;
+    readonly track?: (item: unknown) => unknown;
+  };
 };
 
 export interface RevealSlot {
@@ -69,9 +81,15 @@ export interface RevealCoordinator {
   /**
    * Join as a slot. With a `host`, the slot takes its place in document order; a slot whose host is
    * not in the document neither holds other slots nor shows. When no slot has a host, slots are
-   * ordered by registration.
+   * ordered by registration. `item` is the slot's data for a keyed coordinator (see
+   * {@link RevealOptions.keyed}); read reactively, so a changed item moves the slot at the next
+   * read. Ignored while the coordinator is positional.
    */
-  register(state: () => RevealSlotState, host?: RevealHost | null): RevealSlot;
+  register(
+    state: () => RevealSlotState,
+    host?: RevealHost | null,
+    item?: (() => unknown) | null,
+  ): RevealSlot;
   /** Gated slots render nothing instead of their placeholder. */
   readonly collapsed: Signal<boolean>;
   /**
@@ -86,7 +104,10 @@ type Entry = {
   readonly state: () => RevealSlotState;
   readonly mounted: WritableSignal<boolean>;
   readonly host: RevealHost | null;
+  readonly item: (() => unknown) | null;
 };
+
+type Participants = { readonly list: readonly Entry[]; readonly hold: boolean };
 
 /** One fold: who is released, the order it used, and whether it had to keep the previous one. */
 type Fold = {
@@ -118,10 +139,7 @@ function inOrder<T>(list: readonly T[], order: RevealOrder): readonly T[] {
  * slots whose host is in the document (read live), in document order, a shared host by registration
  * (the sort is stable). Hosts in different trees (a shadow root) cannot be ordered: `hold`.
  */
-function participate(list: readonly Entry[]): {
-  list: readonly Entry[];
-  hold: boolean;
-} {
+function participate(list: readonly Entry[]): Participants {
   if (!list.some((e) => e.host)) return { list, hold: false };
   const placed = list.filter((e) => e.host?.isConnected);
   const first = placed[0]?.host;
@@ -146,12 +164,45 @@ function participate(list: readonly Entry[]): {
   };
 }
 
+const identity = (item: unknown) => item;
+
+/**
+ * Keyed: the slots with an item whose key is in `items`, in the order of the key's first index
+ * there, a shared key by registration (the sort is stable). An item of `undefined` is no item.
+ * Hosts are never read and nothing can hold.
+ */
+function participateKeyed(
+  list: readonly Entry[],
+  items: readonly unknown[],
+  track: (item: unknown) => unknown,
+): Participants {
+  const index = new Map<unknown, number>();
+  items.forEach((item, i) => {
+    const key = track(item);
+    if (!index.has(key)) index.set(key, i);
+  });
+  const at = new Map<Entry, number>();
+  for (const e of list) {
+    if (!e.item) continue;
+    const item = e.item();
+    if (item === undefined) continue;
+    const i = index.get(track(item));
+    if (i !== undefined) at.set(e, i);
+  }
+  return {
+    list: [...at.keys()].sort(
+      (a, b) => (at.get(a) as number) - (at.get(b) as number),
+    ),
+    hold: false,
+  };
+}
+
 const sameList = <T>(a: readonly T[], b: readonly T[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 function fold(
   entries: readonly Entry[],
-  part: { list: readonly Entry[]; hold: boolean },
+  part: Participants,
   states: ReadonlyMap<Entry, RevealSlotState>,
   prev: Fold,
   order: RevealOrder,
@@ -192,7 +243,8 @@ function fold(
 
 /**
  * Create a reveal coordinator. Slots count as pending until mounted (see {@link RevealSlot.mount})
- * and are ordered by document position when they have hosts, by registration when none does. A
+ * and are ordered by document position when they have hosts, by registration when none does, or
+ * by the data when `keyed` is given and its `items()` is an array (then hosts are ignored). A
  * slot is released (may show content) once it is ready, or failed under `onError: 'settled'`, and
  * every slot before it in order has been released; under `together` every slot is released at once
  * when all of them are. A released slot stays released even if it suspends again, or leaves the
@@ -209,7 +261,7 @@ export function createRevealCoordinator(
   const released = linkedSignal<
     {
       list: readonly Entry[];
-      part: { list: readonly Entry[]; hold: boolean };
+      part: Participants;
       states: ReadonlyMap<Entry, RevealSlotState>;
       order: RevealOrder;
       onError: RevealOnError;
@@ -219,8 +271,12 @@ export function createRevealCoordinator(
     source: () => {
       layout();
       const list = entries();
-      // one snapshot: positions are read here, once per fold
-      const part = participate(list);
+      const items = opt?.keyed?.items();
+      // one snapshot: keys or positions are read here, once per fold
+      const part =
+        items !== undefined
+          ? participateKeyed(list, items, opt?.keyed?.track ?? identity)
+          : participate(list);
       return {
         list,
         part,
@@ -257,8 +313,8 @@ export function createRevealCoordinator(
   return {
     collapsed,
     relayout: () => layout.update((v) => v + 1),
-    register(state, host = null) {
-      const entry: Entry = { state, mounted: signal(false), host };
+    register(state, host = null, item = null) {
+      const entry: Entry = { state, mounted: signal(false), host, item };
       let left = false;
       entries.update((list) => [...list, entry]);
       return {
@@ -295,16 +351,18 @@ export function severReveal(): Provider {
  * leaving it when the boundary is destroyed. Returns `null` when there is none. Call it from a
  * boundary (a directive or component, so the slot takes its host element's place in document
  * order) that also provides {@link severReveal}, and call the slot's `mount()` from the boundary's
- * `ngAfterViewInit`.
+ * `ngAfterViewInit`. Pass `item` (the boundary's data, read reactively) so a keyed coordinator can
+ * place the slot; a positional one ignores it.
  */
 export function injectRevealSlot(
   state: () => RevealSlotState,
+  opts?: { readonly item?: () => unknown },
 ): RevealSlot | null {
   const coordinator = inject(REVEAL, { optional: true, skipSelf: true });
   if (!coordinator) return null;
   const host = inject(ElementRef, { optional: true })?.nativeElement as
     RevealHost | undefined;
-  const slot = coordinator.register(state, host ?? null);
+  const slot = coordinator.register(state, host ?? null, opts?.item ?? null);
   inject(DestroyRef).onDestroy(() => slot.unregister());
   return slot;
 }

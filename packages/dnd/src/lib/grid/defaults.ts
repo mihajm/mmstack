@@ -1,11 +1,12 @@
-import { createDefaultsToken } from '../provide';
+import type { TouchActivation } from '../internal/touch-activation';
+import { createDefaultsToken, injectTouchActivationDefault } from '../provide';
 import type { ReorderableAnimation } from '../sortable/types';
 
 /**
  * DI-settable {@link placementGrid} defaults — the cross-cutting, non-identity
  * options (never `key`/`cols`/`group`/callbacks). A per-call option always
- * wins. (No `provideDndDefaults` inheritance: the only cross-primitive
- * default today is `engine`, which a placement grid doesn't have.)
+ * wins. Inherits `touchActivation` from `provideDndDefaults` (a placement
+ * grid has no `engine`).
  */
 export type PlacementGridDefaults = {
   /** Default gap between cells, px. */
@@ -24,6 +25,8 @@ export type PlacementGridDefaults = {
     | false;
   /** Default activation distance in px. */
   activationThreshold?: number;
+  /** Default touch long-press (or `false` to keep it off). */
+  touchActivation?: TouchActivation | false;
   /** Default keyboard announcement (or `false` to disable). */
   announcePlace?:
     | false
@@ -38,6 +41,7 @@ export type PlacementGridDefaults = {
 
 const placementGridDefaults = createDefaultsToken<PlacementGridDefaults>(
   '@mmstack/dnd:placement-grid-defaults',
+  injectTouchActivationDefault,
 );
 /** Register `placementGrid` option defaults (a per-call option always wins). */
 export const providePlacementGridDefaults = placementGridDefaults.provide;

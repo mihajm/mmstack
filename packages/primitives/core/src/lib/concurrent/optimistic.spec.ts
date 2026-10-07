@@ -82,7 +82,7 @@ describe('guessable (live tier): pins', () => {
     expect(n()).toBe('3');
   });
 
-  it('a reconcile on the node replaces every open guess at once (live tier: authoritative writes bury)', () => {
+  it('a reconcile on the node resolves its own guess and replaces every other open guess at once', () => {
     const n = guessable(signal('n0'));
     const a = createTransaction();
     a.guess(n, '1');
@@ -178,6 +178,54 @@ describe('guessable (live tier): pins', () => {
     expect(n()).toBe('on');
     t.clear();
     expect(n()).toBe('off');
+  });
+});
+
+describe('guessable: writes inside the guessing transaction', () => {
+  it('resolve the guess to the value the signal stored, even when its equality rejects the write', () => {
+    const original = { id: 1, label: 'original' };
+    const truth = signal(original, { equal: (a, b) => a.id === b.id });
+    const n = guessable(truth);
+    const t = createTransaction();
+    t.guess(n, { id: 1, label: 'optimistic' });
+    expect(n().label).toBe('optimistic');
+    t.enter(() => n.set({ id: 1, label: 'server' }));
+    expect(truth()).toBe(original); // rejected as equal
+    expect(n()).toBe(original); // the resolved guess is what the signal holds
+    t.clear();
+    expect(n()).toBe(original);
+  });
+
+  it('resolve the guess to an accepted write', () => {
+    const n = guessable(signal('n0'));
+    const t = createTransaction();
+    t.guess(n, 'g');
+    t.enter(() => n.set('server'));
+    expect([n(), n.truth()]).toEqual(['server', 'server']);
+    t.clear();
+    expect(n()).toBe('server');
+  });
+
+  it('update resolves the guess too, and applies to the truth, not the guess on screen', () => {
+    const n = guessable(signal('n0'));
+    const t = createTransaction();
+    t.guess(n, 'g');
+    t.enter(() => n.update((v) => `${v}!`));
+    expect([n(), n.truth()]).toEqual(['n0!', 'n0!']);
+    t.restore();
+    expect(n()).toBe('n0'); // aborted: the truth rolls back and the guess ends
+  });
+
+  it('a write outside tx.enter (after an await, say) is outside the transaction: it buries the guess', () => {
+    const n = guessable(signal('n0'));
+    const t = createTransaction();
+    t.guess(n, 'g');
+    n.set('server'); // no slice of t is running
+    expect(n()).toBe('server');
+    t.guess(n, 'g2');
+    expect(n()).toBe('g2'); // a later guess shows over the plain truth
+    t.clear();
+    expect(n()).toBe('server');
   });
 });
 

@@ -127,4 +127,32 @@ describe('engine-discriminated options (compile-time safety)', () => {
     };
     void bad;
   });
+
+  it('touchActivation is pointer-only on reorderable and draggable', () => {
+    const pointerR: ReorderableOptions<Card, string> = {
+      key: (c) => c.id,
+      engine: 'pointer',
+      touchActivation: { delay: 250 },
+    };
+    const pointerD: CreateDraggableOptions<Card> = {
+      data: card,
+      engine: 'pointer',
+      touchActivation: false,
+    };
+    expect(pointerR.touchActivation).toEqual({ delay: 250 });
+    expect(pointerD.touchActivation).toBe(false);
+
+    // @ts-expect-error `touchActivation` is pointer-only
+    const badR: ReorderableOptions<Card, string> = {
+      key: (c) => c.id,
+      touchActivation: { delay: 250 },
+    };
+    // @ts-expect-error `touchActivation` is pointer-only
+    const badD: CreateDraggableOptions<Card> = {
+      data: card,
+      touchActivation: { delay: 250 },
+    };
+    void badR;
+    void badD;
+  });
 });

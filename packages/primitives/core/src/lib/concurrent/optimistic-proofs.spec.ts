@@ -7,7 +7,12 @@
  * tier's mechanism is a small machine replayed against it over generated traces.
  *
  * - Live tier: a guess is a live write with its own revert-always stamp, kept in a per-node guess
- *   history. Every reader sees it. Any later authoritative write buries it for good.
+ *   history. Every reader sees it. A foreign authoritative write buries it for good. A body's own
+ *   write on a node it guessed is the guess's resolution: it records the truth beneath as usual and
+ *   refines the body's guess to the written value (still a guess, still gone at settlement), burying
+ *   every other guess on that node. A refined guess equals the truth beneath it, so it ranks below
+ *   every genuine guess and never hides one. So a held reader never drops back to the frozen truth
+ *   mid-save, and unheld readers see exactly what they would if the write had buried the guess.
  * - Overlay tier: one fork per body over a base record, reconciled with the real `merge3`, read
  *   through a facade that folds the open forks over the base in open order. Base readers never see
  *   a guess. Forks are discarded at settlement, never committed.
@@ -129,20 +134,21 @@ class Oracle {
     number,
     { n: string; pre: { v: string; id: number }; last: number }[]
   >();
+  /** `v` is what the body laid (the overlay tier's view); `lv` is the live tier's, refined by own writes. */
   private readonly guesses: {
     b: number;
     order: number;
     gen: number;
     n: string;
     v: string;
-    time: number;
+    lv: string;
+    buried: boolean;
+    refined: boolean;
   }[] = [];
-  private readonly lastAuth = new Map<string, number>();
   private readonly order = new Map<number, number>();
   private readonly gen = new Map<number, number>();
   private readonly settledGuesses = new Map<number, string[]>();
   private id = 0;
-  private clock = 0;
 
   constructor(nodes: readonly string[]) {
     for (const n of nodes)
@@ -162,10 +168,26 @@ class Oracle {
       gen,
       n,
       v,
-      time: ++this.clock,
+      lv: v,
+      buried: false,
+      refined: false,
     });
   }
+  /** Live tier: a write by a body with a visible guess on the node refines its latest one. */
+  ownGuess(b: number, n: string) {
+    let own: Oracle['guesses'][number] | undefined;
+    for (const g of this.guesses)
+      if (g.b === b && g.n === n && !g.buried && (!own || g.gen > own.gen))
+        own = g;
+    return own;
+  }
   write(b: number, n: string, v: string) {
+    const own = this.ownGuess(b, n);
+    for (const g of this.guesses) if (g.n === n && g !== own) g.buried = true;
+    if (own) {
+      own.lv = v;
+      own.refined = true;
+    }
     this.nextGen(b);
     // one entry per write (each write is its own slice), as the real ledger keeps them
     const e = { n, pre: this.truthCells.get(n)!, last: 0 };
@@ -173,6 +195,7 @@ class Oracle {
     e.last = this.setTruth(n, v);
   }
   foreign(n: string, v: string) {
+    for (const g of this.guesses) if (g.n === n) g.buried = true;
     this.setTruth(n, v);
   }
   settle(b: number, k: SettleKind) {
@@ -191,35 +214,50 @@ class Oracle {
   truth(n: string): string {
     return this.truthCells.get(n)!.v;
   }
-  /** Live tier: the most recent open guess laid after the node's last authoritative write. */
+  /** Live tier: the most recent open, unburied guess (its refined value), else the truth. */
   live(n: string): string {
     return this.liveGuess(n) ?? this.truth(n);
   }
   liveGuess(n: string): string | undefined {
-    const since = this.lastAuth.get(n) ?? 0;
-    return this.top(n, (g) => g.time > since);
+    return this.top(n, (g) => !g.buried, true)?.lv;
+  }
+  /** The live tier's most recent open genuine (never refined) guess on `n`. */
+  genuineTop(n: string): string | undefined {
+    return this.top(n, (g) => !g.buried && !g.refined)?.lv;
+  }
+  /** Whether a refined guess and a genuine one are open on `n` at once (the case precedence decides). */
+  refinedTop(n: string): boolean {
+    const open = this.guesses.filter((g) => g.n === n && !g.buried);
+    return open.some((g) => g.refined) && open.some((g) => !g.refined);
   }
   /** Overlay tier facade: the most recent open guess shadows truth until its body settles. */
   overlay(n: string): string {
-    return this.top(n, () => true) ?? this.truth(n);
+    return this.top(n, () => true)?.v ?? this.truth(n);
   }
   /** Every guess value of a settled body (for the no-phantom property). */
   settledGuessValues(): Set<string> {
     return new Set([...this.settledGuesses.values()].flat());
   }
 
-  private top(n: string, keep: (g: Oracle['guesses'][number]) => boolean) {
+  /** `refinedBelow`: the live tier's rule, a refined guess loses to every genuine one. */
+  private top(
+    n: string,
+    keep: (g: Oracle['guesses'][number]) => boolean,
+    refinedBelow = false,
+  ) {
     let best: Oracle['guesses'][number] | undefined;
     for (const g of this.guesses) {
       if (g.n !== n || !keep(g)) continue;
-      if (
-        !best ||
+      if (!best) best = g;
+      else if (refinedBelow && g.refined !== best.refined) {
+        if (best.refined) best = g;
+      } else if (
         g.order > best.order ||
         (g.order === best.order && g.gen > best.gen)
       )
         best = g;
     }
-    return best?.v;
+    return best;
   }
   private nextGen(b: number) {
     const g = this.gen.get(b)! + 1;
@@ -229,7 +267,6 @@ class Oracle {
   private setTruth(n: string, v: string) {
     const id = ++this.id;
     this.truthCells.set(n, { v, id });
-    this.lastAuth.set(n, ++this.clock);
     return id;
   }
 }
@@ -245,7 +282,13 @@ type Cell = {
   readonly id: number;
   readonly kind: Kind;
 };
-type GuessEntry = { b: number; order: number; gen: number; v: string };
+type GuessEntry = {
+  b: number;
+  order: number;
+  gen: number;
+  v: string;
+  refined?: boolean;
+};
 type GuessState = { hist: GuessEntry[]; truth: Cell; mine: Cell };
 
 type LiveOpts = {
@@ -261,6 +304,13 @@ type LiveOpts = {
   readonly bypass: 'none' | 'reads' | 'both';
   /** true: a guess is an ordinary recorded write, kept on completion (write-then-rollback). */
   readonly wtr: boolean;
+  /**
+   * A body's own write on a node it guessed: bury its guess like any write, keep the guess as laid
+   * (the truth lands beneath it), or refine the guess to the written value.
+   */
+  readonly ownWrite: 'bury' | 'keep' | 'refine';
+  /** Where a refined guess ranks: below every genuine guess, or by its body's order like any guess. */
+  readonly refinedRank: 'below' | 'body';
 };
 const LIVE: LiveOpts = {
   detect: 'stamp',
@@ -269,6 +319,8 @@ const LIVE: LiveOpts = {
   recordDisplayed: false,
   bypass: 'both',
   wtr: false,
+  ownWrite: 'refine',
+  refinedRank: 'below',
 };
 
 class LiveMachine {
@@ -349,6 +401,24 @@ class LiveMachine {
         return this.apply(n, g);
       }
     }
+    if (g && this.o.ownWrite !== 'bury' && !this.o.recordDisplayed) {
+      const own = g.hist.filter((e) => e.b === b).at(-1);
+      if (own) {
+        // the truth is recorded beneath as any write; only the guess layer changes
+        this.nextGen(b);
+        const pre = g.truth;
+        this.audit.push(pre);
+        const c = this.cell(v, 'auth');
+        g.truth = c;
+        this.logs.get(b)!.push({ n, pre, last: c });
+        if (this.o.ownWrite === 'refine') {
+          own.v = v;
+          own.refined = true;
+        }
+        g.hist = [own];
+        return this.apply(n, g);
+      }
+    }
     this.authWrite(b, n, v, 'auth');
   }
 
@@ -399,9 +469,15 @@ class LiveMachine {
   }
   private apply(n: string, g: GuessState) {
     let top = g.hist[0];
-    for (const e of g.hist)
-      if (e.order > top.order || (e.order === top.order && e.gen > top.gen))
+    for (const e of g.hist) {
+      if (this.o.refinedRank === 'below' && !!e.refined !== !!top.refined) {
+        if (top.refined) top = e;
+      } else if (
+        e.order > top.order ||
+        (e.order === top.order && e.gen > top.gen)
+      )
         top = e;
+    }
     g.mine = this.cell(top.v, 'guess');
     this.cells.set(n, g.mine);
   }
@@ -457,7 +533,9 @@ function runLive(
   };
   let frozenTruth: Map<string, string> | null = null;
   let collided = false;
+  const pending = new Map<string, { b: number; v: string }>();
   trace.forEach((ev, step) => {
+    trackOwnWrites(ev, oracle, pending);
     switch (ev.t) {
       case 'open':
         oracle.open(ev.b);
@@ -504,6 +582,29 @@ function runLive(
           flag('held-visibility', step, `${n}: ${held} != ${wantHeld}`);
       }
     }
+    for (const n of nodes) {
+      const genuine = oracle.genuineTop(n);
+      if (genuine !== undefined && m.display(n) !== genuine)
+        flag(
+          'genuine-hidden',
+          step,
+          `${n}: shows ${m.display(n)} over ${genuine}`,
+        );
+    }
+    for (const [n, w] of pending) {
+      if (m.display(n) !== w.v)
+        flag(
+          'own-write-coherence',
+          step,
+          `${n}: shows ${m.display(n)}, wrote ${w.v}`,
+        );
+      if (m.heldRead(n) !== w.v)
+        flag(
+          'own-write-coherence',
+          step,
+          `${n}: held ${m.heldRead(n)}, wrote ${w.v}`,
+        );
+    }
     if (m.audit.some((c) => c.kind === 'guess'))
       flag(
         'guess-in-undo-log',
@@ -519,6 +620,24 @@ function runLive(
         `${n}: ${m.display(n)} != ${oracle.truth(n)}`,
       );
   return out;
+}
+
+/**
+ * The characterizing property of own writes. After body b writes v on a node it has a visible guess
+ * on, every reader (held or not) shows v until something else touches that node: a foreign write,
+ * another body's write, any new guess on it, or b's settlement. Call before the oracle sees `ev`.
+ */
+function trackOwnWrites(
+  ev: Ev,
+  oracle: Oracle,
+  pending: Map<string, { b: number; v: string }>,
+) {
+  if (ev.t === 'write') {
+    if (oracle.ownGuess(ev.b, ev.n)) pending.set(ev.n, { b: ev.b, v: ev.v });
+    else pending.delete(ev.n);
+  } else if (ev.t === 'foreign' || ev.t === 'guess') pending.delete(ev.n);
+  else if (ev.t === 'settle')
+    for (const [n, w] of [...pending]) if (w.b === ev.b) pending.delete(n);
 }
 
 const NODES = ['n', 'm'] as const;
@@ -840,6 +959,315 @@ describe('optimistic model, live tier', () => {
   });
 });
 
+describe('optimistic model, live tier, own writes', () => {
+  const hold: Ev = { t: 'hold' };
+  const release: Ev = { t: 'release' };
+
+  it('guess, then the server answers the same: a held reader never drops back to the old value', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'B'),
+      write(A, 'B'),
+      settle(A, 'complete'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'B/B',
+      'B/B',
+      'B/n0',
+      'B/B',
+    ]);
+  });
+
+  it('the server answers differently: both readers move to the answer at the write, no flip', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'B'),
+      write(A, 'C'),
+      settle(A, 'complete'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'B/B',
+      'C/C',
+      'C/n0',
+      'C/C',
+    ]);
+  });
+
+  it('a foreign write mid-save still buries the guess: the held reader shows its frozen truth, as before', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'g'),
+      write(A, 's'),
+      foreign('u'),
+      settle(A, 'complete'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'g/g',
+      's/s',
+      'u/n0',
+      'u/n0',
+      'u/u',
+    ]);
+  });
+
+  it('abort after an own write: the truth rolls back and the guess ends, both readers back to the old value', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'g'),
+      write(A, 's'),
+      settle(A, 'abort'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'g/g',
+      's/s',
+      'n0/n0',
+      'n0/n0',
+    ]);
+  });
+
+  it("an own write refines the body's latest guess and buries every other guess on the node", () => {
+    const t = [
+      open(A),
+      open(B),
+      guess(B, 'b'),
+      guess(A, 'a1'),
+      guess(A, 'a2'),
+      write(A, 's'),
+      settle(B, 'fail'),
+      settle(A, 'complete'),
+    ];
+    expect(shown(liveFrames(t, LIVE))).toEqual([
+      'n0',
+      'n0',
+      'b',
+      'b',
+      'b',
+      's',
+      's',
+      's',
+    ]);
+  });
+
+  it('a write by a body without a visible guess on the node is a plain write (buries all, as before)', () => {
+    const t = [
+      open(A),
+      guess(A, 'g'),
+      foreign('u'),
+      write(A, 's'),
+      settle(A, 'abort'),
+    ];
+    expect(shown(liveFrames(t, LIVE))).toEqual(['n0', 'g', 'u', 's', 'u']);
+    expect(shown(liveFrames(t, { ...LIVE, ownWrite: 'bury' }))).toEqual(
+      shown(liveFrames(t, LIVE)),
+    );
+  });
+
+  it('a genuine guess laid after an own write shows over the refined guess, even from an older body', () => {
+    // tx0 opened first; tx1 resolves its own guess; tx0 then guesses: the genuine guess is the news
+    const t = [
+      open(A),
+      open(B),
+      guess(B, 'b'),
+      write(B, 'w'),
+      guess(A, 'a'),
+      settle(B, 'complete'),
+      settle(A, 'fail'),
+    ];
+    expect(shown(liveFrames(t, LIVE))).toEqual([
+      'n0',
+      'n0',
+      'b',
+      'w',
+      'a',
+      'a',
+      'w',
+    ]);
+    expect(shown(liveFrames(t, { ...LIVE, ownWrite: 'bury' }))).toEqual(
+      shown(liveFrames(t, LIVE)),
+    );
+  });
+
+  it('unheld readers see exactly what they saw when own writes buried the guess', () => {
+    let refinedSteps = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const trace = genTrace(seed, {
+        nodes: NODES,
+        bodies: 3,
+        steps: 30,
+        writes: true,
+        holds: true,
+      });
+      const now = new LiveMachine(NODES, LIVE);
+      const before = new LiveMachine(NODES, { ...LIVE, ownWrite: 'bury' });
+      const oracle = new Oracle(NODES);
+      for (const ev of trace) {
+        const fv = ev.t === 'foreign' ? (ev.v ?? oracle.live(ev.n)) : '';
+        if (ev.t === 'open') oracle.open(ev.b);
+        else if (ev.t === 'guess') oracle.guess(ev.b, ev.n, ev.v);
+        else if (ev.t === 'write') oracle.write(ev.b, ev.n, ev.v);
+        else if (ev.t === 'foreign') oracle.foreign(ev.n, fv);
+        else if (ev.t === 'settle') oracle.settle(ev.b, ev.k);
+        for (const mm of [now, before]) {
+          if (ev.t === 'open') mm.open(ev.b);
+          else if (ev.t === 'guess') mm.guess(ev.b, ev.n, ev.v);
+          else if (ev.t === 'write') mm.write(ev.b, ev.n, ev.v);
+          else if (ev.t === 'foreign') mm.foreign(ev.n, fv);
+          else if (ev.t === 'settle') mm.settle(ev.b, ev.k);
+        }
+        for (const n of NODES) {
+          if (oracle.refinedTop(n)) refinedSteps++;
+          expect(now.display(n)).toBe(before.display(n));
+        }
+      }
+    }
+    // non-vacuous: refined guesses sat under genuine ones many times along the way
+    expect(refinedSteps).toBeGreaterThan(100);
+  });
+
+  it('a write by a body whose guess a foreign write buried does not revive it, under a hold', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'g'),
+      foreign('u'),
+      write(A, 's'),
+      settle(A, 'abort'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'g/g',
+      'u/n0',
+      's/n0',
+      'u/n0',
+      'u/u',
+    ]);
+  });
+
+  it('a body whose guess is not on top is still the own writer, under a hold', () => {
+    const t = [
+      open(A),
+      open(B),
+      hold,
+      guess(B, 'b'),
+      guess(A, 'a1'),
+      guess(A, 'a2'),
+      write(A, 's'),
+    ];
+    expect(liveFrames(t, LIVE).at(-1)).toBe('s/s');
+  });
+
+  it("another body's plain write after an own write buries the refined guess: held readers drop to the frozen truth", () => {
+    const t = [
+      open(A),
+      open(B),
+      hold,
+      guess(A, 'g'),
+      write(A, 's'),
+      write(B, 'w'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'n0/n0',
+      'g/g',
+      's/s',
+      'w/n0',
+      'w/w',
+    ]);
+  });
+
+  it("an own write buries another body's refined guess: one refined guess per node at a time", () => {
+    const t = [
+      open(A),
+      open(B),
+      hold,
+      guess(A, 'a'),
+      write(A, 'sa'),
+      guess(B, 'b'),
+      write(B, 'sb'),
+      settle(B, 'complete'),
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'n0/n0',
+      'a/a',
+      'sa/sa',
+      'b/b',
+      'sb/sb',
+      'sb/n0',
+    ]);
+    expect(shown(liveFrames([...t, settle(A, 'complete')], LIVE)).at(-1)).toBe(
+      'sb',
+    );
+  });
+
+  it('several own writes in one save keep refining: held and unheld follow each written value', () => {
+    const t = [
+      open(A),
+      hold,
+      guess(A, 'g'),
+      write(A, 's1'),
+      write(A, 's2'),
+      settle(A, 'complete'),
+      release,
+    ];
+    expect(liveFrames(t, LIVE)).toEqual([
+      'n0/n0',
+      'n0/n0',
+      'g/g',
+      's1/s1',
+      's2/s2',
+      's2/n0',
+      's2/s2',
+    ]);
+  });
+
+  it('the generator reaches own writes under a hold', () => {
+    let ownHeld = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const oracle = new Oracle(NODES);
+      let held = false;
+      for (const ev of genTrace(seed, {
+        nodes: NODES,
+        bodies: 3,
+        steps: 30,
+        writes: true,
+        holds: true,
+      })) {
+        if (ev.t === 'hold') held = true;
+        if (ev.t === 'release') held = false;
+        if (ev.t === 'write' && held && oracle.ownGuess(ev.b, ev.n)) ownHeld++;
+        if (ev.t === 'open') oracle.open(ev.b);
+        if (ev.t === 'guess') oracle.guess(ev.b, ev.n, ev.v);
+        if (ev.t === 'write') oracle.write(ev.b, ev.n, ev.v);
+        if (ev.t === 'foreign') oracle.foreign(ev.n, ev.v ?? oracle.live(ev.n));
+        if (ev.t === 'settle') oracle.settle(ev.b, ev.k);
+      }
+    }
+    expect(ownHeld).toBeGreaterThan(300);
+  });
+});
+
 describe('optimistic model, live tier, killed alternatives', () => {
   const twoBodies = { bodies: 3, steps: 30, writes: true };
 
@@ -940,6 +1368,36 @@ describe('optimistic model, live tier, killed alternatives', () => {
       expect(
         runLive(genTrace(seed, { nodes: NODES, ...twoBodies }), NODES, byValue),
       ).toEqual([]);
+  });
+
+  const withHolds = { ...twoBodies, holds: true };
+
+  it('own writes bury the guess (the shipped rule): the held reader drops back to the old value mid-save', () => {
+    const bury = { ...LIVE, ownWrite: 'bury' as const };
+    const t: Ev[] = [open(A), { t: 'hold' }, guess(A, 'B'), write(A, 'B')];
+    expect(liveFrames(t, bury).at(-1)).toBe('B/n0');
+    expect(liveFrames(t, LIVE).at(-1)).toBe('B/B');
+    expect(
+      findCounterexample('own-write-coherence', bury, withHolds),
+    ).toBeGreaterThan(0);
+  });
+
+  it('own writes keep the guess as laid (L1): a reader keeps a guess the save already knows is wrong', () => {
+    const keep = { ...LIVE, ownWrite: 'keep' as const };
+    const t: Ev[] = [open(A), { t: 'hold' }, guess(A, 'B'), write(A, 'C')];
+    expect(liveFrames(t, keep).at(-1)).toBe('B/B');
+    expect(liveFrames(t, LIVE).at(-1)).toBe('C/C');
+    for (const prop of ['own-write-coherence', 'visibility'])
+      expect(findCounterexample(prop, keep, withHolds)).toBeGreaterThan(0);
+  });
+
+  it('a refined guess ranked by its body: it hides a genuine guess from an older body laid after it', () => {
+    const body = { ...LIVE, refinedRank: 'body' as const };
+    const t = [open(A), open(B), guess(B, 'b'), write(B, 'w'), guess(A, 'a')];
+    expect(shown(liveFrames(t, body)).at(-1)).toBe('w');
+    expect(shown(liveFrames(t, LIVE)).at(-1)).toBe('a');
+    for (const prop of ['genuine-hidden', 'visibility'])
+      expect(findCounterexample(prop, body, withHolds)).toBeGreaterThan(0);
   });
 
   it('no hold bypass: a held reader freezes the pre-guess value', () => {
@@ -1478,7 +1936,9 @@ function runRealLive(trace: readonly Ev[], nodes: readonly string[]) {
   const guesses = new Set<string>();
   const confirmed = new Set<string>();
   let frozenTruth: Map<string, string> | null = null;
+  const pending = new Map<string, { b: number; v: string }>();
   trace.forEach((ev, step) => {
+    trackOwnWrites(ev, oracle, pending);
     let fv: string | undefined;
     if (ev.t === 'foreign' && ev.v === null) {
       fv = oracle.live(ev.n);
@@ -1529,6 +1989,12 @@ function runRealLive(trace: readonly Ev[], nodes: readonly string[]) {
         : oracle.live(n);
       if (held !== wantHeld)
         flag('held-visibility', step, `${n}: ${held} != ${wantHeld}`);
+      const genuine = oracle.genuineTop(n);
+      if (genuine !== undefined && got !== genuine)
+        flag('genuine-hidden', step, `${n}: ${got} over ${genuine}`);
+      const w = pending.get(n);
+      if (w && (got !== w.v || held !== w.v))
+        flag('own-write-coherence', step, `${n}: ${got}/${held}, wrote ${w.v}`);
       if (real.truth(n) !== oracle.truth(n))
         flag('truth', step, `${n}: ${real.truth(n)} != ${oracle.truth(n)}`);
       const t = real.truth(n);

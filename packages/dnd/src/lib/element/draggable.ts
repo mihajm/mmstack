@@ -16,10 +16,15 @@ import {
   type Signal,
 } from '@angular/core';
 import { draggable as pragmaticDraggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
-import { pointerDrag, isServer } from '@mmstack/primitives';
+import { isServer } from '@mmstack/primitives';
 
 import { boxData, extractEdge, mapDropTargets } from '../internal/payload';
 import { resolveElement, resolveSignal } from '../internal/resolve';
+import {
+  gatedPointerDrag,
+  resolveTouchActivation,
+  type TouchActivation,
+} from '../internal/touch-activation';
 import type {
   DragHandleLike,
   DragMeta,
@@ -85,6 +90,13 @@ type DraggableNativeOptions = {
 type DraggablePointerOptions = {
   /** Px the pointer must travel before the drag activates (keeps the element clickable). @default 5 */
   activationThreshold?: number;
+  /**
+   * Touch presses wait for a long-press before they can drag; mouse and pen
+   * start immediately. Until the press activates the page scrolls, so the
+   * element needs no `touch-action: none` of its own. See {@link TouchActivation}.
+   * `false` opts out of a DI default. @default off
+   */
+  touchActivation?: TouchActivation | false;
 };
 
 /**
@@ -118,12 +130,14 @@ export type DraggableRef<TData> = {
   data: Signal<TData>;
 };
 
-/** DI-settable `draggable` defaults; inherits `engine` from {@link provideDndDefaults}. */
+/** DI-settable `draggable` defaults; inherits `engine` and `touchActivation` from {@link provideDndDefaults}. */
 export type DraggableDefaults = {
   /** Default drag engine for draggables. */
   engine?: DragEngine;
   /** Default activation distance in px (pointer engine only). */
   activationThreshold?: number;
+  /** Default touch long-press (pointer engine only). */
+  touchActivation?: TouchActivation | false;
 };
 
 const draggableDefaults = createDefaultsToken<DraggableDefaults>(
@@ -204,9 +218,10 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
       let denied = false;
       // Drive the engine from events: effects can skip the final move, or even
       // an entire gesture, when pointer events arrive between Angular renders.
-      pointerDrag({
+      gatedPointerDrag({
         target,
         activationThreshold: opts.activationThreshold ?? 5,
+        touchActivation: resolveTouchActivation(opts.touchActivation),
         onChange: (g) => {
           if (g.active && g.pointerId !== null) {
             if (denied) return;

@@ -240,7 +240,9 @@ type GuessEntry = {
   readonly b: Id;
   readonly order: number;
   readonly gen: number;
-  readonly v: string;
+  v: string;
+  /** Resolved by its body's own write: equal to the truth beneath, ranked below every genuine guess. */
+  refined?: boolean;
 };
 type GuessState = { hist: GuessEntry[]; truth: Cell; mine: Cell };
 
@@ -437,8 +439,8 @@ class World {
   /** readers mounted on the page or the child scope (two-scope traces) */
   readonly mounted: Reader[] = [];
   /** visibility oracle bookkeeping, independent of the machine (optimistic-proofs `Oracle`) */
-  readonly oGuesses: (GuessEntry & { n: Sig; time: number })[] = [];
-  readonly lastAuth = new Map<Sig, number>();
+  /** The live-tier oracle's guesses: `v` refined by own writes, `buried` by every other write. */
+  readonly oGuesses: (GuessEntry & { n: Sig; buried: boolean })[] = [];
   readonly oOverlay: (GuessEntry & { p: Leaf })[] = [];
   readonly settledGuessers = new Set<Id>();
   baseWritesFromForks = 0;
@@ -758,8 +760,27 @@ class World {
     const by = this.claimWrite(n);
     const v = spec.v ?? `${by}#${++this.ids}${spec.poison ? '!' : ''}`;
     const c = this.cell(v, 'auth', by);
-    this.cells.set(n, c);
-    this.lastAuth.set(n, this.time);
+    // oracle: a write by a body with an open guess here refines its latest one; it buries the rest
+    let ownO: World['oGuesses'][number] | undefined;
+    for (const o of this.oGuesses)
+      if (o.n === n && o.b === by && !o.buried && (!ownO || o.gen > ownO.gen))
+        ownO = o;
+    for (const o of this.oGuesses) if (o.n === n && o !== ownO) o.buried = true;
+    if (ownO) {
+      ownO.v = v;
+      ownO.refined = true;
+    }
+    // machine: optimistic-proofs `LiveMachine.write` with own writes refining
+    const g =
+      this.opt.guessRule === 'history' && by !== 'F' ? this.sync(n) : undefined;
+    const own = g?.hist.filter((e) => e.b === by).at(-1);
+    if (g && own) {
+      g.truth = c;
+      own.v = v;
+      own.refined = true;
+      g.hist = [own];
+      this.apply(n, g);
+    } else this.cells.set(n, c);
     this.noteTruth(n, v, c.s, by, 'auth');
     this.log({ k: 'write', n, v });
   }
@@ -786,7 +807,7 @@ class World {
     this.time++;
     const t = this.txn(cur);
     const gen = ++t.gen;
-    this.oGuesses.push({ b: cur, order: t.order, gen, v, n, time: this.time });
+    this.oGuesses.push({ b: cur, order: t.order, gen, v, n, buried: false });
     if (this.opt.guessRule === 'entry') {
       // a revert-always entry, written live (transaction-proofs `Ledger`, kind 'guess')
       for (const c of this.claimersNow()) this.record(this.txn(c), n, 'guess');
@@ -816,9 +837,15 @@ class World {
   // optimistic-proofs `LiveMachine.apply`
   private apply(n: Sig, g: GuessState): void {
     let top = g.hist[0];
-    for (const e of g.hist)
-      if (e.order > top.order || (e.order === top.order && e.gen > top.gen))
+    for (const e of g.hist) {
+      if (!!e.refined !== !!top.refined) {
+        if (top.refined) top = e;
+      } else if (
+        e.order > top.order ||
+        (e.order === top.order && e.gen > top.gen)
+      )
         top = e;
+    }
     g.mine = this.cell(top.v, 'guess', top.b);
     this.cells.set(n, g.mine);
   }
@@ -1486,14 +1513,15 @@ class World {
 
   // ─── oracles ───────────────────────────────────────────────────────────────────────────
 
-  /** optimistic-proofs `Oracle.liveGuess`: the most recent open guess laid after the last authoritative write. */
+  /** optimistic-proofs `Oracle.liveGuess`: the most recent open unburied guess, refined ones ranked last. */
   liveGuess(n: Sig): string | undefined {
-    const since = this.lastAuth.get(n) ?? 0;
-    let best: (GuessEntry & { time: number }) | undefined;
+    let best: GuessEntry | undefined;
     for (const g of this.oGuesses) {
-      if (g.n !== n || g.time <= since) continue;
-      if (
-        !best ||
+      if (g.n !== n || g.buried) continue;
+      if (!best) best = g;
+      else if (!!g.refined !== !!best.refined) {
+        if (best.refined) best = g;
+      } else if (
         g.order > best.order ||
         (g.order === best.order && g.gen > best.gen)
       )
@@ -2477,7 +2505,7 @@ describe('composition pins: T3 abort under guesses, and the cross-path limit (L2
       w.enter('A', () => w.writeSig('g0'));
       w.enter('B', () => {
         w.guessLive('g0', 'B~1');
-        w.writeSig('g0'); // the reconcile buries the guess
+        w.writeSig('g0'); // the reconcile resolves B's guess to the written value
       });
       const reconciled = shown(w, 'g0');
       w.bodyReturn('B');

@@ -597,7 +597,7 @@ With `order="forwards"` (the default) a boundary shows its content once it is re
 
 Failures follow `onError`. Under `'settled'` (the default) a failed boundary shows its error slot and the ones after it carry on. Under `'blocks'` it shows its error and holds the rest until a retry succeeds, for flows where the order means "this needs that first". Once a boundary has shown its content it stays shown, even if it suspends again later; its own placeholder or busy state takes over as usual.
 
-Only the boundaries directly inside the reveal take part. A boundary nested inside one of them belongs to that boundary, and boundaries are ordered by creation, so one added later by an `@if` goes last. The reveal schedules display and nothing else: held content is created and loads as usual, and a reveal inside a held `*mmTransition` view does its ordering while hidden and shows up with the swap. Compare with Solid 2.0's `<Reveal>`, which this follows. Custom boundaries join through `injectRevealSlot()` and provide `severReveal()` for their content.
+Only the boundaries directly inside the reveal take part. A boundary nested inside one of them belongs to that boundary. Boundaries are ordered by where they are on the page, whether they come from `@if`, `@for` or a plain element, and the order follows them when they move. A boundary that leaves the page (an `@if` turned off, a cached route) stops holding the others and keeps whatever it already showed. One rendered elsewhere (a portal or overlay) orders by where it renders; provide `severReveal()` at the portal host to keep it out. Boundaries inside a shadow root and outside it can't be put in one order: while a reveal spans both, nothing new is shown. The reveal schedules display and nothing else: held content is created and loads as usual, and a reveal inside a held `*mmTransition` view does its ordering while hidden and shows up with the swap. Compare with Solid 2.0's `<Reveal>`, which this follows. A boundary's readiness counts only once it has rendered, so a state seen before its inputs are bound or its content has run can't show it early. Custom boundaries join through `injectRevealSlot()` from their directive or component (so the slot takes its host element's place in the order), call the slot's `mount()` from `ngAfterViewInit`, and provide `severReveal()` for their content. Driving `createRevealCoordinator()` over the DOM without `<mm-reveal>`? Pass each slot's host to `register()` and call `relayout()` after rendering. Until `mount()` is called the slot stays pending and holds the boundaries after it.
 
 ### Per-element morphs — `mmViewTransitionName`
 
@@ -756,18 +756,20 @@ and every `tx.retain()` is released.
 const t = startTransaction(async (tx) => {
   draft.set(next); // before the first await: recorded as usual
   const saved = await api.save(next);
-  tx.enter(() => revision.set(saved.revision)); // re-enter for writes after an await
+  tx.set(revision, saved.revision); // a write after an await, still the transaction's
 });
 const outcome = await t.done; // { kind: 'completed' } | { kind: 'aborted', ... } | { kind: 'failed', ... }
 ```
 
-Code after an `await` runs outside the transaction. `tx.enter(() => ...)` puts it back in for one
-synchronous slice: writes and loads started in the slice are the transaction's. A write you forget
-to wrap still lands and the display stays held, but `abort()` does not undo it. A load Angular
+Code after an `await` runs outside the transaction. Write through it with `tx.set(sig, value)` or
+`tx.update(sig, fn)`: the write is recorded wherever it happens, and a plain `signal()` is recorded
+too, so `abort()` undoes it. `tx.enter(() => ...)` puts a whole synchronous block back in: writes and
+loads started in the block are the transaction's. A plain `sig.set(...)` after an `await` still
+lands and the display stays held, but `abort()` does not undo it. A load Angular
 starts later in response to the slice's writes is attributed by time, like any load started while
 the transaction is open. A rejected body rolls back and settles `failed`; `abort()` or destroying
-the calling context rolls back and settles `aborted`. Once settled, `tx.enter` and `tx.retain`
-throw and the body's later result is ignored, but nothing stops a leftover continuation from
+the calling context rolls back and settles `aborted`. Once settled, `tx.set`, `tx.update`,
+`tx.enter` and `tx.retain` throw and the body's later result is ignored, but nothing stops a leftover continuation from
 writing a signal directly. A `startTransaction` called inside a slice joins the outer transaction:
 its writes, its `abort()` and its `done` are the outer one's. There is no re-trigger policy here;
 for latest-wins or a FIFO queue use `mutationResource`. Reject-while-running and parallel runs are
@@ -800,11 +802,11 @@ const liked = guessable(signal(false));
 const t = startTransaction(async (tx) => {
   tx.guess(liked, true); // everyone sees true now
   const saved = await api.like(postId);
-  tx.enter(() => liked.set(saved.liked)); // the server's answer, recorded
+  tx.set(liked, saved.liked); // the server's answer, recorded
 });
 ```
 
-Readers see the most recent open guess laid after the node's last authoritative write, else the truth. An authoritative write is a `set` or `update` on the guessable (from the body, a user, a refetch, another transaction) or a change of the wrapped signal itself, such as a `linkedSignal` recomputing after a refetch. It replaces every guess laid before it, for good: undoing that write later brings back the truth beneath, never the guess. Equal values count when written through the guessable, so a server confirming the guessed value is not mistaken for no change. A write made directly on the wrapped signal with an equal value is not seen. `update` applies to the truth, not to a guess on screen. Two transactions guessing the same node show the newer one's guess; when either settles the other's guess or the truth shows, never a settled guess.
+Readers see the most recent open guess, else the truth. An authoritative write is a `set` or `update` on the guessable (from the body, a user, a refetch, another transaction) or a change of the wrapped signal itself, such as a `linkedSignal` recomputing after a refetch. A write from outside the transaction that guessed replaces every open guess, for good: undoing that write later brings back the truth beneath, never the guess. A write inside the transaction that laid a guess on that node (`tx.set`, or a write in `tx.enter`, typically the server's answer) resolves the guess instead: it records the truth as any write does, and the guess takes the written value until the transaction settles. So a held reader moves from the guess to the answer and never drops back to the value from before the transaction, while every other reader sees the answer at once. A resolved guess equals the truth beneath it, so a guess laid after it always shows over it. A plain `set` after an `await` (not `tx.set`, not inside `tx.enter`) is outside the transaction. Equal values count when written through the guessable, so a server confirming the guessed value is not mistaken for no change. A write made directly on the wrapped signal with an equal value is not seen. `update` applies to the truth, not to a guess on screen. Two transactions guessing the same node show the newer one's guess; when either settles the other's guess or the truth shows, never a settled guess.
 
 The frozen frame is the truth beneath the guess. `scope.hold(node)` and `scope.commit(node)` read a visible guess live and freeze only the truth, so a hold opened over a guess never keeps showing it after it reverts. A derived value under `hold()` freezes what it computed, guess included; hold the guessable itself where that matters.
 
@@ -817,7 +819,7 @@ const shown = optimisticStore(todos); // read shown.store in the template
 startTransaction(async (tx) => {
   tx.overlay(shown).items.update((xs) => [...xs, draft]); // only shown.store sees it
   await api.add(draft);
-  tx.enter(() => todos.items.update((xs) => [...xs, draft])); // the truth, through the base
+  tx.update(todos.items, (xs) => [...xs, draft]); // the truth, through the base
 });
 ```
 

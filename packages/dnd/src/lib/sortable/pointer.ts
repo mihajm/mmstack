@@ -76,6 +76,7 @@ export function connectPointerContainer<T, K = unknown>(
     {
       handleSelector: HANDLE_SELECTOR,
       activationThreshold: untracked(controller).activationThreshold,
+      touchActivation: untracked(controller).touchActivation ?? false,
       // nested list claims the pointerdown so the outer one doesn't also start a drag (innermost wins).
       stopPropagation: true,
     },

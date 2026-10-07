@@ -1,10 +1,11 @@
+import type { TouchActivation } from '../internal/touch-activation';
 import { createDefaultsToken, injectDndDefaults } from '../provide';
 import type { DragEngine } from '../session';
 import type { ReorderableAnimation, ReorderableAxis } from './types';
 
 /**
  * DI-settable `reorderable` defaults — the cross-cutting, non-identity options
- * (never `key`/`group`/callbacks). Inherits `engine` from {@link provideDndDefaults};
+ * (never `key`/`group`/callbacks). Inherits `engine` and `touchActivation` from {@link provideDndDefaults};
  * a per-call option always wins.
  */
 export type ReorderableDefaults = {
@@ -16,6 +17,8 @@ export type ReorderableDefaults = {
   deadband?: number;
   /** Default activation distance in px (pointer engine only). */
   activationThreshold?: number;
+  /** Default touch long-press (pointer engine only; inherits {@link provideDndDefaults}). */
+  touchActivation?: TouchActivation | false;
   /** Default during-drag reflow glide (or `false` for instant). */
   animation?: ReorderableAnimation | false;
   /** Default edge auto-scroll config (or `false` to keep it off). */

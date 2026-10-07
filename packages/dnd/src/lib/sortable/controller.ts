@@ -9,6 +9,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 
+import { resolveTouchActivation } from '../internal/touch-activation';
 import { withDefaults } from '../provide';
 import type { DragEngine } from '../session';
 import { injectReorderableDefaults } from './defaults';
@@ -80,6 +81,8 @@ export function reorderable<T, K>(
   const deadband = options.deadband ?? 4;
   const engine: DragEngine = options.engine ?? 'native';
   const activationThreshold = options.activationThreshold ?? 5;
+  const touchActivation =
+    engine === 'pointer' ? resolveTouchActivation(options.touchActivation) : null;
   // The per-call union forbids these, but a DI default can flip the engine under an engine-specific option.
   if (isDevMode()) {
     if (engine === 'pointer' && (options.insert || options.onItemInserted)) {
@@ -90,6 +93,11 @@ export function reorderable<T, K>(
     if (engine === 'native' && options.activationThreshold !== undefined) {
       console.warn(
         '[@mmstack/dnd] reorderable: `activationThreshold` is a pointer-engine option and is ignored under engine "native" (was the engine flipped by a DI default?).',
+      );
+    }
+    if (engine === 'native' && raw.touchActivation) {
+      console.warn(
+        '[@mmstack/dnd] reorderable: `touchActivation` is a pointer-engine option and is ignored under engine "native" (the browser owns touch activation there).',
       );
     }
     if (engine === 'native' && wrap) {
@@ -578,6 +586,7 @@ export function reorderable<T, K>(
     autoScroll,
     animation,
     activationThreshold,
+    touchActivation,
     itemState,
     register: (k, el) => {
       byKey.set(k, el);

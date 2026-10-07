@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import type { Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 
+import type { TouchActivation } from './internal/touch-activation';
 import type { Edge } from './internal/types';
 import type { DragEngine } from './session';
 
@@ -233,20 +234,39 @@ export function withDefaults<T extends object>(
   return out;
 }
 
-/** Cross-primitive defaults — set once, inherited by draggable / dropTarget / reorderable. */
+/** Cross-primitive defaults: set once, inherited by every primitive that has the option. */
 export type DndDefaults = {
   /** Default drag engine for every primitive unless a per-primitive default or per-call option overrides. */
   engine?: DragEngine;
+  /**
+   * Touch long-press for every pointer-driven primitive (pointer-engine
+   * `reorderable` and `draggable`, `placementGrid`, `canvas`, `movable`).
+   * Native-engine primitives ignore it. Pass `false` per primitive or per call
+   * to opt one back out. See {@link TouchActivation}.
+   */
+  touchActivation?: TouchActivation | false;
 };
 
 const dndDefaults = createDefaultsToken<DndDefaults>('@mmstack/dnd:defaults');
 
 /**
- * Register cross-primitive option defaults (currently `engine`). Inherited by
- * every primitive; a per-primitive `provideXDefaults` or a per-call option wins.
+ * Register cross-primitive option defaults (`engine`, `touchActivation`).
+ * Inherited by every primitive; a per-primitive `provideXDefaults` or a
+ * per-call option wins.
  *
  * @example provideDndDefaults({ engine: 'pointer' }) // every list/draggable goes pointer-mode
+ * @example provideDndDefaults({ touchActivation: { delay: 250 } }) // long-press to drag on touch
  */
 export const provideDndDefaults = dndDefaults.provide;
 /** Read the cross-primitive defaults (or `null`). @see {@link provideDndDefaults} */
 export const injectDndDefaults = dndDefaults.inject;
+
+/** @internal the common `touchActivation` default only, for primitives that have no `engine`. */
+export function injectTouchActivationDefault(
+  injector?: Injector,
+): { touchActivation?: TouchActivation | false } | null {
+  const common = injectDndDefaults(injector);
+  return common?.touchActivation === undefined
+    ? null
+    : { touchActivation: common.touchActivation };
+}

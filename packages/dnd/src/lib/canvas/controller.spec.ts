@@ -432,6 +432,115 @@ describe('canvas controller', () => {
       ctrl.selection.set(['a', 'b']);
       expect(ctrl.nudgeResize(1, 0, false)).toBe(false);
     });
+
+    describe('within bounds', () => {
+      const frameOf = (source: () => readonly Widget[], id: string) =>
+        source().find((i) => i.id === id)?.frame;
+
+      it('clamps the selection union like a pointer move, keeping relative offsets', () => {
+        const commits: CanvasCommitEvent<Widget, string>[] = [];
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: { x: 0, y: 0, width: 300, height: 300 },
+          onCommit: (e) => commits.push(e),
+        });
+        ctrl.selection.set(['a', 'b']); // union x 100..240
+        expect(ctrl.nudge(1, 0, true)).toBe(true); // +80 would end at 320
+        expect(frameOf(source, 'a')?.x).toBe(160);
+        expect(frameOf(source, 'b')?.x).toBe(260);
+        expect(commits).toHaveLength(1);
+        expect(commits[0].patches.get('b')?.x).toBe(260);
+      });
+
+      it('a nudge pinned against the edge commits nothing', () => {
+        const commits: CanvasCommitEvent<Widget, string>[] = [];
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: { x: 0, y: 0, width: 140, height: 140 },
+          onCommit: (e) => commits.push(e),
+        });
+        ctrl.selection.set(['a']); // 100..140: already at the right and bottom edges
+        expect(ctrl.nudge(1, 0, false)).toBe(false);
+        expect(ctrl.nudge(0, 1, true)).toBe(false);
+        expect(frameOf(source, 'a')).toMatchObject({ x: 100, y: 100 });
+        expect(commits).toHaveLength(0);
+        // the free axis still moves
+        expect(ctrl.nudge(-1, 0, false)).toBe(true);
+        expect(frameOf(source, 'a')?.x).toBe(92);
+      });
+
+      it('a partial step lands exactly on the edge, then stops', () => {
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: { x: 0, y: 0, width: 1000, height: 1000 },
+        });
+        ctrl.selection.set(['a']);
+        expect(ctrl.nudge(-1, 0, true)).toBe(true); // 100 → 20
+        expect(ctrl.nudge(-1, 0, true)).toBe(true); // 20 → 0, not -60
+        expect(frameOf(source, 'a')?.x).toBe(0);
+        expect(ctrl.nudge(-1, 0, false)).toBe(false);
+        expect(frameOf(source, 'a')?.x).toBe(0);
+      });
+
+      it('a keyboard resize is cut at the bounds edge, like a pointer resize', () => {
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: { x: 0, y: 0, width: 380, height: 1000 },
+        });
+        ctrl.selection.set(['c']); // 300,300 60×60
+        expect(ctrl.nudgeResize(1, 1, true)).toBe(true); // +80 each
+        expect(frameOf(source, 'c')).toMatchObject({ width: 80, height: 140 });
+        expect(ctrl.nudgeResize(1, 0, false)).toBe(false); // width pinned
+        expect(ctrl.nudgeResize(0, 1, false)).toBe(true); // height still free
+        expect(frameOf(source, 'c')).toMatchObject({ width: 80, height: 148 });
+      });
+
+      it('bounds shrunk past an item never produce a negative size: growth stops, shrinking still works', () => {
+        const box = signal({ x: 0, y: 0, width: 300, height: 300 });
+        const commits: CanvasCommitEvent<Widget, string>[] = [];
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: () => box(),
+          onCommit: (e) => commits.push(e),
+        });
+        ctrl.selection.set(['b']); // 200,100 40×40
+        box.set({ x: 0, y: 0, width: 150, height: 120 }); // b's origin is past the right edge
+        expect(ctrl.nudgeResize(1, 0, false)).toBe(false); // no room to grow
+        expect(ctrl.nudgeResize(0, 1, false)).toBe(false); // 20px of room, smaller than b already is
+        expect(frameOf(source, 'b')).toMatchObject({ width: 40, height: 40 });
+        expect(commits).toHaveLength(0);
+        expect(ctrl.nudgeResize(-1, 0, false)).toBe(true);
+        expect(ctrl.nudgeResize(0, -1, false)).toBe(true);
+        expect(frameOf(source, 'b')).toMatchObject({ width: 32, height: 32 });
+        for (const c of commits)
+          for (const f of c.patches.values()) {
+            expect(f.width).toBeGreaterThan(0);
+            expect(f.height).toBeGreaterThan(0);
+          }
+      });
+
+      it('reads bounds live when given as a getter', () => {
+        const box = signal({ x: 0, y: 0, width: 150, height: 150 });
+        const { source, ctrl } = setup({
+          grid: { size: 8 },
+          bounds: () => box(),
+        });
+        ctrl.selection.set(['a']);
+        expect(ctrl.nudge(1, 0, true)).toBe(true);
+        expect(frameOf(source, 'a')?.x).toBe(110);
+        box.set({ x: 0, y: 0, width: 400, height: 400 });
+        expect(ctrl.nudge(1, 0, true)).toBe(true);
+        expect(frameOf(source, 'a')?.x).toBe(190);
+      });
+
+      it('without bounds a nudge is unclamped', () => {
+        const { source, ctrl } = setup({ grid: { size: 8 } });
+        ctrl.selection.set(['a']);
+        expect(ctrl.nudge(-1, 0, true)).toBe(true);
+        expect(ctrl.nudge(-1, 0, true)).toBe(true);
+        expect(frameOf(source, 'a')?.x).toBe(-60);
+      });
+    });
   });
 });
 
@@ -489,7 +598,11 @@ describe('canvas — store seam (op-log / undo)', () => {
     const { s, ctrl, history, els } = setupStore();
     const el = els.get('a') as HTMLElement;
 
-    ctrl.beginFromPress({ mode: 'move', itemEl: el }, { x: 105, y: 105 }, false);
+    ctrl.beginFromPress(
+      { mode: 'move', itemEl: el },
+      { x: 105, y: 105 },
+      false,
+    );
     ctrl.move({ x: 145, y: 125 });
     ctrl.end();
     TestBed.tick();

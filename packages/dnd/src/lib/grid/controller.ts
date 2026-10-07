@@ -9,6 +9,11 @@ import {
   type WritableSignal,
 } from '@angular/core';
 
+import {
+  resolveTouchActivation,
+  type ResolvedTouchActivation,
+  type TouchActivation,
+} from '../internal/touch-activation';
 import { withDefaults } from '../provide';
 import {
   insertIndexForMeasure,
@@ -124,10 +129,22 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
   readonly animation?: ReorderableAnimation | false;
   /** Opt-in edge auto-scroll (both axes) while dragging. */
   readonly autoScroll?:
-    | { edge?: number; speed?: number; edgeProportion?: number; maxSpeedAt?: number }
+    | {
+        edge?: number;
+        speed?: number;
+        edgeProportion?: number;
+        maxSpeedAt?: number;
+      }
     | false;
   /** Px the pointer must travel before a drag activates. @default 5 */
   readonly activationThreshold?: number;
+  /**
+   * Touch presses wait for a long-press before they can drag; mouse and pen
+   * start immediately. Items and grips then use `touch-action: manipulation`
+   * so the page scrolls until the press activates. See {@link TouchActivation}.
+   * `false` opts out of a DI default. @default off
+   */
+  readonly touchActivation?: TouchActivation | false;
   readonly injector?: Injector;
   /** After a move commits (drop or keyboard). */
   readonly onPlace?: (event: {
@@ -168,8 +185,19 @@ export type PlacementGridController<
    * restyle the dragged item to preview what it will become there.
    */
   readonly crossTarget: Signal<boolean>;
-  /** The active gesture's projected cell, or `null` (never-valid / idle). */
+  /**
+   * The active move's projected cell, or `null` (idle, resizing, never-valid,
+   * or the pointer is outside the grid).
+   */
   readonly projectedCell: Signal<{ x: number; y: number } | null>;
+  /**
+   * The active move's pointer is outside the grid, so releasing now cancels
+   * the move: the preview shows the original layout and the source is not
+   * written. The test uses the grid box as it was at drag start (shifted by
+   * auto-scroll), not the box the preview grows or shrinks to, so it depends
+   * on the pointer position alone. Always `false` when idle and during a resize.
+   */
+  readonly dropOutside: Signal<boolean>;
   /**
    * A foreign group drag hovering THIS grid, projected to the rect it would
    * occupy on drop — `null` when idle, not hovered, or the drop would be
@@ -186,7 +214,13 @@ export type PlacementGridController<
   readonly targetMask: Signal<Uint8Array | null>;
   readonly keyboard: boolean;
   readonly announcePlace:
-    | ((event: { item: T; x: number; y: number; w: number; h: number }) => string)
+    | ((event: {
+        item: T;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+      }) => string)
     | null;
   readonly animation: { duration: number; easing: string } | null;
   readonly autoScroll: {
@@ -196,6 +230,8 @@ export type PlacementGridController<
     maxSpeedAt?: number;
   } | null;
   readonly activationThreshold: number;
+  /** Resolved touch long-press, or `null` when off. */
+  readonly touchActivation: ResolvedTouchActivation | null;
   readonly group?: SortableGroup<T>;
   itemState(item: () => T): PlacementGridItemState<K>;
   /** Keyboard commit: move the item one step (clamped/validated). */
@@ -214,7 +250,10 @@ export type PlacementGridController<
   ): void;
   /** @internal feed a pointer move (viewport coords). */
   move(point: { x: number; y: number }): void;
-  /** @internal end the drag, committing the preview (or a cross-container transfer). */
+  /**
+   * @internal end the drag, committing the preview (or a cross-container
+   * transfer); a move released outside the grid commits nothing.
+   */
   end(): void;
   cancel(): void;
   dispose(): void;
@@ -254,12 +293,11 @@ export function placementGrid<T extends GridPlacement, K>(
   const groupApi = group ? getGroupInternals(group) : null;
   const cols = resolveNum(options.cols, 12);
   const gap = resolveNum(options.gap, 0);
-  const rowHeight = options.rowHeight
-    ? resolveNum(options.rowHeight, 0)
-    : null;
+  const rowHeight = options.rowHeight ? resolveNum(options.rowHeight, 0) : null;
   const compact = options.compact ?? 'vertical';
   const keyboard = options.keyboard ?? true;
   const activationThreshold = options.activationThreshold ?? 5;
+  const touchActivation = resolveTouchActivation(options.touchActivation);
   const announcePlace =
     options.announcePlace === false
       ? null
@@ -292,6 +330,8 @@ export function placementGrid<T extends GridPlacement, K>(
   const pointerY = signal(0);
   const scrollX = signal(0);
   const scrollY = signal(0);
+  const outside = signal(false);
+  let startRows = 0;
   let snap: PlacementDragSnapshot | null = null;
   let dragStartItems: readonly T[] | null = null;
   let dragStartItem: T | null = null;
@@ -300,7 +340,10 @@ export function placementGrid<T extends GridPlacement, K>(
     arr.findIndex((i) => key(i) === k);
 
   const placeGate = (item: T, x: number, y: number, items: readonly T[]) => {
-    if (compact === 'none' && !canPlaceAt(items, key, key(item), x, y, item.w, item.h, cols())) {
+    if (
+      compact === 'none' &&
+      !canPlaceAt(items, key, key(item), x, y, item.w, item.h, cols())
+    ) {
       return false;
     }
     // untracked: a consumer predicate may read its own signals — the preview
@@ -331,7 +374,10 @@ export function placementGrid<T extends GridPlacement, K>(
         const dy = snap.direction !== 'e' ? py - snap.startY : 0;
         const wPx = it.w * stepX() - snap.gap + dx;
         const hPx = it.h * stepY() - snap.gap + dy;
-        const w = Math.max(1, Math.min(Math.round((wPx + snap.gap) / stepX()), cols() - it.x));
+        const w = Math.max(
+          1,
+          Math.min(Math.round((wPx + snap.gap) / stepX()), cols() - it.x),
+        );
         const h = Math.max(1, Math.round((hPx + snap.gap) / stepY()));
         if (prev?.value && prev.value.x === w && prev.value.y === h) {
           return prev.value;
@@ -349,9 +395,10 @@ export function placementGrid<T extends GridPlacement, K>(
       const cx = Math.round((basePxX + (px - snap.startX)) / stepX());
       const cy = Math.round((basePxY + (py - snap.startY)) / stepY());
       const x = Math.max(0, Math.min(cx, cols() - it.w));
-      const maxY =
-        compact === 'none' ? gridRows(dragStartItems) : Number.POSITIVE_INFINITY;
-      const y = Math.max(0, Math.min(cy, maxY));
+      // one band below the occupied rows is every distinct outcome (gravity
+      // settles anything deeper the same way); it also bounds the grid's
+      // growth, so a pointer far below stays outside the grid
+      const y = Math.max(0, Math.min(cy, gridRows(dragStartItems)));
       if (prev?.value && prev.value.x === x && prev.value.y === y) {
         return prev.value;
       }
@@ -365,6 +412,7 @@ export function placementGrid<T extends GridPlacement, K>(
   const previewLayout = computed<readonly T[]>(() => {
     const k = activeKey();
     if (k === null) return source();
+    if (outside()) return dragStartItems ?? source();
     const p = projected();
     if (!p || !snap || !dragStartItems) return dragStartItems ?? source();
     if (snap.kind === 'resize') {
@@ -408,15 +456,18 @@ export function placementGrid<T extends GridPlacement, K>(
     x: number,
     y: number,
   ): { x: number; y: number } | null => {
-    const b = boundsCache ?? (container ? container.getBoundingClientRect() : null);
+    const b =
+      boundsCache ?? (container ? container.getBoundingClientRect() : null);
     if (!b) return null;
     const g = gap();
     const c = cols();
     const cellW = (b.width - g * (c - 1)) / c;
     const cellH = rowHeight ? rowHeight() : cellW;
     if (cellW <= 0) return null;
-    const cx = Math.floor((x - b.left) / (cellW + g)) - Math.floor((item.w - 1) / 2);
-    const cy = Math.floor((y - b.top) / (cellH + g)) - Math.floor((item.h - 1) / 2);
+    const cx =
+      Math.floor((x - b.left) / (cellW + g)) - Math.floor((item.w - 1) / 2);
+    const cy =
+      Math.floor((y - b.top) / (cellH + g)) - Math.floor((item.h - 1) / 2);
     return {
       x: Math.max(0, Math.min(cx, c - item.w)),
       y: Math.max(0, cy),
@@ -432,7 +483,10 @@ export function placementGrid<T extends GridPlacement, K>(
   const incomingCell = computed<(GridPlacement & { key: K }) | null>(
     () => {
       if (!groupApi) return null;
-      if (groupApi.activeTarget() !== self || groupApi.activeSource() === self) {
+      if (
+        groupApi.activeTarget() !== self ||
+        groupApi.activeSource() === self
+      ) {
         return null;
       }
       const item = groupApi.activeItem() as T | null;
@@ -487,6 +541,8 @@ export function placementGrid<T extends GridPlacement, K>(
 
   const resetDragState = () => {
     activeKey.set(null);
+    outside.set(false);
+    startRows = 0;
     pointerX.set(0);
     pointerY.set(0);
     scrollX.set(0);
@@ -543,6 +599,7 @@ export function placementGrid<T extends GridPlacement, K>(
     scrollX.set(0);
     scrollY.set(0);
     activeKey.set(k);
+    startRows = untracked(rows);
     if (group) for (const m of group.members()) m.refreshBounds();
   };
 
@@ -556,9 +613,35 @@ export function placementGrid<T extends GridPlacement, K>(
     return r;
   };
 
+  /**
+   * Content-space hit test against the grid box as it was when the drag
+   * started, plus the band a move may grow into below the occupied rows
+   * (origin shifted by auto-scroll, rows frozen at drag start). The
+   * preview grows and shrinks the rendered grid, so testing the live box made
+   * the result depend on the path the pointer took; the frozen box makes it a
+   * function of the pointer alone. Imperative: the live rows depend on this flag.
+   */
+  const updateOutside = () => {
+    if (!snap || snap.kind !== 'move' || untracked(activeKey) === null) return;
+    const s = snap;
+    const c = untracked(cols);
+    // a move may land one band below the occupied rows (see the projection),
+    // so the box always includes that band, whatever the compaction
+    const r = Math.max(
+      startRows,
+      gridRows(dragStartItems ?? []) + (dragStartItem?.h ?? 0),
+    );
+    const x = untracked(pointerX) + untracked(scrollX) - s.originX;
+    const y = untracked(pointerY) + untracked(scrollY) - s.originY;
+    const width = c * s.cellW + (c - 1) * s.gap;
+    const height = r > 0 ? r * s.cellH + (r - 1) * s.gap : 0;
+    outside.set(x < 0 || y < 0 || x > width || y > height);
+  };
+
   const move = (p: { x: number; y: number }) => {
     pointerX.set(p.x);
     pointerY.set(p.y);
+    updateOutside();
     if (!group || !groupApi || untracked(activeKey) === null) return;
     if (snap?.kind === 'resize') return;
     const dragged = dragStartItem ?? undefined;
@@ -581,7 +664,10 @@ export function placementGrid<T extends GridPlacement, K>(
     groupApi.setActive({
       source: self,
       target,
-      sourceIndex: dragStartItems && dragged ? indexByKey(dragStartItems, key(dragged)) : -1,
+      sourceIndex:
+        dragStartItems && dragged
+          ? indexByKey(dragStartItems, key(dragged))
+          : -1,
       insertIndex: insertIndexForMeasure(tg, p.x, p.y),
       footprint:
         tg.kind !== 'wrap' && tg.axis === 'x'
@@ -625,6 +711,8 @@ export function placementGrid<T extends GridPlacement, K>(
       return resetDragState();
     }
 
+    if (untracked(outside)) return resetDragState();
+
     const p = untracked(projected);
     const wasResize = snap?.kind === 'resize';
     const preview = untracked(previewLayout);
@@ -636,9 +724,19 @@ export function placementGrid<T extends GridPlacement, K>(
         const placed = settled.find((i) => key(i) === k);
         if (placed) {
           if (wasResize) {
-            options.onResize?.({ item, w: placed.w, h: placed.h, items: settled });
+            options.onResize?.({
+              item,
+              w: placed.w,
+              h: placed.h,
+              items: settled,
+            });
           } else {
-            options.onPlace?.({ item, x: placed.x, y: placed.y, items: settled });
+            options.onPlace?.({
+              item,
+              x: placed.x,
+              y: placed.y,
+              items: settled,
+            });
           }
         }
       }
@@ -656,7 +754,9 @@ export function placementGrid<T extends GridPlacement, K>(
       for (let x = 0; x <= c - item.w; x++) {
         if (
           canPlaceAt(items, key, key(item), x, y, item.w, item.h, c) &&
-          (options.canPlace ? options.canPlace(item, x, y, items) !== false : true)
+          (options.canPlace
+            ? options.canPlace(item, x, y, items) !== false
+            : true)
         ) {
           return { x, y };
         }
@@ -676,7 +776,10 @@ export function placementGrid<T extends GridPlacement, K>(
       source.set([...arr, placed] as T[]);
     } else {
       source.set(
-        compactGrid(placeGridItem([...arr, placed], key, key(item)), key) as T[],
+        compactGrid(
+          placeGridItem([...arr, placed], key, key(item)),
+          key,
+        ) as T[],
       );
     }
     options.onItemArrived?.({ item: placed, x: nx, y: ny });
@@ -707,8 +810,7 @@ export function placementGrid<T extends GridPlacement, K>(
           return 0;
         }
         return (
-          dragStartItem.x * stepX() +
-          (pointerX() + scrollX() - snap.startX)
+          dragStartItem.x * stepX() + (pointerX() + scrollX() - snap.startX)
         );
       }),
       dragY: computed(() => {
@@ -716,8 +818,7 @@ export function placementGrid<T extends GridPlacement, K>(
           return 0;
         }
         return (
-          dragStartItem.y * stepY() +
-          (pointerY() + scrollY() - snap.startY)
+          dragStartItem.y * stepY() + (pointerY() + scrollY() - snap.startY)
         );
       }),
       transitionCss: computed(() =>
@@ -731,7 +832,11 @@ export function placementGrid<T extends GridPlacement, K>(
    * back where it started) as a no-op — arrows can't float an item in mid-air
    * under `compact: 'vertical'`.
    */
-  const commitKeyboard = (k: K, next: readonly T[], before: readonly T[]): boolean => {
+  const commitKeyboard = (
+    k: K,
+    next: readonly T[],
+    before: readonly T[],
+  ): boolean => {
     if (next === before) return false;
     const orig = before.find((i) => key(i) === k);
     const settled = commitLayout(next);
@@ -765,8 +870,9 @@ export function placementGrid<T extends GridPlacement, K>(
       return groupApi.activeSource() === self && tgt !== null && tgt !== self;
     }),
     projectedCell: computed(() =>
-      snap?.kind === 'resize' ? null : projected(),
+      snap?.kind === 'resize' || outside() ? null : projected(),
     ),
+    dropOutside: outside.asReadonly(),
     incomingCell,
     previewLayout,
     targetMask,
@@ -775,6 +881,7 @@ export function placementGrid<T extends GridPlacement, K>(
     animation,
     autoScroll,
     activationThreshold,
+    touchActivation,
     group,
     itemState,
     moveBy: (k, dx, dy) => {
@@ -787,7 +894,9 @@ export function placementGrid<T extends GridPlacement, K>(
       if (nx === it.x && ny === it.y) return false;
       if (!placeGate(it, nx, ny, arr)) return false;
       if (compact === 'none') {
-        source.set(arr.map((i) => (key(i) === k ? { ...i, x: nx, y: ny } : i)) as T[]);
+        source.set(
+          arr.map((i) => (key(i) === k ? { ...i, x: nx, y: ny } : i)) as T[],
+        );
         options.onPlace?.({ item: it, x: nx, y: ny, items: untracked(source) });
         return true;
       }
@@ -795,7 +904,12 @@ export function placementGrid<T extends GridPlacement, K>(
       if (!commitKeyboard(k, moved, arr)) return false;
       const placed = untracked(source).find((i) => key(i) === k);
       if (placed) {
-        options.onPlace?.({ item: it, x: placed.x, y: placed.y, items: untracked(source) });
+        options.onPlace?.({
+          item: it,
+          x: placed.x,
+          y: placed.y,
+          items: untracked(source),
+        });
       }
       return true;
     },
@@ -809,15 +923,27 @@ export function placementGrid<T extends GridPlacement, K>(
       if (nw === it.w && nh === it.h) return false;
       if (compact === 'none') {
         if (!canPlaceAt(arr, key, k, it.x, it.y, nw, nh, c)) return false;
-        source.set(arr.map((i) => (key(i) === k ? { ...i, w: nw, h: nh } : i)) as T[]);
-        options.onResize?.({ item: it, w: nw, h: nh, items: untracked(source) });
+        source.set(
+          arr.map((i) => (key(i) === k ? { ...i, w: nw, h: nh } : i)) as T[],
+        );
+        options.onResize?.({
+          item: it,
+          w: nw,
+          h: nh,
+          items: untracked(source),
+        });
         return true;
       }
       const resized = resizeGridItem(arr, key, k, nw, nh, c);
       if (!commitKeyboard(k, resized, arr)) return false;
       const placed = untracked(source).find((i) => key(i) === k);
       if (placed) {
-        options.onResize?.({ item: it, w: placed.w, h: placed.h, items: untracked(source) });
+        options.onResize?.({
+          item: it,
+          w: placed.w,
+          h: placed.h,
+          items: untracked(source),
+        });
       }
       return true;
     },
@@ -855,6 +981,7 @@ export function placementGrid<T extends GridPlacement, K>(
     setScrollDelta: (x, y) => {
       scrollX.set(x);
       scrollY.set(y);
+      updateOutside();
     },
     bounds: () => boundsCache,
     refreshBounds: () => {

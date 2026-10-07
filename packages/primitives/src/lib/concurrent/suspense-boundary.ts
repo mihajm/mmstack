@@ -1,4 +1,10 @@
-import { Component, computed, Directive, input } from '@angular/core';
+import {
+  type AfterViewInit,
+  Component,
+  computed,
+  Directive,
+  input,
+} from '@angular/core';
 import {
   injectRevealSlot,
   injectTransitionScope,
@@ -43,7 +49,7 @@ import {
  * `fetch`/promise/timer) must opt in itself: wrap it with `inject(PendingTasks).run(() => promise)`.
  */
 @Directive()
-export abstract class SuspenseBoundaryBase {
+export abstract class SuspenseBoundaryBase implements AfterViewInit {
   protected readonly scope = injectTransitionScope();
 
   /** What counts as "not ready" for the first-load placeholder. Defaults to value-presence. */
@@ -67,6 +73,11 @@ export abstract class SuspenseBoundaryBase {
     if (this.failed()) return 'error';
     return this.suspended() ? 'placeholder' : 'content';
   });
+
+  // by now the host's bindings and embedded views have run, so the state is real
+  ngAfterViewInit(): void {
+    this.revealSlot?.mount();
+  }
 }
 
 const SUSPENSE_TEMPLATE = `

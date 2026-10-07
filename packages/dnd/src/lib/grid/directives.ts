@@ -16,6 +16,7 @@ import {
 
 import { injectAnnounce } from '../a11y/a11y';
 import { driveGesture } from '../internal/gesture';
+import { surfaceTouchAction } from '../internal/touch-activation';
 import { resolveAutoScroll } from '../provide';
 import type {
   PlacementGridController,
@@ -168,6 +169,9 @@ export function connectPlacementGrid<T extends GridPlacement, K = unknown>(
           {
             handleSelector: GRID_HANDLE_SELECTOR,
             activationThreshold: untracked(controller).activationThreshold,
+            touchActivation: untracked(controller).touchActivation ?? false,
+            // a resize grip is small and deliberate: it never waits for the long-press
+            touchImmediateSelector: `[${RESIZE_ATTR}]`,
             stopPropagation: true,
           },
         ),
@@ -236,7 +240,7 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
   const transformCss = computed(() => {
     const s = get();
     const c = controller();
-    if (s.isActive() && c.projectedCell() !== null) {
+    if (s.isActive() && (c.projectedCell() !== null || c.dropOutside())) {
       return `translate(${s.dragX()}px, ${s.dragY()}px)`;
     }
     const g = c.gap();
@@ -344,6 +348,7 @@ export class PlacementGrid<T extends GridPlacement, K = unknown> {
  * A grid item: `<div [mmPlacementGridItem]="widget">`. Positions itself by
  * transform from the live preview; add `[data-mm-placement-handle]` children
  * to scope dragging, and resize grips via {@link PlacementGridResizeHandle}.
+ * Carries `touch-action: none` (`manipulation` under a touch long-press).
  */
 @Directive({
   selector: '[mmPlacementGridItem]',
@@ -354,7 +359,7 @@ export class PlacementGrid<T extends GridPlacement, K = unknown> {
     '[style.position]': "'absolute'",
     '[style.top]': "'0'",
     '[style.left]': "'0'",
-    '[style.touch-action]': "'none'",
+    '[style.touch-action]': 'touchAction()',
     '[style.user-select]': "'none'",
     '[style.transform]': 'state.transformCss()',
     '[style.width.px]': 'state.widthPx()',
@@ -373,6 +378,9 @@ export class PlacementGridItem<T extends GridPlacement, K = unknown> {
     () => this.item(),
     this.parent.units,
   );
+  protected readonly touchAction = computed(() =>
+    surfaceTouchAction(this.parent.controller().touchActivation, 'none'),
+  );
 }
 
 /**
@@ -383,6 +391,7 @@ export class PlacementGridItem<T extends GridPlacement, K = unknown> {
   selector: '[mmPlacementGridResizeHandle]',
   host: {
     '[attr.data-mm-placement-resize]': 'direction()',
+    // starts at once even under a touch long-press, so it always claims the touch
     '[style.touch-action]': "'none'",
   },
 })

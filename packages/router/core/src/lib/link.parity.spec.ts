@@ -26,6 +26,10 @@ type _urlTreeStillExists = Expect<
   'urlTree' extends keyof RouterLink ? true : false
 >;
 
+type _ngOnChangesStillExists = Expect<
+  'ngOnChanges' extends keyof RouterLink ? true : false
+>;
+
 type ForwardedInputName =
   | 'routerLink'
   | 'target'
@@ -45,10 +49,7 @@ type _allForwardedAreRealMembers = Expect<
 
 // RouterLink inputs forwarded by Link's hostDirectives. KEEP IN SYNC with link.ts.
 const FORWARDED_INPUTS = [
-  'routerLink',
   'target',
-  'queryParams',
-  'fragment',
   'queryParamsHandling',
   'preserveFragment',
   'state',
@@ -57,6 +58,9 @@ const FORWARDED_INPUTS = [
   'skipLocationChange',
   'replaceUrl',
 ] as const;
+
+// RouterLink inputs Link owns and writes itself in ngOnChanges (inline ?query#fragment parsing).
+const OWNED_INPUTS = ['routerLink', 'queryParams', 'fragment'] as const;
 
 /** Reads the public input names off a compiled directive/component definition. */
 function readDirectiveInputs(type: unknown): string[] {
@@ -79,7 +83,7 @@ describe('mmLink ↔ RouterLink parity', () => {
   });
 
   it('forwards EVERY RouterLink input (catches Angular additions)', () => {
-    const forwarded = new Set<string>(FORWARDED_INPUTS);
+    const forwarded = new Set<string>([...FORWARDED_INPUTS, ...OWNED_INPUTS]);
     const notForwarded = routerLinkInputs.filter((i) => !forwarded.has(i));
 
     expect(
@@ -92,7 +96,9 @@ describe('mmLink ↔ RouterLink parity', () => {
 
   it('does not forward inputs RouterLink no longer has (catches removals/renames)', () => {
     const actual = new Set(routerLinkInputs);
-    const stale = FORWARDED_INPUTS.filter((i) => !actual.has(i));
+    const stale = [...FORWARDED_INPUTS, ...OWNED_INPUTS].filter(
+      (i) => !actual.has(i),
+    );
 
     expect(
       stale,

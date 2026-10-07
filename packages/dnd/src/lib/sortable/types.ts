@@ -1,5 +1,9 @@
 import type { Injector, Signal } from '@angular/core';
 
+import type {
+  ResolvedTouchActivation,
+  TouchActivation,
+} from '../internal/touch-activation';
 import type { DragEngine } from '../session';
 import type { Axis } from './geometry';
 import type { DragGeometry } from './session';
@@ -161,6 +165,13 @@ type ReorderableNativeOptions<T> = {
 type ReorderablePointerOptions = {
   /** Px the pointer must travel before a drag activates (keeps items clickable). @default 5 */
   readonly activationThreshold?: number;
+  /**
+   * Touch presses wait for a long-press before they can drag; mouse and pen
+   * start immediately. Items (or handles) then use `touch-action: manipulation`
+   * so the page scrolls until the press activates. See {@link TouchActivation}.
+   * `false` opts out of a DI default. @default off
+   */
+  readonly touchActivation?: TouchActivation | false;
 };
 
 /**
@@ -281,6 +292,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly animation: { duration: number; easing: string } | null;
   /** Resolved pointer-engine activation distance in px. */
   readonly activationThreshold: number;
+  /** Resolved touch long-press (pointer engine), or `null` when off or native. */
+  readonly touchActivation: ResolvedTouchActivation | null;
   itemState(item: () => T): ReorderableItemState<K>;
   /** @internal item DOM registration (both directions). */
   register(key: K, el: HTMLElement): void;

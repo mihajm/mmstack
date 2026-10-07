@@ -56,49 +56,39 @@ export interface CensusOptions {
 const facadeFailure = (s: FacadeState): CensusError | undefined =>
   s.kind === 'error' ? s.error : s.kind === 'running' ? s.prior : undefined;
 
+/** The highest generation the facade has accepted: carried by every non-idle state. */
+const highestOf = (s: FacadeState): number =>
+  s.kind === 'idle' ? 0 : s.generation;
+
 export function reduceFacade(
   state: FacadeState,
   event:
     | { t: 'start'; generation: number }
     | { t: 'settle'; generation: number; outcome: SettleOutcome },
-  highestGeneration: number,
-): [FacadeState, number] {
+): FacadeState {
   if (event.t === 'start') {
-    if (event.generation <= highestGeneration)
-      return [state, highestGeneration];
-    return [
-      {
-        kind: 'running',
-        generation: event.generation,
-        prior: facadeFailure(state),
-      },
-      event.generation,
-    ];
+    if (event.generation <= highestOf(state)) return state;
+    return {
+      kind: 'running',
+      generation: event.generation,
+      prior: facadeFailure(state),
+    };
   }
   if (state.kind !== 'running' || event.generation !== state.generation)
-    return [state, highestGeneration];
+    return state;
   switch (event.outcome.kind) {
     case 'ok':
-      return [{ kind: 'ok', generation: event.generation }, highestGeneration];
+      return { kind: 'ok', generation: event.generation };
     case 'error':
-      return [
-        {
-          kind: 'error',
-          generation: event.generation,
-          error: event.outcome.error,
-        },
-        highestGeneration,
-      ];
+      return {
+        kind: 'error',
+        generation: event.generation,
+        error: event.outcome.error,
+      };
     case 'skipped':
       return state.prior !== undefined
-        ? [
-            { kind: 'error', generation: event.generation, error: state.prior },
-            highestGeneration,
-          ]
-        : [
-            { kind: 'skipped', generation: event.generation },
-            highestGeneration,
-          ];
+        ? { kind: 'error', generation: event.generation, error: state.prior }
+        : { kind: 'skipped', generation: event.generation };
   }
 }
 
@@ -213,7 +203,6 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
 
   const enroll = (descriptor: FacadeDescriptor): EnrolledFacade => {
     const state = signal<FacadeState>({ kind: 'idle' });
-    let highest = 0;
     const member: CensusMember = {
       id: descriptor.id,
       displayName: descriptor.displayName,
@@ -230,11 +219,7 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
       event:
         | { t: 'start'; generation: number }
         | { t: 'settle'; generation: number; outcome: SettleOutcome },
-    ) => {
-      const [next, hi] = reduceFacade(state(), event, highest);
-      highest = hi;
-      state.set(next);
-    };
+    ) => state.set(reduceFacade(state(), event));
     return {
       member: admitted.member,
       started: (generation) => apply({ t: 'start', generation }),

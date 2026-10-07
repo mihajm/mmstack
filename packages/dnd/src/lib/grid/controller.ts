@@ -330,8 +330,10 @@ export function placementGrid<T extends GridPlacement, K>(
   const pointerY = signal(0);
   const scrollX = signal(0);
   const scrollY = signal(0);
-  const outside = signal(false);
-  let startRows = 0;
+  // The drag record, frozen at gesture start. `activeKey` publishes it: `begin()` fills these
+  // before setting the key and `resetDragState()` clears the key before emptying them, and
+  // every derivation reads `activeKey()` first, so none ever sees a half-written record.
+  const startRows = signal(0);
   let snap: PlacementDragSnapshot | null = null;
   let dragStartItems: readonly T[] | null = null;
   let dragStartItem: T | null = null;
@@ -407,6 +409,31 @@ export function placementGrid<T extends GridPlacement, K>(
       }
       return { x, y };
     },
+  });
+
+  /**
+   * Content-space hit test against the grid box as it was when the drag
+   * started, plus the band a move may grow into below the occupied rows
+   * (origin shifted by auto-scroll, rows frozen at drag start). The
+   * preview grows and shrinks the rendered grid, so testing the live box made
+   * the result depend on the path the pointer took; the frozen box makes it a
+   * function of the pointer alone. Inactive and resize: never outside.
+   */
+  const outside = computed(() => {
+    if (activeKey() === null || !snap || snap.kind !== 'move') return false;
+    const s = snap;
+    const c = cols();
+    // a move may land one band below the occupied rows (see the projection),
+    // so the box always includes that band, whatever the compaction
+    const r = Math.max(
+      startRows(),
+      gridRows(dragStartItems ?? []) + (dragStartItem?.h ?? 0),
+    );
+    const x = pointerX() + scrollX() - s.originX;
+    const y = pointerY() + scrollY() - s.originY;
+    const width = c * s.cellW + (c - 1) * s.gap;
+    const height = r > 0 ? r * s.cellH + (r - 1) * s.gap : 0;
+    return x < 0 || y < 0 || x > width || y > height;
   });
 
   const previewLayout = computed<readonly T[]>(() => {
@@ -541,8 +568,7 @@ export function placementGrid<T extends GridPlacement, K>(
 
   const resetDragState = () => {
     activeKey.set(null);
-    outside.set(false);
-    startRows = 0;
+    startRows.set(0);
     pointerX.set(0);
     pointerY.set(0);
     scrollX.set(0);
@@ -594,12 +620,14 @@ export function placementGrid<T extends GridPlacement, K>(
     snap = snapshot;
     dragStartItems = arr;
     dragStartItem = arr[idx];
+    // the resting grid's rows, read before the key publishes the drag (the
+    // hit test reads them, so it cannot be what supplies them)
+    startRows.set(untracked(rows));
     pointerX.set(snapshot.startX);
     pointerY.set(snapshot.startY);
     scrollX.set(0);
     scrollY.set(0);
     activeKey.set(k);
-    startRows = untracked(rows);
     if (group) for (const m of group.members()) m.refreshBounds();
   };
 
@@ -613,35 +641,9 @@ export function placementGrid<T extends GridPlacement, K>(
     return r;
   };
 
-  /**
-   * Content-space hit test against the grid box as it was when the drag
-   * started, plus the band a move may grow into below the occupied rows
-   * (origin shifted by auto-scroll, rows frozen at drag start). The
-   * preview grows and shrinks the rendered grid, so testing the live box made
-   * the result depend on the path the pointer took; the frozen box makes it a
-   * function of the pointer alone. Imperative: the live rows depend on this flag.
-   */
-  const updateOutside = () => {
-    if (!snap || snap.kind !== 'move' || untracked(activeKey) === null) return;
-    const s = snap;
-    const c = untracked(cols);
-    // a move may land one band below the occupied rows (see the projection),
-    // so the box always includes that band, whatever the compaction
-    const r = Math.max(
-      startRows,
-      gridRows(dragStartItems ?? []) + (dragStartItem?.h ?? 0),
-    );
-    const x = untracked(pointerX) + untracked(scrollX) - s.originX;
-    const y = untracked(pointerY) + untracked(scrollY) - s.originY;
-    const width = c * s.cellW + (c - 1) * s.gap;
-    const height = r > 0 ? r * s.cellH + (r - 1) * s.gap : 0;
-    outside.set(x < 0 || y < 0 || x > width || y > height);
-  };
-
   const move = (p: { x: number; y: number }) => {
     pointerX.set(p.x);
     pointerY.set(p.y);
-    updateOutside();
     if (!group || !groupApi || untracked(activeKey) === null) return;
     if (snap?.kind === 'resize') return;
     const dragged = dragStartItem ?? undefined;
@@ -872,7 +874,7 @@ export function placementGrid<T extends GridPlacement, K>(
     projectedCell: computed(() =>
       snap?.kind === 'resize' || outside() ? null : projected(),
     ),
-    dropOutside: outside.asReadonly(),
+    dropOutside: outside,
     incomingCell,
     previewLayout,
     targetMask,
@@ -981,7 +983,6 @@ export function placementGrid<T extends GridPlacement, K>(
     setScrollDelta: (x, y) => {
       scrollX.set(x);
       scrollY.set(y);
-      updateOutside();
     },
     bounds: () => boundsCache,
     refreshBounds: () => {

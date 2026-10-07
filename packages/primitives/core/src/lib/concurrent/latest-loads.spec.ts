@@ -65,6 +65,23 @@ describe('latest().loads', () => {
     expect(l.loads()).toBe(2);
   });
 
+  it('a member that leaves and comes back adds its moves since it was last seen', () => {
+    const which = signal<'a' | 'b'>('a');
+    const a = member('resolved');
+    const b = member('resolved');
+    const l = latest(() => (which() === 'a' ? use(a) : use(b)));
+    expect(l.loads()).toBe(0);
+    a.start();
+    expect(l.loads()).toBe(1);
+    a.st.set('resolved');
+    which.set('b');
+    expect(l.loads()).toBe(1);
+    a.start();
+    a.start(); // moves while not used
+    which.set('a');
+    expect(l.loads()).toBe(3);
+  });
+
   it('is undefined while any used member keeps no counter', () => {
     const a = member('resolved');
     const plain = member('resolved', false);

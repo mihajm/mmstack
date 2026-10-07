@@ -46,6 +46,16 @@ type GuessEntry = {
   readonly refined?: boolean;
 };
 
+/** What a guessable keeps between events; `visible` projects it, every event replaces it. */
+type Ledger = {
+  /** The truth cell the recorder sees: a new identity for every acknowledged change. */
+  readonly cur: Cell;
+  /** The wrapped signal's version when the ledger last acknowledged it. */
+  readonly known: number | undefined;
+  /** Open, unburied guesses only: burial removes an entry for good. */
+  readonly hist: readonly GuessEntry[];
+};
+
 let ids = 0;
 let guessSeq = 0;
 
@@ -80,28 +90,32 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
   if (isMutable(sig))
     throw new TypeError('guessable: a mutable signal is not supported');
 
-  const rev = signal(0);
-  const bump = () => rev.update((n) => n + 1);
-  let cur: Cell = { value: untracked(sig), id: ++ids };
-  let known = versionOf(sig);
-  // open, unburied guesses only: burial removes an entry for good
-  let hist: GuessEntry[] = [];
+  const ledger = signal<Ledger>({
+    cur: { value: untracked(sig), id: ++ids },
+    known: versionOf(sig),
+    hist: [],
+  });
 
-  /** Brings `cur` up to date with the wrapped signal; an upstream change is authoritative. */
+  /** Whether the wrapped signal moved since the ledger acknowledged it: an upstream change. */
+  const moved = (
+    l: Ledger,
+    value: unknown,
+    ver: number | undefined,
+  ): boolean =>
+    ver === undefined ? !Object.is(value, l.cur.value) : ver !== l.known;
+
+  /** Acknowledges an upstream change (it is authoritative) and returns the current truth cell. */
   const observe = (): Cell => {
+    const l = untracked(ledger);
     const v = untracked(sig);
     const ver = versionOf(sig);
-    const changed =
-      ver === undefined ? !Object.is(v, cur.value) : ver !== known;
-    if (changed) {
-      known = ver;
-      cur = { value: v, id: ++ids };
-      hist = []; // an upstream change buries every guess
-    }
+    if (!moved(l, v, ver)) return l.cur;
+    const cur = { value: v, id: ++ids };
+    ledger.set({ cur, known: ver, hist: [] }); // an upstream change buries every guess
     return cur;
   };
 
-  const top = (): GuessEntry | undefined => {
+  const top = (hist: readonly GuessEntry[]): GuessEntry | undefined => {
     let best: GuessEntry | undefined;
     for (const g of hist) {
       if (!best) best = g;
@@ -118,10 +132,11 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
 
   const visible = computed(
     (): readonly [boolean, unknown?] => {
-      rev();
-      sig();
-      observe();
-      const g = top();
+      const l = ledger();
+      const v = sig();
+      // an upstream change the ledger has not acknowledged yet already buries: the next event
+      // acknowledges it, so the projection and the ledger agree at every event
+      const g = moved(l, v, versionOf(sig)) ? undefined : top(l.hist);
       return g ? [true, g.value] : [false];
     },
     { equal: (a, b) => a[0] === b[0] && Object.is(a[1], b[1]) },
@@ -136,18 +151,19 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
     observe();
     recordWrite(port);
     writeUnrecorded(sig, v);
-    known = versionOf(sig);
     // the value the signal kept: a custom `equal` may have rejected `v`
     const accepted = untracked(sig);
-    cur = { value: accepted, id: ++ids };
     // inside the transaction that guessed here: its latest guess takes the stored value
     const txn = activeTransaction();
     let own: GuessEntry | undefined;
     if (txn)
-      for (const g of hist)
+      for (const g of untracked(ledger).hist)
         if (g.txn === txn && (!own || g.seq > own.seq)) own = g;
-    hist = own ? [{ ...own, value: accepted, refined: true }] : [];
-    bump();
+    ledger.set({
+      cur: { value: accepted, id: ++ids },
+      known: versionOf(sig),
+      hist: own ? [{ ...own, value: accepted, refined: true }] : [],
+    });
   };
 
   // what a transaction records: truth cells, so compare-and-restore compares identities
@@ -156,9 +172,8 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
     const c = cell as Cell;
     observe();
     writeUnrecorded(sig, c.value as T);
-    known = versionOf(sig);
-    cur = c; // a restore re-instates the truth it covered and buries nothing
-    bump();
+    // a restore re-instates the truth it covered and buries nothing
+    ledger.update((l) => ({ ...l, cur: c, known: versionOf(sig) }));
   };
   port.update = (fn) => port.set(fn(observe()));
   port.asReadonly = () => port;
@@ -169,18 +184,21 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
   const lay = (txn: Transaction, value: T) => {
     observe();
     txn.record(guard, { kind: 'guess' });
-    if (!hist.some((g) => g.txn === txn))
-      onTransactionClose(txn, () => {
-        hist = hist.filter((g) => g.txn !== txn);
-        bump();
-      });
-    hist.push({
-      txn,
-      order: openOrderOf(txn),
-      seq: ++guessSeq,
-      value,
+    const l = untracked(ledger);
+    if (!l.hist.some((g) => g.txn === txn))
+      onTransactionClose(txn, () =>
+        ledger.update((cur) => ({
+          ...cur,
+          hist: cur.hist.filter((g) => g.txn !== txn),
+        })),
+      );
+    ledger.set({
+      ...l,
+      hist: [
+        ...l.hist,
+        { txn, order: openOrderOf(txn), seq: ++guessSeq, value },
+      ],
     });
-    bump();
   };
 
   const truth = computed(() => sig());

@@ -502,6 +502,10 @@ export function injectStartTransaction(): StartTransaction {
 
     scope.beginHold();
 
+    // Two phases, not one flag twice: `finished` turns true before the undo pass, the claim
+    // release and the hold release (it is the reentrancy guard, read synchronously and
+    // untracked), `settledSig` after them, so `pending` lets go only once the settlement has
+    // landed. A single tracked phase signal would expose the half-settled window to readers.
     let finished = false;
     let isAsync = false;
     const asyncBody = signal(false);

@@ -202,6 +202,13 @@ type Evaluation<T> = {
 
 type Held<T> = { readonly has: boolean; readonly v: T | undefined };
 
+type LoadsFold = {
+  readonly seen: WeakMap<UseSource<unknown>, number>;
+  readonly total: number;
+  /** False while any observed member keeps no counter. */
+  readonly counted: boolean;
+};
+
 /**
  * An async derivation over resources: evaluates `fn` inside a collector frame so that
  * every `use()` read registers as a member, and exposes the result with resource
@@ -336,22 +343,35 @@ export function latest<T>(
     return undefined;
   });
 
-  const seenLoads = new WeakMap<UseSource<unknown>, number>();
-  let loadsTotal = 0;
-  const loads = computed(() => {
-    let counted = true;
-    for (const d of evaluation().deps) {
-      const l = d.loads?.();
-      if (l === undefined) {
-        counted = false;
-        continue;
+  // A fold over what each evaluation observes: the last counter seen per member (weakly, so
+  // a member that leaves is not kept alive) and the total of their forward moves so far. A
+  // member that leaves keeps what it added; one that returns adds from its last seen count.
+  const observedLoads = linkedSignal<
+    readonly (readonly [UseSource<unknown>, number | undefined])[],
+    LoadsFold
+  >({
+    source: () => evaluation().deps.map((d) => [d, d.loads?.()] as const),
+    computation: (observed, prev) => {
+      const seen =
+        prev?.value.seen ?? new WeakMap<UseSource<unknown>, number>();
+      let total = prev?.value.total ?? 0;
+      let counted = true;
+      for (const [d, l] of observed) {
+        if (l === undefined) {
+          counted = false;
+          continue;
+        }
+        const last = seen.get(d);
+        // only forward moves add, so re-running with the same counts is a no-op
+        if (last !== undefined && l > last) total += l - last;
+        seen.set(d, l);
       }
-      const last = seenLoads.get(d);
-      // only forward moves add, so re-running with the same counts is a no-op
-      if (last !== undefined && l > last) loadsTotal += l - last;
-      seenLoads.set(d, l);
-    }
-    return counted ? loadsTotal : undefined;
+      return { seen, total, counted };
+    },
+  });
+  const loads = computed(() => {
+    const fold = observedLoads();
+    return fold.counted ? fold.total : undefined;
   });
 
   const result = Object.assign(value, {

@@ -51,6 +51,8 @@ type Fault = {
   readonly error: Error;
   /** `update`: the view is kept and resumes on retry. `creation`: retry builds a new view. */
   readonly kind: 'update' | 'creation';
+  /** The census name as it was when this fault was entered. */
+  readonly displayName: string;
 };
 
 type Saved =
@@ -146,7 +148,11 @@ export class MmErrored implements OnInit {
   /** What the census calls this boundary's failure. Defaults to `'view'`. */
   readonly name = input('view', { alias: 'mmErroredName' });
 
-  private readonly fault = signal<Fault | null>(null);
+  // A retry that throws the same cached error again is the same fault: nothing it projects moves.
+  private readonly fault = signal<Fault | null>(null, {
+    equal: (a, b) =>
+      a === b || (!!a && !!b && a.error === b.error && a.kind === b.kind),
+  });
   /** The error currently shown by the fallback, or `undefined` while the content renders. */
   readonly error: Signal<Error | undefined> = computed(
     () => this.fault()?.error,
@@ -161,9 +167,13 @@ export class MmErrored implements OnInit {
   private faults = 0;
   private destroyed = false;
   private leave: (() => void) | null = null;
-  private readonly failure = signal<CensusError | undefined>(undefined);
+  private readonly failure = computed<CensusError | undefined>(() => {
+    const f = this.fault();
+    return f
+      ? { id: this.id, displayName: f.displayName, message: f.error.message }
+      : undefined;
+  });
   private readonly retries = signal(0);
-  private failedWith: Error | null = null;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
@@ -266,10 +276,11 @@ export class MmErrored implements OnInit {
       this.content.detach();
       this.hide(this.content);
     }
-    if (this.fault() === null || this.retrying) this.fault.set({ error, kind });
+    if (this.fault() === null || this.retrying)
+      this.fault.set({ error, kind, displayName: untracked(this.name) });
     this.retrying = false;
     const shown = this.fault() as Fault;
-    this.joinCensus(shown.error);
+    this.joinCensus();
     this.showFallback(shown.error);
   }
 
@@ -340,28 +351,21 @@ export class MmErrored implements OnInit {
     this.hidden.clear();
   }
 
-  private joinCensus(error: Error): void {
-    const displayName = untracked(this.name);
-    // A retry that throws the same cached error again changes nothing the census shows.
-    if (this.failedWith !== error)
-      this.failure.set({ id: this.id, displayName, message: error.message });
-    this.failedWith = error;
+  private joinCensus(): void {
     if (this.leave || !this.census) return;
     this.leave = this.census.register({
       id: this.id,
-      displayName,
+      displayName: untracked(this.name),
       readiness: false,
       paused: NEVER,
       pending: NEVER,
       inFlight: NEVER,
-      failure: this.failure.asReadonly(),
+      failure: this.failure,
       retry: { retry: () => this.retry() },
     });
   }
 
   private leaveCensus(): void {
-    this.failedWith = null;
-    this.failure.set(undefined);
     this.leave?.();
     this.leave = null;
   }

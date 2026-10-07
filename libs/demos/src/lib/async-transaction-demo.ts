@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   signal,
   untracked,
@@ -25,7 +26,7 @@ const NAMES = ['Atlas', 'Borealis', 'Cobalt', 'Dune'];
       <button type="button" (click)="save()" [disabled]="saving()">
         Rename &amp; save
       </button>
-      <button type="button" (click)="ref?.abort()" [disabled]="!saving()">
+      <button type="button" (click)="ref()?.abort()" [disabled]="!saving()">
         Abort
       </button>
       <label
@@ -155,9 +156,10 @@ export class AsyncTransactionDemo {
   protected readonly shownRevision = this.scope.hold(this.revision);
 
   protected readonly fail = signal(false);
-  protected readonly saving = signal(false);
+  protected readonly ref = signal<AsyncTransactionRef | null>(null);
+  // the current transaction's own pending state; nothing to keep in step by hand
+  protected readonly saving = computed(() => this.ref()?.pending() ?? false);
   protected readonly outcome = signal('');
-  protected ref: AsyncTransactionRef | null = null;
 
   protected readonly plain = signal<string[]>([]);
   protected readonly held = signal<string[]>([]);
@@ -174,7 +176,6 @@ export class AsyncTransactionDemo {
 
   protected save() {
     const next = NAMES[(NAMES.indexOf(this.name()) + 1) % NAMES.length];
-    this.saving.set(true);
     this.outcome.set('saving…');
     const ref = this.startTransaction(async (tx) => {
       this.name.set(next); // before the first await: part of the transaction
@@ -183,9 +184,8 @@ export class AsyncTransactionDemo {
       // after an await, re-enter so the write belongs to this transaction
       tx.update(this.revision, (r) => r + 1);
     });
-    this.ref = ref;
+    this.ref.set(ref);
     void ref.done.then((o) => {
-      this.saving.set(false);
       this.outcome.set(o.kind === 'aborted' ? `aborted (${o.reason})` : o.kind);
     });
   }

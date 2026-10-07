@@ -249,8 +249,27 @@ import { DocSection } from '../../../layout/doc-section';
           order really means "this needs that first". Once a boundary has been
           released it no longer waits for the reveal; if it suspends again, its
           own suspense behaviour still applies. Only direct child boundaries
-          take part, in the order they were created, and the reveal only
-          schedules display: held content is created and loads as usual.
+          take part, in the order they appear on the page, whether they come
+          from <code>&#64;if</code>, <code>&#64;for</code> or a plain element,
+          and the reveal only schedules display: held content is created and
+          loads as usual. A boundary counts as waiting until it has rendered
+          once, so a row whose inputs are not bound yet can never be released on
+          a stale reading.
+        </p>
+        <p>
+          Boundaries that come from an <code>&#64;for</code> can take their
+          order from the data instead. Give the reveal the same array and track
+          function, and each boundary its row:
+        </p>
+        <docs-code [code]="revealKeyedEx" label="template" lang="html" />
+        <p>
+          Order and membership then follow the array: a moved row is seen at
+          once, a row that leaves the array stops holding the others and keeps
+          what it showed, and nothing is read from the DOM. A boundary with no
+          <code>[item]</code>, or whose key is not in the array, is held and
+          holds nothing; dev mode warns about both a missing
+          <code>[item]</code> and duplicate keys. <code>track</code> defaults to
+          the row itself, like <code>&#64;for</code>.
         </p>
       </docs-section>
 
@@ -402,11 +421,11 @@ import { DocSection } from '../../../layout/doc-section';
           The catch is the usual one with async functions: code after an
           <code>await</code> runs outside whatever was active when the body
           started. Write through the transaction instead:
-          <code>tx.set(sig, value)</code> and <code>tx.update(sig, fn)</code>
-          are recorded wherever they run, plain signals included, so an abort
-          undoes them. <code>tx.enter(() =&gt; ...)</code> puts a whole
-          synchronous block back in, so writes and loads started there belong
-          to this transaction.
+          <code>tx.set(sig, value)</code> and
+          <code>tx.update(sig, fn)</code> are recorded wherever they run, plain
+          signals included, so an abort undoes them.
+          <code>tx.enter(() =&gt; ...)</code> puts a whole synchronous block
+          back in, so writes and loads started there belong to this transaction.
         </p>
         <docs-code [code]="asyncTxEx" lang="ts" />
         <p>
@@ -497,13 +516,13 @@ import { DocSection } from '../../../layout/doc-section';
           from before the save. A write from outside the transaction, like the
           user typing over the field, replaces the guess at once. After an
           <code>await</code>, write with <code>tx.set</code>; a plain
-          <code>set</code> there counts as outside. A
-          <code>computed</code> over a guessed value doesn't get that for free.
-          Held, it freezes what it computed, guess included, so hold the
-          guessable itself or read <code>node.truth()</code> inside the
-          derivation. A request built from a live guess fires like any other;
-          return <code>undefined</code> from the request function while the
-          input is provisional if that's not wanted. The full rules are in the
+          <code>set</code> there counts as outside. A <code>computed</code> over
+          a guessed value doesn't get that for free. Held, it freezes what it
+          computed, guess included, so hold the guessable itself or read
+          <code>node.truth()</code> inside the derivation. A request built from
+          a live guess fires like any other; return <code>undefined</code> from
+          the request function while the input is provisional if that's not
+          wanted. The full rules are in the
           <a
             href="https://www.npmjs.com/package/@mmstack/primitives#optimistic-writes"
             >primitives README</a
@@ -641,10 +660,10 @@ import { DocSection } from '../../../layout/doc-section';
           <code>retry</code> that reloads the resource, renders where nothing
           above handles the failure: with no boundary around it, or when a
           refresh fails while the resource still holds its last value (with
-          <code>keepPrevious</code>) and the boundary keeps the content up. If the same resource is also
-          registered in that boundary it still counts once. A
-          <code>latest</code> works here too. The rule of thumb: reach for
-          <code>latest</code> where you'd write a <code>computed</code> over
+          <code>keepPrevious</code>) and the boundary keeps the content up. If
+          the same resource is also registered in that boundary it still counts
+          once. A <code>latest</code> works here too. The rule of thumb: reach
+          for <code>latest</code> where you'd write a <code>computed</code> over
           resources, and for <code>*mmOutcome</code> where you'd read one in a
           template.
         </p>
@@ -849,6 +868,12 @@ const card = joined(user, org, (u, o) => u.name + ' @ ' + o.name);
   <mm-suspense><app-profile /></mm-suspense>
   <mm-suspense><app-feed /></mm-suspense>
   <mm-suspense><app-suggestions /></mm-suspense>
+</mm-reveal>`;
+
+  protected readonly revealKeyedEx = `<mm-reveal [items]="rows()" [track]="byId">
+  @for (row of rows(); track row.id) {
+    <mm-suspense [item]="row"><app-row [row]="row" /></mm-suspense>
+  }
 </mm-reveal>`;
 
   protected readonly erroredEx = `<form *mmErrored="failed; name: 'order note'">

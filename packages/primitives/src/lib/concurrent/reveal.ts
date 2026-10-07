@@ -3,8 +3,10 @@ import {
   afterEveryRender,
   booleanAttribute,
   Component,
+  effect,
   forwardRef,
   input,
+  untracked,
 } from '@angular/core';
 import {
   createRevealCoordinator,
@@ -43,8 +45,23 @@ import {
  *   <mm-suspense><app-feed /></mm-suspense>
  * </mm-reveal>
  * ```
+ *
+ * Boundaries that come from an `@for` can take their order from the data instead: give the reveal
+ * the same array and track function (`[items]`, `[track]`, identity by default) and each boundary
+ * its row (`[item]`). Order and membership then follow the array, a move is seen at once and
+ * nothing is read from the DOM. A boundary whose key is not in `items` (or that has no item) is
+ * held and holds nothing; two boundaries with one key order by registration.
+ *
+ * ```html
+ * <mm-reveal [items]="rows()" [track]="byId">
+ *   @for (row of rows(); track row.id) {
+ *     <mm-suspense [item]="row"><app-row [row]="row" /></mm-suspense>
+ *   }
+ * </mm-reveal>
+ * ```
  */
 const FOLLOWING = 4; // Node.DOCUMENT_POSITION_FOLLOWING
+const identity = (item: unknown) => item;
 
 @Component({
   selector: 'mm-reveal',
@@ -56,30 +73,79 @@ export class MmReveal implements RevealCoordinator {
   readonly order = input<RevealOrder>('forwards');
   readonly onError = input<RevealOnError>('settled');
   readonly collapsed = input(false, { transform: booleanAttribute });
+  /** The rows the slots come from. An array switches the reveal to data order; `undefined` keeps document order. */
+  readonly items = input<readonly unknown[] | undefined>(undefined);
+  /** A row's key, the same function the `@for` tracks by. Identity by default. */
+  readonly track = input<(item: any) => unknown>(identity);
 
   private readonly coordinator = createRevealCoordinator({
     order: this.order,
     onError: this.onError,
     collapsed: this.collapsed,
+    keyed: { items: this.items, track: (item) => this.track()(item) },
   });
 
   // hosts of the current slots, one entry per slot (two slots may share a host)
   private readonly hosts = new Map<RevealSlot, RevealHost>();
   private seen: readonly RevealHost[] = [];
 
+  // dev only: mounted slots and their items, for the keyed-mode warnings
+  private readonly mountedItems = new Set<(() => unknown) | null>();
+  private warnedDuplicate = false;
+  private warnedNoItem = false;
+
   constructor() {
     // placement: hosts that moved, left or rejoined the document with no slot changing
     afterEveryRender(() => this.observe());
+    if (typeof ngDevMode !== 'undefined' && ngDevMode) {
+      // once per `items` change: duplicate keys, and mounted slots with no item once keyed
+      effect(() => {
+        const items = this.items();
+        if (items === undefined) return;
+        const track = this.track();
+        if (!this.warnedDuplicate) {
+          const keys = new Set<unknown>();
+          for (const item of items) {
+            const key = track(item);
+            if (keys.has(key)) {
+              this.warnedDuplicate = true;
+              console.warn(
+                `[mm-reveal] duplicate key in items: ${String(key)}. Slots sharing a key order by registration.`,
+              );
+              break;
+            }
+            keys.add(key);
+          }
+        }
+        untracked(() => this.checkItems());
+      });
+    }
   }
 
-  register(state: () => RevealSlotState, host?: RevealHost | null): RevealSlot {
-    const slot = this.coordinator.register(state, host);
-    if (!host) return slot;
-    this.hosts.set(slot, host);
+  register(
+    state: () => RevealSlotState,
+    host?: RevealHost | null,
+    item?: (() => unknown) | null,
+  ): RevealSlot {
+    const slot = this.coordinator.register(state, host, item);
+    if (host) this.hosts.set(slot, host);
+    let mount = slot.mount;
+    let unmount = () => undefined as void;
+    if (typeof ngDevMode !== 'undefined' && ngDevMode) {
+      // by mount the boundary's inputs are bound, so its item is real
+      mount = () => {
+        slot.mount();
+        this.mountedItems.add(item ?? null);
+        this.checkItems();
+      };
+      unmount = () => void this.mountedItems.delete(item ?? null);
+    }
     return {
       ...slot,
+      mount,
       unregister: () => {
         this.hosts.delete(slot);
+        unmount();
         slot.unregister();
       },
     };
@@ -89,7 +155,21 @@ export class MmReveal implements RevealCoordinator {
     this.coordinator.relayout();
   }
 
+  private checkItems() {
+    if (this.warnedNoItem || untracked(this.items) === undefined) return;
+    for (const item of this.mountedItems)
+      if (!item || untracked(item) === undefined) {
+        this.warnedNoItem = true;
+        console.warn(
+          '[mm-reveal] a boundary has no [item] while the reveal has [items]: it is held and holds nothing. Bind [item] on every boundary, or drop [items].',
+        );
+        return;
+      }
+  }
+
   private observe() {
+    // keyed: order comes from `items`, there is nothing to read off the page
+    if (this.items() !== undefined) return;
     const now = [...this.hosts.values()]
       .filter((h) => h.isConnected)
       .sort((a, b) =>
@@ -101,6 +181,8 @@ export class MmReveal implements RevealCoordinator {
     )
       return;
     this.seen = now;
-    this.coordinator.relayout();
+    this.relayout();
   }
 }
+
+declare const ngDevMode: boolean | undefined;

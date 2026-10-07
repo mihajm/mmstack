@@ -21,7 +21,12 @@
  * The last sections replay the same traces against the real `guessable` + `createTransaction` +
  * `hold()` and the real `optimisticStore`, in lockstep with the oracle.
  */
-import { Injector, signal, untracked } from '@angular/core';
+import {
+  Injector,
+  signal,
+  untracked,
+  type WritableSignal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { forkStore, merge3 } from '../store/fork-store';
 import { optimisticStore } from '../store/optimistic-store';
@@ -53,7 +58,10 @@ const SETTLE_KINDS: readonly SettleKind[] = [
 /** Only completion keeps a body's authoritative writes; every settlement drops its guesses. */
 const keepsWrites = (k: SettleKind) => k === 'complete';
 
-/** `foreign` with `v: null` writes whatever readers currently see (a server confirming a guess). */
+/**
+ * `foreign` with `v: null` writes whatever readers currently see (a server confirming a guess);
+ * with `up` it lands on the wrapped signal directly (an upstream change), never through the node.
+ */
 type Ev =
   | { readonly t: 'open'; readonly b: number }
   | {
@@ -68,7 +76,12 @@ type Ev =
       readonly n: string;
       readonly v: string;
     }
-  | { readonly t: 'foreign'; readonly n: string; readonly v: string | null }
+  | {
+      readonly t: 'foreign';
+      readonly n: string;
+      readonly v: string | null;
+      readonly up?: true;
+    }
   | { readonly t: 'settle'; readonly b: number; readonly k: SettleKind }
   | { readonly t: 'hold' }
   | { readonly t: 'release' };
@@ -80,6 +93,8 @@ type GenOpts = {
   readonly writes?: boolean;
   readonly collide?: boolean;
   readonly holds?: boolean;
+  /** Half the fresh-valued foreign writes land on the wrapped signal instead of the node. */
+  readonly upstream?: boolean;
 };
 
 function genTrace(seed: number, o: GenOpts): Ev[] {
@@ -105,7 +120,13 @@ function genTrace(seed: number, o: GenOpts): Ev[] {
       evs.push({ t: 'write', b: pick(open), n, v: `w${++tv}` });
     } else if (x < 0.7) {
       const confirm = o.collide && r() < 0.5;
-      evs.push({ t: 'foreign', n, v: confirm ? null : `t${++tv}` });
+      const up = !confirm && o.upstream && r() < 0.5;
+      evs.push({
+        t: 'foreign',
+        n,
+        v: confirm ? null : `t${++tv}`,
+        ...(up ? { up: true as const } : {}),
+      });
     } else if (o.holds && x < 0.8) {
       evs.push(held ? { t: 'release' } : { t: 'hold' });
       held = !held;
@@ -1901,7 +1922,9 @@ class RealLive {
         this.tx(ev.b).enter(() => this.node(ev.n).set(ev.v));
         break;
       case 'foreign':
-        this.node(ev.n).set(foreignValue ?? ev.v ?? this.display(ev.n));
+        if (ev.up)
+          (this.inner.get(ev.n) as WritableSignal<string>).set(ev.v as string);
+        else this.node(ev.n).set(foreignValue ?? ev.v ?? this.display(ev.n));
         break;
       case 'settle':
         if (keepsWrites(ev.k)) this.tx(ev.b).clear();
@@ -2025,6 +2048,10 @@ describe('optimistic live tier: the real guessable in lockstep with the model', 
     [
       'plus foreign writes that confirm a guess, and holds',
       { bodies: 3, steps: 30, writes: true, collide: true, holds: true },
+    ],
+    [
+      'plus upstream changes of the wrapped signal, and holds',
+      { bodies: 3, steps: 30, writes: true, upstream: true, holds: true },
     ],
   ];
   for (const [name, gen] of shapes)

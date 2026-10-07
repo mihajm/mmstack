@@ -512,6 +512,18 @@ describe('placementGrid', () => {
       expect(t.writes).toBe(0);
     });
 
+    it('a column change mid-drag reaches the hit test with the pointer still', () => {
+      const cols = signal(6);
+      const { grid } = setup({ cols });
+      grid.begin('a', SNAP);
+      grid.move({ x: 290, y: 25 }); // inside the 300px box
+      expect(grid.dropOutside()).toBe(false);
+      cols.set(4); // 200px wide now
+      expect(grid.dropOutside()).toBe(true);
+      cols.set(6);
+      expect(grid.dropOutside()).toBe(false);
+    });
+
     it('cancels outside a compact:none grid too', () => {
       const t = tracked({ compact: 'none' });
       t.grid.begin('a', SNAP);

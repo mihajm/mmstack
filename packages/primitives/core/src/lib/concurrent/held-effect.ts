@@ -67,6 +67,10 @@ export function heldEffect(
     cleanups = [];
     for (const c of current) c();
   };
+  // The watcher wakes `main` through this signal rather than `main` tracking the gate itself:
+  // `fn` is an arbitrary callback whose dependencies are only known by running it, and a hold
+  // that opens and closes with no change in between must run nothing. Tracking the gate in
+  // `main` would run `fn` on every release; this is the one piece of scheduling state here.
   const release = signal(0);
 
   const main = effect(

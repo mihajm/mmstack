@@ -53,6 +53,7 @@
     "@angular/cli": "^21.2.7",
     "@angular/compiler": "^21.2.8",
     "@angular/compiler-cli": "^21.2.8",
+    "@angular/language-server": "21.2.8",
     "@angular/language-service": "^21.2.8",
     "@eslint/js": "^9.39.3",
     "@nx/angular": "^22.6.5",

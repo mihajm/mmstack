@@ -1,4 +1,14 @@
-import { applyOps, diffOps, invertBatch, type StoreOp } from './op-log';
+import { signal } from '@angular/core';
+import {
+  applyOps,
+  diffOps,
+  invertBatch,
+  opLog,
+  type AddedPolicy,
+  type OpLogDriver,
+  type StoreOp,
+} from './op-log';
+import { opSync } from './op-sync';
 import { isOpaque, opaque } from './opaque';
 
 // M1: the leaf-wise emission model. The oracle below is written from the semantics, not from
@@ -277,3 +287,282 @@ function referenceWholeDiff(prev: unknown, next: unknown): StoreOp[] {
   walk(prev, next, []);
   return ops;
 }
+
+// ---- Round 2: the per-path `added` predicate --------------------------------------------------
+
+/** A verifier-owned oracle for policy emission, written from the ruling's prose. */
+function oracleDiff(
+  prev: unknown,
+  next: unknown,
+  policy: AddedPolicy,
+): StoreOp[] {
+  const ops: StoreOp[] = [];
+  const decide = (path: readonly Key[], v: unknown) =>
+    typeof policy === 'function' ? policy(path, v) : policy;
+  const add = (v: unknown, path: readonly Key[]): void => {
+    if (isPlainRecord(v) && decide(path, v) === 'leaves') {
+      ops.push({ kind: 'set', path, next: {} });
+      for (const k of Object.keys(v)) add(v[k], [...path, k]);
+    } else ops.push({ kind: 'set', path, next: v });
+  };
+  const walk = (p: unknown, n: unknown, path: readonly Key[]): void => {
+    if (Object.is(p, n)) return;
+    if (isPlainRecord(p) && isPlainRecord(n)) {
+      for (const k of Object.keys(p))
+        if (!Object.hasOwn(n, k))
+          ops.push({ kind: 'delete', path: [...path, k], prev: p[k] });
+      for (const k of Object.keys(n)) {
+        if (!Object.hasOwn(p, k)) add(n[k], [...path, k]);
+        else walk(p[k], n[k], [...path, k]);
+      }
+      return;
+    }
+    if (isPlainList(p) && isPlainList(n) && p.length === n.length) {
+      for (let i = 0; i < n.length; i++) walk(p[i], n[i], [...path, i]);
+      return;
+    }
+    ops.push({ kind: 'set', path, prev: p, next: n });
+  };
+  walk(prev, next, []);
+  return ops;
+}
+
+const pathHash = (path: readonly Key[], salt: number): number => {
+  let h = salt | 0;
+  for (const ch of JSON.stringify(path))
+    h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
+  return h >>> 0;
+};
+
+/** The predicate families every property runs over. */
+const POLICIES: readonly {
+  name: string;
+  policy: (seed: number) => AddedPolicy;
+}[] = [
+  {
+    name: 'leafy at depth <= 1, whole below',
+    policy: () => (p) => (p.length <= 1 ? 'leaves' : 'whole'),
+  },
+  {
+    name: 'leafy at depth <= 2, whole below',
+    policy: () => (p) => (p.length <= 2 ? 'leaves' : 'whole'),
+  },
+  {
+    name: 'whole at depth 1, leafy below',
+    policy: () => (p) => (p.length <= 1 ? 'whole' : 'leaves'),
+  },
+  {
+    name: 'per-path hash',
+    policy: (seed) => (p) => (pathHash(p, seed) % 2 ? 'leaves' : 'whole'),
+  },
+  { name: 'always leaves (fn)', policy: () => () => 'leaves' },
+  { name: 'always whole (fn)', policy: () => () => 'whole' },
+];
+
+/** The studio policy, verbatim from the ruling: leafy collections, atomic entries. */
+const LEAFY = new Set([
+  JSON.stringify(['lint']),
+  JSON.stringify(['lint', 'rules']),
+  JSON.stringify(['lint', 'suppress']),
+]);
+const studioPolicy: AddedPolicy = (path) =>
+  LEAFY.has(JSON.stringify(path)) ? 'leaves' : 'whole';
+
+describe('M1b diffOps(prev, next, { added: predicate }) — policy properties', () => {
+  for (const { name, policy } of POLICIES) {
+    it(`P0 emission = the oracle; P1 exact round-trip; invert restores — ${name} (${SEEDS} seeds)`, () => {
+      for (let seed = 1; seed <= SEEDS; seed++) {
+        const { prev, next } = genPair(seed);
+        const pol = policy(seed);
+        const ops = diffOps(prev, next, { added: pol });
+        expect(ops, `seed ${seed}`).toStrictEqual(oracleDiff(prev, next, pol));
+        const applied = applyOps(prev, ops);
+        expect(applied, `seed ${seed}`).toStrictEqual(next);
+        expect(
+          applyOps(applied, invertBatch(ops)),
+          `seed ${seed}`,
+        ).toStrictEqual(prev);
+      }
+    });
+
+    it(`P3/P4 a non-empty record add is whole only where the predicate said so; arrays stay one op — ${name} (${SEEDS} seeds)`, () => {
+      for (let seed = 1; seed <= SEEDS; seed++) {
+        const { prev, next } = genPair(seed);
+        const pol = policy(seed) as (
+          p: readonly Key[],
+          v: unknown,
+        ) => 'whole' | 'leaves';
+        const ops = diffOps(prev, next, { added: pol });
+        for (const op of ops) {
+          if (op.kind !== 'set' || resolve(prev, op.path) !== MISSING) continue;
+          if (isPlainRecord(op.next) && Object.keys(op.next).length)
+            expect(
+              pol(op.path, op.next),
+              `seed ${seed} ${JSON.stringify(op.path)}`,
+            ).toBe('whole');
+          if (isPlainList(op.next)) {
+            const under = ops.filter(
+              (o) =>
+                o.path.length > op.path.length &&
+                op.path.every((x, i) => o.path[i] === x),
+            );
+            expect(
+              under,
+              `seed ${seed} ${JSON.stringify(op.path)}`,
+            ).toHaveLength(0);
+          }
+        }
+      }
+    });
+  }
+
+  it(`the predicate is asked exactly for added plain records, with the added record itself (${SEEDS} seeds)`, () => {
+    let calls = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const { prev, next } = genPair(seed);
+      const asked: { path: readonly Key[]; value: unknown }[] = [];
+      diffOps(prev, next, {
+        added: (path, value) => {
+          asked.push({ path, value });
+          return pathHash(path, seed) % 2 ? 'leaves' : 'whole';
+        },
+      });
+      const expected: string[] = [];
+      oracleDiff(prev, next, (path, value) => {
+        expected.push(JSON.stringify(path));
+        void value;
+        return pathHash(path, seed) % 2 ? 'leaves' : 'whole';
+      });
+      expect(
+        asked.map((a) => JSON.stringify(a.path)),
+        `seed ${seed}`,
+      ).toEqual(expected);
+      for (const a of asked) {
+        expect(isPlainRecord(a.value)).toBe(true);
+        expect(a.value, `seed ${seed}`).toBe(resolve(next, a.path)); // the record itself, by reference
+      }
+      calls += asked.length;
+    }
+    expect(calls).toBeGreaterThan(SEEDS);
+  });
+
+  it(`P2 'whole' in every form and an absent option are the frozen base diff (${SEEDS} seeds)`, () => {
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const { prev, next } = genPair(seed);
+      const base = referenceWholeDiff(prev, next);
+      expect(
+        diffOps(prev, next, { added: () => 'whole' }),
+        `seed ${seed}`,
+      ).toStrictEqual(base);
+      expect(
+        diffOps(prev, next, { added: 'whole' }),
+        `seed ${seed}`,
+      ).toStrictEqual(base);
+    }
+  });
+
+  it('witness: an added collection with two entries = [anchor, entry1 whole, entry2 whole], key order; round-trip; undo cleans up', () => {
+    const e1 = { rule: 'r1', path: ['a'], reason: 'x', by: 'u', at: 1 };
+    const e2 = { rule: 'r2', path: ['b'], reason: 'y', by: 'v', at: 2 };
+    const prev = { lint: {} };
+    const next = { lint: { suppress: { k2: e2, k1: e1 } } };
+    const ops = diffOps(prev, next, { added: studioPolicy });
+    expect(ops).toStrictEqual<StoreOp[]>([
+      { kind: 'set', path: ['lint', 'suppress'], next: {} },
+      { kind: 'set', path: ['lint', 'suppress', 'k2'], next: e2 },
+      { kind: 'set', path: ['lint', 'suppress', 'k1'], next: e1 },
+    ]);
+    expect(applyOps(prev, ops)).toStrictEqual(next);
+    expect(applyOps(next, invertBatch(ops))).toStrictEqual(prev);
+    // on a missing `lint`: two anchors, then the entries
+    expect(diffOps({}, next, { added: studioPolicy })).toStrictEqual<StoreOp[]>(
+      [
+        { kind: 'set', path: ['lint'], next: {} },
+        { kind: 'set', path: ['lint', 'suppress'], next: {} },
+        { kind: 'set', path: ['lint', 'suppress', 'k2'], next: e2 },
+        { kind: 'set', path: ['lint', 'suppress', 'k1'], next: e1 },
+      ],
+    );
+    const fromEmpty = diffOps({}, next, { added: studioPolicy });
+    expect(applyOps({}, fromEmpty)).toStrictEqual(next);
+    expect(applyOps(next, invertBatch(fromEmpty))).toStrictEqual({});
+  });
+});
+
+describe('M1c the emission seam: opLog / opSync `emit` (absent ⇒ byte-identical)', () => {
+  const manual: OpLogDriver = (run) => {
+    run();
+    return { destroy: () => undefined };
+  };
+  const emitted = (
+    prev: object,
+    next: object,
+    emit?: { added: AddedPolicy },
+  ) => {
+    const s = signal<object>(prev);
+    const log = opLog(s, { driver: manual, ...(emit ? { emit } : {}) });
+    const out: StoreOp[][] = [];
+    log.subscribe((b) => out.push([...b.ops]));
+    s.set(next);
+    log.flush();
+    log.destroy();
+    return out.flat();
+  };
+
+  it(`opLog without \`emit\` emits the frozen base diff; with \`emit\` it emits diffOps(…, emit) (${SEEDS} seeds)`, () => {
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const { prev, next } = genPair(seed);
+      expect(emitted(prev, next), `seed ${seed}`).toStrictEqual(
+        referenceWholeDiff(prev, next),
+      );
+      const pol: AddedPolicy = (p) =>
+        pathHash(p, seed) % 2 ? 'leaves' : 'whole';
+      expect(emitted(prev, next, { added: pol }), `seed ${seed}`).toStrictEqual(
+        diffOps(prev, next, { added: pol }),
+      );
+    }
+  });
+
+  it('opSync forwards `emit` to its log: a first suppressor on a missing `lint` ships anchors + ONE entry set', () => {
+    const s = signal<Record<string, unknown>>({});
+    const sync = opSync(s, {
+      writer: 'w',
+      driver: manual,
+      emit: { added: studioPolicy },
+    });
+    const envs: StoreOp[][] = [];
+    sync.subscribe((e) =>
+      envs.push(
+        e.ops.map(({ kind, path, ...rest }) => {
+          const { cites, epoch, ...op } = rest as {
+            cites: unknown;
+            epoch: unknown;
+          } & Record<string, unknown>;
+          void cites;
+          void epoch;
+          return { kind, path, ...op } as StoreOp;
+        }),
+      ),
+    );
+    const entry = { rule: 'r', path: ['x'], reason: 'why', by: 'me', at: 1 };
+    s.set({ lint: { suppress: { k: entry } } });
+    sync.flush();
+    expect(envs).toStrictEqual([
+      [
+        { kind: 'set', path: ['lint'], next: {} },
+        { kind: 'set', path: ['lint', 'suppress'], next: {} },
+        { kind: 'set', path: ['lint', 'suppress', 'k'], next: entry },
+      ],
+    ]);
+    sync.destroy();
+    // and without `emit`: one whole set, as before
+    const t = signal<Record<string, unknown>>({});
+    const plain = opSync(t, { writer: 'w', driver: manual });
+    const raw: unknown[] = [];
+    plain.subscribe((e) => raw.push(e.ops.map((o) => o.path)));
+    t.set({ lint: { suppress: { k: entry } } });
+    plain.flush();
+    expect(raw).toEqual([[['lint']]]);
+    plain.destroy();
+  });
+});

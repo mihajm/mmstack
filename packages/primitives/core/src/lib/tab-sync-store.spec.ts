@@ -54,6 +54,61 @@ describe('tabSync (store mode)', () => {
     expect(b().nested).toEqual({ a: 0, b: 0 });
   });
 
+  it('emit: a per-path `added` policy is forwarded — two first suppressors on a missing `lint` both survive', async () => {
+    type Doc = { v: string; lint?: Record<string, Record<string, unknown>> };
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const mk = (leafy: boolean) => {
+      const env = createEnvironmentInjector(
+        [{ provide: MESSAGE_BUS, useFactory: () => new MessageBus() }],
+        TestBed.inject(EnvironmentInjector),
+      );
+      injectors.push(env);
+      return runInInjectionContext(env, () =>
+        tabSync(store<Doc>({ v: 'x' }), {
+          id: leafy ? 'emit-leafy' : 'emit-plain',
+          injector: env.get(Injector),
+          helloTimeoutMs: 40,
+          jitterMs: 1,
+          ...(leafy ? { emit: { added: studio } } : {}),
+        }),
+      );
+    };
+    const run = async (leafy: boolean) => {
+      const a = mk(leafy);
+      await wait(60);
+      const b = mk(leafy);
+      await wait(60);
+      a.update((d) => ({
+        ...d,
+        lint: { suppress: { ka: { by: 'a', at: 1 } } },
+      }));
+      b.update((d) => ({
+        ...d,
+        lint: { suppress: { kb: { by: 'b', at: 2 } } },
+      }));
+      TestBed.tick();
+      await wait(30);
+      return { a: a(), b: b() };
+    };
+    const leafy = await run(true);
+    expect(Object.keys(leafy.a.lint?.['suppress'] ?? {}).sort()).toEqual([
+      'ka',
+      'kb',
+    ]);
+    expect(leafy.b).toEqual(leafy.a);
+    const plain = await run(false);
+    expect(Object.keys(plain.a.lint?.['suppress'] ?? {})).toHaveLength(1);
+    expect(plain.b).toEqual(plain.a);
+  });
+
   it('concurrent writes to DIFFERENT leaves merge instead of clobbering (the op-mode win)', async () => {
     const a = tab();
     await wait(60);

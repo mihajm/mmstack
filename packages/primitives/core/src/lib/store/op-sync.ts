@@ -25,6 +25,7 @@ import {
   diffOps,
   invertBatch,
   opLog,
+  type DiffOpsOptions,
   type OpLogDriver,
   type StoreOp,
 } from './op-log';
@@ -1269,6 +1270,8 @@ export type OpSyncOptions = {
   readonly clock?: HlcClock;
   readonly injector?: Injector;
   readonly driver?: OpLogDriver;
+  /** Emission diff options for local writes, forwarded to the underlying `opLog` (see `DiffOpsOptions`). */
+  readonly emit?: DiffOpsOptions;
   /** A version gap from a known origin (missed envelopes) — the resync hook. */
   readonly onGap?: (origin: string, expected: number, got: number) => void;
   /** A received envelope rejected as malformed by {@link validateEnvelope}, with the reason. */
@@ -1446,8 +1449,8 @@ export function opSync<T extends object>(
   const log = opLog(
     source,
     opt.driver
-      ? { origin, driver: opt.driver }
-      : { origin, injector: resolvedInjector as Injector },
+      ? { origin, driver: opt.driver, emit: opt.emit }
+      : { origin, injector: resolvedInjector as Injector, emit: opt.emit },
   );
 
   const canDefer = !opt.driver;

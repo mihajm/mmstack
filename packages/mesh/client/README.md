@@ -98,6 +98,22 @@ The default is last-writer-wins on a leaf, which drops one side of a true clash 
 For a field where losing a write matters, set `preserve` on its path and resolve the `Conflicted`
 value in the UI.
 
+A new container is a different case: by default an added record ships as one whole `set`, so two
+clients that create the same missing container at once (say the first two suppressions under a
+missing `lint`) race, and only one survives. Pass `emit: { added }` to choose per path. Use
+`'leaves'` for a collection (an empty anchor plus its entries, so concurrent first writers merge)
+and `'whole'` for an entry that must arrive as one atomic `set`:
+
+```ts
+const leafy = new Set(['lint', 'lint.rules', 'lint.suppress']);
+meshSync(doc, {
+  room,
+  writer,
+  transport,
+  emit: { added: (path) => (leafy.has(path.join('.')) ? 'leaves' : 'whole') },
+});
+```
+
 ## Interop with other CRDTs
 
 A merge policy is a plain function, so one path can hold another CRDT and merge through that

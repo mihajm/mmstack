@@ -159,4 +159,114 @@ describe('published subtrees (rung 3)', () => {
       true,
     );
   });
+
+  it('workerStore emit: two replicas first-suppress on a missing `lint` concurrently; both entries survive everywhere', async () => {
+    type Doc = { v: number; lint?: Record<string, Record<string, unknown>> };
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const run = async (leafy: boolean) => {
+      const room = store<Doc>({ v: 0 }, createStoreContext());
+      const host = createWorkerHost({ stores: { room } });
+      const injector = TestBed.inject(Injector);
+      const replica = () => {
+        const worker = connect(host);
+        return TestBed.runInInjectionContext(() =>
+          workerStore<Doc>(worker, 'room', {
+            injector,
+            ...(leafy ? { emit: { added: studio } } : {}),
+          }),
+        );
+      };
+      const a = replica();
+      const b = replica();
+      await tick();
+      // both write before either sees the other's envelope
+      const wa = a.write((d) =>
+        d.set({ ...d(), lint: { suppress: { ka: { by: 'a' } } } }),
+      );
+      const wb = b.write((d) =>
+        d.set({ ...d(), lint: { suppress: { kb: { by: 'b' } } } }),
+      );
+      await Promise.all([wa, wb]);
+      await tick();
+      return { owner: room(), a: a.value(), b: b.value() };
+    };
+    const leafy = await run(true);
+    expect(Object.keys(leafy.owner.lint?.['suppress'] ?? {}).sort()).toEqual([
+      'ka',
+      'kb',
+    ]);
+    expect(leafy.a).toEqual(leafy.owner);
+    expect(leafy.b).toEqual(leafy.owner);
+    const plain = await run(false);
+    expect(Object.keys(plain.owner.lint?.['suppress'] ?? {})).toHaveLength(1);
+    expect(plain.a).toEqual(plain.owner);
+  });
+
+  it('createWorkerHost emit: an owner-side first suppression on a missing `lint` ships two anchors + ONE entry set; absent ⇒ unchanged', () => {
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const entry = {
+      rule: 'r1',
+      path: ['x'],
+      reason: 'why',
+      by: 'agent',
+      at: 1,
+    };
+    const paths = (leafy: boolean) => {
+      type Doc = { v: number; lint?: Record<string, Record<string, unknown>> };
+      const room = store<Doc>({ v: 0 }, createStoreContext());
+      const host = createWorkerHost({
+        stores: { room },
+        ...(leafy ? { emit: { added: studio } } : {}),
+      });
+      const posted: { path: readonly (string | number)[]; next?: unknown }[][] =
+        [];
+      const side = {
+        onmessage: null as ((ev: { data: unknown }) => void) | null,
+        postMessage: (m: unknown) => {
+          const msg = m as {
+            type: string;
+            env?: { ops: { path: (string | number)[]; next?: unknown }[] };
+          };
+          if (msg.type === 'store:sync' && msg.env)
+            posted.push(
+              msg.env.ops.map((o) => ({ path: o.path, next: o.next })),
+            );
+        },
+      };
+      host.connect(side);
+      side.onmessage?.({
+        data: { type: 'store:subscribe', store: 'room', clientId: 'c' },
+      });
+      room.set({ ...room(), lint: { suppress: { k: entry } } });
+      host.flush();
+      host.dispose();
+      return posted;
+    };
+    expect(paths(true)).toEqual([
+      [
+        { path: ['lint'], next: {} },
+        { path: ['lint', 'suppress'], next: {} },
+        { path: ['lint', 'suppress', 'k'], next: entry },
+      ],
+    ]);
+    expect(paths(false)).toEqual([
+      [{ path: ['lint'], next: { suppress: { k: entry } } }],
+    ]);
+  });
 });

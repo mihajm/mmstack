@@ -167,4 +167,90 @@ describe('webRtcMesh (P2P converging over linked channels)', () => {
     expect(a.mesh.peers().length).toBe(1);
     expect(b2.s().title).toBe('while-b-gone');
   });
+
+  it('emit: a first suppression on a missing `lint` ships two anchors + ONE entry set over the peer link; absent ⇒ unchanged', () => {
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const entry = {
+      rule: 'r1',
+      path: ['x'],
+      reason: 'why',
+      by: 'agent',
+      at: 1,
+    };
+    const sent = (leafy: boolean) => {
+      const relay = createRelay();
+      const hub = fakeHub();
+      const frames: string[] = [];
+      const recording: PeerConnector = (...args) => {
+        const c = hub.connector(...args);
+        return {
+          ...c,
+          channel: {
+            ...c.channel,
+            send: (f: string) => {
+              frames.push(f);
+              c.channel.send(f);
+            },
+          },
+        };
+      };
+      type Doc = State & { lint?: Record<string, Record<string, unknown>> };
+      const mk = (writer: string, connector: PeerConnector) =>
+        TestBed.runInInjectionContext(() => {
+          const s = store<Doc>(initial());
+          webRtcMesh(s, {
+            room: 'p2p-emit',
+            writer,
+            signaling: directTransport(relay, { writer }),
+            connector,
+            ...(leafy ? { emit: { added: studio } } : {}),
+          });
+          return s;
+        });
+      const a = mk('wa', recording);
+      mk('wb', recording);
+      flush();
+      frames.length = 0;
+      a.set({ ...a(), lint: { suppress: { k: entry } } });
+      flush();
+      return frames
+        .map(
+          (f) =>
+            JSON.parse(f) as {
+              t: string;
+              env?: {
+                origin: string;
+                ops: { path: (string | number)[]; next?: unknown }[];
+              };
+            },
+        )
+        .flatMap((m) =>
+          m.t === 'env' && m.env?.ops.some((o) => o.path[0] === 'lint')
+            ? [m.env.ops.map((o) => ({ path: o.path, next: o.next }))]
+            : [],
+        );
+    };
+    const leafy = sent(true);
+    expect(leafy.length).toBeGreaterThan(0);
+    for (const ops of leafy)
+      expect(ops).toEqual([
+        { path: ['lint'], next: {} },
+        { path: ['lint', 'suppress'], next: {} },
+        { path: ['lint', 'suppress', 'k'], next: entry },
+      ]);
+    const plain = sent(false);
+    expect(plain.length).toBeGreaterThan(0);
+    for (const ops of plain)
+      expect(ops).toEqual([
+        { path: ['lint'], next: { suppress: { k: entry } } },
+      ]);
+  });
 });

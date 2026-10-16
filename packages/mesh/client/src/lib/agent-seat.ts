@@ -12,6 +12,7 @@ import {
   store,
   type DotFrontier,
   type ForkStoreOptions,
+  type DiffOpsOptions,
   type MergePolicyEntry,
   type OpLogDriver,
   type OpSync,
@@ -80,6 +81,12 @@ export type AgentSeatOptions = {
   readonly transport: MeshTransportFactory;
   /** Per-path merge policies for rebase/convergence (`lww` default). */
   readonly policies?: readonly MergePolicyEntry[];
+  /**
+   * How the seat's writes are diffed into ops (forwarded to its `opSync`; see `DiffOpsOptions`).
+   * Absent: whole-value adds, as before. A per-path `added` predicate keeps chosen collections
+   * leafy while each entry stays one atomic `set` (the whole-entry law the relay holds agents to).
+   */
+  readonly emit?: DiffOpsOptions;
   /**
    * Emit-side validation, symmetric with the relay's — an optimization, not the
    * enforcement (the relay validates every envelope regardless). A violating write is
@@ -184,6 +191,7 @@ export function agentSeat<T extends object>(
     policies: opt.policies,
     policyVersion,
     driver: microtaskDriver(),
+    emit: opt.emit,
     onReject: (_env, reason) => {
       rejected = true;
       console.warn(

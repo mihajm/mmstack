@@ -404,6 +404,61 @@ describe('meshSync (full loop over an in-process relay)', () => {
     expect(b.s()).toEqual(a.s());
   });
 
+  it('emit: a per-path `added` policy reaches the write lane — two first suppressors on a missing `lint` both survive', () => {
+    type Doc = {
+      title: string;
+      lint?: Record<string, Record<string, unknown>>;
+    };
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const run = (emit?: MeshSyncOptions['emit']) => {
+      const relay = createRelay();
+      const mk = (writer: string) =>
+        TestBed.runInInjectionContext(() => {
+          const s = store<Doc>({ title: 't' });
+          meshSync(s, {
+            room: 'emit',
+            writer,
+            transport: directTransport(relay, { writer }),
+            ...(emit ? { emit } : {}),
+          });
+          return s;
+        });
+      const a = mk('wa');
+      const b = mk('wb');
+      flush();
+      const entry = (by: string) => ({
+        rule: 'r1',
+        path: ['x'],
+        reason: 'why',
+        by,
+        at: 1,
+      });
+      a.update((d) => ({ ...d, lint: { suppress: { ka: entry('a') } } }));
+      b.update((d) => ({ ...d, lint: { suppress: { kb: entry('b') } } }));
+      flush();
+      flush();
+      return { a: a(), b: b() };
+    };
+    const leafy = run({ added: studio });
+    expect(Object.keys(leafy.a.lint?.['suppress'] ?? {}).sort()).toEqual([
+      'ka',
+      'kb',
+    ]);
+    expect(leafy.b).toEqual(leafy.a);
+    // without `emit`: unchanged behaviour — the whole `lint` adds race and one suppression is lost
+    const plain = run();
+    expect(Object.keys(plain.a.lint?.['suppress'] ?? {})).toHaveLength(1);
+    expect(plain.b).toEqual(plain.a);
+  });
+
   it('fork(): a committed agent branch reaches the room and a concurrent edit survives', () => {
     const relay = createRelay();
     const a = peer(relay, 'wa');

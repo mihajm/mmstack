@@ -6,6 +6,7 @@ export {
   diffOps,
   invertBatch,
   opLog,
+  type AddedPolicy,
   type CreateOpLogOptions,
   type DiffOpsOptions,
   type OpBatch,

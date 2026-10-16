@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import {
   opSync,
+  type DiffOpsOptions,
   type MergePolicyEntry,
   type OpEnvelope,
   type OpSyncCheckpoint,
@@ -53,6 +54,8 @@ export type WebRtcMeshOptions = {
   readonly policies?: readonly MergePolicyEntry[];
   readonly policyVersion?: number;
   readonly injector?: Injector;
+  /** How local writes are diffed into ops (forwarded to `opSync`; see `DiffOpsOptions`). Absent: as before. */
+  readonly emit?: DiffOpsOptions;
 };
 
 export type WebRtcMeshRef = {
@@ -94,6 +97,7 @@ export function webRtcMesh<T extends object>(
     policies: opt.policies,
     policyVersion: opt.policyVersion,
     injector,
+    emit: opt.emit,
   });
 
   // subscribe before signaling starts: a link can open, and its first frame arrive, while

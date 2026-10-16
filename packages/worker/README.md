@@ -243,7 +243,7 @@ todos.connected; //   the worker connection's liveness
 todos.applied(); //   StoreFrontier: owner generation + highest stamp folded in per origin
 ```
 
-You cannot set a leaf locally (that would diverge from the owner). To change owned state, route a write:
+You cannot set a leaf locally (that would diverge from the owner). To change owned state, route a write. `workerStore(worker, key, { emit: { added } })` chooses per path how an added container is emitted. Make a collection leafy so that two replicas creating it at once both keep their entries, and keep each entry `'whole'` so it arrives as one atomic `set` (see `DiffOpsOptions` in `@mmstack/primitives`):
 
 ```ts
 await todos.write((draft) => {

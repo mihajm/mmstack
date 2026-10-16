@@ -1191,4 +1191,75 @@ describe('agentSeat — seeding a fresh room under a root-write policy', () => {
     first.s.close();
     late.s.close();
   });
+
+  it("emit: an agent's first suppression on a missing `lint` ships two anchors + ONE entry set; absent ⇒ unchanged", async () => {
+    const LEAFY = new Set([
+      '["lint"]',
+      '["lint","rules"]',
+      '["lint","suppress"]',
+    ]);
+    const studio = (path: readonly (string | number)[]) =>
+      LEAFY.has(JSON.stringify(path))
+        ? ('leaves' as const)
+        : ('whole' as const);
+    const entry = {
+      rule: 'r1',
+      path: ['x'],
+      reason: 'why',
+      by: 'agent',
+      at: 1,
+    };
+    const sent = async (leafy: boolean) => {
+      const relay = createRelay();
+      const inner = directTransport(relay, {
+        writer: 'agent-1',
+        kind: 'agent',
+      });
+      const envs: { path: readonly (string | number)[]; next?: unknown }[][] =
+        [];
+      const recording: MeshTransportFactory = () => {
+        const t = inner();
+        return {
+          ...t,
+          send: (msg: ClientMsg) => {
+            if (msg.t === 'env')
+              envs.push(
+                msg.env.ops.map((o) => ({
+                  path: o.path,
+                  next: (o as { next?: unknown }).next,
+                })),
+              );
+            t.send(msg);
+          },
+        };
+      };
+      const s = agentSeat<
+        Doc & { lint?: Record<string, Record<string, unknown>> }
+      >(initial(), {
+        room: 'emit',
+        writer: 'agent-1',
+        transport: recording,
+        ...(leafy ? { emit: { added: studio } } : {}),
+      });
+      for (let i = 0; i < 4; i++)
+        await new Promise<void>((r) => setTimeout(r, 1));
+      s.write(() =>
+        s.doc.set({ ...s.doc(), lint: { suppress: { k: entry } } }),
+      );
+      for (let i = 0; i < 4; i++)
+        await new Promise<void>((r) => setTimeout(r, 1));
+      s.close();
+      return envs.filter((ops) => ops.some((o) => o.path[0] === 'lint'));
+    };
+    expect(await sent(true)).toEqual([
+      [
+        { path: ['lint'], next: {} },
+        { path: ['lint', 'suppress'], next: {} },
+        { path: ['lint', 'suppress', 'k'], next: entry },
+      ],
+    ]);
+    expect(await sent(false)).toEqual([
+      [{ path: ['lint'], next: { suppress: { k: entry } } }],
+    ]);
+  });
 });

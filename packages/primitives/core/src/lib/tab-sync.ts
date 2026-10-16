@@ -10,6 +10,7 @@ import {
   InjectionToken,
 } from '@angular/core';
 import { STORE_KIND, type StoreKind } from './store/internals';
+import type { DiffOpsOptions } from './store/op-log';
 import {
   OP_PROTO_VERSION,
   opSync,
@@ -43,6 +44,7 @@ function storeTabSync(
     writer: opt.writer ?? 'local',
     policies: opt.policies,
     injector,
+    emit: opt.emit,
   });
   const helloTimeoutMs = opt.helloTimeoutMs ?? 250;
   const jitterMs = opt.jitterMs ?? 25;
@@ -270,6 +272,8 @@ export type StoreTabSyncOptions = SyncSignalOptions & {
   helloTimeoutMs?: number;
   /** Max response jitter — first responder wins, others cancel. */
   jitterMs?: number;
+  /** How local writes are diffed into ops (forwarded to `opSync`; see `DiffOpsOptions`). Absent: as before. */
+  emit?: DiffOpsOptions;
 };
 
 /**

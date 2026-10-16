@@ -22,6 +22,7 @@ import {
   opSync,
   registerResource,
   type AsyncStore,
+  type DiffOpsOptions,
   type DotFrontier,
   type ForkStoreOptions,
   type MergePolicyEntry,
@@ -89,6 +90,12 @@ export type MeshSyncOptions = {
   readonly transport: MeshTransportFactory;
   /** Per-path merge policies for rebase/convergence (`lww` default). */
   readonly policies?: readonly MergePolicyEntry[];
+  /**
+   * How local writes are diffed into ops (forwarded to `opSync`; see `DiffOpsOptions`). Absent:
+   * whole-value adds, as before. A per-path `added` predicate keeps chosen collections leafy (so
+   * concurrent first writers merge) while their entries stay one atomic `set`.
+   */
+  readonly emit?: DiffOpsOptions;
   /** Emit-side validation, symmetric with the relay's (tripwire honesty). */
   readonly policy?: OpPolicy;
   /** kind/claims of this principal, so a shared policy evaluates identically on both sides. */
@@ -417,6 +424,7 @@ export function meshSync<T extends object>(
       policies: opt.policies,
       policyVersion,
       injector,
+      emit: opt.emit,
       onReject: (_env, reason) => {
         droppedInvalid.update((n) => n + 1);
         if (isDevMode()) {

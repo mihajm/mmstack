@@ -12,6 +12,7 @@ import {
   createHlcClock,
   frontierEquals,
   opSync,
+  type DiffOpsOptions,
   type OpSync,
 } from '@mmstack/primitives/core';
 import {
@@ -88,6 +89,11 @@ export type CreateWorkerHostOptions = {
    * `MessageChannel` port) or a SharedWorker fan-in.
    */
   readonly port?: WorkerPortLike;
+  /**
+   * How owner-side writes to every OWNED store are diffed into ops (forwarded to each owned
+   * `opSync`; see `DiffOpsOptions`). Absent: whole-value adds, as before.
+   */
+  readonly emit?: DiffOpsOptions;
 };
 
 export type WorkerHost<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
@@ -196,6 +202,7 @@ export function createWorkerHost<
     P | NoInfer<Record<string, PublishedEntry<any, keyof S>>>;
   readonly tasks?: T;
   readonly port?: WorkerPortLike;
+  readonly emit?: DiffOpsOptions;
   // NoInfer: an expected return type (a host assigned into a typed slot) must not drive inference of
   // P through `PublishedValueOf`, which would widen an omitted `published` to `{ [x: string]: any }`
 }): NoInfer<
@@ -259,6 +266,8 @@ export function createWorkerHost<
       origin: `${hostId}:${key}`,
       instance: hostId, // the owner generation every envelope and frontier carries
       driver: writable ? microtaskOpLogDriver() : publishedDriver(),
+      // owned stores only: a published derivation is written by the host's diff, never by an app
+      emit: writable ? options.emit : undefined,
       clock: createHlcClock(),
     });
     const frontierOf = (): StoreFrontier => ({

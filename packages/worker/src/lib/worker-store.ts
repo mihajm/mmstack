@@ -18,6 +18,7 @@ import {
   opSync,
   toStore,
   type Hlc,
+  type DiffOpsOptions,
   type OpEnvelope,
   type OpLogDriver,
   type SignalStore,
@@ -66,6 +67,12 @@ export type WorkerStoreOptions<T> = {
   readonly defaultValue?: T;
   /** Register into the nearest transition scope while hydrating/reloading. */
   readonly register?: false | 'indicator' | 'suspend';
+  /**
+   * How this replica's writes are diffed into ops (forwarded to its `opSync`; see `DiffOpsOptions`).
+   * Absent: whole-value adds, as before. `{ added: (path) => … }` emits chosen added containers
+   * leaf-wise so concurrent first writers merge instead of one winning.
+   */
+  readonly emit?: DiffOpsOptions;
 };
 
 /** The write path — present only on OWNED (writable) subtrees; absent on published (read-only) ones. */
@@ -153,6 +160,7 @@ function build<T extends object>(
   const sync = opSync(root as unknown as WritableSignal<T>, {
     writer: worker.clientId,
     driver: microtaskDriver(),
+    emit: opt?.emit,
     onGap: () => resync(),
   });
 

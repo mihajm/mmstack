@@ -113,6 +113,7 @@ function diffNode(
   next: unknown,
   path: readonly Key[],
   ops: StoreOp[],
+  leaves = false,
 ): void {
   if (Object.is(prev, next)) return;
 
@@ -124,9 +125,10 @@ function diffNode(
     for (const key of Object.keys(next)) {
       if (!Object.hasOwn(prev, key)) {
         // added key: deliberately NO `prev` property (absent ≠ undefined)
-        ops.push({ kind: 'set', path: [...path, key], next: next[key] });
+        if (leaves) addLeaves(next[key], [...path, key], ops);
+        else ops.push({ kind: 'set', path: [...path, key], next: next[key] });
       } else {
-        diffNode(prev[key], next[key], [...path, key], ops);
+        diffNode(prev[key], next[key], [...path, key], ops, leaves);
       }
     }
     return;
@@ -137,7 +139,7 @@ function diffNode(
     // change is a whole unit — index attribution lies under insert/remove/reorder
     if (prev.length === next.length) {
       for (let i = 0; i < next.length; i++)
-        diffNode(prev[i], next[i], [...path, i], ops);
+        diffNode(prev[i], next[i], [...path, i], ops, leaves);
       return;
     }
     ops.push({ kind: 'set', path, prev, next });
@@ -146,6 +148,22 @@ function diffNode(
 
   // leaf / type change / opaque — one unit, prev present (the slot existed)
   ops.push({ kind: 'set', path, prev, next });
+}
+
+/**
+ * An added value under `{ added: 'leaves' }`: a plain record becomes an empty-record anchor
+ * followed by its children, recursively; anything else (leaf, array, opaque) is one add. The
+ * anchor is what lets the leaves materialize on a peer: the converging register only grafts a
+ * deep write through containers that exist in the nearest ancestor register's value.
+ */
+function addLeaves(value: unknown, path: readonly Key[], ops: StoreOp[]): void {
+  if (!isRecord(value)) {
+    ops.push({ kind: 'set', path, next: value });
+    return;
+  }
+  ops.push({ kind: 'set', path, next: {} });
+  for (const key of Object.keys(value))
+    addLeaves(value[key], [...path, key], ops);
 }
 
 /** Immutably applies one op along its path, vivifying missing containers `'auto'`-style. */
@@ -205,16 +223,33 @@ export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
   return next as T;
 }
 
+export type DiffOpsOptions = {
+  /**
+   * How a record key absent in `prev` is emitted. `'whole'` (default): one `set` of the whole
+   * value, which mints a sync register at the container path, so two replicas adding the same new
+   * container concurrently fold to ONE of them. `'leaves'`: an added plain record is emitted as an
+   * empty-record anchor `set` plus its children, recursively, so every leaf is its own register and
+   * concurrent adds of one container merge key by key. Arrays, opaque values and anything
+   * replacing an existing slot stay whole in both modes.
+   */
+  readonly added?: 'whole' | 'leaves';
+};
+
 /**
  * Pure reference-pruned structural diff of two roots into minimal ops (the emission core of
  * {@link opLog}, exported so code outside a log can produce a batch — e.g. diffing a scratch
  * draft against a replica's current value to route a write to its owner). Trusts the
  * copy-on-write contract: an untouched subtree that kept its reference is skipped. Emits only
- * `set` and `delete`; `clear` is an emission-layer intent, never a diff product.
+ * `set` and `delete`; `clear` is an emission-layer intent, never a diff product. See
+ * {@link DiffOpsOptions} for leaf-wise emission of added containers.
  */
-export function diffOps(prev: unknown, next: unknown): StoreOp[] {
+export function diffOps(
+  prev: unknown,
+  next: unknown,
+  opt?: DiffOpsOptions,
+): StoreOp[] {
   const ops: StoreOp[] = [];
-  diffNode(prev, next, [], ops);
+  diffNode(prev, next, [], ops, opt?.added === 'leaves');
   return ops;
 }
 

@@ -10,6 +10,11 @@ export {
   serializeError,
   type SerializedError,
 } from './lib/error';
+export {
+  storeFrontierEquals,
+  UNKNOWN_FRONTIER,
+  type StoreFrontier,
+} from './lib/frontier';
 export { generateId } from './lib/id';
 export type {
   EmptyWorkerSchema,

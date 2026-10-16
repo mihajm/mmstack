@@ -1,4 +1,8 @@
-import type { OpEnvelope, OpSyncCheckpoint } from '@mmstack/primitives/core';
+import type {
+  AppliedFrontier,
+  OpEnvelope,
+  OpSyncCheckpoint,
+} from '@mmstack/primitives/core';
 import type { SerializedError } from './error';
 
 /** Wire-protocol version, negotiated in the hello/ready handshake. Bump on breaking envelope change. */
@@ -37,7 +41,14 @@ export type WorkerEnvelope =
   | { type: 'store:subscribe'; store: string; clientId: string }
   // The owner ships its opSync checkpoint (root + register state + watermark) on subscribe/resync,
   // so a joining replica hydrates through its own fold rather than adopting a bare value.
-  | { type: 'store:checkpoint'; store: string; checkpoint: OpSyncCheckpoint }
+  | {
+      type: 'store:checkpoint';
+      store: string;
+      checkpoint: OpSyncCheckpoint;
+      // additive, optional on read: the owner generation (host id) and what the owner has applied
+      instance?: string;
+      applied?: AppliedFrontier;
+    }
   // A single op envelope, both directions: owner-emitted ops flow host -> clients, and a client's
   // routed write flows client -> host. The host relays each applied envelope to every subscriber
   // (including the sender, whose replica reads its own echo as the acknowledgement).

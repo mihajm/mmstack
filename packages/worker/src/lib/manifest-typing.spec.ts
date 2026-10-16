@@ -1,7 +1,7 @@
 import { computed } from '@angular/core';
 import { createStoreContext, store } from '@mmstack/primitives/core';
 import { createWorkerHost } from '@mmstack/worker/host';
-import type { SchemaOf } from '@mmstack/worker/protocol';
+import type { SchemaOf, StoreFrontier } from '@mmstack/worker/protocol';
 import { describe, expect, it } from 'vitest';
 import type { WorkerRef } from './connect-worker';
 import { workerStore } from './worker-store';
@@ -15,7 +15,12 @@ function makeHost() {
   const stats = computed(() => ({ sum: 0, count: 0 }));
   return createWorkerHost({
     stores: { counter },
-    published: { stats },
+    published: {
+      stats,
+      // a factory entry: `frontiers` is contextually typed by the owned store keys
+      checked: ({ frontiers }) =>
+        computed(() => ({ ok: true, of: frontiers.counter() })),
+    },
     tasks: { fib: (n: number) => n * 2 },
   });
 }
@@ -39,6 +44,27 @@ describe('manifest typing (compile-time)', () => {
       // @ts-expect-error published subtree is read-only — no write()
       stats.write(() => {
         // noop
+      });
+
+      const checked = workerStore(worker, 'checked');
+      const ck: { ok: boolean; of: StoreFrontier } | undefined =
+        checked.value();
+      void ck;
+      const applied: StoreFrontier = counter.applied();
+      void applied;
+
+      const host = null as unknown as App;
+      const f: StoreFrontier = host.frontiers.counter();
+      void f;
+      // @ts-expect-error frontiers exist for OWNED stores only
+      void host.frontiers.stats;
+
+      createWorkerHost({
+        stores: { counter: store({ n: 0 }, createStoreContext()) },
+        published: {
+          // @ts-expect-error a factory sees only the owned store keys
+          bad: ({ frontiers }) => computed(() => frontiers.nope()),
+        },
       });
 
       const r: Promise<number> = worker.runTask('fib', 21);

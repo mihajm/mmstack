@@ -240,6 +240,7 @@ todos.value(); //     Signal<Todo[] | undefined>, undefined before hydration
 todos.status(); //    'loading' until the first snapshot, then 'resolved'
 todos.hasValue();
 todos.connected; //   the worker connection's liveness
+todos.applied(); //   StoreFrontier: owner generation + highest stamp folded in per origin
 ```
 
 You cannot set a leaf locally (that would diverge from the owner). To change owned state, route a write:
@@ -283,6 +284,27 @@ visible.value(); // the last result, held during recompute
 ```
 
 Register it with `{ register: 'indicator' }` and a boundary above reflects the worker's pending state. `write()` on a published subtree is a compile error (and rejects at runtime if you reach past the types).
+
+To tell whether a published result describes the document a client is showing, let the derivation carry the frontier it was computed against and compare it with the replica's own. A `published` entry may be a factory, called once with the host's `frontiers` (one `Signal<StoreFrontier>` per owned store, updated in the same step as the store). A `StoreFrontier` is the owner generation (`instance`, the host id) plus the highest stamp applied per origin. The client compares with `storeFrontierEquals`: equal means the same owner generation and the same applied op set, so the same state; a replica with an unacknowledged own write, or missing an op, reads as not equal until both sides catch up. Frontiers never compare across owner generations: after a disconnect the replica holds no generation until the next checkpoint, and a replacement worker starts a new one. Owned stores emit before any published derivation, so a shipped result never runs ahead of the frontier it carries. A replica counts its own write once it is stamped: inside `write()` at once, a direct `store` write at the next microtask.
+
+```ts
+// worker
+createWorkerHost({
+  stores: { room },
+  published: {
+    problems: ({ frontiers }) =>
+      computed(() => ({ items: lint(room()), of: frontiers.room() })),
+  },
+});
+
+// main
+const room = workerStore(this.worker, 'room');
+const problems = workerStore(this.worker, 'problems');
+const current = computed(() => {
+  const p = problems.value();
+  return !!p && storeFrontierEquals(p.of, room.applied());
+});
+```
 
 ## Transferables
 

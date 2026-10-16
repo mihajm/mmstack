@@ -12,9 +12,12 @@ import {
 } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
 import {
+  compareHlc,
+  frontierEquals,
   injectTransitionScope,
   opSync,
   toStore,
+  type Hlc,
   type OpEnvelope,
   type OpLogDriver,
   type SignalStore,
@@ -22,7 +25,9 @@ import {
 } from '@mmstack/primitives/core';
 import {
   deserializeError,
+  UNKNOWN_FRONTIER,
   type IsWritableKey,
+  type StoreFrontier,
   type StoreKeys,
   type StoreValueOf,
   type WorkerEnvelope,
@@ -89,6 +94,17 @@ export type WorkerStoreRef<T, W extends boolean = true> = {
   readonly isLoading: Signal<boolean>;
   /** The underlying worker connection's liveness. */
   readonly connected: Signal<boolean>;
+  /**
+   * What this replica has applied: the owner generation it hydrated from (`instance`) and the
+   * highest stamp folded in from each writer within it (a `StoreFrontier`). It moves in the same
+   * synchronous step as {@link value}: on hydrate, on every received envelope, and on every own write
+   * the moment it is stamped (inside `write()`; a direct `store` write is stamped at the next
+   * microtask). Monotone per origin within one generation; a checkpoint from a new owner replaces it,
+   * and a disconnect resets it to no generation (`instance: ''`) until the next checkpoint. Compare it
+   * with the frontier a published derivation carries (`storeFrontierEquals`) to tell whether that
+   * result describes the document this replica shows.
+   */
+  readonly applied: Signal<StoreFrontier>;
   hasValue(): boolean;
   destroy(): void;
 } & (W extends true ? WorkerStoreWrite<T> : object);
@@ -142,6 +158,25 @@ function build<T extends object>(
 
   const status = signal<ResourceStatus>('loading');
   const error = signal<unknown>(undefined);
+  // Tracked here, not read from opSync: opSync's applied vector is monotone across resets by contract
+  // (knowledge, not state), so it would keep a dead owner's origins forever. This one is scoped to the
+  // owner generation the replica hydrated from, and moves in the same synchronous step as the root.
+  const applied = signal<StoreFrontier>(UNKNOWN_FRONTIER, {
+    equal: (a, b) =>
+      a.instance === b.instance && frontierEquals(a.applied, b.applied),
+  });
+  const advance = (origin: string, hlc: Hlc): void => {
+    const cur = untracked(applied);
+    const at = cur.applied[origin];
+    if (at && compareHlc(at, hlc) >= 0) return;
+    applied.set({
+      instance: cur.instance,
+      applied: { ...cur.applied, [origin]: hlc },
+    });
+  };
+  // before the first checkpoint, and after a disconnect, envelopes are not folded: the checkpoint
+  // that follows on the same FIFO port covers them
+  let awaitingCheckpoint = true;
   const isLoading = computed(() => {
     const st = status();
     return st === 'loading' || st === 'reloading';
@@ -170,6 +205,7 @@ function build<T extends object>(
   };
 
   const shipUnsub = sync.subscribe((env) => {
+    advance(env.origin, env.hlc); // own write stamped: optimistic, same step as the emission
     lastEmitted = env.version;
     unacked.set(env.version, env);
     if (isOwned() && untracked(worker.connected)) {
@@ -183,9 +219,28 @@ function build<T extends object>(
       case 'store:checkpoint': {
         // rebase from the full unacked outbox, not opSync's bounded recent-local ring, so a burst
         // of writes larger than that ring is never dropped from the local rebase on re-hydrate
-        sync.hydrate(msg.checkpoint as Parameters<typeof sync.hydrate>[0], [
-          ...unacked.values(),
-        ]);
+        const replayed = [...unacked.values()].filter(
+          (e) => e.version > (msg.checkpoint.wm?.[sync.origin] ?? 0),
+        );
+        sync.hydrate(
+          msg.checkpoint as Parameters<typeof sync.hydrate>[0],
+          [...unacked.values()],
+        );
+        // a new owner generation REPLACES the frontier; the same one merges (a resync)
+        const instance = msg.instance ?? '';
+        const prev = untracked(applied);
+        const merged: Record<string, Hlc> =
+          instance !== '' && instance === prev.instance
+            ? { ...prev.applied }
+            : {};
+        for (const [o, h] of Object.entries(msg.applied ?? {}))
+          if (!merged[o] || compareHlc(h, merged[o]) > 0) merged[o] = h;
+        // the replayed own tail is in the hydrated value; the owner re-applies it as it is resent
+        for (const e of replayed)
+          if (!merged[e.origin] || compareHlc(e.hlc, merged[e.origin]) > 0)
+            merged[e.origin] = e.hlc;
+        applied.set({ instance, applied: merged });
+        awaitingCheckpoint = false;
         hasSnapshot = true;
         status.set('resolved');
         error.set(undefined);
@@ -203,11 +258,18 @@ function build<T extends object>(
       }
       case 'store:sync': {
         const env = msg.env;
+        // Before the first checkpoint nothing is folded: the host posts the checkpoint after any envelope
+        // it sends first (one FIFO port), so the checkpoint already covers it. Folding it would show a
+        // partial value on top of `defaultValue` and claim an origin's stamp without its earlier ops.
+        if (awaitingCheckpoint) return;
         if (env.origin === sync.origin) {
           ackUpTo(env.version); // the owner echoed our own write back: acknowledgement
           return;
         }
         sync.receive(env); // owner or peer envelope; a version gap triggers onGap -> resync
+        // folded unless opSync rejected it (malformed / other protocol): then its watermark lags
+        if ((sync.watermark()[env.origin] ?? 0) >= env.version)
+          advance(env.origin, env.hlc);
         return;
       }
       case 'store:status': {
@@ -258,6 +320,9 @@ function build<T extends object>(
   const offReady = worker._onReady(subscribe);
   if (untracked(worker.connected)) subscribe(); // already up (created post-handshake): _onReady won't fire
   const offDisconnect = worker._onDisconnect(() => {
+    // the owner generation is gone: nothing this replica shows is comparable until the next checkpoint
+    applied.set(UNKNOWN_FRONTIER);
+    awaitingCheckpoint = true;
     for (const [, p] of writePending) p.reject(new WorkerCrashedError());
     writePending.clear();
     unacked.clear();
@@ -270,6 +335,7 @@ function build<T extends object>(
     error,
     isLoading,
     connected: worker.connected,
+    applied: applied.asReadonly(),
     hasValue,
     write: (recipe) => {
       const base = untracked(root);

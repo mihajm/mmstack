@@ -572,6 +572,25 @@ export type LiveRegister = {
  */
 export type AppliedFrontier = Readonly<Record<string, Hlc>>;
 
+/**
+ * Whether two {@link AppliedFrontier}s are the same observation: the same origins, each at the same
+ * stamp. Replicas whose frontiers are equal have applied the same op set (one writer per origin,
+ * applied in that writer's order), so by convergence they hold the same state. A derivation can
+ * carry the frontier it was computed against, and a reader compares it with its own to tell
+ * whether the result describes the document it is looking at.
+ */
+export function frontierEquals(
+  a: AppliedFrontier,
+  b: AppliedFrontier,
+): boolean {
+  const origins = Object.keys(a);
+  if (origins.length !== Object.keys(b).length) return false;
+  for (const o of origins) {
+    if (!Object.hasOwn(b, o) || compareHlc(a[o], b[o]) !== 0) return false;
+  }
+  return true;
+}
+
 export type ConvergingApply = {
   /**
    * Fold an envelope into the per-path registers and return the materialization deltas the

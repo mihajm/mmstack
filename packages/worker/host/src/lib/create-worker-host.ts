@@ -1,17 +1,25 @@
 import {
   isDevMode,
+  isSignal,
+  signal,
   untracked,
   type ResourceStatus,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
-import { createHlcClock, opSync, type OpSync } from '@mmstack/primitives/core';
+import {
+  createHlcClock,
+  frontierEquals,
+  opSync,
+  type OpSync,
+} from '@mmstack/primitives/core';
 import {
   generateId,
   PROTO_VERSION,
   serializeError,
   type HasSchema,
+  type StoreFrontier,
   type SignalValueOf,
   type WorkerEnvelope,
   type WorkerPortLike,
@@ -30,6 +38,32 @@ export type PublishedSource<T> =
   | Signal<T>
   | (Signal<T | undefined> & { readonly status: Signal<ResourceStatus> });
 
+/** Per owned store, the frontier its state was folded to (see {@link WorkerHost.frontiers}). */
+export type WorkerHostFrontiers<K extends PropertyKey = string> = {
+  readonly [P in K]: Signal<StoreFrontier>;
+};
+
+/** What a published factory receives: the host's owned-store frontiers, ready to read. */
+export type PublishedHost<K extends PropertyKey = string> = {
+  readonly frontiers: WorkerHostFrontiers<K>;
+};
+
+/**
+ * A `published` entry: a source, or a factory the host calls once at creation with
+ * {@link PublishedHost} (late binding), so a derivation can read the frontier of the stores it
+ * derives from and carry it in its value.
+ */
+export type PublishedEntry<T, K extends PropertyKey = string> =
+  PublishedSource<T> | ((host: PublishedHost<K>) => PublishedSource<T>);
+
+/** The value type a `published` entry mirrors: the signal's, or the factory's returned signal's. */
+export type PublishedValueOf<E> =
+  E extends Signal<any>
+    ? SignalValueOf<E>
+    : E extends (host: never) => infer R
+      ? SignalValueOf<R>
+      : never;
+
 export type CreateWorkerHostOptions = {
   /**
    * Store subtrees this worker OWNS — the single writer. Keys are the wire identifiers. Typed as
@@ -43,9 +77,9 @@ export type CreateWorkerHostOptions = {
    * `projection`) or a status-bearing async derivation (a `latest()`). Main-thread `workerStore`s
    * mirror them like owned stores but cannot write; a status-bearing entry also propagates its
    * pending/error to the replica, so an in-flight worker computation shows as pending on the main
-   * thread.
+   * thread. An entry may also be a factory `({ frontiers }) => source`, called once at creation.
    */
-  readonly published?: Record<string, PublishedSource<any>>;
+  readonly published?: Record<string, PublishedEntry<any>>;
   /** Named tasks callable from the main thread (rung 1). */
   readonly tasks?: Record<string, WorkerTaskHandler>;
   /**
@@ -59,6 +93,17 @@ export type CreateWorkerHostOptions = {
 export type WorkerHost<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
   /** This host's transport identity — the `origin` of every store batch it emits. */
   readonly hostId: string;
+  /**
+   * Per OWNED store, what its state has applied: this host's generation (`instance` = {@link hostId})
+   * and the highest stamp folded in from each writer (a `StoreFrontier`). Updated in the same synchronous step as the
+   * store's own signal when a client write folds in, and when an owner write is stamped (a direct
+   * owner write is stamped at the next microtask, `flush()`, or before any published derivation
+   * emits). A `computed` reading a store and its frontier therefore sees a consistent pair at every
+   * emission. A published derivation can carry it (`{ ..., of: frontiers.room() }`); a replica
+   * compares it with its own `applied` via `storeFrontierEquals`. A replacement host is a new
+   * generation: no frontier of the old one ever equals one of the new.
+   */
+  readonly frontiers: WorkerHostFrontiers<keyof M['stores']>;
   /** Serve an additional transport (multi-client / tests). Returns a disconnect handle. */
   connect(port: WorkerPortLike): () => void;
   /**
@@ -89,6 +134,8 @@ type Subtree = {
   readonly read: () => unknown;
   readonly sync: OpSync<any>;
   readonly writable: boolean;
+  /** Re-read the sync core's applied frontier into the store's frontier signal (owned only). */
+  readonly syncFrontier: () => void;
 };
 
 function toRemoteStatus(
@@ -137,28 +184,37 @@ function isWorkerGlobal(g: unknown): g is WorkerPortLike {
  */
 export function createWorkerHost<
   S extends Record<string, WritableSignal<any>> = Record<string, never>,
-  P extends Record<string, PublishedSource<any>> = Record<string, never>,
+  P extends Record<string, PublishedEntry<any, keyof S>> = Record<
+    string,
+    never
+  >,
   T extends Record<string, WorkerTaskHandler> = Record<string, never>,
 >(options: {
   readonly stores?: S;
-  readonly published?: P;
+  // the NoInfer arm types a factory's `frontiers` from S while P is still being inferred
+  readonly published?:
+    P | NoInfer<Record<string, PublishedEntry<any, keyof S>>>;
   readonly tasks?: T;
   readonly port?: WorkerPortLike;
-}): WorkerHost<{
-  readonly stores: { [K in keyof S]: SignalValueOf<S[K]> };
-  readonly published: { [K in keyof P]: SignalValueOf<P[K]> };
-  readonly tasks: T;
-}> {
+  // NoInfer: an expected return type (a host assigned into a typed slot) must not drive inference of
+  // P through `PublishedValueOf`, which would widen an omitted `published` to `{ [x: string]: any }`
+}): NoInfer<
+  WorkerHost<{
+    readonly stores: { [K in keyof S]: SignalValueOf<S[K]> };
+    readonly published: { [K in keyof P]: PublishedValueOf<P[K]> };
+    readonly tasks: T;
+  }>
+> {
   const hostId = generateId();
   const sources = (options.stores ?? {}) as Record<string, WritableSignal<any>>;
-  const publishedSources = (options.published ?? {}) as Record<
+  const publishedEntries = (options.published ?? {}) as Record<
     string,
-    PublishedSource<any>
+    PublishedEntry<any>
   >;
   const tasks = (options.tasks ?? {}) as Record<string, WorkerTaskHandler>;
   const taskNames = Object.keys(tasks);
   const storeKeys = Object.keys(sources);
-  const publishedKeys = Object.keys(publishedSources);
+  const publishedKeys = Object.keys(publishedEntries);
 
   const subtrees = new Map<string, Subtree>();
   const connections = new Set<Connection>();
@@ -173,6 +229,22 @@ export function createWorkerHost<
       if (conn.stores.has(store)) conn.port.postMessage(message);
   };
 
+  const frontiers: Record<string, Signal<StoreFrontier>> = {};
+
+  // Owned stores emit before any published derivation does, so a derivation that reads a store and
+  // its frontier never ships a value ahead of the frontier it carries (an unstamped owner write).
+  const flushOwned = (): void => {
+    for (const key of storeKeys) subtrees.get(key)?.sync.flush();
+  };
+  const publishedDriver = () => {
+    const base = microtaskOpLogDriver();
+    return (run: () => void) =>
+      base(() => {
+        untracked(flushOwned);
+        run();
+      });
+  };
+
   const observe = (
     key: string,
     src: Signal<unknown>,
@@ -185,20 +257,44 @@ export function createWorkerHost<
     const sync = opSync(src as unknown as WritableSignal<any>, {
       writer: hostId,
       origin: `${hostId}:${key}`,
-      driver: microtaskOpLogDriver(),
+      instance: hostId, // the owner generation every envelope and frontier carries
+      driver: writable ? microtaskOpLogDriver() : publishedDriver(),
       clock: createHlcClock(),
     });
+    const frontierOf = (): StoreFrontier => ({
+      instance: hostId,
+      applied: sync.appliedFrontier(),
+    });
+    const frontier = signal<StoreFrontier>(frontierOf(), {
+      equal: (a, b) => frontierEquals(a.applied, b.applied),
+    });
+    const syncFrontier = (): void => frontier.set(frontierOf());
+    if (writable) frontiers[key] = frontier.asReadonly();
     sync.subscribe((env) => {
+      syncFrontier(); // the stamped write is applied: same step as the emission
       devAssertCloneable(env, `store '${key}' update`);
       fanout(key, { type: 'store:sync', store: key, env });
     });
-    subtrees.set(key, { read: () => untracked(src), sync, writable });
+    subtrees.set(key, {
+      read: () => untracked(src),
+      sync,
+      writable,
+      syncFrontier,
+    });
   };
 
   for (const key of storeKeys) observe(key, sources[key], true);
 
+  const publishedHost: PublishedHost = { frontiers };
+
   for (const key of publishedKeys) {
-    const src = publishedSources[key];
+    const entry = publishedEntries[key];
+    const src: PublishedSource<any> =
+      typeof entry === 'function' && !isSignal(entry)
+        ? (entry as (host: PublishedHost) => PublishedSource<any>)(
+            publishedHost,
+          )
+        : (entry as PublishedSource<any>);
     observe(key, src as Signal<unknown>, false);
     const statusSig = (src as { status?: Signal<ResourceStatus> }).status;
     if (statusSig) {
@@ -281,6 +377,7 @@ export function createWorkerHost<
         const sub = subtrees.get(msg.store);
         if (!sub) return;
         conn.stores.add(msg.store);
+        if (!sub.writable) flushOwned(); // a derivation's checkpoint never runs ahead of its frontier
         sub.sync.flush(); // settle any pending owner change into the register state first
         const checkpoint = sub.sync.snapshot();
         devAssertCloneable(checkpoint, `store '${msg.store}' checkpoint`);
@@ -288,6 +385,8 @@ export function createWorkerHost<
           type: 'store:checkpoint',
           store: msg.store,
           checkpoint,
+          instance: hostId,
+          applied: sub.sync.appliedFrontier(),
         });
         const currentStatus = publishedStatus.get(msg.store);
         if (currentStatus)
@@ -329,6 +428,7 @@ export function createWorkerHost<
         const sub = subtrees.get(msg.store);
         if (!sub || !sub.writable) return;
         sub.sync.receive(msg.env);
+        sub.syncFrontier(); // same synchronous step as the store's fold
         fanout(msg.store, { type: 'store:sync', store: msg.store, env: msg.env });
         return;
       }
@@ -361,6 +461,7 @@ export function createWorkerHost<
 
   return {
     hostId,
+    frontiers: frontiers as WorkerHostFrontiers<keyof S>,
     connect,
     override(store, fn) {
       const sub = subtrees.get(store);

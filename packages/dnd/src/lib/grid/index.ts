@@ -12,6 +12,7 @@ export {
 export {
   injectPlacementGrid,
   placementGrid,
+  type PlacementDisplaced,
   type PlacementDragSnapshot,
   type PlacementGridController,
   type PlacementGridItemState,

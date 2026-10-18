@@ -20,7 +20,11 @@ function wrapRowTarget<T, K>(
   dir: 1 | -1,
 ): number {
   const items = c.items();
-  const myEl = c.elementFor(c.key(items[from]));
+  const at = (i: number) => {
+    const h = c.handleAt(i);
+    return h === undefined ? undefined : c.elementFor(h);
+  };
+  const myEl = at(from);
   if (!myEl) return from;
   const my = myEl.getBoundingClientRect();
   const myCx = my.left + my.width / 2;
@@ -30,7 +34,7 @@ function wrapRowTarget<T, K>(
   const candidates: { i: number; cx: number; cy: number }[] = [];
   for (let i = 0; i < items.length; i++) {
     if (i === from) continue;
-    const r = c.elementFor(c.key(items[i]))?.getBoundingClientRect();
+    const r = at(i)?.getBoundingClientRect();
     if (!r) continue;
     const cy = r.top + r.height / 2;
     if (dir > 0 ? cy > myCy + tol : cy < myCy - tol) {

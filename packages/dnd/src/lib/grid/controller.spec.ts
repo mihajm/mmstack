@@ -816,3 +816,416 @@ describe('placementGrid', () => {
     });
   });
 });
+
+/**
+ * [PIN M5] The drop commits the move over the LIVE source; the drag-start snapshot
+ * serves the preview only. Another writer's change during the drag survives the drop.
+ */
+describe('placementGrid — the drop commits over the live source [PIN M5]', () => {
+  const ids = (arr: readonly Widget[]) => arr.map((i) => i.id).sort();
+  const at = (arr: readonly Widget[], id: string) =>
+    arr.find((i) => i.id === id);
+  const fromB = { ...SNAP, startX: 125, startY: 25 }; // grabbed on b's top-left cell
+
+  for (const compact of ['vertical', 'none'] as const) {
+    it(`a peer adds d mid-drag: d survives the drop (compact: ${compact})`, () => {
+      const places: unknown[] = [];
+      const { source, grid } = setup({
+        compact,
+        onPlace: (e) => places.push(e),
+      });
+      grid.begin('b', fromB);
+      grid.move({ x: 225, y: 25 }); // b → (4,0)
+      source.update((arr) => [...arr, w_('d', 4, 4)]); // peer write
+      grid.end();
+
+      expect(ids(source())).toEqual(['a', 'b', 'c', 'd']);
+      expect(at(source(), 'b')).toMatchObject({ x: 4, y: 0 });
+      expect(places).toHaveLength(1);
+    });
+
+    it(`the dragged key removed mid-drag: the drop is a no-op, nothing resurrected (compact: ${compact})`, () => {
+      const places: unknown[] = [];
+      const { source, grid } = setup({
+        compact,
+        onPlace: (e) => places.push(e),
+      });
+      grid.begin('b', fromB);
+      grid.move({ x: 225, y: 25 });
+      source.update((arr) => arr.filter((i) => i.id !== 'b'));
+      const live = source();
+      grid.end();
+
+      expect(source()).toBe(live);
+      expect(places).toEqual([]);
+      expect(grid.activeKey()).toBeNull();
+    });
+  }
+
+  it('compact none: a peer took the drop cell mid-drag ⇒ the drop is a no-op, never an overlap', () => {
+    const places: unknown[] = [];
+    const { source, grid } = setup({
+      compact: 'none',
+      onPlace: (e) => places.push(e),
+    });
+    grid.begin('b', fromB);
+    grid.move({ x: 225, y: 25 }); // b → (4,0), free at drag start
+    source.update((arr) => [...arr, w_('d', 4, 0)]);
+    const live = source();
+    grid.end();
+
+    expect(source()).toBe(live);
+    expect(places).toEqual([]);
+  });
+
+  it('a resize commits over the live source too: a peer add survives', () => {
+    const { source, grid } = setup();
+    grid.begin('a', {
+      ...SNAP,
+      kind: 'resize',
+      direction: 'e',
+      startX: 100,
+      startY: 50,
+    });
+    grid.move({ x: 150, y: 50 }); // a: w 2 → 3 (pushes b)
+    source.update((arr) => [...arr, w_('d', 4, 6)]);
+    grid.end();
+
+    expect(ids(source())).toEqual(['a', 'b', 'c', 'd']);
+    expect(at(source(), 'a')).toMatchObject({ w: 3 });
+  });
+});
+
+/**
+ * [PIN M6] A drop whose settled layout equals the previous one by ADDRESS (x, y, w, h
+ * per key) is silent: no event, no write — in every compact mode, on both input paths.
+ */
+describe('placementGrid — a no-op drop is silent [PIN M6]', () => {
+  function watched(opts: Partial<PlacementGridOptions<Widget, string>>) {
+    const s = setup(opts);
+    let writes = 0;
+    const set = s.source.set.bind(s.source);
+    vi.spyOn(s.source, 'set').mockImplementation((v) => {
+      writes++;
+      set(v);
+    });
+    vi.spyOn(s.source, 'update').mockImplementation((fn) => {
+      writes++;
+      set(fn(s.source()));
+    });
+    return {
+      ...s,
+      get writes() {
+        return writes;
+      },
+    };
+  }
+  const fromB = { ...SNAP, startX: 125, startY: 25 };
+
+  for (const compact of ['vertical', 'none'] as const) {
+    it(`pointer: wiggle and release on the item's own cell ⇒ no onPlace, no write, same source (compact: ${compact})`, () => {
+      const events: unknown[] = [];
+      const g = watched({ compact, onPlace: (e) => events.push(e) });
+      const before = g.source();
+      g.grid.begin('b', fromB);
+      g.grid.move({ x: 180, y: 80 }); // away: (3,1)
+      g.grid.move({ x: 127, y: 27 }); // back home: (2,0)
+      expect(g.grid.projectedCell()).toEqual({ x: 2, y: 0 });
+      g.grid.end();
+
+      expect(events).toEqual([]);
+      expect(g.writes).toBe(0);
+      expect(g.source()).toBe(before);
+    });
+
+    it(`pointer: a resize released at the item's own spans is silent too (compact: ${compact})`, () => {
+      const events: unknown[] = [];
+      const g = watched({ compact, onResize: (e) => events.push(e) });
+      const before = g.source();
+      g.grid.begin('b', {
+        ...SNAP,
+        kind: 'resize',
+        direction: 'e',
+        startX: 200,
+        startY: 50,
+      });
+      g.grid.move({ x: 250, y: 50 }); // w 3
+      g.grid.move({ x: 201, y: 50 }); // back to w 2
+      g.grid.end();
+
+      expect(events).toEqual([]);
+      expect(g.writes).toBe(0);
+      expect(g.source()).toBe(before);
+    });
+
+    it(`keyboard: a step that settles back home writes nothing (compact: ${compact})`, () => {
+      const events: unknown[] = [];
+      const g = watched({ compact, onPlace: (e) => events.push(e) });
+      const before = g.source();
+      // vertical: b one row down floats back up under gravity; none: a wall clamps the step
+      const moved =
+        compact === 'vertical'
+          ? g.grid.moveBy('b', 0, 1)
+          : g.grid.moveBy('a', -1, 0);
+      expect(moved).toBe(false);
+      expect(events).toEqual([]);
+      expect(g.writes).toBe(0);
+      expect(g.source()).toBe(before);
+    });
+  }
+});
+
+/** [PIN M6] `onPlace.displaced`: the survivors whose address changed by consequence. */
+describe('placementGrid — onPlace reports what the drop displaced [PIN M6]', () => {
+  const col = () =>
+    signal<Widget[]>([
+      w_('A', 0, 0, 1, 1),
+      w_('B', 0, 1, 1, 1),
+      w_('C', 0, 2, 1, 1),
+    ]);
+
+  it('a vertical push lists exactly the pushed keys, each with its from/to address', () => {
+    const source = col();
+    const events: Array<{ x: number; y: number; displaced: unknown }> = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onPlace: (e) => events.push({ x: e.x, y: e.y, displaced: e.displaced }),
+    });
+    grid.begin('C', { ...SNAP, startX: 25, startY: 125 }); // grabbed on C at (0,2)
+    grid.move({ x: 25, y: 25 }); // → (0,0)
+    grid.end();
+
+    expect(events).toEqual([
+      {
+        x: 0,
+        y: 0,
+        displaced: [
+          {
+            key: 'A',
+            from: { x: 0, y: 0, w: 1, h: 1 },
+            to: { x: 0, y: 1, w: 1, h: 1 },
+          },
+          {
+            key: 'B',
+            from: { x: 0, y: 1, w: 1, h: 1 },
+            to: { x: 0, y: 2, w: 1, h: 1 },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('nothing pushed ⇒ an empty list; the dragged item is never in it', () => {
+    const { source, grid } = setup();
+    const displaced: unknown[] = [];
+    const g2 = placementGrid(source, {
+      key,
+      cols: 6,
+      onPlace: (e) => displaced.push(e.displaced),
+    });
+    void grid;
+    g2.begin('a', SNAP);
+    g2.move({ x: 225, y: 25 }); // a → the free corner (4,0)
+    g2.end();
+    expect(displaced).toEqual([[]]);
+  });
+
+  it('the keyboard path reports the push too', () => {
+    const source = col();
+    const displaced: unknown[] = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onPlace: (e) => displaced.push(e.displaced),
+    });
+    expect(grid.moveBy('B', 0, -1)).toBe(true); // B up onto A: A pushed below
+    expect(displaced).toEqual([
+      [
+        {
+          key: 'A',
+          from: { x: 0, y: 0, w: 1, h: 1 },
+          to: { x: 0, y: 1, w: 1, h: 1 },
+        },
+      ],
+    ]);
+  });
+});
+
+/** Astra review: a grid item dropped into a LIST lands at the hovered neighbour, resolved at release. */
+describe('placementGrid — cross-container drop into a list is anchored', () => {
+  it('hover between a and b in [a, b]; the list becomes [x, a, b]; release ⇒ [x, a, w, b]', () => {
+    const group = sortableGroup<Widget>();
+    const source = signal<Widget[]>([w_('w', 0, 0)]);
+    const grid = placementGrid(source, { key, cols: 6, group });
+    const list = signal<Widget[]>([w_('a', 0, 0), w_('b', 0, 0)]);
+    const ids = () => list().map((i) => i.id);
+    const rows = new Map<string, number>();
+    const member: SortableGroupMember<Widget> & { register(): void } = {
+      bounds: () => ({ left: 1000, top: 0, width: 100, height: 200 }),
+      refreshBounds: () => undefined,
+      measure: () => ({
+        centers: list().map((_, i) => i * 20 + 10),
+        axis: 'y',
+        keys: list().map(key),
+      }),
+      insertAt: (item, index) => {
+        list.update((arr) => [
+          ...arr.slice(0, index),
+          item,
+          ...arr.slice(index),
+        ]);
+        return true;
+      },
+      slotOfAnchor: (anchor) => {
+        const keys = list().map(key);
+        if ('after' in anchor) {
+          const i = keys.indexOf(anchor.after as string);
+          return i < 0 ? -1 : i + 1;
+        }
+        if ('before' in anchor) return keys.indexOf(anchor.before as string);
+        return 0;
+      },
+      register: () => group.register(member),
+    };
+    void rows;
+    member.register();
+
+    grid.begin('w', SNAP);
+    grid.move({ x: 1050, y: 20 }); // over the list, between a (10) and b (30)
+    list.update((arr) => [w_('x', 0, 0), ...arr]); // a peer prepends to the list
+    grid.end();
+
+    expect(ids()).toEqual(['x', 'a', 'w', 'b']);
+    expect(source().map((i) => i.id)).toEqual([]);
+  });
+});
+
+/** [PIN M9] Duplicate keys in a grid: identity is the occurrence; rows bind by item reference. */
+describe('placementGrid — duplicate keys are occurrences [PIN M9]', () => {
+  function twins() {
+    const a1 = w_('a', 0, 0);
+    const a2 = w_('a', 2, 0);
+    const source = signal<Widget[]>([a1, a2]);
+    const places: Array<{ x: number; displaced: unknown }> = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onPlace: (e) => places.push({ x: e.x, displaced: e.displaced }),
+    });
+    const el1 = document.createElement('div');
+    const el2 = document.createElement('div');
+    grid.register('a', el1, a1);
+    grid.register('a', el2, a2);
+    return { a1, a2, source, grid, places, el1, el2 };
+  }
+
+  it('two distinct items with one key: dragging the first moves the first only', () => {
+    const { a1, a2, source, grid, el1, el2 } = twins();
+    expect(grid.keyForElement(el1)).not.toBe(grid.keyForElement(el2));
+    const s2 = grid.itemState(() => a2);
+    grid.begin(grid.keyForElement(el1) as never, SNAP); // grabbed on a1 (0,0)
+    expect(s2.isActive()).toBe(false);
+    grid.move({ x: 225, y: 25 }); // a1 → (4,0)
+    grid.end();
+    expect(source()[0]).toMatchObject({ x: 4, y: 0 });
+    expect(source()[1]).toBe(a2);
+    void a1;
+  });
+
+  it('dragging the SECOND item moves the second; the first keeps its object', () => {
+    const { a1, source, grid, el2 } = twins();
+    grid.begin(grid.keyForElement(el2) as never, { ...SNAP, startX: 125 }); // grabbed on a2 (2,0)
+    grid.move({ x: 225, y: 25 }); // a2 → (4,0)
+    grid.end();
+    expect(source()[0]).toBe(a1);
+    expect(source()[1]).toMatchObject({ x: 4, y: 0 });
+  });
+
+  it('a vertical push of the other occurrence is reported under its handle', () => {
+    const { a2, source, grid, places, el1, el2 } = twins();
+    const h2 = grid.keyForElement(el2);
+    grid.begin(grid.keyForElement(el1) as never, SNAP);
+    grid.move({ x: 125, y: 25 }); // a1 onto a2's cell (2,0): a2 pushed down
+    grid.end();
+    expect(source()[1]).not.toBe(a2);
+    expect(places).toEqual([
+      {
+        x: 2,
+        displaced: [
+          {
+            key: h2,
+            from: { x: 2, y: 0, w: 2, h: 2 },
+            to: { x: 2, y: 2, w: 2, h: 2 },
+          },
+        ],
+      },
+    ]);
+  });
+});
+
+/** `onResize.displaced`: the items a resize pushed, as on `onPlace`. */
+describe('placementGrid — onResize reports what the resize displaced', () => {
+  const trio = () =>
+    signal<Widget[]>([
+      w_('A', 0, 0, 1, 1),
+      w_('B', 1, 0, 1, 1),
+      w_('C', 1, 1, 1, 1),
+    ]);
+  const pushed = [
+    {
+      key: 'B',
+      from: { x: 1, y: 0, w: 1, h: 1 },
+      to: { x: 1, y: 1, w: 1, h: 1 },
+    },
+    {
+      key: 'C',
+      from: { x: 1, y: 1, w: 1, h: 1 },
+      to: { x: 1, y: 2, w: 1, h: 1 },
+    },
+  ];
+
+  it('pointer: widening A pushes B and C down; exactly those two, with from/to', () => {
+    const source = trio();
+    const displaced: unknown[] = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onResize: (e) => displaced.push(e.displaced),
+    });
+    grid.begin('A', {
+      ...SNAP,
+      kind: 'resize',
+      direction: 'e',
+      startX: 50,
+      startY: 25,
+    });
+    grid.move({ x: 100, y: 25 }); // w 1 → 2
+    grid.end();
+    expect(displaced).toEqual([pushed]);
+  });
+
+  it('keyboard: the same resize reports the same two', () => {
+    const source = trio();
+    const displaced: unknown[] = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onResize: (e) => displaced.push(e.displaced),
+    });
+    expect(grid.resizeBy('A', 1, 0)).toBe(true);
+    expect(displaced).toEqual([pushed]);
+  });
+
+  it('a resize that pushes nothing ⇒ []', () => {
+    const source = trio();
+    const displaced: unknown[] = [];
+    const grid = placementGrid(source, {
+      key,
+      cols: 6,
+      onResize: (e) => displaced.push(e.displaced),
+    });
+    expect(grid.resizeBy('C', 1, 0)).toBe(true); // C grows into free (2,1)
+    expect(displaced).toEqual([[]]);
+  });
+});

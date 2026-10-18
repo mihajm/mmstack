@@ -619,3 +619,212 @@ describe('canvas — store seam (op-log / undo)', () => {
     expect(s.widgets()[0].frame).toMatchObject({ x: 140, y: 120 });
   });
 });
+
+/**
+ * [PIN M8] No inherited movement: child frames are relative to their container, so a
+ * selected item whose container chain holds another selected item rides on that
+ * ancestor. Only the topmost selected items are patched, and a reparent names only them.
+ */
+describe('canvas — a selected descendant rides on its selected ancestor [PIN M8]', () => {
+  const nested: Widget[] = [
+    { id: 'stage1', kind: 'stage', parent: null, frame: f(0, 0, 200, 200) },
+    { id: 'stage2', kind: 'stage', parent: null, frame: f(400, 0, 300, 300) },
+    {
+      id: 'inner',
+      kind: 'stage',
+      parent: 'stage1',
+      frame: f(20, 20, 120, 120),
+    },
+    { id: 'c', kind: 'widget', parent: 'inner', frame: f(10, 10) },
+    { id: 'loose', kind: 'widget', parent: null, frame: f(250, 250) },
+  ];
+  const containers: CanvasOptions<Widget, string>['containers'] = {
+    isContainer: (w) => w.kind === 'stage',
+    containerOf: (w) => w.parent ?? null,
+  };
+
+  it('container + descendant selected ⇒ one patch (the container); the descendant frame is untouched', () => {
+    const commits: CanvasCommitEvent<Widget, string>[] = [];
+    const { source, ctrl, beginMove } = setup(
+      { containers, snap: false, onCommit: (e) => commits.push(e) },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'c', 'loose']); // c sits two levels under stage1
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 55, y: 5 }); // +50 x, still over the root
+    ctrl.end();
+
+    expect(commits).toHaveLength(1);
+    expect([...commits[0].patches.keys()].sort()).toEqual(['loose', 'stage1']);
+    expect(source().find((i) => i.id === 'c')?.frame).toMatchObject({
+      x: 10,
+      y: 10,
+    });
+    expect(source().find((i) => i.id === 'stage1')?.frame).toMatchObject({
+      x: 50,
+      y: 0,
+    });
+  });
+
+  it('a reparent names only the topmost: the descendant is not split out of its container', () => {
+    const reparents: CanvasReparentEvent<Widget, string>[] = [];
+    const { ctrl, beginMove } = setup(
+      { containers, snap: false, onReparent: (e) => reparents.push(e) },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'c']);
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 455, y: 5 }); // the pointer is over stage2
+    expect(ctrl.session.hoverContainer()).toBe('stage2');
+    ctrl.end();
+
+    expect(reparents).toHaveLength(1);
+    expect(reparents[0].container).toBe('stage2');
+    expect([...reparents[0].patches.keys()]).toEqual(['stage1']);
+  });
+
+  it('a riding descendant is never a drop target: the ancestor cannot be reparented into its own child', () => {
+    const reparents: CanvasReparentEvent<Widget, string>[] = [];
+    const commits: CanvasCommitEvent<Widget, string>[] = [];
+    const { ctrl, beginMove } = setup(
+      {
+        containers,
+        snap: false,
+        onReparent: (e) => reparents.push(e),
+        onCommit: (e) => commits.push(e),
+      },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'inner']);
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 35, y: 35 }); // the pointer is over inner's (start) box
+    expect(ctrl.session.hoverContainer()).toBeNull();
+    ctrl.end();
+    expect(reparents).toHaveLength(0);
+    expect([...commits[0].patches.keys()]).toEqual(['stage1']);
+  });
+
+  it('the keyboard nudge follows the same rule', () => {
+    const commits: CanvasCommitEvent<Widget, string>[] = [];
+    const { source, ctrl } = setup(
+      { containers, grid: { size: 10 }, onCommit: (e) => commits.push(e) },
+      nested,
+    );
+    ctrl.selection.set(['c', 'stage1']);
+    expect(ctrl.nudge(1, 0, false)).toBe(true);
+    expect([...commits[0].patches.keys()]).toEqual(['stage1']);
+    expect(source().find((i) => i.id === 'c')?.frame).toMatchObject({
+      x: 10,
+      y: 10,
+    });
+  });
+
+  it('without containerOf there is no ancestry to read: every selected key still moves', () => {
+    const commits: CanvasCommitEvent<Widget, string>[] = [];
+    const { ctrl, beginMove } = setup(
+      {
+        containers: { isContainer: (w) => w.kind === 'stage' },
+        snap: false,
+        onCommit: (e) => commits.push(e),
+      },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'c']);
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 55, y: 5 });
+    ctrl.end();
+    expect([...commits[0].patches.keys()].sort()).toEqual(['c', 'stage1']);
+  });
+});
+
+/** Astra review: container targets exclude every descendant of a moving item; cycles are explicit. */
+describe('canvas — descendants of a moving item are never its drop targets', () => {
+  const nested: Widget[] = [
+    { id: 'stage1', kind: 'stage', parent: null, frame: f(0, 0, 200, 200) },
+    {
+      id: 'inner',
+      kind: 'stage',
+      parent: 'stage1',
+      frame: f(20, 20, 120, 120),
+    },
+    { id: 'c', kind: 'widget', parent: 'inner', frame: f(10, 10) },
+  ];
+  const containers: CanvasOptions<Widget, string>['containers'] = {
+    isContainer: (w) => w.kind === 'stage',
+    containerOf: (w) => w.parent ?? null,
+  };
+
+  it('an UNSELECTED descendant container is not a target: the parent cannot be dropped into its own child', () => {
+    const reparents: unknown[] = [];
+    const { ctrl, beginMove } = setup(
+      { containers, snap: false, onReparent: (e) => reparents.push(e) },
+      nested,
+    );
+    ctrl.selection.set(['stage1']);
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 35, y: 35 }); // over inner's start box
+    expect(ctrl.session.hoverContainer()).toBeNull();
+    ctrl.end();
+    expect(reparents).toHaveLength(0);
+  });
+
+  it('a selected but LOCKED descendant container is not a target either', () => {
+    const reparents: unknown[] = [];
+    const { ctrl, beginMove } = setup(
+      {
+        containers,
+        snap: false,
+        lockedKeys: signal(new Set(['inner'])),
+        onReparent: (e) => reparents.push(e),
+      },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'inner']);
+    beginMove('stage1', { x: 5, y: 5 });
+    ctrl.move({ x: 35, y: 35 });
+    expect(ctrl.session.hoverContainer()).toBeNull();
+    ctrl.end();
+    expect(reparents).toHaveLength(0);
+  });
+
+  it('a locked parent with an unlocked selected child: the child moves alone', () => {
+    const commits: CanvasCommitEvent<Widget, string>[] = [];
+    const { ctrl, beginMove } = setup(
+      {
+        containers,
+        snap: false,
+        lockedKeys: signal(new Set(['stage1'])),
+        onCommit: (e) => commits.push(e),
+      },
+      nested,
+    );
+    ctrl.selection.set(['stage1', 'c']);
+    beginMove('c', { x: 35, y: 35 });
+    ctrl.move({ x: 45, y: 35 });
+    ctrl.end();
+    expect([...commits[0].patches.keys()]).toEqual(['c']);
+  });
+
+  it('cyclic containment in the data: both selected keys move (treated as topmost), with one dev warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const commits: CanvasCommitEvent<Widget, string>[] = [];
+      const { ctrl, beginMove } = setup(
+        { containers, snap: false, onCommit: (e) => commits.push(e) },
+        [
+          { id: 'A', kind: 'stage', parent: 'B', frame: f(0, 0, 50, 50) },
+          { id: 'B', kind: 'stage', parent: 'A', frame: f(100, 0, 50, 50) },
+        ],
+      );
+      ctrl.selection.set(['A', 'B']);
+      expect(beginMove('A', { x: 5, y: 5 })).toBe(true);
+      ctrl.move({ x: 25, y: 5 });
+      ctrl.end();
+      expect([...commits[0].patches.keys()].sort()).toEqual(['A', 'B']);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('cycl');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

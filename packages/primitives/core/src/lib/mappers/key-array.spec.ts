@@ -144,23 +144,41 @@ describe('keyArray', () => {
     });
   });
 
-  describe('duplicateKeys: ordinal policy', () => {
-    it('passes the effective key to mapFn (ordinal for duplicates, raw key in default mode)', () => {
+  describe('duplicate keys (handles: true / onDuplicates)', () => {
+    it('passes the lifetime handle to mapFn (opaque handles for duplicates, raw key in default mode)', () => {
       TestBed.runInInjectionContext(() => {
         type Item = { id: string };
         const source = signal<Item[]>([{ id: 'a' }, { id: 'a' }, { id: 'b' }]);
 
-        const seen: (string | unknown)[] = [];
+        const seen: unknown[] = [];
         const mapped = keyArray(source, (v, _i, key) => (seen.push(key), v), {
           key: (item) => item.id,
-          duplicateKeys: { policy: 'ordinal' },
+          handles: true,
         });
         mapped();
-        expect(seen).toEqual(['a', 'a#1', 'b']);
+        // a key born duplicated: both occurrences get distinct opaque { key, n } handles
+        expect(seen).toHaveLength(3);
+        expect(typeof seen[0]).toBe('object');
+        expect(typeof seen[1]).toBe('object');
+        expect(seen[0]).not.toBe(seen[1]);
+        expect([
+          (seen[0] as { key: string }).key,
+          (seen[1] as { key: string }).key,
+        ]).toEqual(['a', 'a']);
+        expect(seen[2]).toBe('b');
 
         source.set([{ id: 'a' }, { id: 'a' }, { id: 'b' }, { id: 'a' }]);
         mapped();
-        expect(seen).toEqual(['a', 'a#1', 'b', 'a#2']);
+        // fresh objects, 2 → 3 of key `a`: nothing shows which survived, so all three are
+        // new entries with fresh handles; `b` keeps its entry
+        expect(seen).toHaveLength(6);
+        expect(seen.slice(3).every((k) => typeof k === 'object')).toBe(true);
+        expect(seen.slice(3).map((k) => (k as { key: string }).key)).toEqual([
+          'a',
+          'a',
+          'a',
+        ]);
+        expect(new Set(seen).size).toBe(6);
 
         const plainSeen: unknown[] = [];
         const plainSource = signal<Item[]>([{ id: 'x' }, { id: 'y' }]);
@@ -187,7 +205,7 @@ describe('keyArray', () => {
         const mapFn = vi.fn((v: Item, i) => ({ item: v, index: i }));
         const mapped = keyArray(source, mapFn, {
           key: (item) => item.id,
-          duplicateKeys: { policy: 'ordinal' },
+          handles: true,
         });
 
         const first = mapped();
@@ -212,26 +230,26 @@ describe('keyArray', () => {
       });
     });
 
-    it('assigns ordinal effective keys deterministically (a, a, a -> a, a#1, a#2)', () => {
+    it('keeps every entry of a repeated value across equal and shrinking updates (a, a, a)', () => {
       TestBed.runInInjectionContext(() => {
         let uid = 0;
         const source = signal(['a', 'a', 'a']);
         const mapFn = vi.fn((v: string) => ({ value: v, uid: uid++ }));
         const mapped = keyArray(source, mapFn, {
-          duplicateKeys: { policy: 'ordinal' },
+          handles: true,
         });
 
         const first = mapped();
         expect(first.map((e) => e.uid)).toEqual([0, 1, 2]);
 
-        // Re-set an equal array: every ordinal key (a, a#1, a#2) is stable,
+        // Re-set an equal array: the same value three times keeps all three entries,
         // so all three entries are reused, none recreated.
         source.set(['a', 'a', 'a']);
         const second = mapped();
         expect(mapFn).toHaveBeenCalledTimes(3);
         expect(second.map((e) => e.uid)).toEqual([0, 1, 2]);
 
-        // Drop to two a's: keys a and a#1 survive (uid 0, 1); a#2 (uid 2) is gone.
+        // Drop to two a's: the first two entries survive (uid 0, 1); the third (uid 2) is gone.
         source.set(['a', 'a']);
         const third = mapped();
         expect(mapFn).toHaveBeenCalledTimes(3);
@@ -239,7 +257,7 @@ describe('keyArray', () => {
       });
     });
 
-    it('promotes the second duplicate when the first is removed (identity follows position-among-duplicates)', () => {
+    it("keeps the surviving duplicate's own entry when the first is removed (identity follows the occurrence)", () => {
       TestBed.runInInjectionContext(() => {
         type Item = { id: string; tag: string };
         const x: Item = { id: 'a', tag: 'X' };
@@ -250,26 +268,26 @@ describe('keyArray', () => {
         const mapFn = vi.fn((v: Item) => ({ tag: v.tag }));
         const mapped = keyArray(source, mapFn, {
           key: (item) => item.id,
-          duplicateKeys: { policy: 'ordinal' },
+          handles: true,
           onDestroy: destroySpy,
         });
 
         const first = mapped();
         expect(mapFn).toHaveBeenCalledTimes(2);
-        const entryX = first[0]; // effective key 'a'
-        const entryY = first[1]; // effective key 'a#1'
+        const entryX = first[0];
+        const entryY = first[1];
 
-        // Remove the first duplicate. Y is promoted to the base key 'a', which
-        // changes its identity: its original 'a#1' entry is destroyed and the
-        // surviving base-'a' entry is the one originally created for X.
+        // Remove the first duplicate. y is the same reference on both sides, so
+        // it keeps the entry built for it; only x's entry is destroyed.
         source.set([y]);
         const second = mapped();
 
         expect(second).toHaveLength(1);
-        expect(second[0]).toBe(entryX);
-        expect(second[0]).not.toBe(entryY);
+        expect(second[0]).toBe(entryY);
+        expect(second[0].tag).toBe('Y');
+        expect(mapFn).toHaveBeenCalledTimes(2);
         expect(destroySpy).toHaveBeenCalledTimes(1);
-        expect(destroySpy).toHaveBeenCalledWith(entryY);
+        expect(destroySpy).toHaveBeenCalledWith(entryX);
       });
     });
 
@@ -280,12 +298,12 @@ describe('keyArray', () => {
         const source = signal(['a', 'a', 'b']);
         const mapFn = vi.fn((v: string) => ({ value: v, uid: uid++ }));
         const mapped = keyArray(source, mapFn, {
-          duplicateKeys: { policy: 'ordinal' },
+          handles: true,
           onDestroy: destroySpy,
         });
 
         const first = mapped();
-        const middle = first[1]; // effective key 'a#1'
+        const middle = first[1]; // the second 'a'
         expect(first.map((e) => e.uid)).toEqual([0, 1, 2]);
 
         source.set(['a', 'b']);
@@ -297,12 +315,12 @@ describe('keyArray', () => {
       });
     });
 
-    it('reports duplicate base keys once per recompute, in first-occurrence order, and not when there are none', () => {
+    it('reports duplicate keys once per recompute, in first-occurrence order, and not when there are none', () => {
       TestBed.runInInjectionContext(() => {
         const report = vi.fn();
         const source = signal(['a', 'a', 'b', 'b', 'c']);
         const mapped = keyArray(source, (v) => v, {
-          duplicateKeys: { policy: 'ordinal', report },
+          onDuplicates: report,
         });
 
         mapped();

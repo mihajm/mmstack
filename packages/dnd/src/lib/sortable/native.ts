@@ -9,10 +9,11 @@ import {
   inject,
   Injector,
   inputBinding,
+  isDevMode,
   signal,
   untracked,
 } from '@angular/core';
-import { nestedEffect } from '@mmstack/primitives';
+import { type Handle, nestedEffect } from '@mmstack/primitives';
 
 import { resolveAutoScroll } from '../provide';
 
@@ -26,13 +27,23 @@ import {
   injectDndTargets,
 } from '../session';
 import { DropIndicator } from './drop-indicator';
-import { type Axis, insertIndexFromCenters } from './geometry';
+import {
+  type Axis,
+  insertIndexFromCenters,
+  type ListAnchor,
+  slotAnchor,
+  slotOfAnchor,
+} from './geometry';
 import { keyboardReorder } from './keyboard';
 import type { ReorderableController, ReorderableItemBinding } from './types';
 
 /** Symbols carried on a native sortable drag: its source list id + a ref to the source controller. */
 const NATIVE_LIST_ID = Symbol('@mmstack/dnd:reorderable-list');
 const NATIVE_SOURCE = Symbol('@mmstack/dnd:reorderable-source');
+/** The dragged row's occurrence handle (duplicate keys / a repeated object). */
+const NATIVE_HANDLE = Symbol('@mmstack/dnd:reorderable-handle');
+/** The native container's "not measured during this drag" key sequence. */
+const UNMEASURED: readonly never[] = [];
 
 /**
  * Shared drop gate for a native list's container + item drop targets: accept a
@@ -53,6 +64,69 @@ function canDropOnList<T, K>(
       (c.canReceive ? c.canReceive(source.data) : true)
     );
   return !!c.insert?.accepts(source.data); // foreign palette payload
+}
+
+/**
+ * @internal The native engine's drop commit, given the list it landed on (`c`),
+ * the source list (`src`, absent for a foreign payload), the drag payload and the
+ * insert slot (+ the hover's neighbour anchor for that slot, when recorded).
+ */
+export function commitNativeDrop<T, K>(
+  c: ReorderableController<T, K>,
+  src: ReorderableController<T, K> | undefined,
+  data: T,
+  slot: number,
+  anchor: ListAnchor<Handle<K>> | null,
+  handle?: Handle<K>,
+): void {
+  // the hovered place, by neighbour, resolved against the list as it is NOW
+  const to = anchor ? slotOfAnchor(handlesOf(c), anchor) : slot;
+  if (to < 0) {
+    return warnNative(
+      'the drop target changed mid-drag and the hovered neighbour is gone',
+    );
+  }
+  if (!src) {
+    c.insertForeign(data, to); // foreign payload → map + insert
+    return;
+  }
+  // the dragged OCCURRENCE in the source's live list (its handle, else the
+  // payload's reference or key), never the drag-start payload itself
+  const h = occurrenceIn(src, data, handle);
+  const from = h === undefined ? -1 : (untracked(src.indexMap).get(h) ?? -1);
+  if (from < 0 || h === undefined) {
+    return warnNative('the dragged item was removed from its list mid-drag');
+  }
+  if (src.listId === c.listId) {
+    c.moveItem(from, from < to ? to - 1 : to); // insert slot → final index
+  } else {
+    const item = untracked(src.items)[from];
+    if (c.insertAt(item, to)) src.takeOut(item, to, c, h);
+  }
+}
+
+/** A list's live handles, in order. */
+function handlesOf<T, K>(c: ReorderableController<T, K>): Handle<K>[] {
+  return untracked(() => c.items().map((_, i) => c.handleAt(i) as Handle<K>));
+}
+
+/** The drag's occurrence in `src` now: the handle it carried if still there, else `data`'s. */
+function occurrenceIn<T, K>(
+  src: ReorderableController<T, K>,
+  data: T,
+  handle: Handle<K> | undefined,
+): Handle<K> | undefined {
+  if (handle !== undefined && untracked(src.indexMap).has(handle))
+    return handle;
+  return untracked(() => src.handleOf(data));
+}
+
+function warnNative(reason: string): void {
+  if (isDevMode()) {
+    console.warn(
+      `[@mmstack/dnd] reorderable: ${reason}; the drop was ignored.`,
+    );
+  }
 }
 
 /**
@@ -102,18 +176,29 @@ export function connectNativeContainer<T, K = unknown>(
 
   // Centers cached per drag — stable, so an indicator move can't feed back into hit-testing.
   const centers = signal<readonly number[]>([]);
+  // the key sequence those centers were measured against (a hover's anchor names a slot in it)
+  // UNMEASURED until this drag's first measurement (reset when the drag ends)
+  const centerKeys = signal<readonly Handle<K>[]>(UNMEASURED);
+  effect(() => {
+    if (!active()) untracked(() => centerKeys.set(UNMEASURED));
+  });
   afterRenderEffect({
     earlyRead: () => {
       if (!active()) return null;
       const c = controller();
       void c.items();
       const m = c.measure();
+      // a bailed measurement (a row not rendered) has no keys: not measured
+      const keys = (m.keys ?? UNMEASURED) as readonly Handle<K>[];
       // native + wrap is unsupported (dev-warned at creation) → degrade to empty
-      return m.kind === 'wrap' ? [] : m.centers;
+      return { centers: m.kind === 'wrap' ? [] : m.centers, keys };
     },
     write: (measured) => {
       const m = measured();
-      if (m) centers.set(m);
+      if (m) {
+        centers.set(m.centers);
+        centerKeys.set(m.keys);
+      }
     },
   });
 
@@ -158,6 +243,30 @@ export function connectNativeContainer<T, K = unknown>(
   });
   controller().setNativeInsert(activeInsert);
 
+  // The hovered slot, named by neighbour when the POINTER picks it. A list change
+  // under a still pointer keeps the recorded anchor, so the drop lands where the
+  // indicator was, not wherever the shifted rows put that slot index.
+  let seenKeys: readonly Handle<K>[] | null = null;
+  let seenPointer: unknown = null;
+  effect(() => {
+    const ins = activeInsert();
+    const keys = centerKeys();
+    const p = pointer();
+    untracked(() => {
+      const c = controller();
+      const kept = c.nativeHoverAnchor();
+      const listMoved = keys !== seenKeys && p === seenPointer;
+      seenKeys = keys;
+      seenPointer = p;
+      if (ins == null) c.setNativeHoverAnchor(null);
+      // not measured (yet, or a row not rendered): nothing new to name; keep what was recorded
+      else if (keys === UNMEASURED) return;
+      else if (!(listMoved && kept)) {
+        c.setNativeHoverAnchor(slotAnchor(keys, ins));
+      }
+    });
+  });
+
   dropTarget<T, { listId: symbol }>({
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accept-all guard; the real gate is canDrop (own-list / same-group meta)
     accepts: (d): d is T => true,
@@ -168,19 +277,18 @@ export function connectNativeContainer<T, K = unknown>(
       // read synchronously before the deferred effect clears it
       const to = untracked(c.nativeInsert);
       if (to == null) return;
-      const src = (meta as Record<symbol, unknown>)[NATIVE_SOURCE] as
-        | ReorderableController<T, K>
-        | undefined;
-      if (!src) {
-        c.insertForeign(data, to); // foreign payload → map + insert
-      } else if (src.listId === c.listId) {
-        const from = c.indexMap().get(c.key(data)) ?? -1;
-        if (from < 0) return;
-        c.moveItem(from, from < to ? to - 1 : to); // insert slot → final index
-      } else {
-        c.insertAt(data, to);
-        src.takeOut(data, to);
-      }
+      const tags = meta as Record<symbol, unknown>;
+      const src = tags[NATIVE_SOURCE] as
+        ReorderableController<T, K> | undefined;
+      const handle = tags[NATIVE_HANDLE] as Handle<K> | undefined;
+      commitNativeDrop(
+        c,
+        src,
+        data,
+        to,
+        untracked(c.nativeHoverAnchor),
+        handle,
+      );
     },
   });
 
@@ -204,22 +312,28 @@ export function connectNativeItem<T, K = unknown>(
 ): ReorderableItemBinding<K> {
   nestedEffect((onCleanup) => {
     const c = controller();
-    const k = c.key(item());
-    c.register(k, element);
+    const it = item();
+    const k = c.key(it);
+    c.register(k, element, it); // binds the row to its occurrence
     onCleanup(() => c.unregister(k, element));
   });
 
   const itemKey = computed(() => controller().key(item()));
-  const index = computed(() => {
-    const c = controller();
-    return c.indexMap().get(c.key(item())) ?? -1; // O(1), shared map (not per-item findIndex)
-  });
+  let state: ReturnType<ReorderableController<T, K>['itemState']> | undefined;
+  // O(1) via the shared handle→index map; the row's occurrence, not its key
+  const index = computed(() =>
+    (state ??= controller().itemState(item, element)).index(),
+  );
 
   const dragRef = draggable<T, DragMeta>({
     data: item,
     meta: () => {
       const c = controller();
-      return { [NATIVE_LIST_ID]: c.listId, [NATIVE_SOURCE]: c };
+      return {
+        [NATIVE_LIST_ID]: c.listId,
+        [NATIVE_SOURCE]: c,
+        [NATIVE_HANDLE]: c.keyForElement(element),
+      };
     },
   });
 

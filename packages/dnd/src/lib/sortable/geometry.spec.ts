@@ -1,4 +1,5 @@
 import {
+  anchorOf,
   centerAlong,
   clampInsert,
   closeDisplacement,
@@ -631,5 +632,34 @@ describe('geometry — moveWithin & clampInsert', () => {
         expect(new Set(out.map(key))).toEqual(new Set(base.map(key)));
       }
     }
+  });
+});
+
+describe('anchorOf — a drop position named by a neighbour key [PIN M7]', () => {
+  it("'final': the moved key's index in the list after the move", () => {
+    expect(anchorOf(['b', 'c', 'a', 'd'], 'a', 2, 'final')).toEqual({
+      after: 'c',
+    });
+    expect(anchorOf(['a', 'b', 'c'], 'a', 0, 'final')).toEqual({ before: 'b' });
+    expect(anchorOf(['b', 'c', 'a'], 'a', 2, 'final')).toEqual({ after: 'c' });
+    expect(anchorOf(['a'], 'a', 0, 'final')).toEqual({ empty: true });
+  });
+
+  it("'slot': an insert slot into the list as it stands, the mover discounted", () => {
+    // same list [a,b,c,d], a's slot 3 = between c and d
+    expect(anchorOf(['a', 'b', 'c', 'd'], 'a', 3, 'slot')).toEqual({
+      after: 'c',
+    });
+    // the mover is not there (an arrival): slot 0 of [k,l]
+    expect(anchorOf(['k', 'l'], 'x', 0, 'slot')).toEqual({ before: 'k' });
+    expect(anchorOf(['k', 'l'], 'x', 2, 'slot')).toEqual({ after: 'l' });
+    expect(anchorOf([], 'x', 0, 'slot')).toEqual({ empty: true });
+    // a slot right after the mover's own seat is no move: anchored on its old neighbour
+    expect(anchorOf(['a', 'b'], 'b', 2, 'slot')).toEqual({ after: 'a' });
+  });
+
+  it('out-of-range indices clamp; the mover is never its own anchor', () => {
+    expect(anchorOf(['a', 'b'], 'b', 9, 'final')).toEqual({ after: 'a' });
+    expect(anchorOf(['a', 'b'], 'a', -3, 'slot')).toEqual({ before: 'b' });
   });
 });

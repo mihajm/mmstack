@@ -1,6 +1,6 @@
 {
   "name": "@mmstack/dnd",
-  "version": "21.6.2",
+  "version": "21.7.0",
   "keywords": [
     "angular",
     "dnd",
@@ -18,7 +18,7 @@
   "peerDependencies": {
     "@angular/core": ">=21 <22",
     "@atlaskit/pragmatic-drag-and-drop": "^4.0.0",
-    "@mmstack/primitives": ">=21.13 <22",
+    "@mmstack/primitives": ">=21.22 <22",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^3.0.0",
     "@atlaskit/pragmatic-drag-and-drop-auto-scroll": "^3.2.1",
     "@atlaskit/pragmatic-drag-and-drop-flourish": "^3.0.1",

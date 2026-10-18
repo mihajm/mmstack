@@ -2,23 +2,28 @@ import {
   computed,
   inject,
   Injector,
+  isDevMode,
   linkedSignal,
   signal,
   type Signal,
   untracked,
   type WritableSignal,
 } from '@angular/core';
+import { type Handle } from '@mmstack/primitives';
 
 import {
   resolveTouchActivation,
   type ResolvedTouchActivation,
   type TouchActivation,
 } from '../internal/touch-activation';
+import { occurrences } from '../internal/occurrences';
 import { withDefaults } from '../provide';
 import {
   insertIndexForMeasure,
+  type ListAnchor,
   type MemberMeasure,
   type RectLike,
+  slotAnchor,
 } from '../sortable/geometry';
 import {
   getGroupInternals,
@@ -45,6 +50,14 @@ const DEFAULT_ANIMATION = {
 const DEFAULT_AUTOSCROLL = { edge: 48, speed: 16 } as const;
 
 export type PlacementResizeDirection = 'e' | 's' | 'se';
+
+/** An item a move displaced by consequence: its address before and after the commit. */
+export type PlacementDisplaced<K = unknown> = {
+  /** The displaced item's handle: its raw key unless that key has duplicates. */
+  readonly key: Handle<K>;
+  readonly from: GridPlacement;
+  readonly to: GridPlacement;
+};
 
 /**
  * Everything a placement drag needs, captured ONCE at gesture start: the
@@ -146,12 +159,18 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
    */
   readonly touchActivation?: TouchActivation | false;
   readonly injector?: Injector;
-  /** After a move commits (drop or keyboard). */
+  /** After a move commits (drop or keyboard). A drop or step that changes no address fires nothing. */
   readonly onPlace?: (event: {
     item: T;
     x: number;
     y: number;
     items: readonly T[];
+    /**
+     * The OTHER items whose address the move changed by consequence (pushed or
+     * pulled by the reflow), each against its own previous address, in source
+     * order. Empty under `compact: 'none'`. The dragged item is never listed.
+     */
+    displaced: readonly PlacementDisplaced<K>[];
   }) => void;
   /** After a resize commits. */
   readonly onResize?: (event: {
@@ -159,6 +178,8 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
     w: number;
     h: number;
     items: readonly T[];
+    /** As on `onPlace`: the OTHER items the resize pushed or pulled, `[]` under `compact: 'none'`. */
+    displaced: readonly PlacementDisplaced<K>[];
   }) => void;
   /** After an item arrives from another group member. */
   readonly onItemArrived?: (event: { item: T; x: number; y: number }) => void;
@@ -179,7 +200,8 @@ export type PlacementGridController<
   readonly compact: 'vertical' | 'none';
   /** Rows the (preview) layout occupies — drive the container's height. */
   readonly rows: Signal<number>;
-  readonly activeKey: Signal<K | null>;
+  /** The dragged occurrence's handle (the raw key unless that key has duplicates), or `null`. */
+  readonly activeKey: Signal<Handle<K> | null>;
   /**
    * The active drag is currently over ANOTHER group member (a tray, a list) —
    * restyle the dragged item to preview what it will become there.
@@ -233,18 +255,19 @@ export type PlacementGridController<
   /** Resolved touch long-press, or `null` when off. */
   readonly touchActivation: ResolvedTouchActivation | null;
   readonly group?: SortableGroup<T>;
-  itemState(item: () => T): PlacementGridItemState<K>;
+  /** `element` binds the state to that item's occurrence (see `register`). */
+  itemState(item: () => T, element?: HTMLElement): PlacementGridItemState<K>;
   /** Keyboard commit: move the item one step (clamped/validated). */
-  moveBy(key: K, dx: number, dy: number): boolean;
+  moveBy(handle: Handle<K>, dx: number, dy: number): boolean;
   /** Keyboard commit: resize the item by whole cells (min 1×1). */
-  resizeBy(key: K, dw: number, dh: number): boolean;
+  resizeBy(handle: Handle<K>, dw: number, dh: number): boolean;
   /** Pure drag-start from a measured snapshot. Unit-testable without DOM. */
-  begin(key: K, snapshot: PlacementDragSnapshot): void;
+  begin(handle: Handle<K>, snapshot: PlacementDragSnapshot): void;
   /** @internal DOM edge: measure the container, then {@link begin} a move. */
-  beginGesture(key: K, start: { x: number; y: number }): void;
+  beginGesture(handle: Handle<K>, start: { x: number; y: number }): void;
   /** @internal DOM edge: measure, then {@link begin} a resize. */
   beginResizeGesture(
-    key: K,
+    handle: Handle<K>,
     direction: PlacementResizeDirection,
     start: { x: number; y: number },
   ): void;
@@ -258,13 +281,57 @@ export type PlacementGridController<
   cancel(): void;
   dispose(): void;
   /** @internal item DOM registration. */
-  register(key: K, el: HTMLElement): void;
+  /**
+   * `item` binds the element to its OCCURRENCE: a reference found once in the
+   * source is that row; a reference repeated binds the first occurrence no
+   * other element holds yet (registration order). Without `item` (or for a
+   * reference no longer in the source) the key decides.
+   */
+  register(key: K, el: HTMLElement, item?: T): void;
   unregister(key: K, el: HTMLElement): void;
-  keyForElement(el: HTMLElement): K | undefined;
+  keyForElement(el: HTMLElement): Handle<K> | undefined;
+  /** @internal the live position of an occurrence, or `-1`. */
+  indexOf(handle: Handle<K>): number;
   setContainer(el: HTMLElement | null): void;
   /** @internal auto-scroll compensation, px (x = horizontal, y = vertical). */
   setScrollDelta(x: number, y: number): void;
 };
+
+/**
+ * Layout runs over CELLS: each item's address plus its position. The pure layout
+ * functions identify items by a key; the position is the one identity that is
+ * unique even when two items share a key (or one object is listed twice), and
+ * results keep input order, so cell `i` maps straight back to item `i`.
+ */
+type Cell = GridPlacement & { readonly i: number };
+const cellIndex = (c: Cell) => c.i;
+const cellsOf = (arr: readonly GridPlacement[]): Cell[] =>
+  arr.map((it, i) => ({ x: it.x, y: it.y, w: it.w, h: it.h, i }));
+
+/** Map cells back onto items: an item whose address held is the same object; the array too, if none moved. */
+function fromCells<T extends GridPlacement>(
+  arr: readonly T[],
+  cells: readonly GridPlacement[],
+): readonly T[] {
+  let changed = false;
+  const out = arr.map((it, i) => {
+    const c = cells[i];
+    if (sameAddress(it, c)) return it;
+    changed = true;
+    return { ...it, x: c.x, y: c.y, w: c.w, h: c.h };
+  });
+  return changed ? out : arr;
+}
+
+const sameAddress = (a: GridPlacement, b: GridPlacement): boolean =>
+  a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+
+const addressOf = (i: GridPlacement): GridPlacement => ({
+  x: i.x,
+  y: i.y,
+  w: i.w,
+  h: i.h,
+});
 
 function resolveNum(
   v: number | (() => number) | undefined,
@@ -280,6 +347,9 @@ function resolveNum(
  * pointer to a cell and PREVIEWS the reflow as pure derivation — the source
  * signal is written exactly once, at drop. `compact: 'none'` + `canPlace`
  * turns the same controller into a validity-masked grid (GridState mode).
+ *
+ * Placement events carry addresses (`x`, `y`, `w`, `h`), not neighbour anchors:
+ * a grid has no order to name a position by.
  */
 export function placementGrid<T extends GridPlacement, K>(
   source: WritableSignal<T[]>,
@@ -320,12 +390,13 @@ export function placementGrid<T extends GridPlacement, K>(
       }
     : null;
 
-  const byKey = new Map<K, HTMLElement>();
-  const byEl = new Map<HTMLElement, K>();
+  // identity = the occurrence (a handle: the raw key until that key is duplicated)
+  const occ = occurrences(source, key);
+  const liveIndex = (h: Handle<K>) => untracked(occ.indexMap).get(h) ?? -1;
   let container: HTMLElement | null = null;
   let boundsCache: RectLike | null = null;
 
-  const activeKey = signal<K | null>(null);
+  const activeKey = signal<Handle<K> | null>(null);
   const pointerX = signal(0);
   const pointerY = signal(0);
   const scrollX = signal(0);
@@ -337,15 +408,32 @@ export function placementGrid<T extends GridPlacement, K>(
   let snap: PlacementDragSnapshot | null = null;
   let dragStartItems: readonly T[] | null = null;
   let dragStartItem: T | null = null;
+  let dragStartIdx = -1;
+  let dragStartHandles: readonly Handle<K>[] = [];
+  // The last cross-container hover: its target and the hovered slot named by neighbour.
+  let hover: {
+    target: SortableGroupMember<T>;
+    anchor: ListAnchor<unknown> | null;
+  } | null = null;
 
-  const indexByKey = (arr: readonly T[], k: K) =>
-    arr.findIndex((i) => key(i) === k);
+  /** Could the item at position `idx` (`-1`: not in `items`) take this rect, nobody moving? */
+  const fitsAt = (
+    items: readonly T[],
+    idx: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ) => canPlaceAt(cellsOf(items), cellIndex, idx, x, y, w, h, cols());
 
-  const placeGate = (item: T, x: number, y: number, items: readonly T[]) => {
-    if (
-      compact === 'none' &&
-      !canPlaceAt(items, key, key(item), x, y, item.w, item.h, cols())
-    ) {
+  const placeGate = (
+    item: T,
+    idx: number,
+    x: number,
+    y: number,
+    items: readonly T[],
+  ) => {
+    if (compact === 'none' && !fitsAt(items, idx, x, y, item.w, item.h)) {
       return false;
     }
     // untracked: a consumer predicate may read its own signals — the preview
@@ -386,7 +474,7 @@ export function placementGrid<T extends GridPlacement, K>(
         }
         if (
           compact === 'none' &&
-          !canPlaceAt(dragStartItems, key, key(it), it.x, it.y, w, h, cols())
+          !fitsAt(dragStartItems, dragStartIdx, it.x, it.y, w, h)
         ) {
           return prev?.value ?? null;
         }
@@ -404,7 +492,7 @@ export function placementGrid<T extends GridPlacement, K>(
       if (prev?.value && prev.value.x === x && prev.value.y === y) {
         return prev.value;
       }
-      if (!placeGate(it, x, y, dragStartItems)) {
+      if (!placeGate(it, dragStartIdx, x, y, dragStartItems)) {
         return prev?.value ?? null;
       }
       return { x, y };
@@ -442,25 +530,15 @@ export function placementGrid<T extends GridPlacement, K>(
     if (outside()) return dragStartItems ?? source();
     const p = projected();
     if (!p || !snap || !dragStartItems) return dragStartItems ?? source();
-    if (snap.kind === 'resize') {
-      if (compact === 'none') {
-        return dragStartItems.map((i) =>
-          key(i) === k ? { ...i, w: p.x, h: p.y } : i,
-        );
-      }
-      return resizeGridItem(dragStartItems, key, k, p.x, p.y, cols());
-    }
-    if (compact === 'none') {
-      return dragStartItems.map((i) =>
-        key(i) === k ? { ...i, x: p.x, y: p.y } : i,
-      );
-    }
-    return moveGridItem(dragStartItems, key, k, p.x, p.y, cols());
+    return step(dragStartItems, dragStartIdx, p, snap.kind === 'resize');
   });
 
+  /** Handle → previewed item (positions follow the drag-start snapshot). */
   const previewMap = computed(() => {
-    const map = new Map<K, T>();
-    for (const it of previewLayout()) map.set(key(it), it);
+    const map = new Map<Handle<K>, T>();
+    const layout = previewLayout();
+    const hs = activeKey() === null ? occ.state().handles : dragStartHandles;
+    for (let i = 0; i < layout.length; i++) map.set(hs[i], layout[i]);
     return map;
   });
 
@@ -520,7 +598,7 @@ export function placementGrid<T extends GridPlacement, K>(
       if (!item) return null;
       const cell = cellFromPoint(item, groupApi.activeX(), groupApi.activeY());
       if (!cell) return null;
-      if (!placeGate({ ...item, ...cell }, cell.x, cell.y, source())) {
+      if (!placeGate({ ...item, ...cell }, -1, cell.x, cell.y, source())) {
         return null;
       }
       return { ...cell, w: item.w, h: item.h, key: key(item) };
@@ -558,15 +636,16 @@ export function placementGrid<T extends GridPlacement, K>(
     if (k === null || compact !== 'none' || !dragStartItems) return null;
     // origins deeper than the occupied rows are equivalent, minus dead space
     return validTargets(
-      dragStartItems,
-      key,
-      k,
+      cellsOf(dragStartItems),
+      cellIndex,
+      dragStartIdx,
       cols(),
       gridRows(dragStartItems) + 1,
     );
   });
 
   const resetDragState = () => {
+    hover = null;
     activeKey.set(null);
     startRows.set(0);
     pointerX.set(0);
@@ -576,16 +655,71 @@ export function placementGrid<T extends GridPlacement, K>(
     snap = null;
     dragStartItems = null;
     dragStartItem = null;
+    dragStartIdx = -1;
+    dragStartHandles = [];
     if (groupApi && untracked(groupApi.activeSource) === self) {
       groupApi.clearActive();
     }
   };
 
-  const commitLayout = (next: readonly T[]) => {
-    // release the drag hold: gravity applies to the moved item too
-    const settled = compact === 'vertical' ? compactGrid(next, key) : next;
-    source.set(settled as T[]);
-    return settled;
+  /** Release the drag hold: gravity applies to the moved item too. Pure. */
+  const settle = (next: readonly T[]): readonly T[] =>
+    compact === 'vertical'
+      ? fromCells(next, compactGrid(cellsOf(next), cellIndex))
+      : next;
+
+  /**
+   * The pure step a drop (or a preview) applies to the item at `idx`: move to
+   * `p` or resize to spans `p`, with the reflow of the compaction mode.
+   */
+  const step = (
+    items: readonly T[],
+    idx: number,
+    p: { x: number; y: number },
+    resize: boolean,
+  ): readonly T[] => {
+    if (idx < 0) return items;
+    if (compact === 'none') {
+      return items.map((it, i) =>
+        i !== idx
+          ? it
+          : resize
+            ? { ...it, w: p.x, h: p.y }
+            : { ...it, x: p.x, y: p.y },
+      );
+    }
+    const cells = cellsOf(items);
+    return fromCells(
+      items,
+      resize
+        ? resizeGridItem(cells, cellIndex, idx, p.x, p.y, cols())
+        : moveGridItem(cells, cellIndex, idx, p.x, p.y, cols()),
+    );
+  };
+
+  /** Same address (x, y, w, h) at every position — a layout that changed nothing, whatever the references. */
+  const sameAddresses = (a: readonly T[], b: readonly T[]): boolean => {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++)
+      if (!sameAddress(a[i], b[i])) return false;
+    return true;
+  };
+
+  /** The other items (by handle) whose address changed between `before` and `after`, in order. */
+  const displacedBy = (
+    before: readonly T[],
+    after: readonly T[],
+    movedIdx: number,
+  ): PlacementDisplaced<K>[] => {
+    const hs = untracked(occ.state).handles;
+    const out: PlacementDisplaced<K>[] = [];
+    for (let i = 0; i < after.length; i++) {
+      const was = before[i];
+      if (i === movedIdx || !was || sameAddress(was, after[i])) continue;
+      out.push({ key: hs[i], from: addressOf(was), to: addressOf(after[i]) });
+    }
+    return out;
   };
 
   const measureSnapshot = (
@@ -613,13 +747,15 @@ export function placementGrid<T extends GridPlacement, K>(
     };
   };
 
-  const begin = (k: K, snapshot: PlacementDragSnapshot) => {
+  const begin = (k: Handle<K>, snapshot: PlacementDragSnapshot) => {
     const arr = untracked(source);
-    const idx = indexByKey(arr, k);
+    const idx = liveIndex(k);
     if (idx < 0) return;
     snap = snapshot;
     dragStartItems = arr;
     dragStartItem = arr[idx];
+    dragStartIdx = idx;
+    dragStartHandles = untracked(occ.state).handles;
     // the resting grid's rows, read before the key publishes the drag (the
     // hit test reads them, so it cannot be what supplies them)
     startRows.set(untracked(rows));
@@ -663,14 +799,14 @@ export function placementGrid<T extends GridPlacement, K>(
       return;
     }
     const tg = ensureMeasured(target);
+    const insert = insertIndexForMeasure(tg, p.x, p.y);
+    // name the hovered slot by neighbour in the list it was measured against
+    hover = { target, anchor: tg.keys ? slotAnchor(tg.keys, insert) : null };
     groupApi.setActive({
       source: self,
       target,
-      sourceIndex:
-        dragStartItems && dragged
-          ? indexByKey(dragStartItems, key(dragged))
-          : -1,
-      insertIndex: insertIndexForMeasure(tg, p.x, p.y),
+      sourceIndex: dragStartIdx,
+      insertIndex: insert,
       footprint:
         tg.kind !== 'wrap' && tg.axis === 'x'
           ? (dragged?.w ?? 1) * stepX()
@@ -693,9 +829,30 @@ export function placementGrid<T extends GridPlacement, K>(
         ? untracked(groupApi.activeTarget)
         : null;
 
-    if (crossTarget && groupApi && dragStartItem) {
-      const item = dragStartItem;
-      const to = untracked(groupApi.activeInsertIndex);
+    // the dragged KEY in the live source is what commits, never the drag-start snapshot
+    const before = untracked(source);
+    const idx = liveIndex(k);
+    if (idx < 0) return resetDragState(); // removed by another writer mid-drag: nothing to place
+    const item = before[idx];
+
+    if (crossTarget && groupApi) {
+      let to = untracked(groupApi.activeInsertIndex);
+      // an index target: the hovered neighbour, resolved against its live list
+      if (
+        hover?.target === crossTarget &&
+        hover.anchor &&
+        crossTarget.slotOfAnchor
+      ) {
+        to = crossTarget.slotOfAnchor(hover.anchor);
+        if (to < 0 && !crossTarget.insertAtPoint) {
+          if (isDevMode()) {
+            console.warn(
+              '[@mmstack/dnd] placementGrid: the drop target changed mid-drag and the hovered neighbour is gone; the drag was cancelled.',
+            );
+          }
+          return resetDragState();
+        }
+      }
       const px = untracked(pointerX);
       const py = untracked(pointerY);
       const taken = crossTarget.insertAtPoint?.(item, px, py)
@@ -704,10 +861,10 @@ export function placementGrid<T extends GridPlacement, K>(
           ? crossTarget.insertAt(item, to)
           : false;
       if (taken) {
-        const next = untracked(source).filter((i) => key(i) !== k);
-        source.set(
-          (compact === 'vertical' ? compactGrid(next, key) : next) as T[],
-        );
+        // exactly this occurrence leaves
+        const from = liveIndex(k);
+        const next = untracked(source).filter((_, i) => i !== from);
+        source.set(settle(next) as T[]);
         options.onItemLeft?.({ item });
       }
       return resetDragState();
@@ -717,13 +874,15 @@ export function placementGrid<T extends GridPlacement, K>(
 
     const p = untracked(projected);
     const wasResize = snap?.kind === 'resize';
-    const preview = untracked(previewLayout);
-    const item = dragStartItem;
-    if (p && item) {
-      const before = untracked(source);
-      const settled = commitLayout(preview);
-      if (settled !== before) {
-        const placed = settled.find((i) => key(i) === k);
+    if (p) {
+      // the preview was built from the snapshot; the commit re-runs the same pure
+      // step over the live source, so a concurrent writer's change survives
+      const next = liveStep(before, item, idx, p, wasResize);
+      const settled = next ? settle(next) : before;
+      // a drop that changes no address is silent: no write, no event
+      if (!sameAddresses(before, settled)) {
+        source.set(settled as T[]);
+        const placed = settled[idx];
         if (placed) {
           if (wasResize) {
             options.onResize?.({
@@ -731,6 +890,7 @@ export function placementGrid<T extends GridPlacement, K>(
               w: placed.w,
               h: placed.h,
               items: settled,
+              displaced: displacedBy(before, settled, idx),
             });
           } else {
             options.onPlace?.({
@@ -738,6 +898,7 @@ export function placementGrid<T extends GridPlacement, K>(
               x: placed.x,
               y: placed.y,
               items: settled,
+              displaced: displacedBy(before, settled, idx),
             });
           }
         }
@@ -746,16 +907,37 @@ export function placementGrid<T extends GridPlacement, K>(
     resetDragState();
   };
 
+  /**
+   * The drop's step over the LIVE items: the move (or resize) the preview showed,
+   * re-validated against what is there now. `null` = it no longer fits (a
+   * `compact: 'none'` cell taken meanwhile, or `canPlace` refuses) ⇒ no-op.
+   */
+  const liveStep = (
+    live: readonly T[],
+    item: T,
+    idx: number,
+    p: { x: number; y: number },
+    resize: boolean,
+  ): readonly T[] | null => {
+    if (resize) {
+      if (compact === 'none' && !fitsAt(live, idx, item.x, item.y, p.x, p.y)) {
+        return null;
+      }
+    } else if (!placeGate(item, idx, p.x, p.y, live)) return null;
+    return step(live, idx, p, resize);
+  };
+
   const findFirstFit = (
     items: readonly T[],
     item: T,
   ): { x: number; y: number } => {
     const c = cols();
     const maxY = gridRows(items) + item.h;
+    const cells = cellsOf(items); // the arriving item is not among them
     for (let y = 0; y <= maxY; y++) {
       for (let x = 0; x <= c - item.w; x++) {
         if (
-          canPlaceAt(items, key, key(item), x, y, item.w, item.h, c) &&
+          canPlaceAt(cells, cellIndex, -1, x, y, item.w, item.h, c) &&
           (options.canPlace
             ? options.canPlace(item, x, y, items) !== false
             : true)
@@ -773,14 +955,16 @@ export function placementGrid<T extends GridPlacement, K>(
     const nx = Math.max(0, Math.min(x, c - item.w));
     const ny = Math.max(0, y);
     const placed = { ...item, x: nx, y: ny };
-    if (!placeGate(placed, nx, ny, arr)) return false;
+    if (!placeGate(placed, -1, nx, ny, arr)) return false;
     if (compact === 'none') {
       source.set([...arr, placed] as T[]);
     } else {
+      const all = [...arr, placed];
+      const cells = cellsOf(all);
       source.set(
-        compactGrid(
-          placeGridItem([...arr, placed], key, key(item)),
-          key,
+        fromCells(
+          all,
+          compactGrid(placeGridItem(cells, cellIndex, arr.length), cellIndex),
         ) as T[],
       );
     }
@@ -788,12 +972,23 @@ export function placementGrid<T extends GridPlacement, K>(
     return true;
   };
 
-  const itemState = (item: () => T): PlacementGridItemState<K> => {
+  const itemState = (
+    item: () => T,
+    element?: HTMLElement,
+  ): PlacementGridItemState<K> => {
     const itemKey = computed(() => key(item()));
-    const isActive = computed(() => activeKey() === itemKey());
+    // the item's occurrence: its element's binding, else the item's first occurrence
+    const handle = computed(
+      () => (element && occ.keyForElement(element)) ?? occ.handleOf(item()),
+    );
+    const isActive = computed(() => {
+      const h = handle();
+      return h !== undefined && activeKey() === h;
+    });
     const previewItem = computed(() => {
-      if (activeKey() === null) return item();
-      return previewMap().get(itemKey()) ?? item();
+      const h = handle();
+      if (activeKey() === null || h === undefined) return item();
+      return previewMap().get(h) ?? item();
     });
 
     const glide = animation
@@ -835,25 +1030,12 @@ export function placementGrid<T extends GridPlacement, K>(
    * under `compact: 'vertical'`.
    */
   const commitKeyboard = (
-    k: K,
     next: readonly T[],
     before: readonly T[],
   ): boolean => {
-    if (next === before) return false;
-    const orig = before.find((i) => key(i) === k);
-    const settled = commitLayout(next);
-    const placed = settled.find((i) => key(i) === k);
-    if (
-      orig &&
-      placed &&
-      placed.x === orig.x &&
-      placed.y === orig.y &&
-      placed.w === orig.w &&
-      placed.h === orig.h
-    ) {
-      source.set(before as T[]);
-      return false;
-    }
+    const settled = settle(next);
+    if (sameAddresses(before, settled)) return false; // settled back home: no write
+    source.set(settled as T[]);
     return true;
   };
 
@@ -888,63 +1070,70 @@ export function placementGrid<T extends GridPlacement, K>(
     itemState,
     moveBy: (k, dx, dy) => {
       const arr = untracked(source);
-      const it = arr.find((i) => key(i) === k);
+      const idx = liveIndex(k);
+      const it = arr[idx];
       if (!it) return false;
       const c = cols();
       const nx = Math.max(0, Math.min(it.x + dx, c - it.w));
       const ny = Math.max(0, it.y + dy);
       if (nx === it.x && ny === it.y) return false;
-      if (!placeGate(it, nx, ny, arr)) return false;
+      if (!placeGate(it, idx, nx, ny, arr)) return false;
       if (compact === 'none') {
-        source.set(
-          arr.map((i) => (key(i) === k ? { ...i, x: nx, y: ny } : i)) as T[],
-        );
-        options.onPlace?.({ item: it, x: nx, y: ny, items: untracked(source) });
+        source.set(step(arr, idx, { x: nx, y: ny }, false) as T[]);
+        options.onPlace?.({
+          item: it,
+          x: nx,
+          y: ny,
+          items: untracked(source),
+          displaced: [],
+        });
         return true;
       }
-      const moved = moveGridItem(arr, key, k, nx, ny, c);
-      if (!commitKeyboard(k, moved, arr)) return false;
-      const placed = untracked(source).find((i) => key(i) === k);
+      const moved = step(arr, idx, { x: nx, y: ny }, false);
+      if (!commitKeyboard(moved, arr)) return false;
+      const placed = untracked(source)[idx];
       if (placed) {
         options.onPlace?.({
           item: it,
           x: placed.x,
           y: placed.y,
           items: untracked(source),
+          displaced: displacedBy(arr, untracked(source), idx),
         });
       }
       return true;
     },
     resizeBy: (k, dw, dh) => {
       const arr = untracked(source);
-      const it = arr.find((i) => key(i) === k);
+      const idx = liveIndex(k);
+      const it = arr[idx];
       if (!it) return false;
       const c = cols();
       const nw = Math.max(1, Math.min(it.w + dw, c - it.x));
       const nh = Math.max(1, it.h + dh);
       if (nw === it.w && nh === it.h) return false;
       if (compact === 'none') {
-        if (!canPlaceAt(arr, key, k, it.x, it.y, nw, nh, c)) return false;
-        source.set(
-          arr.map((i) => (key(i) === k ? { ...i, w: nw, h: nh } : i)) as T[],
-        );
+        if (!fitsAt(arr, idx, it.x, it.y, nw, nh)) return false;
+        source.set(step(arr, idx, { x: nw, y: nh }, true) as T[]);
         options.onResize?.({
           item: it,
           w: nw,
           h: nh,
           items: untracked(source),
+          displaced: [],
         });
         return true;
       }
-      const resized = resizeGridItem(arr, key, k, nw, nh, c);
-      if (!commitKeyboard(k, resized, arr)) return false;
-      const placed = untracked(source).find((i) => key(i) === k);
+      const resized = step(arr, idx, { x: nw, y: nh }, true);
+      if (!commitKeyboard(resized, arr)) return false;
+      const placed = untracked(source)[idx];
       if (placed) {
         options.onResize?.({
           item: it,
           w: placed.w,
           h: placed.h,
           items: untracked(source),
+          displaced: displacedBy(arr, untracked(source), idx),
         });
       }
       return true;
@@ -968,15 +1157,10 @@ export function placementGrid<T extends GridPlacement, K>(
       }
       group?.unregister(self);
     },
-    register: (k, el) => {
-      byKey.set(k, el);
-      byEl.set(el, k);
-    },
-    unregister: (k, el) => {
-      if (byKey.get(k) === el) byKey.delete(k);
-      if (byEl.get(el) === k) byEl.delete(el);
-    },
-    keyForElement: (el) => byEl.get(el),
+    register: (k, el, item) => occ.register(k, el, item),
+    unregister: (k, el) => occ.unregister(k, el),
+    keyForElement: (el) => untracked(() => occ.keyForElement(el)),
+    indexOf: (h) => liveIndex(h),
     setContainer: (el) => {
       container = el;
     },

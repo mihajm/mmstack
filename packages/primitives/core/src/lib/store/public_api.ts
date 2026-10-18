@@ -31,6 +31,7 @@ export {
   rebalanceContainer,
   removeElement,
   wrappedContainer,
+  type Anchor,
   type ContainerEntry,
   type ContainerNode,
   type KeyedContainer,

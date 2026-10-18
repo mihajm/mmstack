@@ -74,6 +74,37 @@ export type OrderedEntry<T> = {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** An element's position: its `~pos` string, or `''` when missing or not a string. */
+const posOf = (element: unknown): string => {
+  const raw = isRecord(element) ? element[POS_SEGMENT] : undefined;
+  return typeof raw === 'string' ? raw : '';
+};
+
+/** `(pa, ka)` sorts before `(pb, kb)`: by position, ties broken by key (the reading order). */
+const precedes = (pa: string, ka: string, pb: string, kb: string): boolean =>
+  pa < pb || (pa === pb && ka < kb);
+
+// Reused by every ordering call: the sort buffer and the container its comparator reads. Calls are
+// synchronous and never re-enter, so one buffer serves them all.
+const keyBuffer: string[] = [];
+let sorting: Record<string, unknown> = {};
+const byReadingOrder = (a: string, b: string): number => {
+  const pa = posOf(sorting[a]);
+  const pb = posOf(sorting[b]);
+  return pa < pb ? -1 : pa > pb ? 1 : a < b ? -1 : a > b ? 1 : 0;
+};
+
+/** The container's keys in reading order, `exclude` left out, in the shared buffer (no copies). */
+function sortedKeys(container: Record<string, unknown>, exclude?: string): string[] {
+  keyBuffer.length = 0;
+  for (const key in container)
+    if (Object.hasOwn(container, key) && key !== exclude) keyBuffer.push(key);
+  sorting = container;
+  keyBuffer.sort(byReadingOrder);
+  sorting = {};
+  return keyBuffer;
+}
+
 /**
  * A keyed container's elements in reading order. Order is a pure function of the materialized
  * value: elements sort by their `~pos` string, ties broken by key. An element whose `~pos` is
@@ -89,15 +120,13 @@ function entriesOf<T, E>(
   container: Record<string, E>,
   payloadOf: (element: E) => T,
 ): OrderedEntry<T>[] {
-  const entries: OrderedEntry<T>[] = [];
-  for (const key of Object.keys(container)) {
-    const element = container[key];
-    const raw = isRecord(element) ? element[POS_SEGMENT] : undefined;
-    entries.push({ key, pos: typeof raw === 'string' ? raw : '', value: payloadOf(element) });
+  const keys = sortedKeys(container);
+  const entries = new Array<OrderedEntry<T>>(keys.length);
+  for (let i = 0; i < keys.length; i++) {
+    const element = container[keys[i]];
+    entries[i] = { key: keys[i], pos: posOf(element), value: payloadOf(element) };
   }
-  entries.sort((a, b) =>
-    a.pos < b.pos ? -1 : a.pos > b.pos ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
-  );
+  keys.length = 0;
   return entries;
 }
 
@@ -110,26 +139,100 @@ const devError = (msg: string): void => {
 
 declare const ngDevMode: boolean | undefined;
 
-const neighborPositions = (
-  entries: readonly OrderedEntry<unknown>[],
+type Neighbours = [before: string | undefined, after: string | undefined];
+
+/** The positions around slot `index` of the reading order, `exclude` left out. */
+function neighboursAt(
+  container: Record<string, unknown>,
   index: number,
-): [string | undefined, string | undefined] => {
-  const clamped = Math.max(0, Math.min(index, entries.length));
-  return [entries[clamped - 1]?.pos || undefined, entries[clamped]?.pos || undefined];
-};
+  exclude: string,
+): Neighbours {
+  const keys = sortedKeys(container, exclude);
+  const clamped = Math.max(0, Math.min(index, keys.length));
+  const before = clamped > 0 ? posOf(container[keys[clamped - 1]]) || undefined : undefined;
+  const after = clamped < keys.length ? posOf(container[keys[clamped]]) || undefined : undefined;
+  keys.length = 0;
+  return [before, after];
+}
+
+/**
+ * A drop position named by a neighbour instead of a slot: right after `after`, right before
+ * `before`, or the only element of an otherwise empty container. Resolved when the write is
+ * applied, against the order the container holds then.
+ */
+export type Anchor<K = string> = { readonly after: K } | { readonly before: K } | { readonly empty: true };
+
+/**
+ * The positions around an anchor in ONE scan, no sort: for `after: k`, `k`'s position and the
+ * smallest `(pos, key)` above it; `before: k` mirrors it. `undefined` when the anchor names no
+ * element present other than `exclude` (or `empty` finds siblings, which also logs in dev mode).
+ */
+function resolveAnchor(
+  container: Record<string, unknown>,
+  anchor: Anchor,
+  exclude: string,
+  verb: string,
+): Neighbours | undefined {
+  if ('empty' in anchor) {
+    for (const key in container)
+      if (Object.hasOwn(container, key) && key !== exclude) {
+        devError(`${verb}: an 'empty' anchor needs an otherwise empty container; nothing written`);
+        return undefined;
+      }
+    return [undefined, undefined];
+  }
+  const after = 'after' in anchor;
+  const k = after ? anchor.after : anchor.before;
+  if (k === exclude || !Object.hasOwn(container, k)) return undefined;
+  const pk = posOf(container[k]);
+  let bestKey: string | undefined;
+  let bestPos = '';
+  for (const key in container) {
+    if (!Object.hasOwn(container, key) || key === exclude || key === k) continue;
+    const p = posOf(container[key]);
+    const beyond = after ? precedes(pk, k, p, key) : precedes(p, key, pk, k);
+    if (!beyond) continue;
+    const better =
+      bestKey === undefined ||
+      (after ? precedes(p, key, bestPos, bestKey) : precedes(bestPos, bestKey, p, key));
+    if (better) {
+      bestKey = key;
+      bestPos = p;
+    }
+  }
+  const near = bestKey === undefined ? undefined : bestPos || undefined;
+  return after ? [pk || undefined, near] : [near, pk || undefined];
+}
 
 /**
  * Insert `value` under `key` at `index` in reading order (default: append). The position is
  * computed from the neighbors at that index, so the element lands where asked without renumbering
  * any sibling. A keyed container is a RECORD, never an array, so this is a per-key write the sync
  * layer diffs on its own. Returns the assigned position. Re-inserting an existing key overwrites it.
+ *
+ * Pass an {@link Anchor} instead of an index to place the element next to a neighbour as the
+ * container stands NOW (an external drop has the same concurrency need as a local move; see
+ * {@link moveElement}). An anchor that names no other element present writes nothing and returns
+ * `undefined`.
  */
 export function insertElement<T extends object>(
   container: ContainerNode<T>,
   key: string,
   value: T,
   index?: number,
-): string {
+): string;
+export function insertElement<T extends object>(
+  container: ContainerNode<T>,
+  key: string,
+  value: T,
+  index: Anchor | number | undefined,
+): string | undefined;
+export function insertElement<T extends object>(
+  container: ContainerNode<T>,
+  key: string,
+  value: T,
+  index?: number | Anchor,
+): string | undefined {
   return insertInto(container, key, value, index, inlineElement);
 }
 
@@ -142,13 +245,17 @@ function insertInto<T, E>(
   container: ContainerNode<E>,
   key: string,
   value: T,
-  index: number | undefined,
+  index: number | Anchor | undefined,
   elementOf: (value: T, pos: string) => E,
-): string {
-  const entries = orderedEntries(container()).filter((e) => e.key !== key);
-  const [before, after] = neighborPositions(entries, index ?? entries.length);
-  const pos = posBetween(before, after);
-  container.update((c) => ({ ...c, [key]: elementOf(value, pos) }));
+): string | undefined {
+  const c = container() as Record<string, unknown>;
+  const neighbours =
+    typeof index === 'object'
+      ? resolveAnchor(c, index, key, 'insert')
+      : neighboursAt(c, index ?? Number.POSITIVE_INFINITY, key);
+  if (!neighbours) return undefined;
+  const pos = posBetween(neighbours[0], neighbours[1]);
+  container.update((x) => ({ ...x, [key]: elementOf(value, pos) }));
   return pos;
 }
 
@@ -156,18 +263,31 @@ function insertInto<T, E>(
  * Move the element at `key` to `index` in reading order. This writes ONLY the element's `~pos`
  * field, so it never conflicts with a concurrent edit to the same element's data (they land on
  * different paths and both survive). Returns the new position, or `undefined` if `key` is absent.
+ *
+ * Pass an {@link Anchor} instead of an index to place the element next to a neighbour as the
+ * container stands NOW (`{ after: 'c' }` stays right after `c` even if peers inserted around it
+ * since the drop was decided). An anchor that names no other element present (an absent key, the
+ * moved key itself, or `empty` with siblings left) moves nothing, writes nothing and returns
+ * `undefined`; the `empty` misuse also logs in dev mode. Resolution is local intent, not a
+ * distributed adjacency guarantee: peers in different states may resolve one anchor differently,
+ * as they would an index. Neighbours tied on `~pos` leave no room between them, so `after` the
+ * first can land after both (an index has the same limit). An anchor is resolved in one pass over
+ * the container, without sorting it.
  */
 export function moveElement<T extends object>(
   container: ContainerNode<T>,
   key: string,
-  index: number,
+  index: number | Anchor,
 ): string | undefined {
-  const current = container()[key];
-  if (current == null) return undefined;
-  const entries = orderedEntries(container()).filter((e) => e.key !== key);
-  const [before, after] = neighborPositions(entries, index);
-  const pos = posBetween(before, after);
-  container.update((c) => ({ ...c, [key]: { ...c[key], [POS_SEGMENT]: pos } }));
+  const c = container() as Record<string, unknown>;
+  if (c[key] == null) return undefined;
+  const neighbours =
+    typeof index === 'number'
+      ? neighboursAt(c, index, key)
+      : resolveAnchor(c, index, key, 'move');
+  if (!neighbours) return undefined;
+  const pos = posBetween(neighbours[0], neighbours[1]);
+  container.update((x) => ({ ...x, [key]: { ...x[key], [POS_SEGMENT]: pos } }));
   return pos;
 }
 
@@ -244,7 +364,13 @@ export type KeyedContainerConfig<T> = {
 export type KeyedContainer<T extends object, E extends object = T> = {
   entries(container: Record<string, E>): OrderedEntry<T>[];
   insert(container: ContainerNode<E>, key: string, value: T, index?: number): string;
-  move(container: ContainerNode<E>, key: string, index: number): string | undefined;
+  insert(
+    container: ContainerNode<E>,
+    key: string,
+    value: T,
+    index: Anchor | number | undefined,
+  ): string | undefined;
+  move(container: ContainerNode<E>, key: string, index: number | Anchor): string | undefined;
   remove(container: ContainerNode<E>, key: string): void;
   rebalance(sync: Pick<OpSync, 'override'>, container: ContainerNode<E>): void;
 };
@@ -255,6 +381,7 @@ export type SelfKeyedContainer<T extends object, E extends object = T> = Omit<
   'insert'
 > & {
   insert(container: ContainerNode<E>, value: T, index?: number): string;
+  insert(container: ContainerNode<E>, value: T, index: Anchor | number | undefined): string | undefined;
 };
 
 /**
@@ -319,12 +446,14 @@ function helpersFor<T extends object, E extends object>(
   elementOf: (value: T, pos: string) => E,
   payloadOf: (element: E) => T,
 ): KeyedContainer<T, E> & SelfKeyedContainer<T, E> {
+  type Index = number | Anchor | undefined;
+  const insert = (container: ContainerNode<E>, a: string | T, b?: T | Index, c?: Index) =>
+    extract
+      ? insertInto(container, extract(a as T), a as T, b as Index, elementOf)
+      : insertInto(container, a as string, b as T, c, elementOf);
   return {
     entries: (container) => entriesOf(container, payloadOf),
-    insert: (container: ContainerNode<E>, a: string | T, b?: T | number, c?: number) =>
-      extract
-        ? insertInto(container, extract(a as T), a as T, b as number | undefined, elementOf)
-        : insertInto(container, a as string, b as T, c, elementOf),
+    insert: insert as KeyedContainer<T, E>['insert'] & SelfKeyedContainer<T, E>['insert'],
     move: (container, key, index) => moveElement(container, key, index),
     remove: (container, key) => removeElement(container, key),
     rebalance: (sync, container) => rebalanceContainer(sync, container),

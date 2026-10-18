@@ -287,6 +287,18 @@ const keyed = keyArray(
 
 `indexArray` is the cheaper default. Reach for `keyArray` only when DOM/instance reuse across reorders matters — `<for>` blocks rendering heavy components, charts, drag-and-drop reordering, etc.
 
+**Duplicate keys.** Every occurrence gets its own entry, and an entry follows the occurrence it was built for, not its position among the duplicates. An item that is the same reference before and after keeps its entry, so `[a1, a2] → [a2]` (two objects, one key) destroys the entry built from `a1` and re-creates nothing. The same object listed several times only changes its count: entries are created or destroyed for the difference, never swapped. Fresh objects of one key (an immutable update) are matched in order while their count stays the same; when the count changes, nothing shows which one survived, so those entries are re-created. With `handles: true`, `mapFn` receives the entry's lifetime handle as its key — the raw key while that key never had duplicates, an opaque `{ key, n }` otherwise (`isKeyHandle` tells them apart). `onDuplicates(keys)` is told which keys repeat, once per recompute that sees any, with the actual key values in first-occurrence order (nothing is coerced to a string, so `1` and `"1"` are different keys). A handle is identified by reference, so one sent through `postMessage`, a worker or JSON comes back as a plain object that matches nothing. The same matching is available on its own as `handles(prev, items, keyOf)`; like `pooled`, its table and `destroyed` are reused by the next call, so the previous state stays readable for exactly one call, and an unchanged input returns the previous table as it is. For lists whose keys never repeat, the mapped entries, their `index` values, the `mapFn` calls and the `onDestroy` order are the same as before this change, with one known exception: a `mapFn` that returns `undefined` is now reused on a reorder, where it used to be called again. The `duplicateKeys` option is gone: `handles` and `onDuplicates` replace it.
+
+**Relative order.** `keyArray(source, mapFn, { order: true })` adds `reorders`: a read-only signal of the permutation among the entries present both at its own last evaluation and now, named by handle (`before` in the old order, the same handles in the new order), or `null` when they kept their relative order. Inserts and removals alone are not reorders: a prepend bumps every `index` and leaves `reorders()` at `null`. Its baseline is its own last evaluation, shared by everyone who reads it: changes it did not see fold into one transition (`[a, b]` read, then `[b, a]` and `[a, b]` written, gives `null`), and none is lost because the mapped array was read in between (`[a, b]` read, then `[b, a]` and `[b, a, c]`, gives `[a, b] → [b, a]`). Its first read is `null`. Without the option nothing extra is created or computed.
+
+```typescript
+const rows = keyArray(items, (item, index) => render(item, index), {
+  key: (item) => item.id,
+  order: true,
+});
+rows.reorders(); // { before: [1, 2], after: [2, 1] } after a swap, null after a prepend
+```
+
 ### `mapObject`
 
 The object equivalent of `keyArray`: map `Record<K, V>` into `Record<K, U>` with referential stability for unchanged keys. The mapping function receives the key and a writable signal slice (if the source is writable).
@@ -1089,11 +1101,15 @@ const todos = keyedContainer({ key: (t: Todo) => t.id }); // or pass the key to 
 
 todos.insert(board.todos, { id: 't1', title: 'Ship it' }, 0);
 todos.move(board.todos, 't1', 3); // writes the position and nothing else
+todos.move(board.todos, 't1', { after: 't7' }); // next to a neighbour, as the list stands now
+todos.insert(board.todos, { id: 't9', title: 'Dropped in' }, { before: 't2' }); // same for an insert
 todos.entries(board.todos()); // reading order: by ~pos, key breaking ties
 todos.rebalance(sync, board.todos); // authority sweep when positions grow long
 ```
 
 Reading order is a pure function of the materialized value, so every replica agrees without consulting the op log. `wrappedContainer` stores elements as `{ '~pos', value }` instead, keeping the payload a closed record a schema can validate; the choice is fixed when the container is created and never inferred from data, so peers of a synced container must agree on it. `posBetween(before, after)` is the fractional index underneath.
+
+A move or an insert can name its place by a neighbour instead of an index (an external drop, from a palette or another container, needs this as much as a local reorder): `{ after: key }`, `{ before: key }`, or `{ empty: true }` for a container with nothing else in it (the `Anchor` type). The anchor is resolved when the move is applied, against the order the container has then, so a drop decided as "after `t7`" still lands right after `t7` when a peer inserted elsewhere in the meantime; an index would land in the slot it named, whatever sits there now. An anchor that names no other element present (an absent key, the moved key itself, or `empty` while siblings remain) writes nothing and returns `undefined`. Resolving an anchor is one pass over the container with no sort. An anchor is resolved locally: two peers that apply the same anchor against different states can place the element differently, exactly as with an index; the resulting `~pos` writes still converge. When two neighbours hold the same `~pos` (concurrent inserts into one gap), there is no position strictly between them, so a move "after" the first can land after both; an index has the same limit.
 
 ## Async state values & sentinels
 

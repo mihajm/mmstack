@@ -2,6 +2,7 @@ import {
   computed,
   inject,
   Injector,
+  isDevMode,
   signal,
   type Signal,
   untracked,
@@ -66,7 +67,7 @@ export type CanvasReparentEvent<T, K> = {
 };
 
 export type CanvasOptions<T, K> = {
-  /** Stable identity for an item. */
+  /** Stable identity for an item. Must be unique: frames, selection and patches are per key. */
   readonly key: (item: T) => K;
   /** Read an item's frame (position/size/rotation) — pure. */
   readonly frame: (item: T) => CanvasFrame;
@@ -408,10 +409,12 @@ export function canvas<T, K>(
         if (shift) sel.add(k);
         else sel.set([k]);
       }
-      const keys = untracked(sel.ids).filter((id) => {
+      const selected = untracked(sel.ids).filter((id) => {
         const it = map.get(id);
         return it && !isLocked(id) && gate(it, 'move');
       });
+      // no inherited movement: a selected descendant rides on its selected ancestor
+      const keys = topmost(selected, map);
       if (!keys.length) return false;
 
       const boxes = measureAll();
@@ -427,7 +430,11 @@ export function canvas<T, K>(
       const union = unionBox(participantBoxes);
       if (!union) return false;
 
-      const participantSet = new Set(keys);
+      // riders stay out of the snap/container targets, exactly as when they were participants
+      // everything inside a moving item moves with it: never a snap or drop target
+      // (selected or not, locked or not), so a parent cannot land in its own child
+      const participantSet = new Set<K>(selected);
+      for (const id of insideOf(keys, map)) participantSet.add(id);
       const snapTargets: Box[] = [];
       const containerList: { key: K; box: Box }[] = [];
       const containerBoxMap = new Map<K, Box>();
@@ -596,6 +603,81 @@ export function canvas<T, K>(
     startContainers = null;
     containerBoxes = null;
     resizeBase = null;
+  };
+
+  let warnedCycle = false;
+  const warnCycle = () => {
+    if (warnedCycle || !isDevMode()) return;
+    warnedCycle = true;
+    console.warn(
+      '[@mmstack/dnd] canvas: containerOf describes a cyclic containment; the keys on the cycle are treated as top-level (they move).',
+    );
+  };
+
+  /** `k`'s container chain, nearest first; stops at the root or where a cycle repeats. */
+  const chainOf = (k: K, map: ReadonlyMap<K, T>): K[] => {
+    const containerOf = options.containers?.containerOf;
+    const chain: K[] = [];
+    if (!containerOf) return chain;
+    const seen = new Set<K>([k]);
+    let it = map.get(k);
+    while (it) {
+      const parent = containerOf(it);
+      if (parent === null || seen.has(parent)) break;
+      seen.add(parent);
+      chain.push(parent);
+      it = map.get(parent);
+    }
+    return chain;
+  };
+
+  /** Whether walking up from `k` comes back to `k`. */
+  const isOnCycle = (k: K, map: ReadonlyMap<K, T>): boolean => {
+    const containerOf = options.containers?.containerOf;
+    if (!containerOf) return false;
+    const seen = new Set<K>();
+    let it = map.get(k);
+    while (it) {
+      const parent = containerOf(it);
+      if (parent === null || seen.has(parent)) return false;
+      if (parent === k) return true;
+      seen.add(parent);
+      it = map.get(parent);
+    }
+    return false;
+  };
+
+  /**
+   * The moving keys: the eligible selected keys no other eligible selected key
+   * contains (through `containerOf`, any depth). Child frames are relative to
+   * their container, so moving a descendant too would move it twice and split it
+   * out on a reparent. A key on a containment cycle (bad consumer data) has no
+   * top, so it is treated as top-level and moves (dev-warned once). Without
+   * `containerOf` there is no ancestry to read and every key moves.
+   */
+  const topmost = (keys: readonly K[], map: ReadonlyMap<K, T>): K[] => {
+    if (!options.containers?.containerOf || keys.length < 2)
+      return keys.slice();
+    const chosen = new Set(keys);
+    return keys.filter((k) => {
+      if (isOnCycle(k, map)) {
+        warnCycle();
+        return true;
+      }
+      return !chainOf(k, map).some((p) => chosen.has(p));
+    });
+  };
+
+  /** Every item (not itself moving) whose container chain holds a moving key. */
+  const insideOf = (moving: readonly K[], map: ReadonlyMap<K, T>): K[] => {
+    if (!options.containers?.containerOf) return [];
+    const set = new Set(moving);
+    const out: K[] = [];
+    for (const k of map.keys()) {
+      if (set.has(k)) continue;
+      if (chainOf(k, map).some((p) => set.has(p))) out.push(k);
+    }
+    return out;
   };
 
   /** Apply per-key frame updates in ONE source write, preserving identity. */
@@ -894,10 +976,13 @@ export function canvas<T, K>(
       const map = untracked(indexMap);
       const patches = new Map<K, CanvasFrame>();
       let last: { key: K; item: T } | null = null;
-      for (const k of untracked(sel.ids)) {
-        if (isLocked(k)) continue;
+      const ids = untracked(sel.ids).filter((k) => {
         const it = map.get(k);
-        if (!it || !gate(it, 'keyboard')) continue;
+        return !isLocked(k) && !!it && gate(it, 'keyboard');
+      });
+      for (const k of topmost(ids, map)) {
+        const it = map.get(k);
+        if (!it) continue;
         const f = frame(it);
         const next = { ...f, x: f.x + dx * s, y: f.y + dy * s };
         patches.set(k, next);

@@ -30,7 +30,8 @@
       "defaultConfiguration": "production"
     },
     "test": {
-      "executor": "@nx/angular:unit-test"
+      "executor": "@nx/angular:unit-test",
+      "options": {}
     }
   }
 }

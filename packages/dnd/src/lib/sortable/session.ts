@@ -13,6 +13,8 @@ import {
  * read from the DOM a single time (the one measurement edge) and never again
  * during the drag — the FLIP model keeps every item in flow, so these stay
  * valid as the gap opens, which is what makes the collision self-consistent.
+ * The one exception: another writer changes the list's keys mid-drag, and the
+ * controller re-measures once from the rendered rows (or abandons the drag).
  *
  * Two layout kinds share the snapshot shape as a discriminated union:
  * - `linear` (default; a missing `kind` means linear): centers projected onto
@@ -120,7 +122,11 @@ export function sortableSession(input: SortableSessionInput): SortableSession {
     },
     computation: ({ active, geom, pos, cross }, prev) => {
       if (!active || !geom) return -1;
-      const seed = prev && prev.value >= 0 ? prev.value : geom.source;
+      // a re-measured geometry (mid-drag key change) is a new frame: reseed from its source
+      const seed =
+        prev && prev.value >= 0 && prev.source.geom === geom
+          ? prev.value
+          : geom.source;
       if (geom.kind === 'wrap') {
         return insertIndexFromSlots(geom.centers, cross, pos, seed, deadband);
       }

@@ -1,6 +1,11 @@
 import { computed, type Signal, signal, untracked } from '@angular/core';
 import { mutable } from '@mmstack/primitives';
-import { containsPoint, type MemberMeasure, type RectLike } from './geometry';
+import {
+  containsPoint,
+  type ListAnchor,
+  type MemberMeasure,
+  type RectLike,
+} from './geometry';
 
 export type { MemberMeasure } from './geometry';
 
@@ -45,6 +50,19 @@ export type SortableGroupMember<T = unknown> = {
    * Missing ⇒ always accepts.
    */
   canReceive?(item: T): boolean;
+  /**
+   * Where `item` sits in this member now, named by neighbour key — read by a
+   * source list after a transfer for its `onItemLeft` anchor. Members without
+   * an order (a placement grid) leave it out.
+   */
+  anchorFor?(item: T): ListAnchor<unknown> | null;
+  /**
+   * Resolve a hovered slot's neighbour anchor (recorded from this member's
+   * `measure().keys`) against its LIVE items: the insert slot, or `-1` when the
+   * neighbour is gone. Lets a source drop where the hover pointed even if this
+   * list changed since. Members without it get the raw insert index.
+   */
+  slotOfAnchor?(anchor: ListAnchor<unknown>): number;
 };
 
 /** A resolved cross-list drag, mirrored into the group's decomposed signals. */
@@ -73,6 +91,9 @@ export type SortableActive<T = unknown> = {
  * Create one and pass it to each list's `reorderable({ group })`. It is the
  * shared registry (no magic strings, no global namespace) and holds the active
  * cross-list drag so every member can react to it.
+ *
+ * One key type per group: members hand items to each other and name drop
+ * positions by each other's handles, so every member keys its items the same way.
  */
 export type SortableGroup<T = unknown> = {
   /** @internal a member joins on creation; returns its index for O(1) unregister. */

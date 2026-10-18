@@ -1,4 +1,5 @@
 import {
+  afterRenderEffect,
   computed,
   DestroyRef,
   inject,
@@ -49,6 +50,15 @@ export function connectPointerContainer<T, K = unknown>(
   };
 
   controller().setContainer(element); // one-time (matches the native container)
+  // Another writer changed the list mid-drag: once the change has rendered, re-measure
+  // (or abandon) so the gap and the drop are read from the live rows, never stale centers.
+  afterRenderEffect({
+    read: () => {
+      const c = controller();
+      void c.items(); // tracked at rest too, so the first mid-drag change is seen
+      if (untracked(c.activeKey) !== null) untracked(() => c.syncGeometry());
+    },
+  });
   inject(DestroyRef).onDestroy(() => {
     stopAutoScroll();
     untracked(controller).dispose?.();
@@ -91,13 +101,14 @@ export function connectPointerItem<T, K = unknown>(
 ): ReorderableItemBinding<K> {
   nestedEffect((onCleanup) => {
     const c = controller();
-    const k = c.key(item());
-    c.register(k, element);
+    const it = item();
+    const k = c.key(it);
+    c.register(k, element, it); // binds the row to its occurrence
     onCleanup(() => c.unregister(k, element));
   });
 
   let inner: ReorderableItemState<K> | undefined;
-  const get = () => (inner ??= controller().itemState(item));
+  const get = () => (inner ??= controller().itemState(item, element));
 
   const { onKeydown, tabIndex } = keyboardReorder(
     () => controller(),

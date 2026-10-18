@@ -504,3 +504,21 @@ describe('keyArray — onDuplicates', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('keyArray — raw re-issue', () => {
+  it('[PIN M2 raw re-issue] [a] → [a, a2] → [a3]: the entry for a3 is new, no object crosses', () => {
+    const [a, a2, a3] = [item('a', '1'), item('a', '2'), item('a', '3')];
+    const t = tracked(current, [a], true);
+    const [ea] = t.mapped();
+    t.source.set([a, a2]);
+    const [, ea2] = t.mapped();
+    t.source.set([a3]);
+    const [e3] = t.mapped();
+    expect(e3.item).toBe(a3);
+    expect(e3).not.toBe(ea);
+    expect(e3).not.toBe(ea2);
+    expect(t.created).toHaveLength(3);
+    expect(t.destroyed).toEqual([ea, ea2]);
+    expect(isKeyHandle(e3.key)).toBe(true);
+  });
+});

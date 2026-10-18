@@ -119,10 +119,13 @@ function lawViolations<T, K>(
     for (const i of at) {
       const h = nextHandles[i];
       if (!isFresh(h)) continue;
-      const raw = before.length === 0 && at.length === 1 && !isKeyHandle(key);
+      const raw =
+        at.length === 1 &&
+        !isKeyHandle(key) &&
+        !before.some((p) => sameValueZero(prevHandles[p], key));
       if (raw !== !isKeyHandle(h))
         out.push(
-          '(iv) raw key iff a new sole occurrence of a key that is no handle',
+          '(iv) raw key iff a new sole occurrence of a key that is no handle and never held raw',
         );
     }
   }
@@ -445,7 +448,8 @@ describe('handles — pins', () => {
     const s1 = observe(s0.table, [make('a')], keyOf);
     expect(s1.destroyed).toEqual(s0.h);
     expect(s1.created).toBe(1);
-    expect(isKeyHandle(s1.h[0])).toBe(true);
+    // born duplicated, so raw `a` was never held: the sole new occurrence gets it back
+    expect(s1.h[0]).toBe('a');
   });
 
   it('[PIN M1 convention] [a1,a2] → [a1′,a2′] (fresh, equal count): in order, zero destroys', () => {
@@ -620,5 +624,23 @@ describe('handles — buffers', () => {
       globalThis.Set = OrigSet;
     }
     expect(made).toBe(0);
+  });
+});
+
+describe('handles — raw re-issue', () => {
+  it('[PIN M1 raw re-issue] [a, a] → [a′, b]: a key born duplicated never held raw, so `a′` gets raw `a`', () => {
+    const s0 = observe(undefined, [make('a'), make('a')], keyOf);
+    const s1 = observe(s0.table, [make('a'), make('b')], keyOf);
+    expect(s1.h).toEqual(['a', 'b']);
+    expect(s1.created).toBe(2); // one for a′, one for b
+    expect(s1.destroyed).toEqual(s0.h);
+  });
+
+  it('[PIN M1 raw re-issue] [a] → [a, a2] → [a3]: raw `a` was held, so `a3` gets an opaque handle', () => {
+    const s0 = observe(undefined, [make('a')], keyOf);
+    const s1 = observe(s0.table, [s0.table.items[0], make('a')], keyOf);
+    const s2 = observe(s1.table, [make('a')], keyOf);
+    expect(isKeyHandle(s2.h[0])).toBe(true);
+    expect(s2.destroyed).toEqual(['a', s1.h[1]]);
   });
 });

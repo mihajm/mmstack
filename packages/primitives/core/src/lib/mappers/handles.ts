@@ -110,7 +110,9 @@ class Table<T, K> implements HandleTable<T, K> {
  * Per key:
  * - one occurrence on each side keeps its handle; a key seen for the first time, once, gets its
  *   raw key as the handle, unless that key is itself a {@link KeyHandle} (it then gets an opaque
- *   handle, so handles fed back in as keys never collide with the handles they name);
+ *   handle, so handles fed back in as keys never collide with the handles they name); a key whose
+ *   only new occurrence is left unmatched also gets its raw key, unless one of its previous
+ *   occurrences held it (re-issuing a retired raw handle would read as reuse of that entry);
  * - otherwise, an item reference found on both sides keeps that reference's previous handles in
  *   order and creates or retires only the difference in its count (the occurrences of one object
  *   cannot be told apart, so they never swap);
@@ -217,6 +219,18 @@ export function handles<T, K>(
       if (!nextRefs.has(was.items[p])) remainder.push(p);
     if (remainder.length === fresh.length)
       for (let j = 0; j < fresh.length; j++) take(fresh[j], remainder[j]);
+
+    // a sole new occurrence left unmatched gets its raw key back, unless an earlier occurrence
+    // ever held it: re-issuing a retired raw handle would read as reuse of that entry
+    if (single && !assigned[i] && !isKeyHandle(key)) {
+      let held = false;
+      for (let p = b; !held && p !== -1; p = was.chain[p])
+        held = sameValueZero(was.handles[p], key);
+      if (!held) {
+        out[i] = key;
+        assigned[i] = true;
+      }
+    }
   }
 
   for (let i = 0; i < n; i++) {

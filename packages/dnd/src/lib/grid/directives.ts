@@ -221,8 +221,8 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
   afterNextRender(
     () => {
       const c = controller();
-      const k = c.key(item());
-      c.register(k, el);
+      const it = item();
+      c.register(c.key(it), el, it); // binds the element to its occurrence
     },
     { injector },
   );
@@ -232,7 +232,7 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
   });
 
   let inner: PlacementGridItemState<K> | undefined;
-  const get = () => (inner ??= controller().itemState(item));
+  const get = () => (inner ??= controller().itemState(item, el));
 
   const px = (cells: number, unitPx: number, gapPx: number) =>
     cells * (unitPx + gapPx);
@@ -275,13 +275,13 @@ export function connectPlacementGridItem<T extends GridPlacement, K = unknown>(
     if (!dir) return;
     event.preventDefault();
     const it = item();
-    const k = c.key(it);
+    const k = c.keyForElement(el) ?? c.key(it); // this element's occurrence
     const ok = event.shiftKey
       ? c.resizeBy(k, dir.x, dir.y)
       : c.moveBy(k, dir.x, dir.y);
     const message = c.announcePlace;
     if (ok && message) {
-      const placed = c.items().find((i) => c.key(i) === k);
+      const placed = c.items()[c.indexOf(k)];
       if (placed) {
         getAnnounce()?.(
           message({

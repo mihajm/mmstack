@@ -222,7 +222,8 @@ import { DocSection } from '../../../layout/doc-section';
           >), <code>onItemLeft</code> on the source when an item is dragged into
           another list, <code>onItemArrived</code> on the target when one
           arrives, and <code>onItemInserted</code> after an external
-          <code>insert</code> lands.
+          <code>insert</code> lands. The first three also name the moved item
+          and its new neighbour; see the drop events section below.
         </p>
       </docs-section>
 
@@ -252,6 +253,89 @@ import { DocSection } from '../../../layout/doc-section';
           controller exposes <code>cancel()</code>.
         </p>
         <docs-code [code]="cancelEx" lang="ts" />
+      </docs-section>
+
+      <docs-section title="When the list changes mid-drag" id="live">
+        <p>
+          The dragged item is its key, read live. Every decision during a drag,
+          the gap, a hand-off to another list, the drop, finds the dragged item
+          by <code>key</code> in the list as it is now, not by the slot it held
+          when the drag began. If another writer, a second tab, an agent, or a
+          resource refresh, inserts or removes rows mid-drag, the drop still
+          moves the item you grabbed. Both engines hand the target the source's
+          live item for that key, never a copy taken when the drag began, so an
+          edit made to the item mid-drag travels with it.
+        </p>
+        <p>
+          With the pointer engine, a change to the list's keys is re-measured
+          once after it has rendered, and the dragged row stays under the
+          pointer. An edit that keeps the same keys measures nothing. The drag
+          is cancelled, with a dev-mode warning and nothing committed, when the
+          dragged item itself is removed, when the changed list cannot be
+          measured, or when the drop arrives before the change has rendered.
+        </p>
+        <p>
+          A drop into another list lands where the hover pointed. While you
+          hover, the slot under the pointer is recorded by its neighbour, the
+          item it would land after or before. On release that neighbour is
+          looked up in the target as it is now, so rows inserted there meanwhile
+          do not shift your drop. If the neighbour has been removed, the drop
+          does nothing and warns in dev mode. The native engine does the same
+          for its indicator slot.
+        </p>
+      </docs-section>
+
+      <docs-section title="Drop events name a neighbour" id="anchors">
+        <p>
+          <code>onReorder</code>, <code>onItemArrived</code>, and
+          <code>onItemLeft</code> carry two fields beside the indices:
+          <code>moved</code>, the key of the item that moved, and
+          <code>anchor</code>, where it landed by its neighbour:
+          <code>{{ '{' }} after: key {{ '}' }}</code
+          >, <code>{{ '{' }} before: key {{ '}' }}</code
+          >, or <code>{{ '{' }} empty: true {{ '}' }}</code> when it is alone.
+          <code>from</code>, <code>to</code>, and <code>index</code> are
+          unchanged. On <code>onItemLeft</code> the anchor is the place in the
+          destination list, and <code>null</code> when the destination has no
+          order, such as a placement grid.
+        </p>
+        <p>
+          Apply the anchor, not the index, when the move is written later or
+          somewhere else: a store, a synced document, an undo stack. Once the
+          list has changed an index points somewhere else; a neighbour does not.
+          The anchor has the same shape as the keyed-container
+          <a mmLink="/docs/primitives/sync">Anchor</a>, so
+          <code>moveElement</code> takes it as it is.
+        </p>
+        <docs-code [code]="anchorEx" lang="ts" />
+        <p>
+          For lanes you build yourself, the pure
+          <code>anchorOf(keys, moved, index, lane)</code> is exported. Pass
+          <code>'final'</code> as the lane when <code>index</code> is the moved
+          item's index after the move, or <code>'slot'</code> when it is an
+          insert slot into the list as it stands.
+        </p>
+      </docs-section>
+
+      <docs-section title="Duplicate keys" id="duplicates">
+        <p>
+          Identity is the occurrence, not the key. Two rows that share a key are
+          two items, each draggable on its own, and a transfer to another list
+          carries exactly the one you dragged. A rendered row binds to its
+          occurrence by the item reference you pass to
+          <code>mmReorderableItem</code>. If the same object is listed twice,
+          its rows take its occurrences in the order they registered, since
+          nothing else tells them apart.
+        </p>
+        <p>
+          Events name items by handle: <code>moved</code> and the anchor's
+          neighbour are the raw key while that key never had duplicates, so
+          lists with unique keys see plain keys, and an opaque per-occurrence
+          handle once it did. <code>isKeyHandle(h)</code> from
+          <code>&#64;mmstack/primitives</code> tells them apart, and
+          <code>h.key</code> is the raw key. A handle lasts as long as its item;
+          see <a mmLink="/docs/primitives/collections">handles</a>.
+        </p>
       </docs-section>
     </docs-page>
   `,
@@ -348,4 +432,15 @@ const resolved = injectReorderableDefaults(); // ReorderableDefaults | null`;
 
 // abort the current drag from code (items glide back, no splice):
 list.cancel();`;
+
+  protected readonly anchorEx = `import { moveElement, type Anchor } from '@mmstack/primitives';
+
+reorderable(this.view, {
+  key: (t) => t.id,
+  // the local list moved already; record the move against the shared container
+  onReorder: ({ moved, anchor }) => {
+    // ids are unique here, so moved and the neighbour are plain ids
+    moveElement(board.tasks, moved as string, anchor as Anchor);
+  },
+});`;
 }

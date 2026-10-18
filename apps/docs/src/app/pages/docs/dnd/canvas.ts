@@ -98,6 +98,29 @@ import { DocSection } from '../../../layout/doc-section';
           a single update.
         </p>
         <docs-code [code]="containersEx" lang="ts" />
+        <p>
+          Child frames are relative to their container; that is the contract
+          <code>containerOf</code> assumes. So when a selection holds a
+          container and something inside it, at any depth, only the container
+          moves and the descendant rides along inside it. The descendant is left
+          out of the commit patches and the reparent, so it is never moved twice
+          or split out of its container. Here the container means a moving one:
+          a selected item that is not locked and that
+          <code>canTransform</code> allows. A locked parent with a selected
+          child moves the child alone. Keyboard nudges follow the same rule.
+        </p>
+        <p>
+          Nothing inside a moving item, selected or not, locked or not, is a
+          snap or drop target for it, so a container can't be dropped into its
+          own child. Without <code>containerOf</code> there is no ancestry to
+          read, and every selected item moves.
+        </p>
+        <p>
+          A <code>containerOf</code> that loops, A inside B inside A, is bad
+          data. The items on the loop are treated as top-level and move, with a
+          warning in dev mode. Canvas keys must also be unique, since frames,
+          selection, and patches are all written per key.
+        </p>
       </docs-section>
 
       <docs-section title="Stores, undo, multiplayer" id="stores">

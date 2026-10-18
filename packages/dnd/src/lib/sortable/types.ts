@@ -5,7 +5,9 @@ import type {
   TouchActivation,
 } from '../internal/touch-activation';
 import type { DragEngine } from '../session';
-import type { Axis } from './geometry';
+import type { Handle } from '@mmstack/primitives';
+
+import type { Axis, ListAnchor } from './geometry';
 import type { DragGeometry } from './session';
 import type { SortableGroup, SortableGroupMember } from './group';
 
@@ -116,11 +118,21 @@ type ReorderableSharedOptions<T, K> = {
   readonly announceMove?:
     | false
     | ((event: { item: T; from: number; to: number; total: number }) => string);
-  /** Called after a same-list reorder commits. */
+  /**
+   * Called after a same-list reorder commits. `anchor` names where `moved` landed
+   * by a neighbour's key: unlike `to`, it still means the same place if the list
+   * changes before you apply the move (see {@link ListAnchor}).
+   *
+   * `moved` and the anchor's neighbour are HANDLES: the raw key while that key
+   * never had duplicates (so unique-key lists see plain keys), an opaque
+   * per-occurrence handle (`isKeyHandle`, `.key` holds the raw key) once it did.
+   */
   readonly onReorder?: (event: {
     from: number;
     to: number;
     items: readonly T[];
+    moved: Handle<K>;
+    anchor: ListAnchor<Handle<K>>;
   }) => void;
   /**
    * Whether an item dragged from another list in the group may be dropped here.
@@ -137,10 +149,25 @@ type ReorderableSharedOptions<T, K> = {
    * (a large grid widget becoming a compact tray row).
    */
   readonly insertSize?: number;
-  /** Called on the SOURCE list after an item is dragged out into another list. */
-  readonly onItemLeft?: (event: { item: T; from: number; to: number }) => void;
-  /** Called on the TARGET list after an item arrives from another list. */
-  readonly onItemArrived?: (event: { item: T; index: number }) => void;
+  /**
+   * Called on the SOURCE list after an item is dragged out into another list.
+   * `anchor` is where it landed in the destination, by neighbour key; `null`
+   * when the destination has no order (a placement grid).
+   */
+  readonly onItemLeft?: (event: {
+    item: T;
+    from: number;
+    to: number;
+    moved: Handle<K>;
+    anchor: ListAnchor<Handle<K>> | null;
+  }) => void;
+  /** Called on the TARGET list after an item arrives from another list; `anchor` as in `onReorder`. */
+  readonly onItemArrived?: (event: {
+    item: T;
+    index: number;
+    moved: Handle<K>;
+    anchor: ListAnchor<Handle<K>>;
+  }) => void;
 };
 
 /**
@@ -234,8 +261,16 @@ export type ReorderableContainerBinding = {
 export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly items: Signal<readonly T[]>;
   readonly key: (item: T) => K;
-  /** Reactive key→index map for O(1) index lookups (recomputed once per source change). */
-  readonly indexMap: Signal<ReadonlyMap<K, number>>;
+  /**
+   * Reactive handle→index map for O(1) index lookups (recomputed once per source
+   * change). A handle is the raw key while that key never had duplicates, an
+   * opaque per-occurrence handle once it did (see `handles` in `@mmstack/primitives`).
+   */
+  readonly indexMap: Signal<ReadonlyMap<Handle<K>, number>>;
+  /** @internal the occurrence `item` is (reference first, else key); reactive. */
+  handleOf(item: T): Handle<K> | undefined;
+  /** @internal the occurrence at `index`; reactive. */
+  handleAt(index: number): Handle<K> | undefined;
   readonly axis: ReorderableAxis;
   /** Which engine drives this list — `'pointer'` (FLIP) or `'native'` (indicator). */
   readonly engine: DragEngine;
@@ -247,8 +282,16 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly nativeInsert: Signal<number | null>;
   /** @internal the native container registers its `activeInsert` computed as the source of `nativeInsert` (or `null` to clear on teardown). */
   setNativeInsert(source: Signal<number | null> | null): void;
-  /** Identity of the item being dragged out of THIS list, or `null`. */
-  readonly activeKey: Signal<K | null>;
+  /**
+   * @internal the native container's hovered slot named by neighbour (recorded
+   * when the POINTER picks it; a list change under a still pointer keeps it), or
+   * `null`. The drop resolves it against the live list.
+   */
+  readonly nativeHoverAnchor: Signal<ListAnchor<Handle<K>> | null>;
+  /** @internal the native container records the hover anchor here. */
+  setNativeHoverAnchor(anchor: ListAnchor<Handle<K>> | null): void;
+  /** Identity (the occurrence's handle) of the item being dragged out of THIS list, or `null`. */
+  readonly activeKey: Signal<Handle<K> | null>;
   /** Same-list insert index, or `-1` when idle. */
   readonly insertIndex: Signal<number>;
   /** Trailing space (px) to reserve while this list is the cross-list target opening a gap (so it doesn't overflow). */
@@ -270,8 +313,16 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
     | null;
   /** Commit a same-list move (keyboard reorder) — splice + `onReorder`. */
   moveItem(from: number, to: number): void;
-  /** @internal remove an item leaving for another list — splice + `onItemLeft` (native cross-list). */
-  takeOut(item: T, to: number): void;
+  /**
+   * @internal remove an item leaving for another list — splice + `onItemLeft`.
+   * `target` (the list it arrived in) supplies the event's anchor.
+   */
+  takeOut(
+    item: T,
+    to: number,
+    target?: SortableGroupMember<T>,
+    handle?: Handle<K>,
+  ): void;
   /** Accept foreign (palette) payloads: `accepts` qualifies, `create` maps to `T`. */
   readonly insert?: {
     accepts: (data: unknown) => boolean;
@@ -294,24 +345,38 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   readonly activationThreshold: number;
   /** Resolved touch long-press (pointer engine), or `null` when off or native. */
   readonly touchActivation: ResolvedTouchActivation | null;
-  itemState(item: () => T): ReorderableItemState<K>;
+  /** `element` binds the state to that row's occurrence (see `register`). */
+  itemState(item: () => T, element?: HTMLElement): ReorderableItemState<K>;
   /** @internal item DOM registration (both directions). */
-  register(key: K, el: HTMLElement): void;
+  /**
+   * `item` binds the element to its OCCURRENCE: a reference found once in the
+   * source is that row; a reference repeated binds the first occurrence no
+   * other element holds yet (registration order). Without `item` (or for a
+   * reference no longer in the source) the key decides.
+   */
+  register(key: K, el: HTMLElement, item?: T): void;
   /** @internal */
   unregister(key: K, el: HTMLElement): void;
-  keyForElement(el: HTMLElement): K | undefined;
+  keyForElement(el: HTMLElement): Handle<K> | undefined;
   /** @internal reverse registry lookup (keyboard row navigation). */
-  elementFor(key: K): HTMLElement | undefined;
+  elementFor(handle: Handle<K>): HTMLElement | undefined;
   /** @internal the container element, for cross-list bounds. */
   setContainer(el: HTMLElement | null): void;
   /** Pure drag-start from a measured geometry. Unit-testable without DOM. */
-  begin(key: K, geometry: DragGeometry, startMain: number): void;
+  begin(handle: Handle<K>, geometry: DragGeometry, startMain: number): void;
   /** @internal DOM edge: measure from the registry, then {@link begin}. */
-  beginGesture(key: K, start: { x: number; y: number }): void;
+  beginGesture(handle: Handle<K>, start: { x: number; y: number }): void;
   /** @internal feed a pointer move (viewport coords). */
   move(point: { x: number; y: number }): void;
   /** @internal end the drag, committing reorder or cross-list transfer. */
   end(): void;
+  /**
+   * @internal pointer engine: after the source's key sequence changed mid-drag,
+   * re-measure the drag geometry from the rendered (live) list, or cancel the
+   * drag (dev-warned) when the dragged key is gone or the list cannot be
+   * measured. A no-op when idle or when the key sequence is unchanged.
+   */
+  syncGeometry(): void;
   /** Abort the in-flight drag without committing anything (Escape / pointercancel / programmatic). */
   cancel(): void;
   /** @internal leave the group. */

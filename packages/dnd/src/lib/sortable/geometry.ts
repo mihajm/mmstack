@@ -1,3 +1,5 @@
+import type { Anchor } from '@mmstack/primitives';
+
 /**
  * Pure sortable geometry — no Angular, no DOM. Everything the pointer engine
  * needs to turn cached layout + a pointer coordinate into an insert index and
@@ -309,12 +311,16 @@ export type MemberMeasure =
       readonly kind?: 'linear';
       readonly centers: readonly number[];
       readonly axis: Axis;
+      /** The member's keys in the order the centers were measured (lets a hover name its slot by neighbour). */
+      readonly keys?: readonly unknown[];
     }
   | {
       readonly kind: 'wrap';
       readonly centers: readonly Point[];
       readonly colPitch: number;
       readonly rowPitch: number;
+      /** As on the linear arm. */
+      readonly keys?: readonly unknown[];
     };
 
 /**
@@ -388,4 +394,80 @@ export function moveWithin<T>(
   const [moved] = next.splice(from, 1);
   next.splice(clampInsert(to, next.length), 0, moved);
   return next;
+}
+
+/**
+ * A list position named by a NEIGHBOUR's key instead of a slot index: the one
+ * form that still means the same place after the list changes around it (a
+ * concurrent insert between the neighbours shifts every index, never a key).
+ * It is `@mmstack/primitives`' keyed-container {@link Anchor}, so a consumer
+ * resolves it with `moveElement(container, key, anchor)`.
+ */
+export type ListAnchor<K> = Anchor<K>;
+
+/**
+ * The two index conventions a drop reports:
+ * - `'final'` — the moved key's index in the list AFTER the move (a same-list
+ *   reorder's `to`, an arrival's `index` once inserted).
+ * - `'slot'` — an insert slot in `[0, N]` into the list as it stands, mover
+ *   included if it is there (`insertIndexForMeasure`, the native indicator).
+ */
+export type AnchorLane = 'final' | 'slot';
+
+/**
+ * Pure: name where `moved` lands by its neighbours. `keys` is the list (in
+ * either lane's convention, see {@link AnchorLane}); the result prefers the
+ * key it lands `after`, then the key it lands `before`, else `empty` (it is
+ * alone). The mover is never its own anchor.
+ */
+export function anchorOf<K>(
+  keys: readonly K[],
+  moved: K,
+  index: number,
+  lane: AnchorLane,
+): ListAnchor<K> {
+  const others = keys.filter((k) => k !== moved);
+  let seat = index;
+  if (lane === 'slot') {
+    const slot = clampInsert(index, keys.length);
+    const mover = keys.indexOf(moved);
+    seat = mover >= 0 && mover < slot ? slot - 1 : slot;
+  }
+  seat = clampInsert(seat, others.length);
+  if (seat > 0) return { after: others[seat - 1] };
+  if (others.length) return { before: others[0] };
+  return { empty: true };
+}
+
+const NO_MOVER: unique symbol = Symbol('@mmstack/dnd:no-mover');
+
+/**
+ * Pure: name an insert slot `[0, N]` of `keys` as they stand by a neighbour,
+ * nobody discounted — the form a hover records so the drop can find the same
+ * place after the list changed underneath it.
+ */
+export function slotAnchor<K>(keys: readonly K[], slot: number): ListAnchor<K> {
+  return anchorOf<K | typeof NO_MOVER>(
+    keys,
+    NO_MOVER,
+    slot,
+    'slot',
+  ) as ListAnchor<K>;
+}
+
+/**
+ * Pure: resolve a {@link slotAnchor} against the LIVE keys to an insert slot
+ * (`after: k` ⇒ index of k + 1, `before: k` ⇒ index of k, `empty` ⇒ 0).
+ * `-1` when the named neighbour is gone.
+ */
+export function slotOfAnchor<K>(
+  keys: readonly K[],
+  anchor: ListAnchor<K>,
+): number {
+  if ('after' in anchor) {
+    const i = keys.indexOf(anchor.after);
+    return i < 0 ? -1 : i + 1;
+  }
+  if ('before' in anchor) return keys.indexOf(anchor.before);
+  return 0;
 }

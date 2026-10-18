@@ -1,64 +1,67 @@
 import {
   computed,
   isSignal,
+  linkedSignal,
   signal,
   untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
+import {
+  handles as assignHandles,
+  type Handle,
+  type HandleTable,
+} from './handles';
+import {
+  createSurvivorPermutation,
+  type Permutation,
+} from './survivor-permutation';
 
-/**
- * Opt-in policy describing how `keyArray` should treat duplicate keys.
- *
- * With the `'ordinal'` policy, keys are coerced to strings and disambiguated by
- * their occurrence order: the first item with a given base key keeps `base`, the
- * second becomes `base#1`, the third `base#2`, and so on. Each duplicate therefore
- * gets a stable, distinct entry instead of collapsing.
- *
- * Identity follows position-among-duplicates: removing an earlier occurrence
- * promotes the next one to the base key, which changes its effective key and thus
- * re-creates its mapped entry.
- */
-export type DuplicateKeyPolicy = {
-  /** Disambiguation strategy. Currently only ordinal (`base`, `base#1`, `base#2`, ...). */
-  policy: 'ordinal';
+export type { Permutation } from './survivor-permutation';
+
+/** Options of {@link keyArray}. */
+export type KeyArrayOptions<T, U, K> = {
+  /** Invoked with a mapped entry when its item leaves the array. */
+  onDestroy?: (value: U) => void;
   /**
-   * Optional diagnostics side-channel. When a recompute observes duplicate keys,
-   * this is invoked once with the duplicate base keys in first-occurrence order.
-   * It is called untracked and must not be relied upon to create reactive dependencies.
+   * Optional function to use a custom key for item comparison.
+   * Use this if you want to reuse mapped items based on a property (like an ID)
+   * even if the item reference changes.
    */
-  report?: (bases: readonly string[]) => void;
+  key?: (item: T) => K;
+  /**
+   * Hand `mapFn` the entry's lifetime {@link Handle} as its key instead of the raw key: the raw
+   * key while that key never had duplicates, an opaque `KeyHandle` otherwise. A `KeyHandle` is
+   * identified by reference: one that crosses a structured-clone boundary (a worker,
+   * `postMessage`, JSON) comes back as a plain object that `isKeyHandle` rejects.
+   */
+  handles?: boolean;
+  /**
+   * Called untracked, once per recompute that sees duplicate keys, with those keys (the actual
+   * values, never coerced) in first-occurrence order. Must not be relied upon to create reactive
+   * dependencies.
+   */
+  onDuplicates?: (keys: readonly K[]) => void;
+  /** Expose `reorders` on the result. See {@link keyArray}. */
+  order?: boolean;
 };
 
-function effectiveKeys<T, K>(
-  arr: readonly T[],
-  getKey: (item: T) => K,
-  report?: (bases: readonly string[]) => void,
-): string[] {
-  const out = new Array<string>(arr.length);
-  const counts = new Map<string, number>();
-  const firstOrder: string[] = [];
-  let duped: Set<string> | null = null;
+/** The result of {@link keyArray} with `order: true`: the mapped array plus `reorders`. */
+export type OrderedKeyArray<U, K> = Signal<U[]> & {
+  readonly reorders: Signal<Permutation<Handle<K>> | null>;
+};
 
-  for (let i = 0; i < arr.length; i++) {
-    const base = String(getKey(arr[i]));
-    const seen = counts.get(base) ?? 0;
-    if (seen === 0) {
-      firstOrder.push(base);
-    } else {
-      (duped ??= new Set<string>()).add(base);
-    }
-    out[i] = seen === 0 ? base : base + '#' + seen;
-    counts.set(base, seen + 1);
-  }
+/** The result of {@link keyArray} for options not known statically: `reorders` iff `order` was set. */
+export type MaybeOrderedKeyArray<U, K> = Signal<U[]> & {
+  readonly reorders?: Signal<Permutation<Handle<K>> | null>;
+};
 
-  if (report && duped) {
-    const bases = firstOrder.filter((b) => duped.has(b));
-    untracked(() => report(bases));
-  }
+type Source<T> = Signal<T[]> | (() => T[]);
+type MapFn<T, U, Key> = (v: T, i: Signal<number>, key: Key) => U;
 
-  return out;
-}
+const sameValueZero = (a: unknown, b: unknown): boolean =>
+  a === b || (a !== a && b !== b);
+const EMPTY: readonly never[] = [];
 
 /**
  * Reactively maps items from a source array to a new array by value (identity).
@@ -72,17 +75,31 @@ function effectiveKeys<T, K>(
  * This is useful for building efficient lists where DOM nodes or heavy instances should be reused
  * when the list is reordered.
  *
+ * Duplicate keys: every occurrence gets its own entry, and an entry follows the occurrence it was
+ * built for, never its position among the duplicates. An item reference that occurs once on each
+ * side is that occurrence, so removing one duplicate destroys exactly its entry and re-creates
+ * none (`[a1, a2] → [a2]` keeps the entry built from `a2`). The same object repeated only changes
+ * its count: entries are created or destroyed for the difference, never swapped. Fresh objects of
+ * one key are matched in order when their count is unchanged (the immutable-update case); when
+ * the count changes nothing shows which one survived, so those entries are re-created.
+ *
  * @param source A `Signal<T[]>` or a function returning `T[]`.
- * @param mapFn The mapping function. Receives the item, its index as a Signal, and the
- *   entry's key (the effective ordinal key when `duplicateKeys` is enabled, otherwise
- *   the raw key) — stable for the lifetime of the mapped entry.
+ * @param mapFn The mapping function. Receives the item, its index as a Signal, and the entry's
+ *   key: the raw key, or with `handles: true` the entry's lifetime {@link Handle} — stable for the
+ *   lifetime of the mapped entry.
  * @param options Optional configuration:
  *  - `onDestroy`: A callback invoked when a mapped item is removed from the array.
  *  - `key`: A custom key extractor for identity matching (e.g. `(item) => item.id`)
  *    when item references change but conceptual identity is preserved.
- *  - `duplicateKeys`: Opt-in policy for handling duplicate keys. When omitted,
- *    duplicates still get one entry each, share the raw key and are matched to
- *    earlier entries in order of occurrence. See {@link DuplicateKeyPolicy}.
+ *  - `handles`: Hand `mapFn` the entry's lifetime handle instead of the raw key.
+ *  - `onDuplicates`: Told which keys repeat, once per recompute that sees any.
+ *  - `order`: Adds `reorders`, a read-only signal of the {@link Permutation} among the entries
+ *    present both at its own last evaluation and now, or `null` when they kept their relative
+ *    order. Inserts and removals alone are not reorders (a prepend bumps every `index` but yields
+ *    `null`). The baseline is the signal's own last evaluation, shared by all its readers: changes
+ *    it did not see fold into one transition, and none is lost because someone else read the
+ *    mapped array in between. Its first evaluation is `null`. Without the option nothing is
+ *    created or computed for it.
  * @returns A `Signal<U[]>` containing the mapped array.
  *
  * @example
@@ -107,155 +124,200 @@ function effectiveKeys<T, K>(
  * ```
  */
 export function keyArray<T, U, K>(
-  source: Signal<T[]> | (() => T[]),
-  mapFn: (v: T, i: Signal<number>, key: K | string) => U,
-  options: {
-    onDestroy?: (value: U) => void;
-    /**
-     * Optional function to use a custom key for item comparison.
-     * Use this if you want to reuse mapped items based on a property (like an ID)
-     * even if the item reference changes.
-     */
-    key?: (item: T) => K;
-    /**
-     * Opt-in policy for disambiguating duplicate keys. When present, keys are
-     * coerced to strings and duplicates get distinct ordinal effective keys
-     * (`base`, `base#1`, `base#2`, ...). When absent, behavior is unchanged.
-     */
-    duplicateKeys?: DuplicateKeyPolicy;
-  } = {},
-): Signal<U[]> {
+  source: Source<T>,
+  mapFn: MapFn<T, U, Handle<K>>,
+  options: KeyArrayOptions<T, U, K> & { handles: true; order: true },
+): OrderedKeyArray<U, K>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, K>,
+  options: KeyArrayOptions<T, U, K> & { handles?: false; order: true },
+): OrderedKeyArray<U, K>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, Handle<K>>,
+  options: KeyArrayOptions<T, U, K> & { order: true },
+): OrderedKeyArray<U, K>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, Handle<K>>,
+  options: KeyArrayOptions<T, U, K> & { handles: true; order?: false },
+): Signal<U[]>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, K>,
+  options?: KeyArrayOptions<T, U, K> & { handles?: false; order?: false },
+): Signal<U[]>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, Handle<K>>,
+  options?: KeyArrayOptions<T, U, K>,
+): MaybeOrderedKeyArray<U, K>;
+export function keyArray<T, U, K>(
+  source: Source<T>,
+  mapFn: MapFn<T, U, Handle<K>>,
+  options: KeyArrayOptions<T, U, K> = {},
+): MaybeOrderedKeyArray<U, K> {
   const sourceSignal = isSignal(source) ? source : computed(source);
+  const getKey = options.key || ((v: T) => v as unknown as K);
+  const withHandles = !!options.handles;
+  const onDestroy = options.onDestroy;
+  const onDuplicates = options.onDuplicates;
 
-  const items: T[] = [];
+  let table: HandleTable<T, K> | undefined;
   let mapped: U[] = [];
-  const indexes: WritableSignal<number>[] = [];
-  const getKey = options.key || ((v) => v as unknown as K);
+  // double-buffered index signals and reused scratch; the returned array is the one allocation
+  let indexes: WritableSignal<number>[] = [];
+  let spareIndexes: WritableSignal<number>[] = [];
+  const oldAt = new Map<Handle<K>, number>();
+  const reused: boolean[] = [];
+  const fresh: number[] = [];
+  const counts = onDuplicates ? new Map<K, number>() : null;
 
-  const newIndices = new Map<K, number>();
-  const temp: U[] = [];
-  const tempIndexes: WritableSignal<number>[] = [];
-  const newIndicesNext: number[] = [];
+  const reportDuplicates = (keys: readonly K[]) => {
+    if (!counts || !onDuplicates) return;
+    counts.clear();
+    let any = false;
+    for (let i = 0; i < keys.length; i++) {
+      const c = (counts.get(keys[i]) ?? 0) + 1;
+      counts.set(keys[i], c);
+      if (c > 1) any = true;
+    }
+    if (!any) return;
+    const dup: K[] = [];
+    for (let i = 0; i < keys.length; i++) {
+      if ((counts.get(keys[i]) ?? 0) < 2) continue;
+      dup.push(keys[i]);
+      counts.set(keys[i], 0);
+    }
+    counts.clear();
+    untracked(() => onDuplicates(dup));
+  };
 
-  const newIndexesCache = new Array<WritableSignal<number>>();
-
-  const dup = options.duplicateKeys;
-
-  return computed(() => {
+  const out = computed(() => {
     const newItems = sourceSignal() || [];
 
     return untracked(() => {
-      const newKeys = dup ? effectiveKeys(newItems, getKey, dup.report) : null;
-      let i: number;
-      let j: number;
-      const newLen = newItems.length;
-      const len = items.length;
-      const newMapped = new Array<U>(newLen);
-      const newIndexes = newIndexesCache;
-      newIndexes.length = 0;
-      newIndexes.length = newLen;
+      // the previous table's arrays stay intact for this one call (HandleTable retention)
+      const prevHandles = table ? table.handles : EMPTY;
+      const next = assignHandles(table, newItems, getKey).table;
+      table = next;
+      reportDuplicates(next.keys);
 
-      let start: number;
-      let end: number;
-      let newEnd: number;
-      let item: T;
-      let key: any;
+      const hs = next.handles;
+      const keys = next.keys;
+      const newLen = hs.length;
+      const len = prevHandles.length;
 
       if (newLen === 0) {
         if (len !== 0) {
-          if (options.onDestroy) {
-            for (let k = 0; k < len; k++) options.onDestroy(mapped[k]);
-          }
-          items.length = 0;
+          if (onDestroy) for (let k = 0; k < len; k++) onDestroy(mapped[k]);
           mapped = [];
           indexes.length = 0;
+          spareIndexes.length = 0;
         }
         return mapped;
       }
 
+      const newMapped = new Array<U>(newLen);
+      const newIndexes = spareIndexes;
+      newIndexes.length = newLen;
+      const create = (j: number) => {
+        const indexSignal = signal(j);
+        newIndexes[j] = indexSignal;
+        newMapped[j] = mapFn(
+          newItems[j],
+          indexSignal,
+          withHandles ? hs[j] : (keys[j] as Handle<K>),
+        );
+      };
+
       if (len === 0) {
-        for (j = 0; j < newLen; j++) {
-          item = newItems[j];
-          items[j] = item;
-          const indexSignal = signal(j);
-          newIndexes[j] = indexSignal;
-          newMapped[j] = mapFn(item, indexSignal, newKeys ? newKeys[j] : getKey(item));
-        }
+        for (let j = 0; j < newLen; j++) create(j);
       } else {
-        newIndices.clear();
-        temp.length = 0;
-        tempIndexes.length = 0;
-        newIndicesNext.length = 0;
-
-        const oldKeys = dup ? effectiveKeys(items, getKey) : null;
-        const kNew = newKeys
-          ? (idx: number) => newKeys[idx]
-          : (idx: number) => getKey(newItems[idx]);
-        const kOld = oldKeys
-          ? (idx: number) => oldKeys[idx]
-          : (idx: number) => getKey(items[idx]);
-
+        // common prefix and suffix by handle, then a handle map in the middle
+        let start = 0;
+        const shorter = Math.min(len, newLen);
         for (
-          start = 0, end = Math.min(len, newLen);
-          start < end && kOld(start) === kNew(start);
+          ;
+          start < shorter && sameValueZero(prevHandles[start], hs[start]);
           start++
         ) {
           newMapped[start] = mapped[start];
           newIndexes[start] = indexes[start];
         }
-
+        let end = len - 1;
+        let newEnd = newLen - 1;
         for (
-          end = len - 1, newEnd = newLen - 1;
-          end >= start && newEnd >= start && kOld(end) === kNew(newEnd);
+          ;
+          end >= start &&
+          newEnd >= start &&
+          sameValueZero(prevHandles[end], hs[newEnd]);
           end--, newEnd--
         ) {
-          temp[newEnd] = mapped[end];
-          tempIndexes[newEnd] = indexes[end];
+          newMapped[newEnd] = mapped[end];
+          newIndexes[newEnd] = indexes[end];
         }
 
-        for (j = newEnd; j >= start; j--) {
-          key = kNew(j);
-          i = newIndices.get(key) ?? -1;
-          newIndicesNext[j] = i === undefined ? -1 : i;
-          newIndices.set(key, j);
-        }
-
-        for (i = start; i <= end; i++) {
-          key = kOld(i);
-          j = newIndices.get(key) ?? -1;
-          if (j !== undefined && j !== -1) {
-            temp[j] = mapped[i];
-            tempIndexes[j] = indexes[i];
-            j = newIndicesNext[j];
-            newIndices.set(key, j);
-          } else {
-            if (options.onDestroy) options.onDestroy(mapped[i]);
+        oldAt.clear();
+        for (let i = start; i <= end; i++) oldAt.set(prevHandles[i], i);
+        reused.length = len;
+        reused.fill(false, start, end + 1);
+        fresh.length = 0;
+        for (let j = start; j <= newEnd; j++) {
+          const i = oldAt.get(hs[j]);
+          if (i === undefined) {
+            fresh.push(j);
+            continue;
           }
+          reused[i] = true;
+          newMapped[j] = mapped[i];
+          newIndexes[j] = indexes[i];
         }
+        oldAt.clear();
+        if (onDestroy)
+          for (let i = start; i <= end; i++)
+            if (!reused[i]) onDestroy(mapped[i]);
 
-        // 2) Set all new values
-        for (j = start; j < newLen; j++) {
-          if (temp[j] !== undefined) {
-            newMapped[j] = temp[j];
-            newIndexes[j] = tempIndexes[j];
-            newIndexes[j].set(j);
-          } else {
-            const indexSignal = signal(j);
-            newIndexes[j] = indexSignal;
-            newMapped[j] = mapFn(newItems[j], indexSignal, kNew(j));
-          }
+        let f = 0;
+        for (let j = start; j < newLen; j++) {
+          if (f < fresh.length && fresh[f] === j) {
+            create(j);
+            f++;
+          } else newIndexes[j].set(j);
         }
-
-        items.length = newLen;
-        for (let k = 0; k < newLen; k++) items[k] = newItems[k];
       }
 
       mapped = newMapped;
-
-      indexes.length = newLen;
-      for (let k = 0; k < newLen; k++) indexes[k] = newIndexes[k];
-
+      spareIndexes = indexes;
+      indexes = newIndexes;
       return mapped;
     });
   });
+
+  if (!options.order) return out;
+
+  // `reorders` keeps its own baseline: a copy of the handles at its last evaluation, in one of two
+  // buffers (the table's own arrays are reused by later recomputes of the mapped signal)
+  const perm = createSurvivorPermutation<Handle<K>>();
+  let fill: Handle<K>[] = [];
+  let held: Handle<K>[] = [];
+  const reorders = linkedSignal<
+    readonly Handle<K>[],
+    Permutation<Handle<K>> | null
+  >({
+    source: () => {
+      out();
+      const hs = untracked(() => (table ? table.handles : EMPTY));
+      const snap = fill;
+      snap.length = hs.length;
+      for (let i = 0; i < hs.length; i++) snap[i] = hs[i];
+      fill = held;
+      held = snap;
+      return snap;
+    },
+    computation: (hs, previous) =>
+      previous ? perm(previous.source, hs) : null,
+  });
+  return Object.assign(out, { reorders: reorders.asReadonly() });
 }

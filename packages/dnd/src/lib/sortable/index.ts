@@ -1,6 +1,9 @@
 export {
+  type AnchorLane,
   type Axis,
+  type ListAnchor,
   type MemberMeasure,
+  anchorOf,
   type RectLike,
   centerAlong,
   clampInsert,

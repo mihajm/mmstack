@@ -98,6 +98,131 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
       </docs-section>
 
+      <docs-section title="Duplicate keys" id="duplicate-keys">
+        <p>
+          Keys do not have to be unique. Every occurrence of a key gets its own
+          entry, and an entry follows the occurrence it was built for, not its
+          position among the duplicates. Which occurrence is which is decided by
+          a few plain rules:
+        </p>
+        <ul>
+          <li>
+            <strong>The same reference keeps its entry.</strong> An item that is
+            the same object before and after is that occurrence. With two
+            objects of one key, <code>[a1, a2]</code> becoming
+            <code>[a2]</code> destroys the entry built from <code>a1</code> and
+            re-creates nothing.
+          </li>
+          <li>
+            <strong
+              >The same object listed several times only changes its
+              count.</strong
+            >
+            Its occurrences cannot be told apart, so entries are created or
+            destroyed for the difference and never swapped.
+          </li>
+          <li>
+            <strong
+              >Fresh objects are matched in order while their count stays the
+              same.</strong
+            >
+            That is the immutable-update convention: replace every item with a
+            new copy and each entry keeps its place.
+          </li>
+          <li>
+            <strong
+              >When the count of fresh objects changes, they are
+              re-created.</strong
+            >
+            Nothing shows which one survived, so every entry they could belong
+            to is destroyed and built again rather than guessed.
+          </li>
+        </ul>
+        <p>
+          If your duplicates come from immutable updates that also add or remove
+          copies, keep the references you did not change, and the first rule
+          keeps their entries. For lists whose keys never repeat none of this
+          comes into play: each key is one entry, matched by key alone.
+        </p>
+      </docs-section>
+
+      <docs-section title="Handles" id="handles">
+        <p>
+          The mapping function receives the entry's key as a third argument.
+          Pass <code>handles: true</code> and it receives the entry's lifetime
+          handle there instead: the raw key while that key never had duplicates,
+          an opaque <code>&#123; key, n &#125;</code> object once it did. The
+          handle stays the same for the life of the entry, even after the key
+          becomes unique again, so it is a safe name for the entry.
+          <code>isKeyHandle(value)</code> tells the two apart, and
+          <code>handle.key</code> is the raw key.
+        </p>
+        <docs-code [code]="handlesEx" lang="ts" />
+        <p>
+          A handle is identified by its reference. One that crosses a
+          structured-clone boundary, <code>postMessage</code>, a worker, or
+          JSON, comes back as a plain object that <code>isKeyHandle</code>
+          rejects and that matches no entry. Send the raw key across a boundary,
+          never the handle.
+        </p>
+        <p>
+          To find out that a list has duplicates at all, pass
+          <code>onDuplicates</code>. It is called once per recompute that sees
+          any, with the repeated keys as their actual values in first-occurrence
+          order. Nothing is coerced to a string, so <code>1</code> and
+          <code>"1"</code> are different keys. It runs untracked, so it cannot
+          add reactive dependencies.
+        </p>
+        <docs-code [code]="onDuplicatesEx" lang="ts" />
+      </docs-section>
+
+      <docs-section title="Relative order" id="reorders">
+        <p>
+          Pass <code>order: true</code> and the result gains
+          <code>reorders</code>, a read-only signal that says whether the
+          entries changed their order relative to each other. It holds the
+          permutation among the entries present both at its last evaluation and
+          now, named by handle: <code>before</code> lists them in the old order,
+          <code>after</code> the same handles in the new order. When they kept
+          their relative order it is <code>null</code>.
+        </p>
+        <docs-code [code]="orderEx" lang="ts" />
+        <p>
+          Inserts and removals alone are not reorders. A prepend bumps every
+          index signal and still leaves <code>reorders()</code> at
+          <code>null</code>, so an animation or a sync layer can tell a real
+          move from items shifting around an insert.
+        </p>
+        <p>
+          The baseline is the signal's own last evaluation, shared by everyone
+          who reads it. Changes it did not see fold into one transition, so
+          swapping two items and swapping them back before it is read gives
+          <code>null</code>. Reading the mapped array in between loses nothing,
+          since that read does not move the baseline. The first read is
+          <code>null</code>. Without the option nothing extra is created or
+          computed.
+        </p>
+      </docs-section>
+
+      <docs-section title="handles on its own" id="handles-fn">
+        <p>
+          The matching behind <code>keyArray</code> is exported as
+          <code>handles(prev, items, keyOf)</code>, for code that tracks the
+          identity of list occurrences without mapping them. Pass the previous
+          table (or <code>null</code> the first time), the new items and a key
+          function. You get back the new <code>table</code>, whose
+          <code>handles</code> line up with the items, and the handles that
+          retired, in <code>destroyed</code>.
+        </p>
+        <docs-code [code]="handlesFnEx" lang="ts" />
+        <p>
+          Like <code>pooled</code>, the table and <code>destroyed</code> are
+          reused by the next call, so the previous state stays readable for
+          exactly one call; copy anything you keep longer. An unchanged input
+          returns the previous table as it is.
+        </p>
+      </docs-section>
+
       <docs-section title="mapObject for records" id="map-object">
         <p>
           <code>mapObject</code> is the record counterpart of
@@ -145,6 +270,41 @@ const keyed = keyArray(
   (child, index) => computed(() => \`\${index()}: \${child.name}\`),
   { key: (item) => item.id },
 );`;
+
+  protected readonly handlesEx = `import { isKeyHandle, keyArray } from '@mmstack/primitives';
+
+const rows = keyArray(
+  items,
+  (item, index, handle) => ({
+    handle, // the raw id, or an opaque handle once the id was duplicated
+    id: isKeyHandle(handle) ? handle.key : handle,
+    item,
+  }),
+  { key: (item) => item.id, handles: true },
+);`;
+
+  protected readonly onDuplicatesEx = `const rows = keyArray(items, render, {
+  key: (item) => item.id,
+  onDuplicates: (ids) => console.warn('repeated ids', ids), // e.g. [3, 7]
+});`;
+
+  protected readonly orderEx = `const rows = keyArray(items, render, {
+  key: (item) => item.id,
+  order: true,
+});
+
+rows.reorders(); // { before: [1, 2], after: [2, 1] } after a swap
+// null after a prepend, an append or a removal`;
+
+  protected readonly handlesFnEx = `import { handles, type HandleTable } from '@mmstack/primitives';
+
+let table: HandleTable<Item, number> | null = null;
+
+function observe(items: Item[]) {
+  const next = handles(table, items, (item) => item.id);
+  for (const gone of next.destroyed) release(gone);
+  table = next.table; // table.handles[i] names items[i]
+}`;
 
   protected readonly mapObjectEx = `import { signal } from '@angular/core';
 import { mapObject } from '@mmstack/primitives';

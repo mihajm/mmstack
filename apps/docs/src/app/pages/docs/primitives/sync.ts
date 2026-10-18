@@ -122,7 +122,7 @@ import { DocSection } from '../../../layout/doc-section';
           <li>
             <code>insertElement</code> / <code>moveElement</code> /
             <code>removeElement</code>: add at a position, reorder, or remove an
-            element by key.
+            element by key. A position is an index or a neighbour, see below.
           </li>
           <li>
             <code>rebalanceContainer</code>: even out positions after many
@@ -138,6 +138,43 @@ import { DocSection } from '../../../layout/doc-section';
           racing.
         </p>
         <docs-code [code]="keyedContainer" lang="ts" />
+        <p>
+          An insert or a move can name its place by a neighbour instead of an
+          index. The <code>Anchor</code> type has three forms:
+          <code>&#123; after: key &#125;</code>,
+          <code>&#123; before: key &#125;</code>, and
+          <code>&#123; empty: true &#125;</code> for a container with nothing
+          else in it. <code>insertElement</code>, <code>moveElement</code>, and
+          the <code>insert</code> and <code>move</code> of the
+          <code>keyedContainer</code> and <code>wrappedContainer</code> helpers
+          all accept one wherever they take an index.
+        </p>
+        <p>
+          The anchor is resolved when the write is applied, against the order
+          the container has then. A drop decided as "after
+          <code>t7</code>" still lands right after <code>t7</code> when someone
+          inserted elsewhere in the meantime, where an index would land in the
+          slot it named, whatever sits there now. That makes an anchor the right
+          thing to keep for a drop from another list or a palette, as much as
+          for a local reorder. Resolving one is a single pass over the
+          container, with no sort.
+        </p>
+        <p>
+          If the anchor names no other element present, an absent key, the moved
+          key itself, or <code>empty</code> while siblings remain, nothing is
+          written and the call returns <code>undefined</code>. The
+          <code>empty</code> misuse also logs in dev mode. Check the return
+          value when the neighbour may have gone.
+        </p>
+        <p>
+          An anchor is local intent, not a shared guarantee. Two peers that
+          apply the same anchor against different states can place the element
+          differently, exactly as they would with an index; the position writes
+          that result still converge. And when two neighbours hold the same
+          position, after concurrent inserts into one gap, there is no room
+          between them, so a move after the first can land after both. An index
+          has the same limit.
+        </p>
       </docs-section>
 
       <docs-section title="Rebase and forks" id="rebase">
@@ -196,6 +233,11 @@ const tasks = signal<Record<string, Task>>({});
 insertElement(tasks, 't1', { title: 'Draft' });          // append
 insertElement(tasks, 't2', { title: 'Review' });
 moveElement(tasks, 't2', 0);                             // to the front
+moveElement(tasks, 't2', { after: 't1' });               // next to a neighbour, as the list stands now
+insertElement(tasks, 't3', { title: 'Ship' }, { before: 't2' }); // same for an insert
+
+const pos = moveElement(tasks, 't3', { after: 'gone' }); // no such neighbour
+pos === undefined;                                       // nothing was written
 
 for (const { key, value } of orderedEntries(tasks())) {  // reading order
   render(key, value);

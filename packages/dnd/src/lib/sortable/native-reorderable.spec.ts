@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
+import { DndSession } from '../session';
 import { sortableGroup } from './group';
 import { Reorderable, ReorderableItem, reorderable } from './reorderable';
 
@@ -244,8 +245,8 @@ describe('reorderable — native engine wiring', () => {
 
     expect(listB().map((r) => r.label)).toEqual(['B1', 'A1']);
     expect(listA().map((r) => r.label)).toEqual(['A2']);
-    expect(arrived).toEqual([{ item: moved, index: 1 }]);
-    expect(left).toEqual([{ item: moved, from: 0, to: 1 }]);
+    expect(arrived).toMatchObject([{ item: moved, index: 1 }]);
+    expect(left).toMatchObject([{ item: moved, from: 0, to: 1 }]);
   });
 
   it('keyboard: ArrowDown moves the focused item down (native engine, default keyboard)', () => {
@@ -407,5 +408,123 @@ describe('reorderable — native engine wiring', () => {
 
     r.insertForeign(42, 0); // not a string → rejected by accepts
     expect(list()).toHaveLength(2);
+  });
+});
+
+/**
+ * The native hover recorder, driven through the real container effect: the hovered
+ * slot is recorded by neighbour, kept when the target list changes under a still
+ * pointer, and the drop lands there.
+ */
+@Component({
+  selector: 'mm-native-pair-host',
+  imports: [Reorderable, ReorderableItem],
+  template: `
+    <ul class="from" [mmReorderable]="from">
+      @for (r of from.items(); track r.id) {
+        <li [mmReorderableItem]="r">{{ r.label }}</li>
+      }
+    </ul>
+    <ul class="to" [mmReorderable]="to">
+      @for (r of to.items(); track r.id) {
+        <li [mmReorderableItem]="r">{{ r.label }}</li>
+      }
+    </ul>
+  `,
+})
+class NativePairHost {
+  readonly group = sortableGroup<Row>();
+  readonly a = signal<Row[]>([{ id: 10, label: 'M' }]);
+  readonly b = signal<Row[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ]);
+  readonly from = reorderable(this.a, { key: (r) => r.id, group: this.group });
+  readonly to = reorderable(this.b, { key: (r) => r.id, group: this.group });
+}
+
+describe('reorderable — native hover anchor, through the container effect', () => {
+  it('hover between A and B in [A, B]; the target becomes [X, A, B]; release ⇒ [X, A, M, B]', () => {
+    // rows 40px tall by live DOM position inside their list
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const parent = this.parentElement;
+        const idx = parent ? Array.from(parent.children).indexOf(this) : 0;
+        return {
+          top: idx * 40,
+          bottom: idx * 40 + 40,
+          left: 0,
+          right: 100,
+          width: 100,
+          height: 40,
+          x: 0,
+          y: idx * 40,
+          toJSON: () => ({}),
+        } as DOMRect;
+      });
+    try {
+      draggableMock.mockClear();
+      dropTargetMock.mockClear();
+      const fixture = TestBed.createComponent(NativePairHost);
+      fixture.detectChanges();
+      TestBed.tick();
+      fixture.detectChanges();
+      const host = fixture.componentInstance;
+      const el = fixture.nativeElement as HTMLElement;
+      const ulTo = el.querySelector('ul.to') as HTMLElement;
+      const liM = el.querySelector('ul.from li') as HTMLElement;
+      const dragCfg = draggableMock.mock.calls
+        .map(
+          (c) =>
+            c[0] as {
+              element: Element;
+              getInitialData: () => Record<string | symbol, unknown>;
+            },
+        )
+        .find((c) => c.element === liM);
+      const dropCfg = dropTargetMock.mock.calls
+        .map((c) => c[0] as { element: Element; onDrop?: (a: unknown) => void })
+        .find((c) => c.element === ulTo && c.onDrop);
+      expect(dragCfg).toBeDefined();
+      expect(dropCfg).toBeDefined();
+      const sourceData = dragCfg?.getInitialData() ?? {};
+
+      const session = TestBed.inject(DndSession).session;
+      session.set({
+        sourceEl: liM,
+        sourceData,
+        targets: [{ element: ulTo, data: {} }],
+        pointer: { x: 5, y: 40 }, // between A (20) and B (60)
+        kind: 'transfer',
+        engine: 'native',
+      });
+      fixture.detectChanges();
+      TestBed.tick();
+      fixture.detectChanges();
+      expect(host.to.nativeInsert()).toBe(1);
+      expect(host.to.nativeHoverAnchor()).toEqual({ after: 1 }); // recorded: after A
+
+      host.b.update((arr) => [{ id: 3, label: 'X' }, ...arr]); // a peer prepends; the pointer stays
+      fixture.detectChanges();
+      TestBed.tick();
+      fixture.detectChanges();
+      expect(host.to.nativeInsert()).toBe(1); // the raw slot now points between X and A
+      expect(host.to.nativeHoverAnchor()).toEqual({ after: 1 }); // the anchor still names A
+
+      dropCfg?.onDrop?.({
+        source: { element: liM, data: sourceData },
+        self: { element: ulTo, data: {} },
+        location: {
+          current: { dropTargets: [] },
+          previous: { dropTargets: [] },
+        },
+      });
+      expect(host.b().map((r) => r.label)).toEqual(['X', 'A', 'M', 'B']);
+      expect(host.a()).toEqual([]);
+      session.set(null);
+    } finally {
+      rectSpy.mockRestore();
+    }
   });
 });

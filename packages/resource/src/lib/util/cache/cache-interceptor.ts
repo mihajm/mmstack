@@ -1,6 +1,7 @@
 import {
   HttpContext,
   HttpContextToken,
+  HttpErrorResponse,
   type HttpEvent,
   type HttpHandlerFn,
   type HttpInterceptorFn,
@@ -8,7 +9,7 @@ import {
   HttpResponse,
 } from '@angular/common/http';
 import { inject, PLATFORM_ID } from '@angular/core';
-import { map, type Observable, of } from 'rxjs';
+import { catchError, map, type Observable, of, throwError } from 'rxjs';
 import { hashRequest } from '../hash-request';
 import { sharePending } from '../share-pending';
 import { injectQueryCache } from './cache';
@@ -54,7 +55,7 @@ type ResolvedCacheControl = {
 };
 
 function parseCacheControlHeader(
-  req: HttpResponse<unknown>,
+  req: HttpResponse<unknown> | HttpErrorResponse,
 ): ResolvedCacheControl {
   const header = req.headers.get('Cache-Control');
 
@@ -254,24 +255,34 @@ export function createCacheInterceptor(
 
       const broadcast = !opt.skipTabSync;
 
+      const revalidated = (
+        cached: HttpResponse<unknown>,
+        res: HttpResponse<unknown> | HttpErrorResponse,
+      ) => {
+        const live = cache.getUntracked(key);
+
+        if (!live) return cached;
+
+        if (live.value !== cached) return live.value;
+
+        const cacheControl = parseCacheControlHeader(res);
+        const { staleTime, ttl } = opt.ignoreCacheControl
+          ? opt
+          : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
+        const persist =
+          (opt.persist ?? false) &&
+          (opt.ignoreCacheControl || !cacheControl.isPrivate);
+
+        cache.store(key, cached, staleTime, ttl, persist, broadcast);
+        return cached;
+      };
+
       return next(req).pipe(
         map((event) => {
           if (!(event instanceof HttpResponse)) return event;
 
-          if (event.status === 304 && entry) {
-            if (cache.getUntracked(key)) {
-              const cacheControl = parseCacheControlHeader(event);
-              const { staleTime, ttl } = opt.ignoreCacheControl
-                ? opt
-                : resolveTimings(cacheControl, opt.staleTime, opt.ttl);
-              const persist =
-                (opt.persist ?? false) &&
-                (opt.ignoreCacheControl || !cacheControl.isPrivate);
-
-              cache.store(key, entry.value, staleTime, ttl, persist, broadcast);
-            }
-            return entry.value;
-          }
+          if (event.status === 304 && entry)
+            return revalidated(entry.value, event);
 
           if (!event.ok) return event;
 
@@ -300,6 +311,11 @@ export function createCacheInterceptor(
           }
 
           return parsed;
+        }),
+        catchError((err: unknown) => {
+          if (err instanceof HttpErrorResponse && err.status === 304 && entry)
+            return of(revalidated(entry.value, err));
+          return throwError(() => err);
         }),
       );
     });

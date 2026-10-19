@@ -13,7 +13,14 @@ import {
 } from '@angular/common/http';
 import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { delay, firstValueFrom, Observable, of, throwError } from 'rxjs';
+import {
+  concatMap,
+  firstValueFrom,
+  Observable,
+  of,
+  throwError,
+  timer,
+} from 'rxjs';
 import { injectQueryCache, provideQueryCache, type Cache } from './cache';
 import { createCacheInterceptor, setCacheContext } from './cache-interceptor';
 
@@ -32,25 +39,29 @@ const stubInterceptor: HttpInterceptorFn = (req) => {
   const stub = req.context.get(STUB);
   backendCalls++;
 
-  if (stub.status >= 400) {
-    return throwError(
-      () =>
-        new HttpErrorResponse({
-          status: stub.status,
-          error: stub.body ?? 'Error',
-        }),
-    );
-  }
+  // mirror Angular's backends: anything outside 2xx is an HttpErrorResponse
+  const res$ =
+    stub.status < 200 || stub.status >= 300
+      ? throwError(
+          () =>
+            new HttpErrorResponse({
+              status: stub.status,
+              error: stub.body ?? 'Error',
+              headers: new HttpHeaders(stub.headers ?? {}),
+            }),
+        )
+      : of(
+          new HttpResponse({
+            status: stub.status,
+            body: stub.body ?? null,
+            headers: new HttpHeaders(stub.headers ?? {}),
+          }),
+        );
 
-  const res$ = of(
-    new HttpResponse({
-      status: stub.status,
-      body: stub.body ?? null,
-      headers: new HttpHeaders(stub.headers ?? {}),
-    }),
-  );
-
-  return stub.delayMs ? res$.pipe(delay(stub.delayMs)) : res$;
+  // delay() lets errors through immediately; timer+concatMap defers both channels
+  return stub.delayMs
+    ? timer(stub.delayMs).pipe(concatMap(() => res$))
+    : res$;
 };
 
 function makeContext(
@@ -154,6 +165,34 @@ describe('createCacheInterceptor', () => {
     expect(entry).not.toBeNull();
     expect(entry!.value.body).toEqual({ id: 1 });
     expect(entry!.isStale).toBe(false);
+  });
+
+  it('honors Cache-Control carried on the 304 error response', async () => {
+    await firstValueFrom(
+      client.get('https://example.com/data', {
+        observe: 'response',
+        context: makeContext(
+          { status: 200, body: { id: 1 }, headers: { ETag: 'v1' } },
+          { key: 'k304-cc', staleTime: 5_000, ttl: 60_000 },
+        ),
+      }),
+    );
+    vi.advanceTimersByTime(6_000);
+
+    const response = await firstValueFrom(
+      client.get('https://example.com/data', {
+        observe: 'response',
+        context: makeContext(
+          { status: 304, headers: { 'Cache-Control': 'max-age=1' } },
+          { key: 'k304-cc', staleTime: 5_000, ttl: 60_000 },
+        ),
+      }),
+    );
+
+    expect(response.body).toEqual({ id: 1 });
+    expect(cache.getUntracked('k304-cc')?.isStale).toBe(false);
+    vi.advanceTimersByTime(1_500);
+    expect(cache.getUntracked('k304-cc')?.isStale).toBe(true);
   });
 
   it('substitutes the cached entry as the response on 304', async () => {
@@ -329,6 +368,42 @@ describe('createCacheInterceptor', () => {
       await pending;
 
       expect(cache.getUntracked('race-1')).toBeNull();
+    });
+
+    it('a 304 landing after a newer value was stored must not clobber it', async () => {
+      await firstValueFrom(
+        client.get('https://example.com/data', {
+          observe: 'response',
+          context: makeContext(
+            { status: 200, body: { v: 1 }, headers: { ETag: 'v1' } },
+            { key: 'race-2', staleTime: 5_000, ttl: 60_000 },
+          ),
+        }),
+      );
+      vi.advanceTimersByTime(6_000);
+
+      const pending = firstValueFrom(
+        client.get('https://example.com/data', {
+          observe: 'response',
+          context: makeContext(
+            { status: 304, delayMs: 100 },
+            { key: 'race-2', staleTime: 5_000, ttl: 60_000 },
+          ),
+        }),
+      );
+
+      // stands in for a cross-tab sync restore of a fresher response
+      const newer = new HttpResponse({ status: 200, body: { v: 2 } });
+      cache.store('race-2', newer, 5_000, 60_000);
+      const storedAt = Date.now();
+
+      await vi.advanceTimersByTimeAsync(100);
+      const response = await pending;
+
+      const live = cache.getUntracked('race-2');
+      expect(live!.value).toBe(newer);
+      expect(live!.updated).toBe(storedAt);
+      expect(response.body).toEqual({ v: 2 });
     });
   });
 

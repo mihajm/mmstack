@@ -1,25 +1,12 @@
-import {
-  computed,
-  isSignal,
-  linkedSignal,
-  signal,
-  untracked,
-  type Signal,
-  type WritableSignal,
-} from '@angular/core';
-import {
-  handles as assignHandles,
-  type Handle,
-  type HandleTable,
-} from './handles';
-import {
-  createSurvivorPermutation,
-  type Permutation,
-} from './survivor-permutation';
+import { type Signal } from '@angular/core';
+import { type Handle } from './handles';
+import { keyedMapper, type Source } from './keyed';
+import { type Permutation } from './survivor-permutation';
 
-export type { Permutation } from './survivor-permutation';
-
-/** Options of {@link keyArray}. */
+/**
+ * Options of {@link keyArray}.
+ * @deprecated use {@link mapArray} and its {@link MapArrayOptions}
+ */
 export type KeyArrayOptions<T, U, K> = {
   /** Invoked with a mapped entry when its item leaves the array. */
   onDestroy?: (value: U) => void;
@@ -46,22 +33,23 @@ export type KeyArrayOptions<T, U, K> = {
   order?: boolean;
 };
 
-/** The result of {@link keyArray} with `order: true`: the mapped array plus `reorders`. */
+/**
+ * The result of {@link keyArray} with `order: true`: the mapped array plus `reorders`.
+ * @deprecated use {@link mapArray}, whose {@link MappedArray} always has `reorders`
+ */
 export type OrderedKeyArray<U, K> = Signal<U[]> & {
   readonly reorders: Signal<Permutation<Handle<K>> | null>;
 };
 
-/** The result of {@link keyArray} for options not known statically: `reorders` iff `order` was set. */
+/**
+ * The result of {@link keyArray} for options not known statically: `reorders` iff `order` was set.
+ * @deprecated use {@link mapArray}, whose {@link MappedArray} always has `reorders`
+ */
 export type MaybeOrderedKeyArray<U, K> = Signal<U[]> & {
   readonly reorders?: Signal<Permutation<Handle<K>> | null>;
 };
 
-type Source<T> = Signal<T[]> | (() => T[]);
 type MapFn<T, U, Key> = (v: T, i: Signal<number>, key: Key) => U;
-
-const sameValueZero = (a: unknown, b: unknown): boolean =>
-  a === b || (a !== a && b !== b);
-const EMPTY: readonly never[] = [];
 
 /**
  * Reactively maps items from a source array to a new array by value (identity).
@@ -101,6 +89,8 @@ const EMPTY: readonly never[] = [];
  *    mapped array in between. Its first evaluation is `null`. Without the option nothing is
  *    created or computed for it.
  * @returns A `Signal<U[]>` containing the mapped array.
+ * @deprecated use {@link mapArray}: the same keyed reuse, with the item handed over as a signal
+ *   that follows immutable updates under a custom `key`.
  *
  * @example
  * ```ts
@@ -128,26 +118,31 @@ export function keyArray<T, U, K>(
   mapFn: MapFn<T, U, Handle<K>>,
   options: KeyArrayOptions<T, U, K> & { handles: true; order: true },
 ): OrderedKeyArray<U, K>;
+/** @deprecated use {@link mapArray} */
 export function keyArray<T, U, K>(
   source: Source<T>,
   mapFn: MapFn<T, U, K>,
   options: KeyArrayOptions<T, U, K> & { handles?: false; order: true },
 ): OrderedKeyArray<U, K>;
+/** @deprecated use {@link mapArray} */
 export function keyArray<T, U, K>(
   source: Source<T>,
   mapFn: MapFn<T, U, Handle<K>>,
   options: KeyArrayOptions<T, U, K> & { order: true },
 ): OrderedKeyArray<U, K>;
+/** @deprecated use {@link mapArray} */
 export function keyArray<T, U, K>(
   source: Source<T>,
   mapFn: MapFn<T, U, Handle<K>>,
   options: KeyArrayOptions<T, U, K> & { handles: true; order?: false },
 ): Signal<U[]>;
+/** @deprecated use {@link mapArray} */
 export function keyArray<T, U, K>(
   source: Source<T>,
   mapFn: MapFn<T, U, K>,
   options?: KeyArrayOptions<T, U, K> & { handles?: false; order?: false },
 ): Signal<U[]>;
+/** @deprecated use {@link mapArray} */
 export function keyArray<T, U, K>(
   source: Source<T>,
   mapFn: MapFn<T, U, Handle<K>>,
@@ -158,166 +153,17 @@ export function keyArray<T, U, K>(
   mapFn: MapFn<T, U, Handle<K>>,
   options: KeyArrayOptions<T, U, K> = {},
 ): MaybeOrderedKeyArray<U, K> {
-  const sourceSignal = isSignal(source) ? source : computed(source);
-  const getKey = options.key || ((v: T) => v as unknown as K);
-  const withHandles = !!options.handles;
-  const onDestroy = options.onDestroy;
-  const onDuplicates = options.onDuplicates;
-
-  let table: HandleTable<T, K> | undefined;
-  let mapped: U[] = [];
-  // double-buffered index signals and reused scratch; the returned array is the one allocation
-  let indexes: WritableSignal<number>[] = [];
-  let spareIndexes: WritableSignal<number>[] = [];
-  const oldAt = new Map<Handle<K>, number>();
-  const reused: boolean[] = [];
-  const fresh: number[] = [];
-  const counts = onDuplicates ? new Map<K, number>() : null;
-
-  const reportDuplicates = (keys: readonly K[]) => {
-    if (!counts || !onDuplicates) return;
-    counts.clear();
-    let any = false;
-    for (let i = 0; i < keys.length; i++) {
-      const c = (counts.get(keys[i]) ?? 0) + 1;
-      counts.set(keys[i], c);
-      if (c > 1) any = true;
-    }
-    if (!any) return;
-    const dup: K[] = [];
-    for (let i = 0; i < keys.length; i++) {
-      if ((counts.get(keys[i]) ?? 0) < 2) continue;
-      dup.push(keys[i]);
-      counts.set(keys[i], 0);
-    }
-    counts.clear();
-    untracked(() => onDuplicates(dup));
-  };
-
-  const out = computed(() => {
-    const newItems = sourceSignal() || [];
-
-    return untracked(() => {
-      // the previous table's arrays stay intact for this one call (HandleTable retention)
-      const prevHandles = table ? table.handles : EMPTY;
-      const next = assignHandles(table, newItems, getKey).table;
-      table = next;
-      reportDuplicates(next.keys);
-
-      const hs = next.handles;
-      const keys = next.keys;
-      const newLen = hs.length;
-      const len = prevHandles.length;
-
-      if (newLen === 0) {
-        if (len !== 0) {
-          if (onDestroy) for (let k = 0; k < len; k++) onDestroy(mapped[k]);
-          mapped = [];
-          indexes.length = 0;
-          spareIndexes.length = 0;
-        }
-        return mapped;
-      }
-
-      const newMapped = new Array<U>(newLen);
-      const newIndexes = spareIndexes;
-      newIndexes.length = newLen;
-      const create = (j: number) => {
-        const indexSignal = signal(j);
-        newIndexes[j] = indexSignal;
-        newMapped[j] = mapFn(
-          newItems[j],
-          indexSignal,
-          withHandles ? hs[j] : (keys[j] as Handle<K>),
-        );
-      };
-
-      if (len === 0) {
-        for (let j = 0; j < newLen; j++) create(j);
-      } else {
-        // common prefix and suffix by handle, then a handle map in the middle
-        let start = 0;
-        const shorter = Math.min(len, newLen);
-        for (
-          ;
-          start < shorter && sameValueZero(prevHandles[start], hs[start]);
-          start++
-        ) {
-          newMapped[start] = mapped[start];
-          newIndexes[start] = indexes[start];
-        }
-        let end = len - 1;
-        let newEnd = newLen - 1;
-        for (
-          ;
-          end >= start &&
-          newEnd >= start &&
-          sameValueZero(prevHandles[end], hs[newEnd]);
-          end--, newEnd--
-        ) {
-          newMapped[newEnd] = mapped[end];
-          newIndexes[newEnd] = indexes[end];
-        }
-
-        oldAt.clear();
-        for (let i = start; i <= end; i++) oldAt.set(prevHandles[i], i);
-        reused.length = len;
-        reused.fill(false, start, end + 1);
-        fresh.length = 0;
-        for (let j = start; j <= newEnd; j++) {
-          const i = oldAt.get(hs[j]);
-          if (i === undefined) {
-            fresh.push(j);
-            continue;
-          }
-          reused[i] = true;
-          newMapped[j] = mapped[i];
-          newIndexes[j] = indexes[i];
-        }
-        oldAt.clear();
-        if (onDestroy)
-          for (let i = start; i <= end; i++)
-            if (!reused[i]) onDestroy(mapped[i]);
-
-        let f = 0;
-        for (let j = start; j < newLen; j++) {
-          if (f < fresh.length && fresh[f] === j) {
-            create(j);
-            f++;
-          } else newIndexes[j].set(j);
-        }
-      }
-
-      mapped = newMapped;
-      spareIndexes = indexes;
-      indexes = newIndexes;
-      return mapped;
-    });
+  const handlesAsKey = !!options.handles;
+  const { out, reorders } = keyedMapper<T, U, K>(source, {
+    getKey: options.key || ((v: T) => v as unknown as K),
+    build: handlesAsKey
+      ? (item, _s, index, _key, handle) => mapFn(item, index, handle)
+      : (item, _s, index, key) => mapFn(item, index, key as Handle<K>),
+    onDestroy: options.onDestroy,
+    onDuplicates: options.onDuplicates,
+    items: false,
   });
 
   if (!options.order) return out;
-
-  // `reorders` keeps its own baseline: a copy of the handles at its last evaluation, in one of two
-  // buffers (the table's own arrays are reused by later recomputes of the mapped signal)
-  const perm = createSurvivorPermutation<Handle<K>>();
-  let fill: Handle<K>[] = [];
-  let held: Handle<K>[] = [];
-  const reorders = linkedSignal<
-    readonly Handle<K>[],
-    Permutation<Handle<K>> | null
-  >({
-    source: () => {
-      out();
-      const hs = untracked(() => (table ? table.handles : EMPTY));
-      const snap = fill;
-      snap.length = hs.length;
-      for (let i = 0; i < hs.length; i++) snap[i] = hs[i];
-      fill = held;
-      held = snap;
-      return snap;
-    },
-    computation: (hs, previous) =>
-      previous ? perm(previous.source, hs) : null,
-  });
-  return Object.assign(out, { reorders: reorders.asReadonly() });
+  return Object.assign(out, { reorders: reorders() });
 }

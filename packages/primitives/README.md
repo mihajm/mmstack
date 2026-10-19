@@ -19,7 +19,7 @@ Everything that is not a directive or component is also exported from `@mmstack/
 
 - [Writable signal variants](#writable-signal-variants) — `mutable`, `derived`, `store` / `mutableStore`, `forkStore`, `toWritable`
 - [Timing & propagation](#timing--propagation) — `debounced`, `throttled`, `until`
-- [Reactive collections](#reactive-collections) — `indexArray`, `keyArray`, `mapObject`, `projection`
+- [Reactive collections](#reactive-collections) — `indexArray`, `mapArray`, `mapObject`, `projection`
 - [Effects](#effects) — `nestedEffect`
 - [Concurrency & transitions](#concurrency--transitions) — `keepPrevious`, keep-alive (`MmActivity`), `pausable*` / `providePausableOptions`, Suspense & the census (`mm-suspense`, error slots, `mmRetryFailed`, `*mmSuspenseError`, retry rounds), hold-and-swap (`*mmTransition`), per-element morphs (`mmViewTransitionName`), async derivations (`latest` / `use` / `useAll`), `deferredValue`, `startTransition` / `startTransaction`, optimistic writes (`guessable`, `optimistic`, `optimisticStore`), `holdUntilReady`
 - [History & persistence](#history--persistence) — `withHistory`, `storeHistory`, `stored`, `persistedStore`, `tabSync`, `opLog`
@@ -120,7 +120,7 @@ form.user.address.city.set('NYC');
 
 Each level's shape is resolved from what's known: a value that is currently an object/array re-creates as that same shape (resolved per path and cached, so it survives the value later being nulled), while genuinely-unknown levels follow your option — `'auto'` (an array for index keys, an object otherwise), `'object'`, `'array'`, or a `() => container` factory. `false` (the default) keeps writes through `null` as no-ops. Adding a key that simply wasn't present on an existing object always works and needs no `vivify`.
 
-Top-level array support isn't exposed yet — use `indexArray` / `keyArray` for those.
+Top-level array support isn't exposed yet — use `indexArray` / `mapArray` for those.
 
 **Union leaves (perf opt-in).** `noUnionLeaves: true` promises no node ever flips between a leaf and a sub-store, so each node's leaf-ness is resolved once on first access and cached instead of staying reactive. Off by default — leave it off if a value can switch between a primitive and an object/array.
 
@@ -258,14 +258,14 @@ await until(progress, (p) => p === 100, { timeout: 5_000 });
 
 ## Reactive collections
 
-### `indexArray` / `keyArray`
+### `indexArray` / `mapArray`
 
-Map a source array signal into a stable array of derived values. `indexArray` stabilizes by **position** — each index gets a writable signal whose value is the item at that index. `keyArray` stabilizes by **identity** (via an optional `key` selector) — moving an item preserves its mapped output and just updates the item's index signal.
+Map a source array signal into a stable array of derived values. `indexArray` stabilizes by **position** — each index gets a writable signal whose value is the item at that index. `mapArray` stabilizes by **identity** (via an optional `key` selector) — moving an item preserves its mapped output and just updates the entry's `index` signal. If you know them from SolidJS, they are the same pair: `mapArray` is the keyed mapper, `indexArray` the per-slot one.
 
 Both pool their internal buffers, so reordering a 10k-item list is much cheaper than `.map()` of a `computed`.
 
 ```typescript
-import { indexArray, keyArray, mutable } from '@mmstack/primitives';
+import { indexArray, mapArray, mutable } from '@mmstack/primitives';
 
 const items = mutable([
   { id: 1, name: 'A' },
@@ -277,31 +277,32 @@ const labels = indexArray(items, (child, index) =>
   computed(() => `Item ${index}: ${child().name}`),
 );
 
-// Identity-stable: `child` is the item value, `index` is a Signal<number>.
-const keyed = keyArray(
+// Identity-stable: `child` is a Signal of the entry's item, `index` a Signal<number>.
+const keyed = mapArray(
   items,
-  (child, index) => computed(() => `${index()}: ${child.name}`),
+  (child, index) => computed(() => `${index()}: ${child().name}`),
   { key: (item) => item.id },
 );
 ```
 
-`indexArray` is the cheaper default. Reach for `keyArray` only when DOM/instance reuse across reorders matters — `<for>` blocks rendering heavy components, charts, drag-and-drop reordering, etc.
+`mapFn` receives four arguments: the item as a read-only signal, the index as a read-only signal, the raw key (the item itself without a `key` option) and the entry's lifetime handle. With a `key`, an immutable update (same id, new object) keeps the entry and updates `child()`. A row is as fresh as the list's last read: the list writes `child` and `index` when it is read, so a row read before the list sees the previous state, never a mix of two.
 
-**Duplicate keys.** Every occurrence gets its own entry, and an entry follows the occurrence it was built for, not its position among the duplicates. An item that is the same reference before and after keeps its entry, so `[a1, a2] → [a2]` (two objects, one key) destroys the entry built from `a1` and re-creates nothing. The same object listed several times only changes its count: entries are created or destroyed for the difference, never swapped. Fresh objects of one key (an immutable update) are matched in order while their count stays the same; when the count changes, nothing shows which one survived, so those entries are re-created. With `handles: true`, `mapFn` receives the entry's lifetime handle as its key — the raw key while that key never had duplicates, an opaque `{ key, n }` otherwise (`isKeyHandle` tells them apart). A key whose only occurrence is new gets its raw key back, unless an earlier occurrence ever held it. `onDuplicates(keys)` is told which keys repeat, once per recompute that sees any, with the actual key values in first-occurrence order (nothing is coerced to a string, so `1` and `"1"` are different keys). A handle is identified by reference, so one sent through `postMessage`, a worker or JSON comes back as a plain object that matches nothing. The same matching is available on its own as `handles(prev, items, keyOf)`; like `pooled`, its table and `destroyed` are reused by the next call, so the previous state stays readable for exactly one call, and an unchanged input returns the previous table as it is. For lists whose keys never repeat, the mapped entries, their `index` values, the `mapFn` calls and the `onDestroy` order are the same as before this change, with one known exception: a `mapFn` that returns `undefined` is now reused on a reorder, where it used to be called again. The `duplicateKeys` option is gone: `handles` and `onDuplicates` replace it.
+`indexArray` is the cheaper default. Reach for `mapArray` only when DOM/instance reuse across reorders matters — `<for>` blocks rendering heavy components, charts, drag-and-drop reordering, etc.
 
-**Relative order.** `keyArray(source, mapFn, { order: true })` adds `reorders`: a read-only signal of the permutation among the entries present both at its own last evaluation and now, named by handle (`before` in the old order, the same handles in the new order), or `null` when they kept their relative order. Inserts and removals alone are not reorders: a prepend bumps every `index` and leaves `reorders()` at `null`. Its baseline is its own last evaluation, shared by everyone who reads it: changes it did not see fold into one transition (`[a, b]` read, then `[b, a]` and `[a, b]` written, gives `null`), and none is lost because the mapped array was read in between (`[a, b]` read, then `[b, a]` and `[b, a, c]`, gives `[a, b] → [b, a]`). Its first read is `null`. Without the option nothing extra is created or computed.
+**Duplicate keys.** Every occurrence gets its own entry, and an entry follows the occurrence it was built for, not its position among the duplicates. An item that is the same reference before and after keeps its entry, so `[a1, a2] → [a2]` (two objects, one key) destroys the entry built from `a1` and re-creates nothing. The same object listed several times only changes its count: entries are created or destroyed for the difference, never swapped. Fresh objects of one key (an immutable update) are matched in order while their count stays the same; when the count changes, nothing shows which one survived, so those entries are re-created. The 4th argument of `mapFn` is the entry's lifetime handle — the raw key while that key never had duplicates, an opaque `{ key, n }` otherwise (`isKeyHandle` tells them apart). A key whose only occurrence is new gets its raw key back, unless an earlier occurrence ever held it. `onDuplicates(keys)` is told which keys repeat, once per recompute that sees any, with the actual key values in first-occurrence order (nothing is coerced to a string, so `1` and `"1"` are different keys). A handle is identified by reference, so one sent through `postMessage`, a worker or JSON comes back as a plain object that matches nothing. The same matching is available on its own as `handles(prev, items, keyOf)`; like `pooled`, its table and `destroyed` are reused by the next call, so the previous state stays readable for exactly one call, and an unchanged input returns the previous table as it is.
+
+**Relative order.** The result of `mapArray` always has `reorders`: a read-only signal of the permutation among the entries present both at its own last evaluation and now, named by handle (`before` in the old order, the same handles in the new order), or `null` when they kept their relative order. Inserts and removals alone are not reorders: a prepend bumps every `index` and leaves `reorders()` at `null`. Its baseline is its own last evaluation, shared by everyone who reads it: changes it did not see fold into one transition (`[a, b]` read, then `[b, a]` and `[a, b]` written, gives `null`), and none is lost because the mapped array was read in between (`[a, b]` read, then `[b, a]` and `[b, a, c]`, gives `[a, b] → [b, a]`). Its first read is `null`. Unread, nothing is computed for it.
 
 ```typescript
-const rows = keyArray(items, (item, index) => render(item, index), {
+const rows = mapArray(items, (item, index) => render(item, index), {
   key: (item) => item.id,
-  order: true,
 });
 rows.reorders(); // { before: [1, 2], after: [2, 1] } after a swap, null after a prepend
 ```
 
 ### `mapObject`
 
-The object equivalent of `keyArray`: map `Record<K, V>` into `Record<K, U>` with referential stability for unchanged keys. The mapping function receives the key and a writable signal slice (if the source is writable).
+The object equivalent of `mapArray`: map `Record<K, V>` into `Record<K, U>` with referential stability for unchanged keys. The mapping function receives the key and a writable signal slice (if the source is writable).
 
 ```typescript
 import { mapObject } from '@mmstack/primitives';
@@ -324,7 +325,7 @@ const controls = mapObject(
 
 ### `projection`
 
-A derived **store**, the store-shaped counterpart to `computed`. Where `derived` slices one value out of a source and `indexArray` / `keyArray` map a list, `projection` derives a whole store subtree from a computation. `fn` receives a mutable draft seeded with the current value and either mutates it or returns new data; the result is reconciled against the previous value so unchanged object subtrees keep their reference and keyed array items keep their identity across recomputes. Reading through the returned store is per-leaf, so a `computed` over one field only recomputes when that field actually changes, even though the whole projection re-ran.
+A derived **store**, the store-shaped counterpart to `computed`. Where `derived` slices one value out of a source and `indexArray` / `mapArray` map a list, `projection` derives a whole store subtree from a computation. `fn` receives a mutable draft seeded with the current value and either mutates it or returns new data; the result is reconciled against the previous value so unchanged object subtrees keep their reference and keyed array items keep their identity across recomputes. Reading through the returned store is per-leaf, so a `computed` over one field only recomputes when that field actually changes, even though the whole projection re-ran.
 
 ```typescript
 import { projection } from '@mmstack/primitives';

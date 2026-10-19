@@ -7,7 +7,8 @@ import { signal, type Signal } from '@angular/core';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { Handle } from './handles';
-import { keyArray, type Permutation } from './key-array';
+import { keyArray } from './key-array';
+import type { Permutation } from './survivor-permutation';
 
 type Item = { readonly id: string; readonly tag: number };
 type Entry = {

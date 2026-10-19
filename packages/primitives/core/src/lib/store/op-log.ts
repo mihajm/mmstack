@@ -11,7 +11,7 @@ import {
 import { isMutable } from '../mutable';
 import { STORE_KIND, type StoreKind } from './internals';
 import { isOpaque } from './opaque';
-import { isRecord } from './predicates';
+import { isRecord, structEq } from './predicates';
 
 type Key = string | number;
 
@@ -32,6 +32,14 @@ export type StoreOp =
   | { kind: 'set'; path: readonly Key[]; next: unknown; prev?: unknown }
   | { kind: 'delete'; path: readonly Key[]; prev: unknown }
   | { kind: 'clear'; path: readonly Key[] };
+
+/**
+ * Delivered beside an emitted batch, to subscribers only (never part of the batch, so nothing new
+ * reaches a transport). `root` is the value the batch's ops produce from the value they were
+ * diffed from, captured when the batch was emitted: a subscriber notified later (a deferred sync
+ * envelope) still sees the root of THIS change, not the store as it is by then.
+ */
+export type EmitContext = { readonly root?: unknown };
 
 /** One emission: every op derived from one commit window (a tick), in path order. */
 export type OpBatch = {
@@ -64,8 +72,9 @@ export type CreateOpLogOptions = {
    */
   readonly driver?: OpLogDriver;
   /**
-   * How emission diffs the source (see {@link DiffOpsOptions}). Absent: today's emission, byte for
-   * byte. `{ added: policy }` lets an app emit an added container leaf-wise (or per path).
+   * How emission diffs the source (see {@link DiffOpsOptions}). Absent: arrays per index, added
+   * containers whole. `{ added: policy }` lets an app emit an added container leaf-wise (or per
+   * path); `{ arrays: 'unit' }` emits every changed array as one `set`.
    */
   readonly emit?: DiffOpsOptions;
 };
@@ -75,8 +84,9 @@ export type OpLog<T extends object> = {
   /**
    * Ordered, lossless delivery of every emitted batch. Synchronous — don't write back into
    * the observed source from inside a callback (route remote data through {@link OpLog.apply}).
+   * The second argument carries the root the batch was diffed TO ({@link EmitContext}).
    */
-  subscribe(cb: (batch: OpBatch) => void): () => void;
+  subscribe(cb: (batch: OpBatch, ctx?: EmitContext) => void): () => void;
   /** The most recent batch — a lossy sampling view (devtools); use `subscribe` for transport. */
   readonly latest: Signal<OpBatch | null>;
   /**
@@ -111,7 +121,7 @@ const isPlainArray = (v: unknown): v is unknown[] =>
 /**
  * Reference-identity-pruned structural diff — the same short-circuit discipline as `merge3`:
  * an untouched subtree kept its reference (the store's copy-on-write contract), so the walk
- * descends only where refs differ. O(changed paths), not O(tree).
+ * descends only where refs differ. O(changed paths), not O(tree). `unit` = the `'unit'` array mode.
  */
 function diffNode(
   prev: unknown,
@@ -119,6 +129,7 @@ function diffNode(
   path: readonly Key[],
   ops: StoreOp[],
   added?: AddedPolicy,
+  unit = false,
 ): void {
   if (Object.is(prev, next)) return;
 
@@ -133,13 +144,18 @@ function diffNode(
         if (added) addValue(next[key], [...path, key], ops, added);
         else ops.push({ kind: 'set', path: [...path, key], next: next[key] });
       } else {
-        diffNode(prev[key], next[key], [...path, key], ops, added);
+        diffNode(prev[key], next[key], [...path, key], ops, added, unit);
       }
     }
     return;
   }
 
   if (isPlainArray(prev) && isPlainArray(next)) {
+    if (unit) {
+      // one unit: equal values (a rebuilt-but-equal array) emit nothing, anything else one `set`
+      if (!structEq(prev, next)) ops.push({ kind: 'set', path, prev, next });
+      return;
+    }
     // same length → per-index descent (matches `arr[i].x.set(...)` writes); a length
     // change is a whole unit — index attribution lies under insert/remove/reorder
     if (prev.length === next.length) {
@@ -265,6 +281,14 @@ export type DiffOpsOptions = {
    * existing slot stay whole in every mode.
    */
   readonly added?: AddedPolicy;
+  /**
+   * How a changed plain array is emitted. `'index'` (default): a same-length change descends per
+   * index (`['todos', 2, 'done']`), a length change is one `set`. `'unit'`: the array is ONE unit,
+   * nothing when the two arrays are structurally equal, else one `set` carrying `prev` and
+   * `next`, so a reorder or an edit travels whole and the receiving register merges whole arrays
+   * (`opSync` emits in this mode by default). Opaque arrays are leaves in both modes.
+   */
+  readonly arrays?: 'unit' | 'index';
 };
 
 /** `undefined` for the default (`'whole'`), so the default walk is exactly the pre-option one. */
@@ -285,7 +309,7 @@ export function diffOps(
   opt?: DiffOpsOptions,
 ): StoreOp[] {
   const ops: StoreOp[] = [];
-  diffNode(prev, next, [], ops, policyOf(opt));
+  diffNode(prev, next, [], ops, policyOf(opt), opt?.arrays === 'unit');
   return ops;
 }
 
@@ -362,10 +386,11 @@ export function opLog<T extends object>(
   }
 
   const added = policyOf(opt?.emit);
+  const unit = opt?.emit?.arrays === 'unit';
   let prevRoot: T = untracked(source);
   let version = 0;
   let destroyed = false;
-  const subscribers = new Set<(batch: OpBatch) => void>();
+  const subscribers = new Set<(batch: OpBatch, ctx?: EmitContext) => void>();
   const latest = signal<OpBatch | null>(null);
 
   /** Diff now, emit if there's a delta, advance the baseline. */
@@ -374,12 +399,13 @@ export function opLog<T extends object>(
     const next = untracked(source);
     if (Object.is(prevRoot, next)) return;
     const ops: StoreOp[] = [];
-    diffNode(prevRoot, next, [], ops, added);
+    diffNode(prevRoot, next, [], ops, added, unit);
     prevRoot = next;
     if (!ops.length) return; // fresh refs, equal values — spurious-write tolerance
     const batch: OpBatch = { origin, version: ++version, ops };
     latest.set(batch);
-    for (const cb of [...subscribers]) cb(batch);
+    const ctx: EmitContext = { root: next };
+    for (const cb of [...subscribers]) cb(batch, ctx);
   };
 
   const run = () => {

@@ -54,7 +54,7 @@ export type RelayOptions = {
   readonly ejection?: 'writer' | 'connection';
   readonly policyVersion?: number;
   readonly limits?: RelayLimits;
-  /** Seq-envelopes retained per room for delta answers (default 1000). Trimming the tail is also when the room garbage-collects settled register evidence. */
+  /** Seq-envelopes retained per room for delta answers (default 1000; 0 keeps none, every behind client gets a snapshot). Trimming the tail is also when the room garbage-collects settled register evidence. */
   readonly journalLimit?: number;
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
@@ -219,7 +219,14 @@ export type Relay = {
   /**
    * Restore a persisted room before clients join (relay boot, Durable Object wake). Refused
    * (`false`) once the room has state or members: hydrating a live seq space would corrupt
-   * it. Load asynchronously at the adapter layer, then hydrate synchronously.
+   * it. Load asynchronously at the adapter layer, then hydrate synchronously. Journal entries
+   * before the first one stamped {@link MESH_PROTO_VERSION} are dropped (written before an
+   * upgrade, they fold differently), then the newest `journalLimit` are kept. A client BEHIND the
+   * room (`msg.seq < room.seq`) is answered with deltas exactly when the kept journal is non-empty
+   * and `msg.seq >= firstKept.seq - 1` (the last dropped seq itself still gets the kept suffix as
+   * deltas), otherwise with a snapshot; a client at `room.seq` is up to date. PRECONDITION, not
+   * validated: protocol versions only rise along a journal (an upgrade is monotone), so old-proto
+   * entries form a prefix; an old entry after a current one would be kept and served.
    */
   hydrate(name: string, snapshot: RoomSnapshot): boolean;
   /**
@@ -369,6 +376,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const rooms = new Map<string, Room>();
   const policyVersion = opt.policyVersion ?? 0;
   const journalLimit = opt.journalLimit ?? 1000;
+  /** The newest `journalLimit` entries (`slice(-0)` would keep everything: a limit of 0 keeps none). */
+  const keepTail = <E>(journal: E[]): E[] =>
+    journalLimit > 0 ? journal.slice(-journalLimit) : [];
   const maxOps = opt.limits?.maxOpsPerEnvelope ?? 1024;
   const rate = opt.limits?.maxEnvelopesPerSecond;
   const iceFor = (room: string, origin: string) => {
@@ -605,10 +615,14 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
       if (snapshot.journal) {
-        room.journal = snapshot.journal
+        const journal = snapshot.journal
           .filter((e) => e.seq <= snapshot.seq)
-          .sort((a, b) => a.seq - b.seq)
-          .slice(-journalLimit);
+          .sort((a, b) => a.seq - b.seq);
+        // entries written under an older protocol form a prefix (the version changes only at an
+        // upgrade); a delta answer must never serve them, so the journal starts at the first
+        // current-version entry and a client behind it is answered with a snapshot instead
+        const first = journal.findIndex((e) => e.proto === MESH_PROTO_VERSION);
+        room.journal = keepTail(first === -1 ? [] : journal.slice(first));
       }
       return true;
     },
@@ -870,7 +884,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // only what no future write can observe, so the notice is parity for clients, not a gate
           let moved: Readonly<Record<string, Hlc>> | undefined;
           if (room.journal.length > journalLimit) {
-            room.journal.shift();
+            room.journal = keepTail(room.journal);
             if (room.settled.size > 0) {
               moved = settledRecord(room);
               room.registers.settle(moved);

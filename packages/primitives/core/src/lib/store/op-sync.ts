@@ -26,11 +26,12 @@ import {
   invertBatch,
   opLog,
   type DiffOpsOptions,
+  type EmitContext,
   type OpLogDriver,
   type StoreOp,
 } from './op-log';
 import { isOpaque } from './opaque';
-import { isRecord } from './predicates';
+import { isRecord, structEq } from './predicates';
 import type { WritableSignalStore } from './types';
 
 /**
@@ -41,8 +42,14 @@ import type { WritableSignalStore } from './types';
  * same op set, which is exactly what the version fence exists to make loud. Envelopes from
  * other versions are dropped loudly, and the tab-sync join protocol refuses to pair mismatched
  * peers: versions are never silently mixed, in shape OR in meaning.
+ *
+ * Version 4 changes the FOLD, not the shape: an array register with no matching merge policy folds
+ * concurrent writes position by position ({@link positional}) instead of keeping the winner whole,
+ * and `merge3` decides "unchanged" by value. A v3 and a v4 replica holding the same registers
+ * materialize different arrays, so they must not share a room; the register format is unchanged,
+ * so a v3 checkpoint still loads (it is re-materialized under the v4 fold, see `hydrate`).
  */
-export const OP_PROTO_VERSION = 3;
+export const OP_PROTO_VERSION = 4;
 
 type Key = string | number;
 
@@ -113,6 +120,10 @@ export type Conflicted<T = unknown> = {
   readonly siblings: readonly T[];
   readonly mine: T;
   readonly theirs: T;
+  /**
+   * The runner-up's `prev`: the value the second sibling replaced when it wrote. It is NOT a
+   * common ancestor of the siblings; across a causal gap the winner may never have seen it.
+   */
   readonly ancestor?: T;
 };
 
@@ -303,15 +314,68 @@ export const preserve: MergeFn = (ancestor, mine, theirs) =>
   }) satisfies Conflicted;
 
 /**
- * Identity-aware array merge: reconciles two concurrent versions of
- * an array item-wise by a user-provided identity, instead of last-writer-wins on the whole
- * array. Items are matched by key; per-item fields merge via `merge3` against the ancestor
- * item; items added on either side survive; an item removed on either side and unedited on
- * the other stays removed. Item ORDER follows `mine` (the total-order winner), with `theirs`-
- * only additions appended, and arrays still TRAVEL as whole-value sets. For a list whose elements
- * move and edit concurrently, model it as a keyed container (a record of elements ordered by
- * `posBetween`) instead: `insertElement`/`moveElement`/`removeElement` write per element, so a
- * reorder and a concurrent edit both survive and elements travel one at a time.
+ * Pairs one side's occurrences of an identity with the ancestor's: an occurrence structurally
+ * equal to an ancestor occurrence pairs with it (first free one, in order); the leftovers pair in
+ * order up to the smaller count; the rest stay unpaired (-1: an addition). Returns, per side
+ * occurrence, the index into `anc` it pairs with.
+ */
+function pairOccurrences(
+  anc: readonly unknown[],
+  side: readonly unknown[],
+): number[] {
+  const out = side.map(() => -1);
+  const taken = anc.map(() => false);
+  for (let s = 0; s < side.length; s++) {
+    for (let a = 0; a < anc.length; a++) {
+      if (!taken[a] && structEq(side[s], anc[a])) {
+        out[s] = a;
+        taken[a] = true;
+        break;
+      }
+    }
+  }
+  const restS = out.flatMap((a, s) => (a === -1 ? [s] : []));
+  const restA = taken.flatMap((t, a) => (t ? [] : [a]));
+  restS.slice(0, restA.length).forEach((s, k) => (out[s] = restA[k]));
+  return out;
+}
+
+/** Occurrence indices per identity, in array order. */
+function groupBy(
+  arr: readonly unknown[],
+  identity: (item: unknown) => unknown,
+): Map<unknown, number[]> {
+  const g = new Map<unknown, number[]>();
+  arr.forEach((x, i) => {
+    const k = identity(x);
+    const list = g.get(k);
+    if (list) list.push(i);
+    else g.set(k, [i]);
+  });
+  return g;
+}
+
+/**
+ * Identity-aware array merge: reconciles two concurrent versions of an array item-wise by a
+ * user-provided identity, instead of keeping one side whole. Items are matched by key; per-item
+ * fields merge via `merge3` against the ancestor item (so by value); items added on either side
+ * survive; an item removed on one side and unedited on the other stays removed (an edit beats a
+ * removal). Item ORDER follows `mine` (the total-order winner), with `theirs`-only items
+ * appended.
+ *
+ * Duplicate identities (one key on several items) correspond by VALUE, per side against the
+ * ancestor: an occurrence equal to an ancestor occurrence is that occurrence; the remaining ones
+ * pair in order up to the smaller count; surplus ancestor occurrences were removed, surplus new
+ * ones are additions. Additions of one identity on both sides pair the same way (equal first,
+ * then in order) and fold to ONE item each (mine's), so two writers duplicating an item give two
+ * copies, not three; the longer side's surplus stay additions. At unequal counts with nothing
+ * equal, in-order pairing can merge an edit onto another occurrence: give such items distinct
+ * identities.
+ *
+ * Arrays still TRAVEL as whole-value sets. For a list whose elements move and edit concurrently,
+ * model it as a keyed container (a record of elements ordered by `posBetween`), the
+ * identity-on-the-wire form: `insertElement`/`moveElement`/`removeElement` write per element, so
+ * a reorder and a concurrent edit both survive and elements travel one at a time.
  */
 export function keyedArray(
   identity: (item: unknown) => unknown,
@@ -323,35 +387,69 @@ export function keyedArray(
       return mine; // type conflict → total-order winner, like lww
     }
     const anc = Array.isArray(ancestor) ? ancestor : [];
-    const byKey = (arr: readonly unknown[]) => {
-      const map = new Map<unknown, unknown>();
-      for (const item of arr) map.set(identity(item), item);
-      return map;
-    };
-    const ancMap = byKey(anc);
-    const mineMap = byKey(mine);
-    const theirsMap = byKey(theirs);
+    const ga = groupBy(anc, identity);
+    const gm = groupBy(mine, identity);
+    const gt = groupBy(theirs, identity);
+    // per occurrence: the ancestor occurrence it is (-1: added); a mine addition's theirs partner
+    const mineToAnc = new Map<number, number>();
+    const theirsToAnc = new Map<number, number>();
+    const addPair = new Map<number, number>();
+    const pairedTheirsAdds = new Set<number>();
+    for (const id of new Set([...ga.keys(), ...gm.keys(), ...gt.keys()])) {
+      const ai = ga.get(id) ?? [];
+      const mi = gm.get(id) ?? [];
+      const ti = gt.get(id) ?? [];
+      const ancOf = (list: number[], side: readonly unknown[]) => {
+        const p = pairOccurrences(
+          ai.map((i) => anc[i]),
+          list.map((i) => side[i]),
+        );
+        return list.map((_, k) => (p[k] === -1 ? -1 : ai[p[k]]));
+      };
+      const pm = ancOf(mi, mine);
+      const pt = ancOf(ti, theirs);
+      mi.forEach((m, k) => mineToAnc.set(m, pm[k]));
+      ti.forEach((t, k) => theirsToAnc.set(t, pt[k]));
+      const mAdds = mi.filter((_, k) => pm[k] === -1);
+      const tAdds = ti.filter((_, k) => pt[k] === -1);
+      pairOccurrences(
+        tAdds.map((i) => theirs[i]),
+        mAdds.map((i) => mine[i]),
+      ).forEach((t, k) => {
+        if (t === -1) return;
+        addPair.set(mAdds[k], tAdds[t]);
+        pairedTheirsAdds.add(tAdds[t]);
+      });
+    }
+    const theirsByAnc = new Map<number, number>();
+    for (const [t, a] of theirsToAnc) if (a !== -1) theirsByAnc.set(a, t);
+    const mineByAnc = new Set<number>();
+    for (const a of mineToAnc.values()) if (a !== -1) mineByAnc.add(a);
 
     const out: unknown[] = [];
-    for (const item of mine) {
-      const key = identity(item);
-      const other = theirsMap.get(key);
-      const base = ancMap.get(key);
-      if (theirsMap.has(key)) {
+    for (let m = 0; m < mine.length; m++) {
+      const a = mineToAnc.get(m) ?? -1;
+      const t = a === -1 ? addPair.get(m) : theirsByAnc.get(a);
+      const item = mine[m];
+      if (t !== undefined) {
+        const other = theirs[t];
+        // an addition on both sides has NO ancestor (not `undefined`): neither side is unchanged,
+        // so the pair is mine's body
         out.push(
-          structuralEq(item, other) ? item : mergeItem(base, item, other, ctx),
+          a === -1 || structEq(item, other)
+            ? item
+            : mergeItem(anc[a], item, other, ctx),
         );
-      } else if (!ancMap.has(key) || !structuralEq(item, base)) {
+      } else if (a === -1 || !structEq(item, anc[a])) {
         out.push(item); // added by mine, or edited by mine while theirs removed it → keep
       }
       // else: theirs removed it and mine left it untouched → stays removed
     }
-    for (const item of theirs) {
-      const key = identity(item);
-      if (mineMap.has(key)) continue;
-      if (!ancMap.has(key) || !structuralEq(item, ancMap.get(key))) {
-        out.push(item); // added by theirs, or edited by theirs while mine removed it → keep
-      }
+    for (let t = 0; t < theirs.length; t++) {
+      if (pairedTheirsAdds.has(t)) continue; // folded into its mine partner
+      const a = theirsToAnc.get(t) ?? -1;
+      if (a !== -1 && mineByAnc.has(a)) continue; // merged in mine's pass
+      if (a === -1 || !structEq(theirs[t], anc[a])) out.push(theirs[t]);
     }
     return out;
   };
@@ -383,46 +481,49 @@ function matchSegments(
   return true;
 }
 
+/** The first policy matching `path`, or `undefined` when none does (NOT `lww`: see {@link positional}). */
 function policyFor(
   policies: readonly CompiledPolicy[],
   path: readonly Key[],
-): MergeFn {
+): MergeFn | undefined {
   for (const p of policies) {
     if (matchSegments(p.segments, path)) return p.merge;
   }
-  return lww;
+  return undefined;
 }
+
+/**
+ * @internal The selective-undo dispatch (`storeHistory`'s `policies`/`folds`), per path of an
+ * inverse `set(prev = N, next = P)` resolved against the current value `C` as `merge(N, P, C)`:
+ * a custom fold ⇒ my inverse whole (a fold has no two-sided form); a `keyedArray` merge policy ⇒
+ * that policy (identity-aware undo); `preserve` ⇒ whole (an undo never writes a conflict value);
+ * any other explicit policy ⇒ that policy (`lww` = whole); NO policy ⇒ {@link undoMerge} for an
+ * array, `merge3` for anything else.
+ */
+export function undoMergeFor(
+  policies?: readonly MergePolicyEntry[],
+  folds?: readonly FoldPolicyEntry[],
+): (path: readonly Key[]) => MergeFn {
+  const compiled = compilePolicies(policies ?? []);
+  const custom = compilePolicies(
+    (folds ?? []).map((f) => ({ path: f.path, merge: lww })),
+  );
+  return (path) => {
+    if (custom.some((f) => matchSegments(f.segments, path))) return lww;
+    const merge = policyFor(compiled, path);
+    if (merge === undefined) return noPolicyUndo;
+    if (merge === preserve) return lww;
+    return merge;
+  };
+}
+
+const noPolicyUndo: MergeFn = (ancestor, mine, theirs, ctx) =>
+  isPlainArray(mine)
+    ? undoMerge(ancestor, mine, theirs, ctx)
+    : merge3(ancestor, mine, theirs);
 
 const SEP = ''; // unit separator: keeps joined path keys prefix-unambiguous
 const keyOf = (path: readonly Key[]): string => path.map(String).join(SEP);
-
-function structuralEq(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (
-    typeof a !== 'object' ||
-    typeof b !== 'object' ||
-    a === null ||
-    b === null ||
-    Array.isArray(a) !== Array.isArray(b)
-  ) {
-    return false;
-  }
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) {
-    if (!Object.hasOwn(b, k)) return false;
-    if (
-      !structuralEq(
-        (a as Record<string, unknown>)[k],
-        (b as Record<string, unknown>)[k],
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
 
 /**
  * One retained concurrent write at a path. The register keeps at most one sibling per origin
@@ -522,6 +623,7 @@ const preserveFold: FoldFn = (siblings) => {
     siblings: values,
     mine: values[0],
     theirs: values[1],
+    // the runner-up's `prev` (what it replaced), not a common ancestor of the siblings
     ancestor: ordered[1].prev,
   };
   return { kind: 'set', value: conflicted };
@@ -544,6 +646,101 @@ const mergeFold = (merge: MergeFn): FoldFn => {
     }
     return { kind: 'set', value: acc };
   };
+};
+
+const isPlainArray = (v: unknown): v is unknown[] =>
+  Array.isArray(v) && !isOpaque(v);
+
+/**
+ * Whether `side` moved a value: some slot changed to a value that structurally equals ANOTHER
+ * ancestor slot, and that source slot changed too (the value left it). A copy (the source slot
+ * kept its value) or an edit that happens to equal another slot is not a move; every pure move
+ * (a swap, a rotation, a shift, a move among duplicates) is.
+ */
+function movedAgainst(
+  anc: readonly unknown[],
+  side: readonly unknown[],
+): boolean {
+  for (let i = 0; i < side.length; i++) {
+    if (i < anc.length && structEq(side[i], anc[i])) continue;
+    for (let j = 0; j < anc.length; j++) {
+      if (
+        j !== i &&
+        structEq(side[i], anc[j]) &&
+        (j >= side.length || !structEq(side[j], anc[j]))
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
+/** The positional three-way merge; `movedMine: false` ignores moves on `mine` (the undo merge). */
+function positionalMerge(
+  ancestor: unknown,
+  mine: unknown,
+  theirs: unknown,
+  movedMine: boolean,
+): unknown {
+  if (!isPlainArray(ancestor) || !isPlainArray(mine) || !isPlainArray(theirs))
+    return mine;
+  if (ancestor.length !== mine.length || ancestor.length !== theirs.length)
+    return mine;
+  if (
+    (movedMine && movedAgainst(ancestor, mine)) ||
+    movedAgainst(ancestor, theirs)
+  )
+    return mine;
+  // every index, holes included (a hole reads as `undefined`), so equal inputs give equal outputs
+  let changed = false;
+  const out = Array.from(mine, (m, i) => {
+    const a = ancestor[i];
+    const t = theirs[i];
+    const v = structEq(m, a) ? t : structEq(t, a) ? m : merge3(a, m, t);
+    if (!Object.is(v, m) || !(i in mine)) changed = true;
+    return v;
+  });
+  return changed ? out : mine;
+}
+
+/**
+ * The positional array merge, and the fold of an array path that matches NO merge policy.
+ * Concurrent writes of one array merge slot by slot against the merged side's `prev` WHEN SAFE:
+ * all three are plain arrays of equal length and neither side moved a value (see below). Then a
+ * slot only one side changed takes that side's value, and a slot both changed merges like
+ * {@link merge3} (records key by key, anything else `mine`). Otherwise `mine` (the total-order
+ * winner) is kept whole, as `lww` would.
+ *
+ * A side moved a value when a changed slot structurally equals another ancestor slot whose own
+ * value changed too. A copy into a slot is not a move; an equal-valued swap is invisible. The
+ * merge is identity-blind: a reorder that also edits every moved element folds by slot, and a
+ * replacement against an edit of the same slot merges the two field-wise. Lists whose elements
+ * move and edit concurrently want the `keyedArray` merge policy or a keyed container. An explicit
+ * `lww` policy keeps the winner whole.
+ */
+export const positional: MergeFn = (ancestor, mine, theirs) =>
+  positionalMerge(ancestor, mine, theirs, true);
+
+/**
+ * The selective-undo merge for an array with no matching policy: `undoMerge(N, P, C)` with
+ * `N` = my forward write's value, `P` = the value it replaced (what undo restores), `C` = the
+ * current value. Like {@link positional} with `N` as the ancestor, except that only moves on the
+ * CURRENT side count: my own write may itself have been a reorder, so a move between `P` and `N`
+ * does not keep my inverse whole. Equal length and no move by others ⇒ slot by slot (a slot
+ * nobody else changed returns to `P`, a slot others changed keeps their value, a slot both
+ * changed merges like {@link merge3}); otherwise `P` whole.
+ */
+export const undoMerge: MergeFn = (ancestor, mine, theirs) =>
+  positionalMerge(ancestor, mine, theirs, false);
+
+const positionalFold = mergeFold(positional);
+
+/** No matching policy: arrays fold by {@link positional}, everything else by {@link defaultFold}. */
+const noPolicyFold: FoldFn = (siblings, ctx) => {
+  const winner = maxSibling(siblings);
+  return winner.kind === 'set' && isPlainArray(winner.value)
+    ? positionalFold(siblings, ctx)
+    : defaultFold(siblings, ctx);
 };
 
 /**
@@ -638,8 +835,13 @@ export type ConvergingApply = {
   materialize(): unknown;
   /** Serializable register state for a snapshot/seed checkpoint. */
   checkpoint(): RegisterCheckpoint[];
-  /** Merge checkpointed register state in (idempotent; call after `reset()` on hydrate). */
-  load(registers: readonly RegisterCheckpoint[]): void;
+  /**
+   * Merge checkpointed register state in (idempotent; call after `reset()` on hydrate). Returns
+   * the materialization of the loaded registers as deltas, each register taken as changed from
+   * nothing: applied over the checkpoint's root they give the value this replica's fold derives
+   * from that state (a checkpoint written under another fold carries a root that is stale here).
+   */
+  load(registers: readonly RegisterCheckpoint[]): StoreOp[];
   /**
    * Effect-preserving garbage collection the twin of the relay's `settle`. `settled[o]` is the stamp below which nothing new from origin
    * `o` can arrive. Drops covered siblings and watermarks at or below it; never a tombstone.
@@ -677,9 +879,6 @@ type PathReg = {
   /** the last fold result: what the store currently materializes for this path. */
   result?: FoldResult;
 };
-
-const isPlainArray = (v: unknown): v is unknown[] =>
-  Array.isArray(v) && !isOpaque(v);
 
 /**
  * The graft-side container admission. MUST equal `diffNode`'s descent set (plain records and
@@ -743,6 +942,7 @@ export function createConvergingApply(opt?: {
       if (matchSegments(f.segments, path)) return f.fold;
     }
     const merge = policyFor(policies, path);
+    if (merge === undefined) return noPolicyFold;
     if (merge === lww) return defaultFold;
     if (merge === preserve) return preserveFold;
     return mergeFold(merge);
@@ -802,7 +1002,7 @@ export function createConvergingApply(opt?: {
         (prev.kind !== 'set' ||
           next.kind !== 'set' ||
           Object.is(prev.value, next.value) ||
-          structuralEq(prev.value, next.value)));
+          structEq(prev.value, next.value)));
     if (same) return false; // keep the previous result object: reference identity is the contract
     reg.result = next;
     return true;
@@ -1104,8 +1304,10 @@ export function createConvergingApply(opt?: {
 
     load: (regs) => {
       const seq = ++ingestSeq;
+      const loaded = new Map<string, Changed>();
       for (const r of regs) {
         const reg = regAt(r.path);
+        loaded.set(keyOf(r.path), { reg, before: undefined });
         const key = keyOf(r.path);
         for (const s of r.siblings) {
           observeApplied(s.origin, s.hlc);
@@ -1128,6 +1330,7 @@ export function createConvergingApply(opt?: {
         }
         refresh(reg);
       }
+      return deltas([...loaded.values()]);
     },
 
     emissionFloors: () =>
@@ -1176,13 +1379,18 @@ export function createConvergingApply(opt?: {
   };
 }
 
-function getAtPath(root: unknown, path: readonly Key[]): unknown {
+/** The value at `path` with presence: a key holding `undefined` is found, an absent one is not. */
+function lookupAt(
+  root: unknown,
+  path: readonly Key[],
+): { found: boolean; value: unknown } {
   let cur: unknown = root;
   for (const seg of path) {
-    if (cur === null || typeof cur !== 'object') return undefined;
+    if (cur === null || typeof cur !== 'object' || !Object.hasOwn(cur, seg))
+      return { found: false, value: undefined };
     cur = (cur as Record<Key, unknown>)[seg];
   }
-  return cur;
+  return { found: true, value: cur };
 }
 
 export type RebaseResult<T = unknown> = {
@@ -1218,13 +1426,15 @@ export function rebaseOps<T>(
         next.push(op); // a register intent, not a value change: passes through untouched
         continue;
       }
-      const cur = getAtPath(base, op.path);
+      const here = lookupAt(base, op.path);
+      const cur = here.value;
       if (op.kind === 'delete') {
         next.push({ kind: 'delete', path: op.path, prev: cur });
-      } else if (cur === undefined) {
+      } else if (!here.found) {
+        // absent now: an add (no `prev`); a key holding `undefined` is present and merges below
         next.push({ kind: 'set', path: op.path, next: op.next });
-      } else if (Object.hasOwn(op, 'prev') && !structuralEq(op.prev, cur)) {
-        const merge = policyFor(compiled, op.path);
+      } else if (Object.hasOwn(op, 'prev') && !structEq(op.prev, cur)) {
+        const merge = policyFor(compiled, op.path) ?? positional;
         const resolved = merge(op.prev, op.next, cur, { path: op.path });
         next.push({ kind: 'set', path: op.path, next: resolved, prev: cur });
       } else {
@@ -1238,12 +1448,16 @@ export function rebaseOps<T>(
   return { root: base as T, pending: rebased };
 }
 
+const UNIT: DiffOpsOptions = { arrays: 'unit' };
+
 /**
  * A per-path-policy `ForkStrategy` for `forkStore`: a three-way reconcile built from the
  * shared rebase (invert mine → apply theirs' delta → re-apply mine through the policies).
  * Paths only one side touched resolve like `merge3`; paths BOTH touched go through the
- * matching {@link MergePolicyEntry} (`lww` default — fork wins, matching `'fine'`; or
- * `mergeThree` / `preserve` / custom). Same copy-on-write contract as `'fine'`.
+ * matching {@link MergePolicyEntry} (`lww` — fork wins, matching `'fine'`; or `mergeThree` /
+ * `preserve` / custom). Arrays diff as units, so an array policy sees whole arrays; an array
+ * path with NO matching policy merges by {@link positional}, an explicit `lww` keeps the fork's
+ * array whole. Same copy-on-write contract as `'fine'`.
  */
 export function policyStrategy<T>(
   policies: readonly MergePolicyEntry[],
@@ -1251,8 +1465,8 @@ export function policyStrategy<T>(
   return (ancestor, mine, theirs) =>
     rebaseOps(
       mine,
-      [diffOps(ancestor, mine)],
-      diffOps(ancestor, theirs),
+      [diffOps(ancestor, mine, UNIT)],
+      diffOps(ancestor, theirs, UNIT),
       policies,
     ).root;
 }
@@ -1270,7 +1484,10 @@ export type OpSyncOptions = {
   readonly clock?: HlcClock;
   readonly injector?: Injector;
   readonly driver?: OpLogDriver;
-  /** Emission diff options for local writes, forwarded to the underlying `opLog` (see `DiffOpsOptions`). */
+  /**
+   * Emission diff options for local writes, forwarded to the underlying `opLog` (see
+   * `DiffOpsOptions`). `arrays` defaults to `'unit'` here (an `opLog` alone defaults to `'index'`).
+   */
   readonly emit?: DiffOpsOptions;
   /** A version gap from a known origin (missed envelopes) — the resync hook. */
   readonly onGap?: (origin: string, expected: number, got: number) => void;
@@ -1286,6 +1503,13 @@ export type OpSyncOptions = {
  * resurrect on it while every established peer keeps ignoring it.
  */
 export type OpSyncCheckpoint<T = unknown> = {
+  /**
+   * The {@link OP_PROTO_VERSION} of the writer. `hydrate` re-materializes every checkpoint under
+   * its own fold, so a protocol 3 (or unversioned, i.e. written before this field existed) or a
+   * current checkpoint loads; any other version throws (older registers lack cites + epoch,
+   * newer ones may mean something this version cannot fold).
+   */
+  readonly proto?: number;
   readonly root: T;
   readonly registers: readonly RegisterCheckpoint[];
   readonly wm: Readonly<Record<string, number>>;
@@ -1313,8 +1537,13 @@ export type SyncedFork<T> = Fork<T> & {
 
 export type OpSync<T = unknown> = {
   readonly origin: string;
-  /** Locally-emitted envelopes, ready for a transport. */
-  subscribe(cb: (env: OpEnvelope) => void): () => void;
+  /**
+   * Locally-emitted envelopes, ready for a transport. The second argument
+   * ({@link EmitContext}) carries the store root the envelope's ops produced, captured when it
+   * was minted (before any fork-commit reconcile, and kept for an envelope whose delivery was
+   * deferred); it is never part of the envelope.
+   */
+  subscribe(cb: (env: OpEnvelope, ctx?: EmitContext) => void): () => void;
   /** Converging apply of a remote envelope (echo-free; own-origin envelopes are ignored). */
   receive(env: OpEnvelope): void;
   /** Synchronously emit any pending local delta now. */
@@ -1436,7 +1665,7 @@ export function opSync<T extends object>(
     folds: opt.folds,
     origin,
   });
-  const subscribers = new Set<(env: OpEnvelope) => void>();
+  const subscribers = new Set<(env: OpEnvelope, ctx?: EmitContext) => void>();
   const versions = new Map<string, number>();
   const recentLocal: OpEnvelope[] = [];
   let instance = opt.instance;
@@ -1446,15 +1675,22 @@ export function opSync<T extends object>(
     ? null
     : (opt.injector ?? inject(Injector));
 
+  // a sync emits every changed array as ONE unit unless the caller chose otherwise: the register
+  // folds whole arrays (see `positional`), and per-index ops would bypass it
+  const emit: DiffOpsOptions = {
+    ...opt.emit,
+    arrays: opt.emit?.arrays ?? 'unit',
+  };
   const log = opLog(
     source,
     opt.driver
-      ? { origin, driver: opt.driver, emit: opt.emit }
-      : { origin, injector: resolvedInjector as Injector, emit: opt.emit },
+      ? { origin, driver: opt.driver, emit }
+      : { origin, injector: resolvedInjector as Injector, emit },
   );
 
   const canDefer = !opt.driver;
-  const outbox: OpEnvelope[] = [];
+  // deferred local envelopes, each beside the root it was minted with (never on the envelope)
+  const outbox: { env: OpEnvelope; ctx: EmitContext }[] = [];
   let receiving = false;
   let bumping = false;
   // set while a synced fork's commit is emitting: freezes emission cites to what the fork observed
@@ -1464,14 +1700,20 @@ export function opSync<T extends object>(
   const drainTick = signal(0);
   const scheduleDrain = (): void => drainTick.update((v) => v + 1);
 
-  const notify = (env: OpEnvelope): void => {
-    for (const cb of [...subscribers]) cb(env);
+  const notify = (env: OpEnvelope, ctx: EmitContext): void => {
+    for (const cb of [...subscribers]) cb(env, ctx);
   };
   const drainOutbox = (): void => {
-    for (const env of outbox.splice(0)) notify(env);
+    // in place (never a spliced copy): a nested flush() or a mid-drain local write keeps FIFO order
+    while (outbox.length) {
+      const next = outbox.shift();
+      if (next) notify(next.env, next.ctx);
+    }
   };
 
-  const emitLocal = (ops: readonly StoreOp[]): void => {
+  /** `root`: the store value these ops produced, captured now (before a fork-commit reconcile). */
+  const emitLocal = (ops: readonly StoreOp[], root: unknown): void => {
+    const ctx: EmitContext = { root };
     const frontier = scopeFrontier;
     const stamped = conv.stamp(ops, { bump: bumping, frontier });
     if (isDevMode()) lintWireValues(stamped);
@@ -1500,14 +1742,16 @@ export function opSync<T extends object>(
     if (recentLocal.length > RECENT_LOCAL_CAP) recentLocal.shift();
     // mid-receive, or a drain still owed → queue (frozen stamp verbatim) instead of emitting now
     if (canDefer && (receiving || outbox.length)) {
-      outbox.push(env);
+      outbox.push({ env, ctx });
       scheduleDrain();
       return;
     }
-    notify(env);
+    notify(env, ctx);
   };
 
-  const unsub = log.subscribe((batch) => emitLocal(batch.ops));
+  const unsub = log.subscribe((batch, ctx) =>
+    emitLocal(batch.ops, ctx?.root ?? untracked(source)),
+  );
 
   // fires on the tick after `scheduleDrain`: emits frozen local envelopes outside any receive frame
   const drainRun = (): void => {
@@ -1606,6 +1850,7 @@ export function opSync<T extends object>(
     snapshot: () => {
       log.flush();
       return {
+        proto: OP_PROTO_VERSION,
         root: untracked(source),
         registers: conv.checkpoint(),
         wm: Object.fromEntries(versions),
@@ -1614,9 +1859,21 @@ export function opSync<T extends object>(
     },
     seed: () => {
       log.flush();
-      emitLocal([{ kind: 'set', path: [], next: untracked(source) }]);
+      const root = untracked(source);
+      emitLocal([{ kind: 'set', path: [], next: root }], root);
     },
     hydrate: (state, pending) => {
+      // absent = written before the field existed = 3; below 3 registers lack cites + epoch, above
+      // they may mean something this fold cannot read: neither is guessed at
+      if (
+        state.proto !== undefined &&
+        state.proto !== 3 &&
+        state.proto !== OP_PROTO_VERSION
+      ) {
+        throw new Error(
+          `[@mmstack/primitives] cannot hydrate a checkpoint written by protocol ${state.proto}: this replica speaks protocol ${OP_PROTO_VERSION} and loads only protocol 3 (or unversioned) and ${OP_PROTO_VERSION} checkpoints`,
+        );
+      }
       log.flush();
 
       const source = pending ?? recentLocal;
@@ -1624,9 +1881,9 @@ export function opSync<T extends object>(
         (e) => e.version > (state.wm?.[e.origin] ?? 0),
       );
       conv.reset();
-      conv.load(state.registers ?? []);
-
-      const deltas: StoreOp[] = [];
+      // parity: the root is what THIS fold derives from the loaded registers, whatever fold wrote
+      // the checkpoint's root (a v3 checkpoint's root keeps array winners whole)
+      const deltas: StoreOp[] = conv.load(state.registers ?? []);
       for (const e of toReplay) {
         deltas.push(...conv.ingest(e, { local: true, reconcile: true }));
       }
@@ -1637,7 +1894,19 @@ export function opSync<T extends object>(
         versions.set(o, Math.max(versions.get(o) ?? 0, v));
       }
     },
-    restore: (envs, highWater, floors, clockHigh) => {
+    restore: (all, highWater, floors, clockHigh) => {
+      // an outbox written under another protocol folds differently: drop it, loudly
+      const envs = all.filter((env) => {
+        if (env.proto === OP_PROTO_VERSION) return true;
+        const reason = `proto ${env.proto} (expected ${OP_PROTO_VERSION})`;
+        if (isDevMode()) {
+          console.warn(
+            `[@mmstack/primitives] restore dropped an outbox envelope with ${reason}: an offline tail from another protocol version is never replayed`,
+          );
+        }
+        opt.onReject?.(env, reason);
+        return false;
+      });
       if (floors) conv.restoreFloors(floors);
       if (clockHigh) clock.observe(clockHigh); // an acked, dropped tail still moved the clock
       let tailOrigin: string | undefined;
@@ -1652,7 +1921,7 @@ export function opSync<T extends object>(
           Math.max(versions.get(env.origin) ?? 0, env.version),
         );
         tailOrigin = env.origin;
-        notify(env); // hand to the transport to resend the unacknowledged tail
+        notify(env, { root: untracked(source) }); // hand to the transport to resend the unacknowledged tail
       }
       if (highWater != null && tailOrigin != null) {
         versions.set(

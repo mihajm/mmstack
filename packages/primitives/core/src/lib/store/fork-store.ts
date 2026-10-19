@@ -2,6 +2,7 @@ import { isDevMode, linkedSignal, untracked } from '@angular/core';
 import { STORE_SHARED_OPTIONS } from './internals';
 import { diffOps, type StoreOp } from './op-log';
 import type { UnwrapOpaque } from './opaque';
+import { isRecord, structEq } from './predicates';
 import { toStore, type toStoreOptions } from './store';
 import type { WritableSignalStore } from './types';
 
@@ -40,7 +41,7 @@ export type ForkStrategy<T> = 'fine' | 'coarse' | ReconcileFn<T>;
  * Reactivity note: the fork reads through a single staged signal, so a read subscribes to the
  * whole record (coarser than the base store's per-leaf tracking) and the strategy re-runs on any
  * base change. Free when the base is held (it never ticks); on a live base, `'fine'`'s {@link
- * merge3} is identity-pruned so it only walks paths that both sides changed.
+ * merge3} checks reference identity first, so a subtree neither side touched costs one comparison.
  */
 export type Fork<T> = {
   /** The forked store — use it like any store (read/write/extend). */
@@ -53,60 +54,63 @@ export type Fork<T> = {
   ops(): StoreOp[];
 };
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object') return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+const ABSENT: unique symbol = Symbol('absent');
+type Slot = unknown;
+
+const fieldOf = (r: Record<string, unknown>, k: string): Slot =>
+  Object.hasOwn(r, k) ? r[k] : ABSENT;
+
+/** Same value, presence included: an absent key equals only an absent key. */
+const sameSlot = (a: Slot, b: Slot): boolean =>
+  a === ABSENT || b === ABSENT ? a === b : structEq(a, b);
+
+function mergeSlot(ancestor: Slot, mine: Slot, theirs: Slot): Slot {
+  // fast path: a copy-on-write side that kept its reference is unchanged, without a deep compare
+  if (Object.is(mine, theirs) || Object.is(mine, ancestor)) return theirs;
+  if (Object.is(theirs, ancestor)) return mine;
+  if (sameSlot(mine, theirs) || sameSlot(mine, ancestor)) return theirs;
+  // `theirs` equal to the ancestor needs no check of its own: the result is `mine` either way, and
+  // walking records key by key keeps the base's references for the subtrees the fork left alone
+  if (isRecord(ancestor) && isRecord(mine) && isRecord(theirs)) {
+    const out: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+      const merged = mergeSlot(
+        fieldOf(ancestor, key),
+        fieldOf(mine, key),
+        fieldOf(theirs, key),
+      );
+      if (merged !== ABSENT) out[key] = merged;
+    }
+    return out;
+  }
+  return mine; // leaf / array / type-mismatch conflict → local wins
 }
 
 /**
- * Per-path 3-way merge. Reference-equality short-circuits do the work: a subtree the fork never
- * touched satisfies `mine === ancestor` (structural sharing keeps its identity) → take the live
- * base; a subtree the base never changed satisfies `theirs === ancestor` → keep the fork's. So it
- * only deep-walks paths that BOTH sides changed, and on a leaf/array conflict the fork wins.
- * Arrays are treated atomically (no positional merge — index shifts make that unsafe); supply a
- * {@link ReconcileFn} for array-aware merging.
+ * Per-path 3-way merge by VALUE. A side whose value equals the ancestor made no change and yields
+ * to the other side: `mine` equal to the ancestor takes the live base, `theirs` equal to the
+ * ancestor keeps the fork's edit. When both sides changed a plain record, it merges key by key;
+ * any other conflict (a leaf, an array, a type change) keeps the fork's value. Arrays are atomic
+ * here (no positional merge); supply a {@link ReconcileFn} for array-aware merging.
  *
- * CONTRACT: "unchanged" is detected by REFERENCE identity, not deep equality. `mine` must be a
- * copy-on-write derivative of `ancestor` — i.e. untouched nodes keep their reference — which the
- * fork guarantees because writes flow through `toStore` (it rebuilds only the edited path and
- * shares everything else). Feed it a structurally-equal-but-fresh-reference node for an untouched
- * path and it will treat that node as edited (recursion/leaf-value checks usually still reconcile,
- * but a fresh-ref clean node vs a base type-change resolves to the fork's stale value). Primitive
- * leaves compare by value, so equal primitives are correctly seen as unchanged.
+ * Equality is structural over plain data: plain records and plain arrays compare deeply,
+ * primitives by `Object.is`, and everything else (a `Date`, `Map`, class instance, opaque value)
+ * only by reference. So a side that edited a value and then wrote it back as a fresh copy counts
+ * as unchanged: with ancestor `{ arr: [0] }`, a fork that wrote `[1]` and then a fresh `[0]`, and
+ * a base now at `{ arr: [2] }`, the merge is `{ arr: [2] }`.
+ *
+ * Fast path: before any deep compare, reference identity is checked first. A subtree the fork
+ * never touched keeps its reference under copy-on-write writes (`toStore` rebuilds only the
+ * edited path), so it is recognised as unchanged at the cost of one comparison, and only paths
+ * whose references differ are compared by value.
  *
  * An absent key and a key holding `undefined` are different values here, because `diffOps` (and
  * so `Fork.ops()` and every sync layer built on it) turns one into the other with a `set` or a
- * `delete`. When a key merges to `undefined`, the result copies presence from the side that won:
- * if the fork changed the key, the key is present only when the fork holds it; otherwise it is
- * present only when the base holds it. So a key the base deleted and the fork left alone is
+ * `delete`. Presence merges like any value: a key the base deleted and the fork left alone is
  * absent, a key the fork deleted is absent, and only a deliberate `undefined` survives as a key.
  */
 export function merge3<T>(ancestor: T, mine: T, theirs: T): T {
-  if (Object.is(mine, theirs) || Object.is(mine, ancestor)) return theirs; // unedited → live base
-  if (Object.is(theirs, ancestor)) return mine; // base unchanged here → keep the fork's edit
-
-  if (isPlainRecord(mine) && isPlainRecord(theirs) && isPlainRecord(ancestor)) {
-    const a = ancestor as Record<string, unknown>;
-    const m = mine as Record<string, unknown>;
-    const t = theirs as Record<string, unknown>;
-    const out: Record<string, unknown> = { ...t };
-    for (const key of new Set([...Object.keys(m), ...Object.keys(t)])) {
-      const merged = merge3(a[key], m[key], t[key]);
-      if (merged !== undefined) {
-        out[key] = merged;
-        continue;
-      }
-      // An `undefined` result takes its presence from the side that won: the fork's if the fork
-      // changed this key (value or presence), otherwise the base's.
-      const forkChanged = key in m !== key in a || !Object.is(m[key], a[key]);
-      if (forkChanged ? key in m : key in t) out[key] = undefined;
-      else delete out[key];
-    }
-    return out as T;
-  }
-
-  return mine; // leaf / array / type-mismatch conflict → local wins
+  return mergeSlot(ancestor, mine, theirs) as T;
 }
 
 /**

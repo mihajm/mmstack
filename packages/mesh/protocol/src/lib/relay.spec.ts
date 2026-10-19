@@ -321,6 +321,28 @@ describe('createRelay', () => {
     });
   });
 
+  it('[PIN proto 4] the relay speaks protocol 4 (K-diff fold) and refuses a v3 hello and a v3 envelope', () => {
+    expect(MESH_PROTO_VERSION).toBe(4);
+    const relay = createRelay();
+    const sock = socket();
+    relay.connect(sock, { writer: 'w' }).receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: 3,
+      policyVersion: 0,
+    });
+    expect(last(sock)).toMatchObject({
+      t: 'reject',
+      reason: 'proto',
+      expected: 4,
+    });
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['x'], 1)], { proto: 3 });
+    expect(a.sock.closed).toBe(true);
+  });
+
   it('rejects a pre-citation emitter per envelope: a stale-proto envelope is a proto violation, never merged', () => {
     const relay = createRelay();
     const a = client(relay, 'wa', 'oa');
@@ -758,6 +780,169 @@ describe('createRelay: persistence seam', () => {
         (e) => e.seq,
       ),
     ).toEqual([3, 4]);
+  });
+});
+
+describe('relay hydrate across a protocol upgrade (K-diff, proto 4)', () => {
+  it('[PIN N1 relay journal suffix] a journal with an old-proto prefix keeps only its current-proto suffix: a joiner behind it is answered with a snapshot, so a delta-joiner and a snapshot-joiner end with the same registers', () => {
+    const mk = (seq: number, proto: number, path: string): SeqEnvelope => ({
+      proto,
+      instance: 'g',
+      origin: 'oa',
+      writer: 'wa',
+      version: seq,
+      hlc: { p: seq, l: 0 },
+      policyVersion: 0,
+      ops: [set([path], seq)],
+      seq,
+    });
+    const journal = [
+      mk(1, 3, 'x'),
+      mk(2, 3, 'y'),
+      mk(3, MESH_PROTO_VERSION, 'z'),
+    ];
+    const all = createRegisterStore();
+    for (const e of journal) all.ingest(e);
+    const relay = createRelay();
+    relay.hydrate('r', {
+      seq: 3,
+      instance: 'g',
+      registers: all.checkpoint(),
+      wm: { oa: 3 },
+      journal,
+    });
+    expect(relay.room('r')).toMatchObject({ journal: 1 });
+
+    // the joiner applied seq 1 before the upgrade; a client only ever folds current-proto envelopes
+    const joinerAt1 = createRegisterStore();
+    joinerAt1.ingest(journal[0]);
+    const behind = client(relay, 'wb', 'ob');
+    behind.hello(1);
+    const welcome = last(behind.sock) as unknown as {
+      mode: string;
+      envs?: SeqEnvelope[];
+      registers?: RegisterCheckpoint[];
+    };
+    if (welcome.mode === 'delta') {
+      for (const e of welcome.envs ?? [])
+        if (e.proto === MESH_PROTO_VERSION) joinerAt1.ingest(e);
+    } else {
+      joinerAt1.reset();
+      joinerAt1.load(welcome.registers ?? []);
+    }
+    const fresh = client(relay, 'wf', 'of');
+    fresh.hello();
+    const snapshotJoiner = createRegisterStore();
+    snapshotJoiner.load(snapshotOf(fresh.sock).registers);
+    expect(welcome.mode).toBe('snapshot');
+    expect(joinerAt1.checkpoint()).toEqual(snapshotJoiner.checkpoint());
+  });
+});
+
+describe('relay hydrate: the exact delta boundary and journalLimit 0 (astra r3 B1)', () => {
+  const mk = (seq: number, proto: number): SeqEnvelope => ({
+    proto,
+    instance: 'g',
+    origin: 'oa',
+    writer: 'wa',
+    version: seq,
+    hlc: { p: seq, l: 0 },
+    policyVersion: 0,
+    ops: [set([`k${seq}`], seq)],
+    seq,
+  });
+  const relayWith = (
+    journal: SeqEnvelope[],
+    opt?: { journalLimit?: number },
+  ) => {
+    const regs = createRegisterStore();
+    for (const e of journal) regs.ingest(e);
+    const relay = createRelay(opt);
+    relay.hydrate('r', {
+      seq: journal.length,
+      instance: 'g',
+      registers: regs.checkpoint(),
+      wm: { oa: journal.length },
+      journal,
+    });
+    return relay;
+  };
+  const modeAt = (
+    relay: ReturnType<typeof createRelay>,
+    seq: number,
+    origin: string,
+  ) => {
+    const c = client(relay, `w${origin}`, origin);
+    c.hello(seq);
+    return last(c.sock) as unknown as { mode: string; envs?: SeqEnvelope[] };
+  };
+
+  it('[PIN B relay boundary] first kept seq 3 (old prefix 1, 2): seq 1 = firstKept − 2 ⇒ snapshot; seq 2 = firstKept − 1 ⇒ delta of the suffix [3,4]; seq 4 ⇒ up-to-date', () => {
+    const relay = relayWith([
+      mk(1, 3),
+      mk(2, 3),
+      mk(3, MESH_PROTO_VERSION),
+      mk(4, MESH_PROTO_VERSION),
+    ]);
+    expect(modeAt(relay, 1, 'o1').mode).toBe('snapshot');
+    const delta = modeAt(relay, 2, 'o2');
+    expect(delta.mode).toBe('delta');
+    expect((delta.envs ?? []).map((e) => e.seq)).toEqual([3, 4]);
+    expect(modeAt(relay, 4, 'o4').mode).toBe('up-to-date');
+  });
+
+  it('[PIN B all-old journal] a journal of only protocol-3 entries keeps nothing: seq 1 ⇒ snapshot, seq 2 (= room seq) ⇒ up-to-date', () => {
+    const relay = relayWith([mk(1, 3), mk(2, 3)]);
+    expect(relay.room('r')).toMatchObject({ journal: 0 });
+    expect(modeAt(relay, 1, 'o1').mode).toBe('snapshot');
+    expect(modeAt(relay, 2, 'o2').mode).toBe('up-to-date');
+  });
+
+  it('[PIN B1 journalLimit 0] keeps no journal at hydrate or after an admission; a behind client gets a snapshot', () => {
+    const relay = relayWith(
+      [mk(1, MESH_PROTO_VERSION), mk(2, MESH_PROTO_VERSION)],
+      { journalLimit: 0 },
+    );
+    expect(relay.room('r')).toMatchObject({ journal: 0 });
+    expect(modeAt(relay, 1, 'o1').mode).toBe('snapshot');
+    const w = client(relay, 'ww', 'ow');
+    w.hello(2);
+    w.env([set(['z'], 1)]);
+    expect(relay.room('r')).toMatchObject({ seq: 3, journal: 0 });
+  });
+
+  it('[PIN B limit 1 + future entry] snapshot seq 4, journal (1,3),(2,3),(3,4),(4,4),(5,4), journalLimit 1: the future entry 5 is filtered, only seq 4 is kept; seq 2 ⇒ snapshot, seq 3 ⇒ delta [4], seq 4 ⇒ up-to-date', () => {
+    const journal = [
+      mk(1, 3),
+      mk(2, 3),
+      mk(3, MESH_PROTO_VERSION),
+      mk(4, MESH_PROTO_VERSION),
+      mk(5, MESH_PROTO_VERSION),
+    ];
+    const regs = createRegisterStore();
+    for (const e of journal.slice(0, 4)) regs.ingest(e);
+    const relay = createRelay({ journalLimit: 1 });
+    relay.hydrate('r', {
+      seq: 4,
+      instance: 'g',
+      registers: regs.checkpoint(),
+      wm: { oa: 4 },
+      journal,
+    });
+    expect(relay.room('r')).toMatchObject({ seq: 4, journal: 1 });
+    expect(modeAt(relay, 2, 'o2').mode).toBe('snapshot');
+    const delta = modeAt(relay, 3, 'o3');
+    expect(delta.mode).toBe('delta');
+    expect((delta.envs ?? []).map((e) => e.seq)).toEqual([4]);
+    expect(modeAt(relay, 4, 'o4').mode).toBe('up-to-date');
+  });
+
+  it('[PIN B1 admission trim] with journalLimit 2 the journal never exceeds 2 entries across admissions', () => {
+    const relay = relayWith([mk(1, MESH_PROTO_VERSION)], { journalLimit: 2 });
+    const w = client(relay, 'ww', 'ow');
+    w.hello(1);
+    for (let i = 0; i < 3; i++) w.env([set(['z'], i)]);
+    expect(relay.room('r')).toMatchObject({ seq: 4, journal: 2 });
   });
 });
 

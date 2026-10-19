@@ -32,11 +32,14 @@ export type SyncOp = StoreOp & {
  * fence written in two places and must move together. Version 2 ops carry `cites` + `epoch`
  * (an op without citations cannot be merged soundly — it would supersede nothing and its
  * siblings would accumulate forever); version 3 changes materialization semantics rather than
- * shape, so a v2 and a v3 replica cannot converge on the same op set. Either way the relay
- * rejects envelopes from any other version outright rather than silently mixing incompatible
- * emitters into a room.
+ * shape, so a v2 and a v3 replica cannot converge on the same op set. Version 4 changes the
+ * client FOLD: an array register with no merge policy merges concurrent writes position by
+ * position instead of keeping the winner whole, so a v3 and a v4 replica holding the same
+ * registers materialize different arrays. Either way the relay rejects envelopes from any other
+ * version outright rather than silently mixing incompatible emitters into a room, and a hydrated
+ * journal keeps only its current-version suffix (see `Relay.hydrate`).
  */
-export const MESH_PROTO_VERSION = 3;
+export const MESH_PROTO_VERSION = 4;
 
 export type OpEnvelope = {
   readonly proto: number;

@@ -1323,6 +1323,21 @@ describe('opSync', () => {
     expect(b().v).toBe('resolved');
   });
 
+  it('[PIN proto 4] the protocol is 4 (K-diff: the no-policy array fold changed) and a v3 envelope is dropped', () => {
+    expect(OP_PROTO_VERSION).toBe(4);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { a, syncA } = pair();
+      syncA.receive({
+        ...env([set(['v'], 'v3')], { p: 99, writer: 'z' }),
+        proto: 3,
+      });
+      expect(a().v).toBe('init');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('drops foreign-proto envelopes with a dev warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {

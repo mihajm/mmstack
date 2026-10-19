@@ -12,7 +12,7 @@ Low-level signal utilities: deep reactive stores, timing helpers, sensors, persi
 - [Signal variants](https://mihajm.github.io/mmstack/docs/primitives/signals): mutable, derived, toWritable
 - [Store](https://mihajm.github.io/mmstack/docs/primitives/store): deep reactive store, extendStore, forkStore, projection, opLog, opaque
 - [Sync and convergence](https://mihajm.github.io/mmstack/docs/primitives/sync): op-log, tabSync, per-path merge policies, rebase
-- [Mapped collections](https://mihajm.github.io/mmstack/docs/primitives/collections): indexArray, keyArray, mapObject
+- [Mapped collections](https://mihajm.github.io/mmstack/docs/primitives/collections): indexArray, mapArray, mapObject
 - [Timing](https://mihajm.github.io/mmstack/docs/primitives/timing): debounced, throttled, until
 - [Storage and history](https://mihajm.github.io/mmstack/docs/primitives/storage): stored, tabSync, withHistory
 - [Sensors](https://mihajm.github.io/mmstack/docs/primitives/sensors): browser state as signals

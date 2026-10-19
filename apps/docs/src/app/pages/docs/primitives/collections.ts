@@ -40,7 +40,7 @@ import { DocSection } from '../../../layout/doc-section';
             <code>indexArray</code> stabilizes an array <strong>by position</strong>.
           </li>
           <li>
-            <code>keyArray</code> stabilizes an array <strong>by identity</strong>.
+            <code>mapArray</code> stabilizes an array <strong>by identity</strong>.
           </li>
           <li>
             <code>mapObject</code> is the record equivalent, stable
@@ -70,19 +70,21 @@ import { DocSection } from '../../../layout/doc-section';
           cheaper of the two array helpers.
         </p>
         <p>
-          If you know it from SolidJS, <code>mapArray</code> is a deprecated
-          alias for <code>indexArray</code>; it stays for compatibility, so reach
-          for <code>indexArray</code> in new code.
+          Solid users: <code>mapArray</code> is the keyed mapper here too; the
+          slot mapper is <code>indexArray</code>.
         </p>
       </docs-section>
 
-      <docs-section title="keyArray, stable by identity" id="key-array">
+      <docs-section title="mapArray, stable by identity" id="map-array">
         <p>
-          <code>keyArray</code> stabilizes by identity instead. You pass a
-          <code>key</code> selector; moving an item then carries its derivation
-          along, and only the item's index signal updates. Here the mapping
-          receives the item value and a <code>Signal&lt;number&gt;</code> for its
-          current index.
+          <code>mapArray</code> stabilizes by identity instead. Items are their
+          own keys, or you pass a <code>key</code> selector; moving an item then
+          carries its derivation along, and only the entry's index signal
+          updates. The mapping receives the item as a read-only signal, a
+          <code>Signal&lt;number&gt;</code> for its current index, the raw key
+          and the entry's handle. With a <code>key</code>, an immutable update
+          (same id, new object) keeps the entry and the item signal reports the
+          new object.
         </p>
         <docs-code [code]="keyEx" lang="ts" />
         <p>
@@ -90,11 +92,17 @@ import { DocSection } from '../../../layout/doc-section';
           should survive a reorder: a rendered chart, a media element with
           playback state, a drag-and-drop row. With <code>indexArray</code> a
           reorder would hand each position a different item and force those to
-          rebuild; with <code>keyArray</code> the instance moves with its item.
+          rebuild; with <code>mapArray</code> the instance moves with its item.
           If nothing downstream depends on instance reuse across reorders,
           <code>indexArray</code> is enough. Both accept an
           <code>onDestroy</code> callback that runs when a mapped entry is
           removed, so per-item resources can clean up.
+        </p>
+        <p>
+          A row is as fresh as the list's last read. The list writes each
+          entry's item and index signals when it is read, so a row read before
+          the list sees the previous state, never a mix of two: its item and
+          index always belong to the same source array.
         </p>
       </docs-section>
 
@@ -148,10 +156,10 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Handles" id="handles">
         <p>
-          The mapping function receives the entry's key as a third argument.
-          Pass <code>handles: true</code> and it receives the entry's lifetime
-          handle there instead: the raw key while that key never had duplicates,
-          an opaque <code>&#123; key, n &#125;</code> object once it did. The
+          The mapping function receives the entry's raw key as its third
+          argument and the entry's lifetime handle as its fourth: the raw key
+          while that key never had duplicates, an opaque
+          <code>&#123; key, n &#125;</code> object once it did. The
           handle stays the same for the life of the entry, even after the key
           becomes unique again, so it is a safe name for the entry.
           <code>isKeyHandle(value)</code> tells the two apart, and
@@ -178,8 +186,8 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Relative order" id="reorders">
         <p>
-          Pass <code>order: true</code> and the result gains
-          <code>reorders</code>, a read-only signal that says whether the
+          The result always has <code>reorders</code>, a read-only signal that
+          says whether the
           entries changed their order relative to each other. It holds the
           permutation among the entries present both at its last evaluation and
           now, named by handle: <code>before</code> lists them in the old order,
@@ -199,14 +207,13 @@ import { DocSection } from '../../../layout/doc-section';
           swapping two items and swapping them back before it is read gives
           <code>null</code>. Reading the mapped array in between loses nothing,
           since that read does not move the baseline. The first read is
-          <code>null</code>. Without the option nothing extra is created or
-          computed.
+          <code>null</code>. Unread, nothing is computed for it.
         </p>
       </docs-section>
 
       <docs-section title="handles on its own" id="handles-fn">
         <p>
-          The matching behind <code>keyArray</code> is exported as
+          The matching behind <code>mapArray</code> is exported as
           <code>handles(prev, items, keyOf)</code>, for code that tracks the
           identity of list occurrences without mapping them. Pass the previous
           table (or <code>null</code> the first time), the new items and a key
@@ -226,7 +233,7 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="mapObject for records" id="map-object">
         <p>
           <code>mapObject</code> is the record counterpart of
-          <code>keyArray</code>. It maps a <code>Record&lt;K, V&gt;</code> into a
+          <code>mapArray</code>. It maps a <code>Record&lt;K, V&gt;</code> into a
           <code>Record&lt;K, U&gt;</code> with referential stability for
           unchanged keys, and when the source is writable it hands the mapping a
           writable signal slice for each value, so each entry can both read and
@@ -257,40 +264,41 @@ const labels = indexArray(items, (child, index) =>
 );`;
 
   protected readonly keyEx = `import { computed } from '@angular/core';
-import { keyArray, mutable } from '@mmstack/primitives';
+import { mapArray, mutable } from '@mmstack/primitives';
 
 const items = mutable([
   { id: 1, name: 'A' },
   { id: 2, name: 'B' },
 ]);
 
-// child is the item value, index is a Signal<number>
-const keyed = keyArray(
+// child is a Signal of the entry's item, index is a Signal<number>
+const keyed = mapArray(
   items,
-  (child, index) => computed(() => \`\${index()}: \${child.name}\`),
+  (child, index) => computed(() => \`\${index()}: \${child().name}\`),
   { key: (item) => item.id },
 );`;
 
-  protected readonly handlesEx = `import { isKeyHandle, keyArray } from '@mmstack/primitives';
+  protected readonly handlesEx = `import { mapArray } from '@mmstack/primitives';
 
-const rows = keyArray(
+const rows = mapArray(
   items,
-  (item, index, handle) => ({
+  (item, index, id, handle) => ({
+    id, // the raw id
     handle, // the raw id, or an opaque handle once the id was duplicated
-    id: isKeyHandle(handle) ? handle.key : handle,
     item,
   }),
-  { key: (item) => item.id, handles: true },
+  // annotate the parameter: a mapping that names the key or handle is typed
+  // before the options, so an unannotated (item) => item.id is not inferred
+  { key: (item: Item) => item.id },
 );`;
 
-  protected readonly onDuplicatesEx = `const rows = keyArray(items, render, {
+  protected readonly onDuplicatesEx = `const rows = mapArray(items, render, {
   key: (item) => item.id,
   onDuplicates: (ids) => console.warn('repeated ids', ids), // e.g. [3, 7]
 });`;
 
-  protected readonly orderEx = `const rows = keyArray(items, render, {
+  protected readonly orderEx = `const rows = mapArray(items, render, {
   key: (item) => item.id,
-  order: true,
 });
 
 rows.reorders(); // { before: [1, 2], after: [2, 1] } after a swap

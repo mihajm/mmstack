@@ -36,7 +36,7 @@ function createItemSignal<T>(
 /**
  * Reactively maps items from a source array to a new array, creating stable signals for each item.
  *
- * This function is highly optimized for performance, similar to SolidJS's `mapArray`.
+ * This function is highly optimized for performance, similar to SolidJS's `indexArray`.
  * For each item in the source array, it creates a stable signal that is passed to the mapping function.
  * This ensures that downstream consumers only re-evaluate for items that have actually changed,
  * or when items are added or removed from the list.
@@ -159,8 +159,3 @@ export function indexArray<T, U>(
     equal: (a, b) => a.length === b.length,
   });
 }
-
-/**
- * @deprecated use indexArray instead
- */
-export const mapArray = indexArray;

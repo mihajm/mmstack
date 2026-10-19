@@ -56,10 +56,12 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="template" lang="html" />
         <p>
           If you would rather render one flat list, flatten the pages in a
-          computed. Pairing that with <code>keyArray</code> from
+          computed. Pairing that with <code>mapArray</code> from
           <a mmLink="/docs/primitives">&#64;mmstack/primitives</a> keeps the
           per-item view models stable, so appending page four doesn't rebuild
-          the rows from pages one through three.
+          the rows from pages one through three. Each row gets its item as a
+          signal, so a view model that reads <code>item()</code> follows a
+          refetched object with the same id.
         </p>
         <docs-code [code]="flatten" lang="ts" />
       </docs-section>
@@ -167,13 +169,14 @@ readonly posts = infiniteQueryResource<PostPage, PostPage, number>(
   @if (posts.isFetchingNextPage()) { Loading… } @else { Load more }
 </button>`;
 
-  protected readonly flatten = `import { keyArray } from '@mmstack/primitives';
+  protected readonly flatten = `import { mapArray } from '@mmstack/primitives';
 
 // one flat list across every page
 readonly items = computed(() => this.posts.pages().flatMap((p) => p.items));
 
-// stable per-item view models: appending a page doesn't recreate the earlier rows
-readonly rows = keyArray(this.items, (item) => buildRowVm(item), {
+// stable per-item view models: appending a page doesn't recreate the earlier rows;
+// buildRowVm takes the item signal and reads item() where it renders
+readonly rows = mapArray(this.items, (item) => buildRowVm(item), {
   key: (item) => item.id,
 });`;
 

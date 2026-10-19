@@ -7,8 +7,8 @@ import {
   type KeyArrayOptions,
   type MaybeOrderedKeyArray,
   type OrderedKeyArray,
-  type Permutation,
 } from './key-array';
+import type { Permutation } from './survivor-permutation';
 
 type Item = { id: string };
 const source = signal<Item[]>([]);

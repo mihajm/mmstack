@@ -54,7 +54,7 @@ type MappedObject<T extends object, U> = {
  * Reactively maps each property of an object signal into a new object,
  * preserving the same set of keys. For each key, `mapFn` receives a stable
  * per-key signal — outputs for keys that haven't been added or removed are
- * reused on subsequent reads. Sibling to {@link indexArray} / {@link keyArray}
+ * reused on subsequent reads. Sibling to {@link indexArray} / {@link mapArray}
  * but for object records.
  *
  * The type of per-key signal passed into `mapFn` depends on the source:

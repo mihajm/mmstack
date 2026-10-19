@@ -583,8 +583,9 @@ For rendering, compose with the primitives mappers instead of reaching for a bui
 ```typescript
 // flat item list across pages
 const items = computed(() => posts.pages().flatMap((p) => p.items));
-// stable per-item mappings: appending page 4 doesn't recreate pages 1-3's row VMs
-const rows = keyArray(items, (item) => buildRowVm(item), {
+// stable per-item mappings: appending page 4 doesn't recreate pages 1-3's row VMs;
+// `item` is a signal, so a row VM that reads `item()` follows a refetched (new) object
+const rows = mapArray(items, (item) => buildRowVm(item), {
   key: (item) => item.id,
 });
 ```

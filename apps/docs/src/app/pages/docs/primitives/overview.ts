@@ -67,7 +67,7 @@ import { DocSection } from '../../../layout/doc-section';
                 <td>Map an array or record into stable, per-item derived values</td>
                 <td>
                   <a mmLink="/docs/primitives/collections">Mapped collections</a>:
-                  <code>indexArray</code>, <code>keyArray</code>, <code>mapObject</code>
+                  <code>indexArray</code>, <code>mapArray</code>, <code>mapObject</code>
                 </td>
               </tr>
               <tr>

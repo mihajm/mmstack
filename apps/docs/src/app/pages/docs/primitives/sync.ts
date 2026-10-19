@@ -42,23 +42,27 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Merge policies" id="policies">
         <p>
           When two peers change the same path at the same time, a merge policy
-          decides the result. The default is last-writer-wins, ordered by a
-          hybrid logical clock so every peer agrees. You attach a different
-          policy per path pattern:
+          decides the result. With no policy the latest write wins, ordered by a
+          hybrid logical clock so every peer agrees, except for arrays (see
+          below). You attach a different policy per path pattern:
         </p>
         <ul>
           <li>
-            <code>lww</code>: the latest write wins. The default, invisible.
+            <code>lww</code>: the latest write wins, whole. Set it on an array
+            to keep that array out of the positional merge.
           </li>
           <li>
-            <code>mergeThree</code>: a three-way merge against the common
-            ancestor, so concurrent edits to different fields of one object both
-            land.
+            <code>mergeThree</code>: a three-way merge against the value the
+            other write replaced, so concurrent edits to different fields of one
+            object both land.
           </li>
           <li>
-            <code>keyedArray(idFn)</code>: reconcile a list by item identity, so
-            concurrent edits to different items survive and an edit beats a
-            concurrent removal.
+            <code>keyedArray(idFn)</code>: the <code>keyedArray</code> merge
+            policy reconciles a list by item identity, so concurrent edits to
+            different items survive and an edit beats a concurrent removal.
+            Items that share an identity correspond by value: one equal to an
+            item in the base is that item, the rest pair in order, and two
+            writers duplicating the same item give two copies, not three.
           </li>
           <li>
             <code>preserve</code>: keep both sides of a clash as a
@@ -68,21 +72,46 @@ import { DocSection } from '../../../layout/doc-section';
         </ul>
         <p>
           Last-writer-wins drops one side of a true clash on the same field. Set
-          <code>preserve</code> on the paths where losing a write matters.
+          <code>preserve</code> on the paths where losing a write matters. The
+          merges that look for an unchanged side (<code>mergeThree</code>, the
+          positional default, the <code>keyedArray</code> merge policy) decide
+          it by value: a side equal to what it replaced made no change, even as
+          a fresh copy. <code>lww</code> and <code>preserve</code> do not look
+          for one.
         </p>
         <docs-code [code]="policies" lang="ts" />
+        <p>
+          An array travels as one value, and with no policy two concurrent
+          writes of it merge position by position: when both kept the length and
+          neither moved a value, each slot takes the side that changed it, so
+          base <code>[0, 0]</code> with <code>[1, 0]</code> and
+          <code>[0, 2]</code> becomes <code>[1, 2]</code> everywhere. A length
+          change or a moved value keeps the latest array whole. The merge does
+          not know identities: a reorder that also edits every moved element
+          reads as edits in place, so a concurrent edit lands on whatever now
+          sits in its slot, and replacing an element while someone edits it
+          merges the two field by field. For lists like that, use the
+          <code>keyedArray</code> merge policy or a keyed container.
+        </p>
+        <p>
+          This changed the fold, so 22.23 / 21.23 speak protocol 4 and refuse
+          protocol 3 peers. An unversioned, protocol 3 or protocol 4 checkpoint
+          loads and is re-derived from its registers (any other version throws);
+          an offline outbox from before the upgrade is dropped, not replayed.
+        </p>
       </docs-section>
 
       <docs-section title="Conflicts as data" id="conflicted">
         <p>
           <code>preserve</code> exists for the cases where silently dropping a
           value is wrong, a clinical note edited by two people at once, say. The
-          clashing leaf becomes a <code>Conflicted</code> holding every side that
-          clashed in <code>siblings</code>, with <code>mine</code> and
+          clashing leaf becomes a <code>Conflicted</code> holding every side
+          that clashed in <code>siblings</code>, with <code>mine</code> and
           <code>theirs</code> naming the first two and <code>ancestor</code> the
-          common base. Three or more people editing the same field at once all
-          survive, not just two. Sync never blocks on it, and you resolve it when
-          and how you choose. <code>isConflicted(value)</code> narrows the type.
+          value the second one replaced (not a common base). Three or more
+          people editing the same field at once all survive, not just two. Sync
+          never blocks on it, and you resolve it when and how you choose.
+          <code>isConflicted(value)</code> narrows the type.
         </p>
         <docs-code [code]="conflicted" lang="ts" />
       </docs-section>
@@ -131,11 +160,11 @@ import { DocSection } from '../../../layout/doc-section';
           </li>
         </ul>
         <p>
-          Reach for this over <code>keyedArray</code> when order matters or a
-          list is edited by several people at once. <code>keyedArray</code>
-          reconciles a whole array as one value; a keyed container tracks each
-          element, so a move and an edit to the same list merge instead of
-          racing.
+          Reach for this over the <code>keyedArray</code> merge policy when
+          order matters or a list is edited by several people at once. The
+          policy reconciles a whole array as one value after the fact; a keyed
+          container is the identity-on-the-wire form, tracking each element, so
+          a move and an edit to the same list merge instead of racing.
         </p>
         <docs-code [code]="keyedContainer" lang="ts" />
         <p>
@@ -190,8 +219,9 @@ import { DocSection } from '../../../layout/doc-section';
           time rather than space. <code>fork.ops()</code> exposes the staged
           delta as operations, and <code>policyStrategy(policies)</code> gives a
           fork the same per-path resolution, so a fork can hold a
-          <code>Conflicted</code> value when the base moves underneath it instead
-          of clobbering an edit.
+          <code>Conflicted</code> value when the base moves underneath it
+          instead of clobbering an edit. Both diff arrays as units, so array
+          policies and the positional default apply to them as in the room.
         </p>
         <docs-code [code]="rebase" lang="ts" />
         <p>
@@ -200,9 +230,32 @@ import { DocSection } from '../../../layout/doc-section';
           approves the commit. <code>syncedFork</code> wires a fork to a sync so
           the commit cites what the fork observed when it forked: an edit that
           lands on the room mid-review stays a concurrent value the merge policy
-          decides, never silently steamrolled by the approval. Call
-          <code>rebase()</code> to re-observe the room before committing on top.
-          See <a mmLink="/docs/mesh/agents">agents</a> for the full pattern.
+          decides, never silently steamrolled by the approval. So the committed
+          value can differ from the preview: a fork showing
+          <code>[1, 0]</code> can commit to <code>[1, 2]</code> next to a peer's
+          <code>[0, 2]</code>. Call <code>rebase()</code> to re-observe the room
+          before committing on top. See
+          <a mmLink="/docs/mesh/agents">agents</a> for the full pattern.
+        </p>
+      </docs-section>
+
+      <docs-section title="Undo in a synced store" id="undo">
+        <p>
+          <code>storeHistory(store, &#123; track: sync, policies &#125;)</code>
+          makes only your own writes undoable, and undo is selective: it takes
+          back what your change did and keeps what others wrote since. In the
+          array above, undoing your <code>[1, 0]</code> after the merge gives
+          <code>[0, 2]</code>. Pass the same <code>policies</code> as the sync
+          so each path undoes the way it merges. If others moved elements since
+          your change, your previous array comes back whole and their move is
+          lost, and an undo of your own reorder is identity-blind; keyed lists
+          avoid both.
+        </p>
+        <p>
+          With <code>coalesce</code>, a run of your changes is one entry: one
+          write from the run's first value to its last, and its net is what
+          differs between them. A peer's edit elsewhere never enters it; a
+          peer's edit to a path you touch next ends the run.
         </p>
       </docs-section>
     </docs-page>

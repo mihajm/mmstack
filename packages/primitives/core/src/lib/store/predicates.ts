@@ -89,7 +89,36 @@ export function createFallbackOnChange(
   };
 
   return isMutableSource
-    ? (newValue: any) =>
-        (target as MutableSignal<any>).mutate(write(newValue))
+    ? (newValue: any) => (target as MutableSignal<any>).mutate(write(newValue))
     : (newValue: any) => target.update(write(newValue));
+}
+
+/**
+ * @internal
+ * Structural equality over plain data, the one equality the merges decide "unchanged" by:
+ * primitives by `Object.is` (so `NaN` equals `NaN` and `+0` differs from `-0`); plain arrays by
+ * length and index (a hole reads as `undefined`); plain records by their own enumerable keys,
+ * with presence (an absent key differs from a key holding `undefined`). Everything else (a
+ * `Date`, `Map`, `Set`, class instance, function, typed array or opaque value) is equal only
+ * to itself.
+ */
+export function structEq(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  const la = Array.isArray(a) && !isOpaque(a);
+  const lb = Array.isArray(b) && !isOpaque(b);
+  if (la || lb) {
+    if (!la || !lb) return false;
+    const x = a as unknown[];
+    const y = b as unknown[];
+    if (x.length !== y.length) return false;
+    for (let i = 0; i < x.length; i++) if (!structEq(x[i], y[i])) return false;
+    return true;
+  }
+  if (!isRecord(a) || !isRecord(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) {
+    if (!Object.hasOwn(b, k) || !structEq(a[k], b[k])) return false;
+  }
+  return true;
 }

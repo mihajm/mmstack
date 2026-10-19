@@ -457,12 +457,24 @@ describe('diffOps (pure diff)', () => {
     expect(ops).toEqual([{ kind: 'set', path: ['cfg'], prev: before, next: after }]);
   });
 
-  it('same-length array reorder emits per-index value ops (identity-blind)', () => {
-    const ops = diffOps({ arr: ['a', 'b'] }, { arr: ['b', 'a'] });
-    expect(ops).toEqual([
+  it("same-length array reorder emits per-index value ops (identity-blind) under the default `'index'` mode", () => {
+    const perIndex = [
       { kind: 'set', path: ['arr', 0], prev: 'a', next: 'b' },
       { kind: 'set', path: ['arr', 1], prev: 'b', next: 'a' },
+    ];
+    expect(diffOps({ arr: ['a', 'b'] }, { arr: ['b', 'a'] })).toEqual(perIndex);
+    expect(
+      diffOps({ arr: ['a', 'b'] }, { arr: ['b', 'a'] }, { arrays: 'index' }),
+    ).toEqual(perIndex);
+  });
+
+  it("[PIN K1] under `arrays: 'unit'` the same reorder is ONE set carrying prev and next; an equal rebuilt array emits nothing", () => {
+    const prev = { arr: ['a', 'b'] };
+    const next = { arr: ['b', 'a'] };
+    expect(diffOps(prev, next, { arrays: 'unit' })).toEqual([
+      { kind: 'set', path: ['arr'], prev: prev.arr, next: next.arr },
     ]);
+    expect(diffOps(prev, { arr: ['a', 'b'] }, { arrays: 'unit' })).toEqual([]);
   });
 
   it('an array length change is one whole-array set (grow and shrink)', () => {

@@ -170,15 +170,14 @@ describe('merge3', () => {
   });
 
   describe('the reference-identity contract', () => {
-    it('a fresh-ref "clean" node vs a base type-change resolves to mine (documented limitation)', () => {
-      // VIOLATING the contract on purpose: mine.x is a fresh reference equal to ancestor.x.
-      // merge3 cannot distinguish that from a real edit, so against a base type-change it keeps
-      // mine's (stale) value rather than taking theirs. The fork never hits this — toStore shares
-      // the reference for untouched paths — but a hand-built caller must uphold the same.
+    it('a fresh-ref "clean" node vs a base type-change takes the base (unchanged is decided by value)', () => {
+      // mine.x is a fresh reference structurally equal to ancestor.x: the fork made no change
+      // there, so the base's type change wins. Before K-diff (reference-based "unchanged") this
+      // kept mine's stale { y: 1 }.
       const ancestor = { x: { y: 1 } };
       const mine = { x: { y: 1 } }; // fresh ref, not ancestor.x
       const theirs = { x: 5 as unknown as { y: number } };
-      expect(merge3(ancestor, mine, theirs)).toEqual({ x: { y: 1 } }); // NOT { x: 5 }
+      expect(merge3(ancestor, mine, theirs)).toEqual({ x: 5 });
     });
 
     it('equal primitive leaves are still seen as unchanged (value compare at the leaf)', () => {

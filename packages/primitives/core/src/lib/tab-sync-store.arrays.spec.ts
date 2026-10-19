@@ -8,10 +8,11 @@ import { TestBed } from '@angular/core/testing';
 import { store } from './store';
 import { MESSAGE_BUS, MessageBus, tabSync } from './tab-sync';
 
-// A same-length array write travels as PER-INDEX ops (`diffOps` descends), so it lands under an
-// ancestor register holding the whole array. These are the transport-level witnesses that such a
-// write reaches its peers — including the peer that just hydrated, whose store would otherwise show
-// the value while every other tab silently kept the stale array.
+// An array write travels WHOLE: `opSync` emits a changed array as one unit `set` (`arrays: 'unit'`),
+// which the array's register folds (positionally, with no merge policy). These were written when a
+// same-length write travelled as per-index ops landing under an ancestor register; they stay the
+// transport-level witnesses that such a write reaches its peers — including the peer that just
+// hydrated, whose store would otherwise show the value while every other tab kept the stale array.
 
 type State = { routes: string[]; items: { id: string }[] };
 const initial = (): State => ({ routes: [], items: [] });

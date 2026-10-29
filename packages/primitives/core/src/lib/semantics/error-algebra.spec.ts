@@ -218,7 +218,12 @@ describe('[ASSERTED telemetry] error telemetry seam — value-free sentinel, rep
     try {
       const e = error('boom');
       expect(reports).toEqual([
-        { origin: 'authored', subclass: 'author-fault', cause: 'boom' },
+        {
+          origin: 'authored',
+          subclass: 'author-fault',
+          cause: 'boom',
+          sensitive: false,
+        },
       ]);
       expect(Object.prototype.hasOwnProperty.call(e, 'cause')).toBe(false);
       expect((e as unknown as { cause?: unknown }).cause).toBeUndefined();
@@ -235,7 +240,12 @@ describe('[ASSERTED telemetry] error telemetry seam — value-free sentinel, rep
     try {
       const e = errorEdge('timeout');
       expect(reports).toEqual([
-        { origin: 'edge', subclass: 'external-fault', cause: 'timeout' },
+        {
+          origin: 'edge',
+          subclass: 'external-fault',
+          cause: 'timeout',
+          sensitive: false,
+        },
       ]);
       expect(e.origin).toBe('edge');
       expect(e.renderableMessage).toBeUndefined();

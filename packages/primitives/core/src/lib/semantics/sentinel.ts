@@ -1,3 +1,11 @@
+import { sensitive } from './sensitive';
+import {
+  addLabel,
+  hasLabel,
+  mintSensitivity,
+  SENSITIVE,
+} from './sensitive-registry';
+
 declare const SENTINEL_BRAND: unique symbol;
 
 const SENTINEL_REGISTRY_KEY = Symbol.for('@mmstack/primitives.sentinels');
@@ -192,32 +200,46 @@ type LeakBoundary = 'primitive-coercion' | 'string-coercion' | 'serialization';
 
 const leakReported = new WeakSet<object>();
 
-/** Strict: throw. Soft: report the first coercion of this sentinel, then let the caller answer. */
-function coerced(value: unknown, boundary: LeakBoundary): SentinelKind {
+/**
+ * Strict: throw. Soft: report the first coercion of this sentinel, then let the caller answer with
+ * its kind, or with nothing for a labeled sentinel (its kind is as secret as the value it stands for).
+ */
+function coerced(
+  value: unknown,
+  boundary: LeakBoundary,
+): SentinelKind | undefined {
   if (POLICY.strict || !isSentinel(value))
     throw new SentinelLeakError(boundary);
+  const labeled = hasLabel(value);
   if (!weakSetHas(leakReported, value)) {
     weakSetAdd(leakReported, value);
     errorReporter?.({
       origin: 'leak',
       subclass: 'author-fault',
       cause: new SentinelLeakError(boundary),
+      sensitive: labeled,
     });
   }
-  return value.kind;
+  return labeled ? undefined : value.kind;
 }
+
+const text = (kind: SentinelKind | undefined): string =>
+  kind === undefined ? SENSITIVE.policy.placeholder : `[mmstack ${kind}]`;
 
 function leakPrimitive(this: unknown, hint: string): string | number {
   const kind = coerced(this, 'primitive-coercion');
-  return hint === 'number' ? NaN : `[mmstack ${kind}]`;
+  return hint === 'number' ? NaN : text(kind);
 }
 
 function leakString(this: unknown): string {
-  return `[mmstack ${coerced(this, 'string-coercion')}]`;
+  return text(coerced(this, 'string-coercion'));
 }
 
-function leakJson(this: unknown): { readonly $sentinel: SentinelKind } {
-  return { $sentinel: coerced(this, 'serialization') };
+function leakJson(
+  this: unknown,
+): { readonly $sentinel: SentinelKind } | { readonly $sensitive: true } {
+  const kind = coerced(this, 'serialization');
+  return kind === undefined ? { $sensitive: true } : { $sentinel: kind };
 }
 
 function mint<TKind extends SentinelKind>(
@@ -235,6 +257,32 @@ function mint<TKind extends SentinelKind>(
   });
   weakSetAdd(REGISTRY.sentinels, sentinel);
   return sentinel as unknown as Sentinel<TKind>;
+}
+
+/**
+ * @internal The labeled twin of a sentinel: a pending is a fresh `loading` with the same `source`, a
+ * done is a fresh `done`, an error is a copy with the same `origin` and `renderableMessage` and no
+ * report (the same occurrence wearing the label). One twin per sentinel; a twin is its own twin.
+ * Callers check the mode.
+ */
+export function labeledTwin<T extends Sentinel>(sentinel: T): T {
+  if (weakSetHas(SENSITIVE.labels, sentinel)) return sentinel;
+  const known = SENSITIVE.twin.get(sentinel);
+  if (known) return known as T;
+  const absorber = sentinel as unknown as Loading | Done | ErrorSentinel;
+  let twin: Sentinel;
+  if (absorber.kind === 'loading') twin = mint('loading', absorber.source);
+  else if (absorber.kind === 'done') twin = mint('done', absorber.source);
+  else {
+    const extra: Record<string, unknown> = { origin: absorber.origin };
+    if (absorber.renderableMessage !== undefined)
+      extra['renderableMessage'] = absorber.renderableMessage;
+    twin = mint('error', undefined, extra);
+  }
+  addLabel(twin);
+  SENSITIVE.twin.set(sentinel, twin);
+  SENSITIVE.plain.set(twin, sentinel);
+  return twin as T;
 }
 
 export function loading(source?: unknown): Loading {
@@ -288,16 +336,28 @@ export const ifLoading = sentinelAware(
  * One report per error mint, and one per sentinel the first time it is coerced while sentinels are
  * not strict: origin `'leak'`, subclass `'author-fault'`, cause = the `SentinelLeakError` strict mode
  * would have thrown (not thrown).
+ *
+ * `sensitive` is true, while sensitive values are boxed, for a mint inside a labeled region or over
+ * an object thrown under a labeled call (the error itself is then labeled too), for a mint over a
+ * boxed cause (the error stays plain, only its cause is hidden), and for the leak report of a box.
+ * Its `cause` is then boxed. A reporter that withholds sensitive data drops these reports by this
+ * one field.
  */
 export interface ErrorMintReport {
   readonly origin: ErrorOrigin | 'leak';
   readonly subclass: ErrorSubclass;
   readonly cause: unknown;
+  readonly sensitive: boolean;
 }
 
 export type ErrorReporter = (report: ErrorMintReport) => void;
 
 let errorReporter: ErrorReporter | undefined;
+
+/** @internal Delivers a report to the installed reporter, if any. */
+export function reportError(report: ErrorMintReport): void {
+  errorReporter?.(report);
+}
 
 /**
  * Install the observability sink that receives every error mint exactly once (the sentinel is
@@ -318,7 +378,16 @@ function mintError(
   if (renderableMessage !== undefined)
     extra['renderableMessage'] = renderableMessage;
   const sentinel = mint('error', undefined, extra) as ErrorSentinel;
-  errorReporter?.({ origin, subclass, cause });
+  const sensitivity = mintSensitivity(cause);
+  if (sensitivity) {
+    if (sensitivity === 'labeled') addLabel(sentinel);
+    errorReporter?.({
+      origin,
+      subclass,
+      cause: sensitive(cause),
+      sensitive: true,
+    });
+  } else errorReporter?.({ origin, subclass, cause, sensitive: false });
   return sentinel;
 }
 

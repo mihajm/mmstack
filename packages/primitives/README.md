@@ -1214,6 +1214,46 @@ If a sentinel value is interpolated directly in a template (e.g. `{{ res.outcome
 - The first time a sentinel is coerced, it reports an `origin: 'leak'` finding through the installed telemetry reporter so unintended template reads are visible in monitoring.
 - `provideStrictSentinels()` at the application root makes coercion throw a `SentinelLeakError`, useful in compiler or expression-evaluation contexts that require strict containment. The policy is realm-wide: the most recently initialized live provider wins, including `provideStrictSentinels(false)`. Injectors can be destroyed in any order; each removes only its own override. With no providers, `setStrictSentinels(true)` controls the policy directly. While providers are active, that setter updates the fallback used after the last provider is destroyed.
 
+### Sensitive values
+
+A value can be declared **sensitive** so that it cannot reach a log, a report, a model prompt or any other reader by accident, while the program computes exactly what it would compute without the declaration. Boxing is a mode, off by default: turn it on in builder, preview and test environments, leave it off in production.
+
+```typescript
+import { sensitive, setSensitiveMode, unbox } from '@mmstack/primitives';
+
+setSensitiveMode(true); // realm-wide, shared by every copy of @mmstack/primitives
+
+const ssn = sensitive('123-45-6789');
+String(ssn); // '[mmstack sensitive]' (reported once), or a SensitiveLeakError when strict
+JSON.stringify({ ssn }); // '{"ssn":{"$sensitive":true}}'
+unbox(ssn); // '123-45-6789' (a reader operation, see below)
+```
+
+With the mode off, `sensitive(value)` returns `value` itself and registers nothing, so the declaration can stay in place everywhere.
+
+**The box.** `sensitive(value)` gives a frozen object with no own properties; the value lives in a registry side table, so reflection (`Object.keys`, spread, `Object.prototype.toString`, which answers `[object Sensitive]`) shows nothing. Every coercion and inspection protocol (`toString`, `valueOf`, `Symbol.toPrimitive`, `toJSON`, Node's inspect hook) is guarded by the same policy as sentinels: soft by default (the placeholder, `NaN` for a number, `{ "$sensitive": true }` for JSON, and one `origin: 'leak'` report per box), throwing `SensitiveLeakError` under `provideStrictSentinels()` / `setStrictSentinels(true)`. Declaring the same object twice gives the same box; a box declared again is itself; nested boxes are kept.
+
+**In expressions.** The operator algebra and the array shims of `@mmstack/primitives/algebra` read through boxes: they compute on the inner value, so branches, absorbers and results are exactly those of the mode-off program, and they label every result a boxed operand reached. A boxed test of `?:`, `&&`, `||` or `??` picks its branch on the inner value and labels the result. Callbacks over a boxed array receive boxed elements, and anything read out of a boxed container stays boxed. A function that is not sentinel-aware receives plain values (one copy per argument value, so two references to one value stay one object, and a whole box hands over its real inner object); its result is labeled when any argument was. Interpreter authors get `isLabeled` and `unlabel` from the same entry.
+
+**Labeled pending, error and done.** `sensitive(loading())`, `sensitive(errorEdge(cause))` and `sensitive(DONE)` give labeled twins: still `isLoading` / `isError` / `isDone`, absorbing (or settling) and ranked exactly as their plain sentinel, but readers that withhold show the placeholder for them, and a soft coercion answers the sensitive placeholder instead of the kind. A hook whose operands are labeled labels the absorber it returns, so `(secret ? pending : 0) + failure` does not reveal which branch was taken.
+
+**Reports.** Every `ErrorMintReport` carries `sensitive: boolean`. An error minted inside `runSensitiveRegion(fn)` or over an object thrown under a labeled call is labeled: readers that withhold show the placeholder for it, and its report has `sensitive: true` and a boxed `cause`. An error minted over a boxed cause (`errorEdge(sensitive(cause))`, the way an edge reports a sensitive source's own failure) stays a plain error to every reader; only its cause is hidden, the report has `sensitive: true` and that box as its `cause`. A reporter that withholds sensitive data drops these reports by that one field. The reporter is installed per copy of the library, as for sentinels: every bundled copy installs its own.
+
+```typescript
+setErrorReporter((report) => {
+  if (report.sensitive) return; // drop it: even a value-free entry tells that something ran
+  telemetry.track(report);
+});
+```
+
+**Reader operations.** `unbox(value)` (one level), `unboxAll(value)` (deep, through arrays and plain objects) and `redact(value)` (every labeled value replaced by the marker) are how a value leaves the sensitive plane: display, storage and transport readers unbox, readers that must not see the value redact. They belong to readers, so restrict which modules may import them (for example with a lint rule on import paths). `isSensitive(value)` tells a box apart.
+
+**Equality.** `sensitiveEqual(base)` wraps a signal or container equality: with the mode off it returns `base` itself; with the mode on two values are equal when `base` finds their canonical forms equal and their labels sit at the same positions. The mode is read when the wrapper is built, so build it after setting the mode. An edge that builds a per-field view (a fresh object whose fields are boxes) calls `registerCanonical(view, raw)` so the view compares as the raw value it came from.
+
+**Clone and transfer.** A box never carries its value across a boundary: `structuredClone` and `postMessage` give an empty plain object, and JSON serialization (storage, network) gives the `{ "$sensitive": true }` marker or throws when strict. The receiving side declares its values again from the same declarations.
+
+**Policy.** `setSensitivePolicy({ placeholder, marker })` sets the string a soft coercion answers (`[mmstack sensitive]` by default) and the value `redact` substitutes (the placeholder by default); a host typically sets both so no library-branded text reaches its users.
+
 ### The compiler & expression kit (`@mmstack/primitives/algebra`)
 
 For teams building dynamic expression interpreters or AST compilers that evaluate user expressions over async sentinels, the operator algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`, `joinAbsorbersDeep`) and sentinel-safe array shims (`ARRAY_METHOD_SHIMS`, `spreadArray`) are published separately under:
@@ -1226,7 +1266,7 @@ Standard application development does not need this subpath.
 
 ### Multi-bundle registry
 
-Sentinels are recognized across independently bundled chunks or micro-frontends through a shared registry on `globalThis` (`Symbol.for('@mmstack/primitives.sentinels')`). Two bundles sharing the same protocol version seamlessly recognize each other's sentinels and share the strictness setting.
+Sentinels are recognized across independently bundled chunks or micro-frontends through a shared registry on `globalThis` (`Symbol.for('@mmstack/primitives.sentinels')`). Two bundles sharing the same protocol version seamlessly recognize each other's sentinels and share the strictness setting. Sensitive boxes, their labels and the sensitive mode live in a second slot (`Symbol.for('@mmstack/primitives.sensitive')`) with its own protocol version, checked the same way.
 
 ## Observability
 

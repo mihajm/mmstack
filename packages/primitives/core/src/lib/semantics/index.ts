@@ -32,4 +32,25 @@ export {
   setErrorReporter,
   setStrictSentinels,
 } from './sentinel';
+export {
+  isSensitive,
+  isSensitiveMode,
+  redact,
+  registerCanonical,
+  runSensitiveRegion,
+  sensitive,
+  SensitiveLeakError,
+  setSensitiveMode,
+  setSensitivePolicy,
+  unbox,
+  unboxAll,
+} from './sensitive';
+export { sensitiveEqual } from './sensitive-equal';
+export {
+  openWalk as ɵopenSensitiveWalk,
+  type SensitiveWalk as ɵSensitiveWalk,
+  walkSensitive as ɵwalkSensitive,
+  type WalkStep as ɵSensitiveWalkStep,
+} from './sensitive-walk';
+export type { SensitivePolicy } from './sensitive-registry';
 export { provideStrictSentinels } from './strict-sentinels';

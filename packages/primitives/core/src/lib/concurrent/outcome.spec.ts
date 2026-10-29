@@ -139,7 +139,12 @@ describe('outcomeOf (M5 outcome table)', () => {
     const again = outcomeOf(ref)();
     expect(again).toBe(first);
     expect(reports).toEqual([
-      { origin: 'edge', subclass: 'external-fault', cause: boom },
+      {
+        origin: 'edge',
+        subclass: 'external-fault',
+        cause: boom,
+        sensitive: false,
+      },
     ]);
     expect(outcomeErrorCause(first as never)).toEqual({ cause: boom });
   });

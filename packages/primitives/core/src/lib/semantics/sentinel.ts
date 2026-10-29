@@ -373,12 +373,12 @@ function mintError(
   cause: unknown,
   renderableMessage: string | undefined,
   subclass: ErrorSubclass,
+  sensitivity = mintSensitivity(cause),
 ): ErrorSentinel {
   const extra: Record<string, unknown> = { origin };
   if (renderableMessage !== undefined)
     extra['renderableMessage'] = renderableMessage;
   const sentinel = mint('error', undefined, extra) as ErrorSentinel;
-  const sensitivity = mintSensitivity(cause);
   if (sensitivity) {
     if (sensitivity === 'labeled') addLabel(sentinel);
     errorReporter?.({
@@ -401,6 +401,25 @@ export function error(
   origin: ErrorOrigin = 'authored',
 ): ErrorSentinel {
   return mintError(origin, message, undefined, 'author-fault');
+}
+
+/**
+ * An evaluation error whose cause is hidden whatever the region depth: with the mode on the report
+ * has `sensitive: true` and a boxed cause, and the error itself stays plain (not labeled), even
+ * inside a labeled region. For a caller that keeps one plain error per cause and hands out its
+ * labeled twin (`sensitive(err)`) where the occurrence is labeled. Mode off: `error(cause, origin)`.
+ */
+export function errorHidden(
+  cause: unknown,
+  origin: ErrorOrigin = 'evaluation',
+): ErrorSentinel {
+  return mintError(
+    origin,
+    cause,
+    undefined,
+    'author-fault',
+    SENSITIVE.policy.mode ? 'hidden' : undefined,
+  );
 }
 
 /**

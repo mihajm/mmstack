@@ -1,3 +1,17 @@
+/**
+ * A pure resolution model of the operator algebra: `evalAlgebra` evaluates a small expression
+ * language through the algebra hooks, `evalPlain` evaluates the same tree as plain JavaScript over a
+ * resolution, and the helpers compare the two.
+ *
+ * Faults. By default a fault (a throw that is not a `SentinelLeakError`) escapes the whole
+ * expression, so its outcome is `{ kind: 'throw' }`. With `{ containFaults: true }` a fault is an
+ * error value at the operation that raised it: that operation yields {@link FAULT}, which the
+ * enclosing operations then join by precedence like any absorber (a pending operand outranks it, a
+ * container holds it in its slot). Spreading a non-iterable and looking up a method on a nullish
+ * receiver are operations of their own, so the rest of the call or container still evaluates and
+ * joins with them. A callback body contains its own faults, so a shim sees an error value, not a
+ * throw. A `SentinelLeakError` is never contained (its outcome stays `{ kind: 'leak' }`).
+ */
 import {
   ARRAY_METHOD_SHIMS,
   and,
@@ -34,6 +48,33 @@ export const ERR: readonly ErrorSentinel[] = Object.freeze([
   error('E0'),
   error('E1'),
 ]);
+
+/**
+ * The error value a contained fault yields under `{ containFaults: true }`: one fixed instance, so
+ * a differential can tell a fault apart from the authored `ERR` errors by identity and compare where
+ * it sits.
+ */
+export const FAULT: ErrorSentinel = error('fault', 'evaluation');
+
+/** Options of {@link evalAlgebra}. */
+export interface EvalOptions {
+  /** A fault is an error value at its operation instead of a throw out of the whole expression. */
+  readonly containFaults?: boolean;
+}
+
+/** Runs one operation; under `containFaults` a fault becomes {@link FAULT}. */
+function operation<T>(
+  options: EvalOptions | undefined,
+  run: () => T,
+): T | ErrorSentinel {
+  if (!options?.containFaults) return run();
+  try {
+    return run();
+  } catch (caught) {
+    if (caught instanceof SentinelLeakError) throw caught;
+    return FAULT;
+  }
+}
 
 export type UnaryOp = 'negate' | 'not' | 'plus';
 export type BinOp =
@@ -211,16 +252,17 @@ export function flattenAlgebra(
   slots: readonly Slot[],
   pending: Loading,
   env: Env,
+  options?: EvalOptions,
 ): Absorbing | unknown[] {
   const out: unknown[] = [];
   const spreadAbsorbers: unknown[] = [];
   for (const slot of slots) {
-    const value = evalAlgebra(slot.e, pending, env);
+    const value = evalAlgebra(slot.e, pending, env, options);
     if (!slot.spread) {
       out.push(value);
       continue;
     }
-    const source = spreadArray(value);
+    const source = operation(options, () => spreadArray(value));
     if (isAbsorbing(source)) {
       spreadAbsorbers.push(source);
       continue;
@@ -240,16 +282,17 @@ export function flattenCallAlgebra(
   slots: readonly Slot[],
   pending: Loading,
   env: Env,
+  options?: EvalOptions,
 ): Absorbing | unknown[] {
   const flat: unknown[] = [];
   let unconstructable = false;
   for (const slot of slots) {
-    const value = evalAlgebra(slot.e, pending, env);
+    const value = evalAlgebra(slot.e, pending, env, options);
     if (!slot.spread) {
       flat.push(value);
       continue;
     }
-    const source = spreadArray(value);
+    const source = operation(options, () => spreadArray(value));
     if (isAbsorbing(source)) {
       unconstructable = true;
       flat.push(source);
@@ -260,7 +303,21 @@ export function flattenCallAlgebra(
   return unconstructable ? (joinAbsorbers(flat) as Absorbing) : flat;
 }
 
-export function evalAlgebra(e: Expr, pending: Loading, env: Env): unknown {
+export function evalAlgebra(
+  e: Expr,
+  pending: Loading,
+  env: Env,
+  options?: EvalOptions,
+): unknown {
+  return operation(options, () => evalNode(e, pending, env, options));
+}
+
+function evalNode(
+  e: Expr,
+  pending: Loading,
+  env: Env,
+  options: EvalOptions | undefined,
+): unknown {
   switch (e.t) {
     case 'lit':
       return POOL[e.i];
@@ -271,64 +328,64 @@ export function evalAlgebra(e: Expr, pending: Loading, env: Env): unknown {
     case 'param':
       return env[e.name];
     case 'unary':
-      return strictUnary(evalAlgebra(e.e, pending, env), UNARY[e.op]);
+      return strictUnary(evalAlgebra(e.e, pending, env, options), UNARY[e.op]);
     case 'bin':
       return strictBinary(
-        evalAlgebra(e.l, pending, env),
-        evalAlgebra(e.r, pending, env),
+        evalAlgebra(e.l, pending, env, options),
+        evalAlgebra(e.r, pending, env, options),
         BIN[e.op],
       );
     case 'logic': {
-      const left = evalAlgebra(e.l, pending, env);
-      const right = () => evalAlgebra(e.r, pending, env);
+      const left = evalAlgebra(e.l, pending, env, options);
+      const right = () => evalAlgebra(e.r, pending, env, options);
       if (e.op === 'and') return and(left, right);
       if (e.op === 'or') return or(left, right);
       return coalesce(left, right);
     }
     case 'cond':
       return conditional(
-        evalAlgebra(e.c, pending, env),
-        () => evalAlgebra(e.a, pending, env),
-        () => evalAlgebra(e.b, pending, env),
+        evalAlgebra(e.c, pending, env, options),
+        () => evalAlgebra(e.a, pending, env, options),
+        () => evalAlgebra(e.b, pending, env, options),
       );
     case 'member':
-      return member(evalAlgebra(e.o, pending, env), readMember(e.k));
+      return member(evalAlgebra(e.o, pending, env, options), readMember(e.k));
     case 'memberc':
       return strictBinary(
-        evalAlgebra(e.o, pending, env),
-        evalAlgebra(e.k, pending, env),
+        evalAlgebra(e.o, pending, env, options),
+        evalAlgebra(e.k, pending, env, options),
         readComputed,
       );
     case 'call': {
-      const args = flattenCallAlgebra(e.args, pending, env);
+      const args = flattenCallAlgebra(e.args, pending, env, options);
       if (isAbsorbing(args)) return args;
       return invoke(FNS[e.f], args, applyCall);
     }
     case 'gcall': {
-      const args = flattenCallAlgebra(e.args, pending, env);
+      const args = flattenCallAlgebra(e.args, pending, env, options);
       if (isAbsorbing(args)) return args;
       return invoke(GLOBAL_FNS[e.f], args, applyCall);
     }
     case 'arr':
-      return flattenAlgebra(e.slots, pending, env);
+      return flattenAlgebra(e.slots, pending, env, options);
     case 'obj': {
       const out: Record<string, unknown> = {};
       const structural: unknown[] = [];
       for (const prop of e.props) {
         if (prop.kind === 'static') {
-          setProp(out, prop.k, evalAlgebra(prop.v, pending, env));
+          setProp(out, prop.k, evalAlgebra(prop.v, pending, env, options));
           continue;
         }
         if (prop.kind === 'computed') {
-          const key = evalAlgebra(prop.k, pending, env);
+          const key = evalAlgebra(prop.k, pending, env, options);
           if (isAbsorbing(key)) {
             structural.push(key);
             continue;
           }
-          setProp(out, key, evalAlgebra(prop.v, pending, env));
+          setProp(out, key, evalAlgebra(prop.v, pending, env, options));
           continue;
         }
-        const source = evalAlgebra(prop.e, pending, env);
+        const source = evalAlgebra(prop.e, pending, env, options);
         if (isAbsorbing(source)) {
           structural.push(source);
           continue;
@@ -340,26 +397,34 @@ export function evalAlgebra(e: Expr, pending: Loading, env: Env): unknown {
     case 'arrow':
       return sentinelAware(
         normalizeArrowString((...args: unknown[]) =>
-          evalAlgebra(e.body, pending, bindParams(env, e.params, args)),
+          evalAlgebra(
+            e.body,
+            pending,
+            bindParams(env, e.params, args),
+            options,
+          ),
         ),
       );
     case 'apply': {
-      const target = evalAlgebra(e.fn, pending, env);
-      const args = flattenCallAlgebra(e.args, pending, env);
+      const target = evalAlgebra(e.fn, pending, env, options);
+      const args = flattenCallAlgebra(e.args, pending, env, options);
       if (isAbsorbing(args)) return joinAbsorbers([target, args]);
       return invoke(target, args, applyCall);
     }
     case 'hof': {
-      const receiver = evalAlgebra(e.arr, pending, env);
+      const receiver = evalAlgebra(e.arr, pending, env, options);
       const method =
         isAbsorbing(receiver) || Array.isArray(receiver)
           ? undefined
-          : (receiver as Record<string, unknown>)[e.m];
-      const callback = evalAlgebra(e.cb, pending, env);
+          : operation(
+              options,
+              () => (receiver as Record<string, unknown>)[e.m],
+            );
+      const callback = evalAlgebra(e.cb, pending, env, options);
       const args =
         e.init === undefined
           ? [callback]
-          : [callback, evalAlgebra(e.init, pending, env)];
+          : [callback, evalAlgebra(e.init, pending, env, options)];
       /* An absorbing receiver is the member result (`recv.m`), joined with the arguments exactly as
        * `(recv.m)(...args)` composes — so a higher-precedence pending argument outranks an error
        * receiver, and the arguments still evaluate. Non-array concrete receiver = JS-faithful method
@@ -374,16 +439,19 @@ export function evalAlgebra(e: Expr, pending: Loading, env: Env): unknown {
       return ARRAY_METHOD_SHIMS[e.m](receiver, args, applyCall);
     }
     case 'search': {
-      const receiver = evalAlgebra(e.arr, pending, env);
+      const receiver = evalAlgebra(e.arr, pending, env, options);
       const method =
         isAbsorbing(receiver) || Array.isArray(receiver)
           ? undefined
-          : (receiver as Record<string, unknown>)[e.m];
-      const target = evalAlgebra(e.target, pending, env);
+          : operation(
+              options,
+              () => (receiver as Record<string, unknown>)[e.m],
+            );
+      const target = evalAlgebra(e.target, pending, env, options);
       const args =
         e.from === undefined
           ? [target]
-          : [target, evalAlgebra(e.from, pending, env)];
+          : [target, evalAlgebra(e.from, pending, env, options)];
       if (isAbsorbing(receiver)) return joinAbsorbers([receiver, ...args]);
       if (!Array.isArray(receiver)) {
         const applyBound: ApplyFn = (fn, fnArgs) =>

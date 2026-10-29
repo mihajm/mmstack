@@ -2,6 +2,7 @@ import {
   error,
   errorConstant,
   errorEdge,
+  errorHidden,
   type ErrorMintReport,
   isAbsorbing,
   isError,
@@ -12,6 +13,7 @@ import {
   setStrictSentinels,
 } from './sentinel';
 import {
+  inSensitiveRegion,
   isSensitive,
   isSensitiveMode,
   redact,
@@ -314,6 +316,89 @@ describe('sensitive box', () => {
       error('after');
       expect(reports.at(-1)?.sensitive).toBe(false);
       expect(SENSITIVE.counters.region).toBe(0);
+    });
+  });
+
+  describe('region predicate', () => {
+    it('is true only while a labeled region is open, nested ones included', () => {
+      on();
+      expect(inSensitiveRegion()).toBe(false);
+      runSensitiveRegion(() => {
+        expect(inSensitiveRegion()).toBe(true);
+        runSensitiveRegion(() => expect(inSensitiveRegion()).toBe(true));
+        expect(inSensitiveRegion()).toBe(true);
+      });
+      expect(inSensitiveRegion()).toBe(false);
+    });
+
+    it('is false with the mode off, inside a region too', () => {
+      runSensitiveRegion(() => expect(inSensitiveRegion()).toBe(false));
+      expect(inSensitiveRegion()).toBe(false);
+    });
+  });
+
+  describe('hidden mints', () => {
+    it('inside a region: the report is sensitive with a boxed cause, the error stays plain', () => {
+      on();
+      const e = runSensitiveRegion(() => errorHidden(TOKEN));
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({
+        origin: 'evaluation',
+        subclass: 'author-fault',
+        sensitive: true,
+      });
+      expect(isSensitive(reports[0].cause)).toBe(true);
+      expect(unbox(reports[0].cause)).toBe(TOKEN);
+      expect(isError(e)).toBe(true);
+      expect(SENSITIVE.labels.has(e)).toBe(false);
+      expect(redact(e)).toBe(e);
+      // Its labeled twin is the labeled occurrence, and is not reported again.
+      expect(redact(sensitive(e))).toBe(PLACEHOLDER);
+      expect(reports).toHaveLength(1);
+    });
+
+    it('outside a region and over a thrown labeled object: hidden, not labeled', () => {
+      on();
+      const plainCause = errorHidden('plain', 'edge');
+      const thrown = new Error(TOKEN);
+      SENSITIVE.labels.add(thrown);
+      const overThrown = errorHidden(thrown);
+      expect(reports.map((r) => r.sensitive)).toEqual([true, true]);
+      expect(reports[0].origin).toBe('edge');
+      expect(unbox(reports[0].cause)).toBe('plain');
+      expect(unbox(reports[1].cause)).toBe(thrown);
+      expect(SENSITIVE.labels.has(plainCause)).toBe(false);
+      expect(SENSITIVE.labels.has(overThrown)).toBe(false);
+    });
+
+    it('a boxed cause is reported as that box', () => {
+      on();
+      const cause = sensitive({ body: TOKEN });
+      const e = runSensitiveRegion(() => errorHidden(cause));
+      expect(reports[0].cause).toBe(cause);
+      expect(SENSITIVE.labels.has(e)).toBe(false);
+    });
+
+    it('mode off: the same as error(cause, origin)', () => {
+      const registered = SENSITIVE.counters.registered;
+      const e = runSensitiveRegion(() => errorHidden(TOKEN));
+      error(TOKEN, 'evaluation');
+      expect(reports).toEqual([
+        {
+          origin: 'evaluation',
+          subclass: 'author-fault',
+          cause: TOKEN,
+          sensitive: false,
+        },
+        {
+          origin: 'evaluation',
+          subclass: 'author-fault',
+          cause: TOKEN,
+          sensitive: false,
+        },
+      ]);
+      expect(isError(e)).toBe(true);
+      expect(SENSITIVE.counters.registered).toBe(registered);
     });
   });
 

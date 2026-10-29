@@ -115,6 +115,21 @@ export function markThrown(thrown: unknown): void {
   REGISTRY.counters.registered++;
 }
 
+/**
+ * Marks a thrown object as labeled, so an error minted over it later is labeled, the way an object
+ * thrown under a labeled call is. Mode off, a primitive, or an object already labeled: nothing.
+ */
+export function markLabeled(thrown: unknown): void {
+  if (
+    !SENSITIVE_POLICY.mode ||
+    typeof thrown !== 'object' ||
+    thrown === null ||
+    weakSetHas(REGISTRY.labels, thrown)
+  )
+    return;
+  markThrown(thrown);
+}
+
 /** @internal Runs `fn` and marks what it throws as labeled. */
 export function markingThrows<T>(fn: () => T): T {
   try {

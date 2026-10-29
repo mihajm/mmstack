@@ -176,6 +176,11 @@ export function runSensitiveRegion<T>(fn: () => T): T {
   }
 }
 
+/** Whether a labeled region is open (see {@link runSensitiveRegion}). Mode off: false. */
+export function inSensitiveRegion(): boolean {
+  return POLICY.mode && COUNTERS.region > 0;
+}
+
 /**
  * A reader operation: every box removed, deep through arrays and plain objects (a labeled sentinel
  * becomes its plain sentinel). Containers are copied only where a box was found; accessors are never

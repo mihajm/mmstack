@@ -8,6 +8,7 @@ export {
   error,
   errorConstant,
   errorEdge,
+  errorHidden,
   type ErrorMintReport,
   type ErrorOrigin,
   type ErrorReporter,
@@ -33,6 +34,7 @@ export {
   setStrictSentinels,
 } from './sentinel';
 export {
+  inSensitiveRegion,
   isSensitive,
   isSensitiveMode,
   redact,

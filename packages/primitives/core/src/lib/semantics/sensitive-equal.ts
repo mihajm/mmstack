@@ -1,5 +1,5 @@
 import { unbox } from './sensitive';
-import { hasLabel, SENSITIVE } from './sensitive-registry';
+import { hasAlways, hasLabel, SENSITIVE } from './sensitive-registry';
 import {
   isPlainArray,
   isPlainRecord,
@@ -41,7 +41,8 @@ function anyLabel(value: unknown, seen: Set<object>): boolean {
 }
 
 /**
- * Labels at the same positions, through arrays and plain records. Only a label differing makes the
+ * Labels at the same positions, through arrays and plain records, an always-sensitive label apart
+ * from an ordinary one. Only a label differing makes the
  * trees differ: a position present on one side only, or a differing shape, counts only when a label
  * sits there; otherwise the base equality decides.
  */
@@ -50,7 +51,8 @@ function sameLabelTree(
   b: unknown,
   seen: Map<object, Set<object>>,
 ): boolean {
-  if (hasLabel(a) !== hasLabel(b)) return false;
+  if (hasLabel(a) !== hasLabel(b) || hasAlways(a) !== hasAlways(b))
+    return false;
   const x = unbox(a);
   const y = unbox(b);
   if (x === y) return true;
@@ -72,8 +74,9 @@ function sameLabelTree(
  * Wraps an equality for values that may hold sensitive boxes. While the mode is off this returns
  * `base` itself. While it is on, two values are equal when `base` finds their canonical forms equal
  * (boxes unwrapped deep through one memo per check, labeled absorbers as their plain absorber, edge
- * views as their raw value) and their labels sit at the same positions: a box and an equal plain
- * value differ, two boxes of equal values do not. The mode is read when the wrapper is built.
+ * views as their raw value) and their labels sit at the same positions, each of the same class
+ * (ordinary or always sensitive): a box and an equal plain value differ, two boxes of equal values
+ * do not. The mode is read when the wrapper is built.
  */
 export function sensitiveEqual<T>(
   base: (a: T, b: T) => boolean,

@@ -273,11 +273,32 @@ export const oracle = (e: Expr, env: OEnv): LV => {
     }
     case 'map':
     case 'filter':
-    case 'find': {
+    case 'find':
+    case 'some':
+    case 'every': {
       const a = go(e.a);
       const bad = absorbed([a]) ?? oList(a);
       if (bad) return bad;
       const els = elsOf(a);
+      if (e.t === 'some' || e.t === 'every') {
+        // A decision like find: the verdicts read up to the one that settles label the answer.
+        const settles = e.t === 'some';
+        const seen: LV[] = [a];
+        for (const el of els) {
+          const t = oracle(e.body, { ...env, param: el });
+          seen.push(t);
+          if (isOracleAbsorber(t.v)) return absorbed(seen) as LV;
+          if (truthy(t.v) === settles)
+            return markIf(
+              seen.some((x) => x.l.b),
+              plainLV(settles),
+            );
+        }
+        return markIf(
+          seen.some((x) => x.l.b),
+          plainLV(!settles),
+        );
+      }
       if (e.t === 'find') {
         const seen: LV[] = [a];
         for (const el of els) {

@@ -168,3 +168,8 @@ export function walkSensitive(value: unknown, walk: SensitiveWalk): unknown {
   analyze(value, walk);
   return build(value, walk);
 }
+
+/** @internal Visits everything a walk reaches from `value` once, building nothing. */
+export function visitSensitive(value: unknown, walk: SensitiveWalk): void {
+  analyze(value, walk);
+}

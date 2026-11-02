@@ -932,21 +932,28 @@ class Lockstep implements Engine {
   }
 }
 
+/** 1500 seeds × 24-step traces run for ~6 s on a laptop; the default 5 s budget is for unit tests. */
+const LOCKSTEP_TIMEOUT_MS = 60_000;
+
 describe('real createTransaction: generated traces, lockstep with the model', () => {
-  it('matches the model at every read and satisfies the properties (guesses recorded, not reverted at commit)', () => {
-    let effective = 0;
-    for (let seed = 1; seed <= 1500; seed++) {
-      const engine = new Lockstep();
-      const r = runTrace(
-        engine,
-        genTrace(seed, { guesses: true, length: 24 }),
-        false,
-      );
-      expect([seed, r.violations]).toEqual([seed, []]);
-      effective += r.effectiveAborts;
-    }
-    expect(effective).toBeGreaterThan(1500);
-  });
+  it(
+    'matches the model at every read and satisfies the properties (guesses recorded, not reverted at commit)',
+    () => {
+      let effective = 0;
+      for (let seed = 1; seed <= 1500; seed++) {
+        const engine = new Lockstep();
+        const r = runTrace(
+          engine,
+          genTrace(seed, { guesses: true, length: 24 }),
+          false,
+        );
+        expect([seed, r.violations]).toEqual([seed, []]);
+        effective += r.effectiveAborts;
+      }
+      expect(effective).toBeGreaterThan(1500);
+    },
+    LOCKSTEP_TIMEOUT_MS,
+  );
 });
 
 describe('real createTransaction: pins', () => {

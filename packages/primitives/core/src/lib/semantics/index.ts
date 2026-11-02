@@ -34,7 +34,10 @@ export {
   setStrictSentinels,
 } from './sentinel';
 export {
+  alwaysSensitive,
   inSensitiveRegion,
+  isAlwaysBoxed,
+  isAlwaysSensitive,
   isSensitive,
   isSensitiveMode,
   redact,

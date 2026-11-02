@@ -7,11 +7,14 @@ import {
 import {
   canonicalize,
   isLabeled,
-  label,
-  labeledInArrays,
+  labelAt,
+  levelInArrays,
+  levelOf,
   mapBack,
   markingThrows,
+  maxLevel,
   openUnwrap,
+  raise,
   SENSITIVE_POLICY,
   underLabel,
   unlabel,
@@ -45,7 +48,7 @@ function labeledJoinDeep(values: readonly unknown[]): Absorbing | undefined {
   const winner = joinCanonical(
     canonicalize(values, unwrap, false) as readonly unknown[],
   );
-  return winner && unwrap.found ? (label(winner) as Absorbing) : winner;
+  return winner && (labelAt(unwrap.level, winner) as Absorbing);
 }
 
 function joinCanonical(values: readonly unknown[]): Absorbing | undefined {
@@ -134,7 +137,9 @@ export function invoke(
 }
 
 // The mode-on branches live out of line so each hook stays as small as it is today. Each starts
-// with the WeakSet test; an unlabeled operand takes today's path.
+// with the WeakSet test; an unlabeled operand takes today's path. A labeled result is labeled at the
+// highest level among the operands it read (`Level`), so an always-sensitive operand makes the
+// result always sensitive; whether a result is labeled at all does not depend on the level.
 
 /** The test position: the branch is chosen on the inner value, and its result is labeled. */
 function labeledTest(
@@ -144,7 +149,8 @@ function labeledTest(
 ): unknown {
   const plain = unlabel(left);
   if (isAbsorbing(plain)) return left;
-  return takesRight(plain) ? label(underLabel(right)) : left;
+  const level = levelOf(left);
+  return takesRight(plain) ? labelAt(level, underLabel(right, level)) : left;
 }
 
 function labeledAnd(left: unknown, right: Thunk): unknown {
@@ -176,7 +182,8 @@ function labeledConditional(
   }
   const plain = unlabel(test);
   if (isAbsorbing(plain)) return test;
-  return label(underLabel(plain ? whenTrue : whenFalse));
+  const level = levelOf(test);
+  return labelAt(level, underLabel(plain ? whenTrue : whenFalse, level));
 }
 
 function labeledMember(
@@ -186,22 +193,30 @@ function labeledMember(
   if (!isLabeled(object)) return isAbsorbing(object) ? object : read(object);
   const plain = unlabel(object);
   if (isAbsorbing(plain)) return object;
-  return label(underLabel(() => read(plain)));
+  const level = levelOf(object);
+  return labelAt(
+    level,
+    underLabel(() => read(plain), level),
+  );
 }
 
 function labeledUnary(
   value: unknown,
   apply: (value: unknown) => unknown,
 ): unknown {
-  const labeled = labeledInArrays(value);
+  const level = levelInArrays(value);
   const plain = unlabel(value);
-  if (isAbsorbing(plain)) return labeled ? label(plain) : plain;
-  if (!labeled) return apply(value);
+  if (isAbsorbing(plain)) return labelAt(level, plain);
+  if (!level) return apply(value);
   const unwrap = openUnwrap();
   const operand = canonicalize(value, unwrap, false);
-  return label(
+  // The level of what coercion reads (arrays and box inners), not every label the unwrap crossed:
+  // a per-field view's record fields are crossed but never read by a coercion.
+  const at = level;
+  return labelAt(
+    at,
     mapBack(
-      underLabel(() => apply(operand)),
+      underLabel(() => apply(operand), at),
       unwrap,
     ),
   );
@@ -212,16 +227,19 @@ function labeledBinary(
   right: unknown,
   apply: (left: unknown, right: unknown) => unknown,
 ): unknown {
-  const labeled = labeledInArrays(left) || labeledInArrays(right);
+  const level = raise(levelInArrays(left), levelInArrays(right));
   const absorber = joinAbsorbers([unlabel(left), unlabel(right)]);
-  if (absorber) return labeled ? label(absorber) : absorber;
-  if (!labeled) return apply(left, right);
+  if (absorber) return labelAt(level, absorber);
+  if (!level) return apply(left, right);
   const unwrap = openUnwrap();
   const a = canonicalize(left, unwrap, false);
   const b = canonicalize(right, unwrap, false);
-  return label(
+  // As in `labeledUnary`: the level of what the operator reads.
+  const at = level;
+  return labelAt(
+    at,
     mapBack(
-      underLabel(() => apply(a, b)),
+      underLabel(() => apply(a, b), at),
       unwrap,
     ),
   );
@@ -232,27 +250,32 @@ function labeledInvoke(
   args: readonly unknown[],
   apply: (target: unknown, args: readonly unknown[]) => unknown,
 ): unknown {
-  const targetLabeled = isLabeled(target);
+  const targetLevel = levelOf(target);
   const callee = unlabel(target);
   if (isSentinelAware(callee)) {
-    if (!targetLabeled && !args.some(labeledInArrays))
-      return apply(target, args);
+    const level = raise(targetLevel, maxLevel(args, levelInArrays));
+    if (!level) return apply(target, args);
     // A labeled target was chosen by a secret: the whole call is a labeled region. A plain target
     // over labeled arguments propagates by data, so only its throws are marked.
     const run = () => apply(callee, args);
-    return label(targetLabeled ? underLabel(run) : markingThrows(run));
+    return labelAt(
+      level,
+      targetLevel ? underLabel(run, level) : markingThrows(run, level),
+    );
   }
   const absorber = joinAbsorbers([callee, joinAbsorbers(args.map(unlabel))]);
   if (absorber)
-    return targetLabeled || args.some(isLabeled) ? label(absorber) : absorber;
+    return labelAt(raise(targetLevel, maxLevel(args, levelOf)), absorber);
   const unwrap = openUnwrap();
   const plainArgs = args.map((arg) => canonicalize(arg, unwrap, true));
-  if (!targetLabeled && !unwrap.found) return apply(target, args);
+  const level = raise(targetLevel, unwrap.level);
+  if (!level) return apply(target, args);
   // Position cost: a labeled argument the callee ignores still runs the call as a labeled region,
   // so the call's own mints are reported sensitive.
-  return label(
+  return labelAt(
+    level,
     mapBack(
-      underLabel(() => apply(callee, plainArgs)),
+      underLabel(() => apply(callee, plainArgs), level),
       unwrap,
     ),
   );

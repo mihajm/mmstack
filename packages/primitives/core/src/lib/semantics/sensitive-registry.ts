@@ -1,5 +1,5 @@
 const SENSITIVE_REGISTRY_KEY = Symbol.for('@mmstack/primitives.sensitive');
-const SENSITIVE_PROTOCOL = 1;
+const SENSITIVE_PROTOCOL = 2;
 
 /**
  * The marker value meaning "substitute the placeholder". Realm-wide, so every copy reads the same
@@ -25,6 +25,8 @@ export interface SensitiveCounters {
   region: number;
   /** Every write into the side tables, for the "mode off registers nothing" witness. */
   registered: number;
+  /** Depth of open always regions: an error minted while above zero is always sensitive. Protocol 2. */
+  alwaysRegion: number;
 }
 
 export interface SensitiveRegistry {
@@ -41,6 +43,10 @@ export interface SensitiveRegistry {
   readonly objectBox: WeakMap<object, object>;
   /** Edge-minted per-field view to the raw value it was minted from. */
   readonly canonical: WeakMap<object, unknown>;
+  /** Every always-sensitive label: a subset of `labels`. Protocol 2. */
+  readonly always: WeakSet<object>;
+  /** Object or absorber to its one always-sensitive box or twin. Protocol 2. */
+  readonly alwaysOf: WeakMap<object, object>;
   readonly policy: SensitivePolicy;
   readonly counters: SensitiveCounters;
 }
@@ -70,10 +76,12 @@ function validateForeignRegistry(slot: unknown): SensitiveRegistry {
     record.plain,
     record.objectBox,
     record.canonical,
+    record.alwaysOf,
   ];
   if (
     !maps.every((m) => m instanceof WeakMap) ||
-    !(record.labels instanceof WeakSet)
+    !(record.labels instanceof WeakSet) ||
+    !(record.always instanceof WeakSet)
   ) {
     throw new SensitiveRegistryError('sensitive registry record is malformed');
   }
@@ -87,7 +95,8 @@ function validateForeignRegistry(slot: unknown): SensitiveRegistry {
     typeof counters !== 'object' ||
     counters === null ||
     typeof counters.region !== 'number' ||
-    typeof counters.registered !== 'number'
+    typeof counters.registered !== 'number' ||
+    typeof counters.alwaysRegion !== 'number'
   ) {
     throw new SensitiveRegistryError('sensitive registry policy is malformed');
   }
@@ -115,12 +124,14 @@ export function joinSensitiveRegistry(
     plain: new WeakMap<object, object>(),
     objectBox: new WeakMap<object, object>(),
     canonical: new WeakMap<object, unknown>(),
+    always: new WeakSet<object>(),
+    alwaysOf: new WeakMap<object, object>(),
     policy: {
       mode: false,
       placeholder: '[mmstack sensitive]',
       marker: PLACEHOLDER_MARKER,
     },
-    counters: { region: 0, registered: 0 },
+    counters: { region: 0, registered: 0, alwaysRegion: 0 },
   });
   Object.defineProperty(host, SENSITIVE_REGISTRY_KEY, {
     value: minted,
@@ -146,6 +157,35 @@ const weakSetAdd = Function.prototype.call.bind(WeakSet.prototype.add) as (
 export function addLabel(value: object): void {
   weakSetAdd(SENSITIVE.labels, value);
   SENSITIVE.counters.registered++;
+}
+
+/** Registers a label as always sensitive. Callers check the mode and label it first. */
+export function addAlways(value: object): void {
+  weakSetAdd(SENSITIVE.always, value);
+  SENSITIVE.counters.registered++;
+}
+
+/** Mode on and `value` is an always-sensitive label. */
+export function hasAlways(value: unknown): boolean {
+  return (
+    SENSITIVE.policy.mode &&
+    typeof value === 'object' &&
+    value !== null &&
+    weakSetHas(SENSITIVE.always, value)
+  );
+}
+
+/**
+ * Whether an error minted now over `cause` is always sensitive: inside an always region, or over an
+ * always-sensitive cause. Callers have already found the mint sensitive.
+ */
+export function mintAlways(cause: unknown): boolean {
+  return (
+    SENSITIVE.counters.alwaysRegion > 0 ||
+    (typeof cause === 'object' &&
+      cause !== null &&
+      weakSetHas(SENSITIVE.always, cause))
+  );
 }
 
 /** Mode on and `value` is a labeled object: the one predicate every hook branch starts with. */

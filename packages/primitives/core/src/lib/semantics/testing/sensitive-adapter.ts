@@ -6,6 +6,7 @@ import {
   coalesce,
   conditional,
   invoke,
+  isAlwaysLabeled,
   isLabeled,
   member,
   or,
@@ -15,6 +16,7 @@ import {
   unlabel,
 } from '@mmstack/primitives/algebra';
 import {
+  alwaysSensitive,
   error,
   errorEdge,
   ifLoading,
@@ -120,26 +122,41 @@ const labelInRecord = (value: unknown): boolean => {
   return scan(value, false);
 };
 
-export function materialize(spec: SourceSpec, mode: boolean): unknown {
+/**
+ * A source as an edge materializes it; `always` declares its sensitive parts always sensitive, and
+ * `nest` wraps a per-field view in an ordinary box (an ordinary label over nested labels).
+ */
+export function materialize(
+  spec: SourceSpec,
+  mode: boolean,
+  always = false,
+  nest = false,
+): unknown {
+  const declare = always ? alwaysSensitive : sensitive;
+  const outer = (view: unknown): unknown => (nest ? sensitive(view) : view);
   if (spec.kind === 'pending') return loading();
   if (spec.kind === 'error')
-    return errorEdge(mode && spec.sens ? sensitive(spec.cause) : spec.cause);
+    return errorEdge(mode && spec.sens ? declare(spec.cause) : spec.cause);
   if (!mode || spec.sens === 'none') return spec.v;
-  if (spec.sens === 'whole') return sensitive(spec.v);
+  if (spec.sens === 'whole') return declare(spec.v);
   const raw = spec.v;
   if (Array.isArray(raw))
-    return registerCanonical(
-      raw.map((x) => sensitive(x)),
-      raw,
+    return outer(
+      registerCanonical(
+        raw.map((x) => declare(x)),
+        raw,
+      ),
     );
   if (isRec(raw))
-    return registerCanonical(
-      Object.fromEntries(
-        Object.entries(raw).map(([k, x]) => [k, sensitive(x)]),
+    return outer(
+      registerCanonical(
+        Object.fromEntries(
+          Object.entries(raw).map(([k, x]) => [k, declare(x)]),
+        ),
+        raw,
       ),
-      raw,
     );
-  return sensitive(raw);
+  return declare(raw);
 }
 
 function binary(op: BinOp, a: unknown, b: unknown, env: Env): unknown {
@@ -284,7 +301,9 @@ export function evaluate(e: Expr, env: Env): unknown {
       return { a: go(e.a), b: go(e.b) };
     case 'map':
     case 'filter':
-    case 'find': {
+    case 'find':
+    case 'some':
+    case 'every': {
       const a = go(e.a);
       const onVerdict =
         e.t === 'filter'
@@ -354,8 +373,11 @@ export function evaluate(e: Expr, env: Env): unknown {
     case 'spread': {
       const [a, b] = [go(e.a), go(e.b)];
       const labeled = isLabeled(a) || isLabeled(b);
+      // The engine's own relabel propagates the always class like the hooks do.
+      const relabel =
+        isAlwaysLabeled(a) || isAlwaysLabeled(b) ? alwaysSensitive : sensitive;
       const top = joinAbsorbers([unlabel(a), unlabel(b)]);
-      if (top) return labeled ? sensitive(top) : top;
+      if (top) return labeled ? relabel(top) : top;
       // `spreadArray` hands a boxed source's elements boxed; the literal they land in is new, and
       // the engine labels it whole when a source was labeled (its length follows the secret).
       const build = () => {
@@ -363,7 +385,7 @@ export function evaluate(e: Expr, env: Env): unknown {
           ...(spreadArray(a) as readonly unknown[]),
           ...(spreadArray(b) as readonly unknown[]),
         ];
-        return labeled ? sensitive(out) : out;
+        return labeled ? relabel(out) : out;
       };
       // A structural throw is as secret as any operand labeled at coercion depth: an engine's slot
       // builder runs the build as a labeled call then (here through an aware call, which marks it).
@@ -446,13 +468,16 @@ export interface RealRun {
 
 /**
  * Evaluates `tree` over `specs` through the real hooks with the mode `on` or off. `observe` reads
- * the raw result while the mode is still on (reader operations, label positions).
+ * the raw result while the mode is still on (reader operations, label positions). `always` declares
+ * every source (or the sources at the true indexes) always sensitive.
  */
 export function runReal<T = undefined>(
   tree: Expr,
   specs: readonly SourceSpec[],
   on: boolean,
   observe?: (raw: unknown, reports: readonly Report[]) => T,
+  always: boolean | readonly boolean[] = false,
+  nest: readonly boolean[] = [],
 ): RealRun & { observed: T | undefined } {
   const reports: Report[] = [];
   setErrorReporter((r) => reports.push(r));
@@ -460,7 +485,14 @@ export function runReal<T = undefined>(
   const before = registered();
   try {
     const env: Env = { srcs: [], specs, flags: new Set() };
-    env.srcs = specs.map((s) => materialize(s, on));
+    env.srcs = specs.map((s, i) =>
+      materialize(
+        s,
+        on,
+        typeof always === 'boolean' ? always : always[i],
+        nest[i] ?? false,
+      ),
+    );
     const raw = evaluate(tree, env);
     return {
       raw,

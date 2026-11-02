@@ -8,10 +8,14 @@ import type { ApplyFn, ArrayMethodShim } from './containers';
 import {
   canonicalize,
   isLabeled,
-  label,
-  labeledInArrays,
+  labelAt,
+  type Level,
+  levelInArrays,
+  levelOf,
   markThrown,
+  maxLevel,
   openUnwrap,
+  raise,
   underLabel,
   unlabel,
 } from './sensitive';
@@ -24,30 +28,34 @@ import {
 // Two rules hold for every shim here. (A) Over a labeled receiver the whole shim runs as a labeled
 // region and every answer, early returns and throws included, carries the label (`overReceiver`):
 // reading its elements may run an accessor. Reads out of a labeled nested array run in the region
-// too. (B) Every early return carries the labels of the operands scanned before it.
+// too. (B) Every early return carries the labels of the operands scanned before it. Every label is
+// applied at the highest level read (`Level`): a shim that read an always-sensitive operand answers
+// always sensitive.
 
 type Settled = { value: unknown } | undefined;
 
-function open(receiver: unknown): { xs: readonly unknown[]; boxed: boolean } {
+function open(receiver: unknown): { xs: readonly unknown[]; boxed: Level } {
   return {
     xs: unlabel(receiver) as readonly unknown[],
-    boxed: isLabeled(receiver),
+    boxed: levelOf(receiver),
   };
 }
 
-const labelIf = (labeled: boolean, value: unknown): unknown =>
-  labeled ? label(value) : value;
-
 /** Rule (A): over a labeled receiver the shim runs as a labeled region and its answer is labeled. */
 function overReceiver(shim: ArrayMethodShim): ArrayMethodShim {
-  return (receiver, args, apply) =>
-    isLabeled(receiver)
-      ? label(underLabel(() => shim(receiver, args, apply)))
+  return (receiver, args, apply) => {
+    const level = levelOf(receiver);
+    return level
+      ? labelAt(
+          level,
+          underLabel(() => shim(receiver, args, apply), level),
+        )
       : shim(receiver, args, apply);
+  };
 }
 
-function throwLabeled(labeled: boolean, thrown: Error): never {
-  if (labeled) markThrown(thrown);
+function throwLabeled(level: Level, thrown: Error): never {
+  if (level) markThrown(thrown, level);
   throw thrown;
 }
 
@@ -64,9 +72,8 @@ const coercible = (value: unknown): unknown =>
 
 /** Runs a coercion over `value`; over a labeled value it runs as a labeled region. */
 function coerce<T>(value: unknown, run: (plain: unknown) => T): T {
-  return labeledInArrays(value)
-    ? underLabel(() => run(coercible(value)))
-    : run(value);
+  const level = levelInArrays(value);
+  return level ? underLabel(() => run(coercible(value)), level) : run(value);
 }
 
 export function labeledPassthrough(
@@ -80,13 +87,14 @@ export function labeledPassthrough(
     const scanned = args.filter((_, i) => scans(i));
     const absorber = joinAbsorbers(scanned.map(unlabel));
     if (absorber)
-      return labelIf(boxed || scanned.some(labeledInArrays), absorber);
-    const labeled = boxed || args.some(labeledInArrays);
-    if (!labeled)
+      return labelAt(raise(boxed, maxLevel(scanned, levelInArrays)), absorber);
+    const level = raise(boxed, maxLevel(args, levelInArrays));
+    if (!level)
       return (xs as unknown as Record<string, (...a: unknown[]) => unknown>)[
         method
       ](...args);
-    return label(
+    return labelAt(
+      level,
       underLabel(() => {
         const plainArgs = args.map((arg, i) =>
           scans(i) ? coercible(arg) : unlabel(arg),
@@ -94,7 +102,7 @@ export function labeledPassthrough(
         return (xs as unknown as Record<string, (...a: unknown[]) => unknown>)[
           method
         ](...plainArgs);
-      }),
+      }, level),
     );
   });
 }
@@ -106,31 +114,34 @@ export function labeledPassthrough(
 export const labeledFlat: ArrayMethodShim = overReceiver((receiver, args) => {
   const { xs, boxed } = open(receiver);
   const absorber = joinAbsorbers(args.map(unlabel));
-  if (absorber) return labelIf(boxed || args.some(labeledInArrays), absorber);
+  if (absorber)
+    return labelAt(raise(boxed, maxLevel(args, levelInArrays)), absorber);
   let depth = coerce(args[0], (raw) =>
     raw === undefined ? 1 : toIntegerOrInfinity(raw),
   );
   if (depth < 0) depth = 0;
   const out: unknown[] = [];
-  let read = false;
+  let read: Level = 0;
   const into = (
     source: readonly unknown[],
     level: number,
-    fromBox: boolean,
+    fromBox: Level,
   ): void => {
     for (let i = 0; i < source.length; i++) {
       if (!(i in source)) continue;
       // Reading out of a labeled array may run an accessor: in the region.
-      const element = fromBox ? underLabel(() => label(source[i])) : source[i];
-      read ||= isLabeled(element);
+      const element = fromBox
+        ? underLabel(() => labelAt(fromBox, source[i]), fromBox)
+        : source[i];
+      read = raise(read, levelOf(element));
       const inner = unlabel(element);
       if (level > 0 && Array.isArray(inner))
-        into(inner, level - 1, isLabeled(element));
+        into(inner, level - 1, levelOf(element));
       else out.push(element);
     }
   };
-  into(xs, depth, false);
-  return labelIf(boxed || read || labeledInArrays(args[0]), out);
+  into(xs, depth, 0);
+  return labelAt(raise(raise(boxed, read), levelInArrays(args[0])), out);
 });
 
 type SearchMethod = 'indexOf' | 'lastIndexOf' | 'includes';
@@ -144,25 +155,28 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
     const { xs, boxed } = open(receiver);
     const argAbsorber = joinAbsorbers(args.map(unlabel));
     if (argAbsorber)
-      return labelIf(boxed || args.some(labeledInArrays), argAbsorber);
+      return labelAt(raise(boxed, maxLevel(args, levelInArrays)), argAbsorber);
     const unwrap = openUnwrap();
     const len = xs.length;
     const target = canonicalize(args[0], unwrap, true);
-    let labeled =
-      boxed ||
-      isLabeled(args[0]) ||
-      (args.length > 1 && labeledInArrays(args[1]));
+    let labeled: Level = raise(
+      raise(boxed, levelOf(args[0])),
+      args.length > 1 ? levelInArrays(args[1]) : 0,
+    );
+    // Labeled by the prefix through the hit. Comparisons read canonical values at the top level
+    // (objects by identity), so the level is that of the target and the elements scanned.
+    const at = (): Level => labeled;
     const matches =
       method === 'includes'
         ? (element: unknown) => sameValueZero(element, target)
         : (element: unknown) => element === target;
     const visit = (i: number): Settled => {
       const element = xs[i];
-      labeled ||= isLabeled(element);
+      labeled = raise(labeled, levelOf(element));
       const plain = unlabel(element);
-      if (isAbsorbing(plain)) return { value: labelIf(labeled, plain) };
+      if (isAbsorbing(plain)) return { value: labelAt(at(), plain) };
       if (matches(canonicalize(element, unwrap, true)))
-        return { value: labelIf(labeled, method === 'includes' ? true : i) };
+        return { value: labelAt(at(), method === 'includes' ? true : i) };
       return undefined;
     };
     if (method === 'lastIndexOf') {
@@ -170,7 +184,7 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
         args.length > 1 ? coerce(args[1], toIntegerOrInfinity) : len - 1;
       if (from < 0) {
         from = len + from;
-        if (from < 0) return labelIf(labeled, -1);
+        if (from < 0) return labelAt(at(), -1);
       } else if (from > len - 1) {
         from = len - 1;
       }
@@ -178,7 +192,7 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
         const hit = visit(i);
         if (hit) return hit.value;
       }
-      return labelIf(labeled, -1);
+      return labelAt(at(), -1);
     }
     let start = args.length > 1 ? coerce(args[1], toIntegerOrInfinity) : 0;
     if (start < 0) {
@@ -189,7 +203,7 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
       const hit = visit(i);
       if (hit) return hit.value;
     }
-    return labelIf(labeled, method === 'includes' ? false : -1);
+    return labelAt(at(), method === 'includes' ? false : -1);
   });
 }
 
@@ -201,17 +215,24 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
 export function labeledWithCallback(shim: ArrayMethodShim): ArrayMethodShim {
   return overReceiver((receiver, args, apply) => {
     const cb = args[0];
-    const cbLabeled = isLabeled(cb);
+    const cbLevel = levelOf(cb);
     const plain = unlabel(cb);
-    if (isAbsorbing(plain)) return labelIf(isLabeled(receiver), cb);
+    if (isAbsorbing(plain)) return labelAt(levelOf(receiver), cb);
     if (typeof plain !== 'function') {
-      const labeled = cbLabeled || isLabeled(receiver);
-      const message = coerce(cbLabeled ? cb : plain, (p) => String(p));
-      throwLabeled(labeled, new TypeError(`${message} is not a function`));
+      const source = cbLevel ? cb : plain;
+      // Labeled as before (callback or receiver); the message's own labels only raise the level.
+      const base = raise(cbLevel, levelOf(receiver));
+      const level = base ? raise(base, levelInArrays(source)) : 0;
+      const message = coerce(source, (p) => String(p));
+      throwLabeled(level, new TypeError(`${message} is not a function`));
     }
-    if (!cbLabeled) return shim(receiver, args, apply);
-    return label(
-      underLabel(() => shim(receiver, [plain, ...args.slice(1)], apply)),
+    if (!cbLevel) return shim(receiver, args, apply);
+    return labelAt(
+      cbLevel,
+      underLabel(
+        () => shim(receiver, [plain, ...args.slice(1)], apply),
+        cbLevel,
+      ),
     );
   });
 }
@@ -221,10 +242,10 @@ function call(
   cb: unknown,
   args: unknown[],
   apply: ApplyFn,
-  labeled: boolean,
+  level: Level,
 ): unknown {
-  return labeled
-    ? underLabel(() => invoke(cb, args, apply))
+  return level
+    ? underLabel(() => invoke(cb, args, apply), level)
     : invoke(cb, args, apply);
 }
 
@@ -232,9 +253,9 @@ export const labeledMap: ArrayMethodShim = overReceiver(
   (receiver, args, apply) => {
     const { xs, boxed } = open(receiver);
     const out = xs.map((element, index) =>
-      call(args[0], [boxed ? label(element) : element, index], apply, boxed),
+      call(args[0], [labelAt(boxed, element), index], apply, boxed),
     );
-    return labelIf(boxed, out);
+    return labelAt(boxed, out);
   },
 );
 
@@ -242,19 +263,21 @@ export const labeledFlatMap: ArrayMethodShim = overReceiver(
   (receiver, args, apply) => {
     const { xs, boxed } = open(receiver);
     const mapped = xs.map((element, index) =>
-      call(args[0], [boxed ? label(element) : element, index], apply, boxed),
+      call(args[0], [labelAt(boxed, element), index], apply, boxed),
     );
     // Whether a result spreads decides the length: any labeled element read labels the whole result.
-    let read = false;
+    let read: Level = 0;
     const spreadable = mapped.map((result) => {
       const inner = unlabel(result);
-      if (isLabeled(result)) read = true;
-      else if (Array.isArray(inner) && inner.some(isLabeled)) read = true;
-      return isLabeled(result) && Array.isArray(inner)
-        ? underLabel(() => inner.map(label))
+      const level = levelOf(result);
+      if (level) read = raise(read, level);
+      else if (Array.isArray(inner))
+        read = raise(read, maxLevel(inner, levelOf));
+      return level && Array.isArray(inner)
+        ? underLabel(() => inner.map((x) => labelAt(level, x)), level)
         : result;
     });
-    return labelIf(boxed || read, spreadable.flat());
+    return labelAt(raise(boxed, read), spreadable.flat());
   },
 );
 
@@ -266,36 +289,36 @@ export function labeledDecision(
 ): ArrayMethodShim {
   return overReceiver((receiver, args, apply) => {
     const { xs, boxed } = open(receiver);
-    let labeled = boxed;
+    let labeled: Level = boxed;
     const last = xs.length - 1;
     for (let step = 0; step <= last; step++) {
       const index = reverse ? last - step : step;
-      const element = boxed ? label(xs[index]) : xs[index];
+      const element = labelAt(boxed, xs[index]);
       const verdict = call(args[0], [element, index], apply, labeled);
-      labeled ||= isLabeled(verdict);
+      labeled = raise(labeled, levelOf(verdict));
       const plain = unlabel(verdict);
-      if (isAbsorbing(plain)) return labelIf(labeled, plain);
+      if (isAbsorbing(plain)) return labelAt(labeled, plain);
       const settled = settle(plain, element, index);
-      if (settled) return labelIf(labeled, settled.value);
+      if (settled) return labelAt(labeled, settled.value);
     }
-    return labelIf(labeled, fallthrough());
+    return labelAt(labeled, fallthrough());
   });
 }
 
 export const labeledFilter: ArrayMethodShim = overReceiver(
   (receiver, args, apply) => {
     const { xs, boxed } = open(receiver);
-    let labeled = boxed;
+    let labeled: Level = boxed;
     const out: unknown[] = [];
     for (let index = 0; index < xs.length; index++) {
-      const element = boxed ? label(xs[index]) : xs[index];
+      const element = labelAt(boxed, xs[index]);
       const verdict = call(args[0], [element, index], apply, labeled);
-      labeled ||= isLabeled(verdict);
+      labeled = raise(labeled, levelOf(verdict));
       const plain = unlabel(verdict);
-      if (isAbsorbing(plain)) return labelIf(labeled, plain);
+      if (isAbsorbing(plain)) return labelAt(labeled, plain);
       if (plain) out.push(element);
     }
-    return labelIf(labeled, out);
+    return labelAt(labeled, out);
   },
 );
 
@@ -314,37 +337,43 @@ export const labeledReduce: ArrayMethodShim = overReceiver(
           boxed,
           new TypeError('Reduce of empty array with no initial value'),
         );
-      accumulator = boxed ? label(xs[0]) : xs[0];
+      accumulator = labelAt(boxed, xs[0]);
       start = 1;
     }
-    let labeled = boxed || isLabeled(accumulator);
+    let labeled = raise(boxed, levelOf(accumulator));
     for (let index = start; index < xs.length; index++) {
-      const element = boxed ? label(xs[index]) : xs[index];
+      const element = labelAt(boxed, xs[index]);
       accumulator = call(
         args[0],
         [accumulator, element, index],
         apply,
         labeled,
       );
-      labeled ||= isLabeled(accumulator);
+      labeled = raise(labeled, levelOf(accumulator));
     }
-    return labelIf(labeled, accumulator);
+    return labelAt(labeled, accumulator);
   },
 );
 
 export const labeledJoin: ArrayMethodShim = overReceiver((receiver, args) => {
   const { xs, boxed } = open(receiver);
-  const labeled = boxed || labeledInArrays(xs) || args.some(labeledInArrays);
+  const labeled = raise(
+    raise(boxed, levelInArrays(xs)),
+    maxLevel(args, levelInArrays),
+  );
   const cellAbsorber = joinAbsorbersDeep(xs);
-  if (cellAbsorber) return labelIf(labeled, unlabel(cellAbsorber));
+  if (cellAbsorber) return labelAt(labeled, unlabel(cellAbsorber));
   const argAbsorber = joinAbsorbers(args.map(unlabel));
-  if (argAbsorber) return labelIf(labeled, argAbsorber);
+  if (argAbsorber) return labelAt(labeled, argAbsorber);
   if (!labeled) return xs.join(args[0] as string | undefined);
   const unwrap = openUnwrap();
   const cells = canonicalize(xs, unwrap, false) as readonly unknown[];
-  return label(
-    underLabel(() =>
-      cells.join(canonicalize(args[0], unwrap, false) as string | undefined),
+  return labelAt(
+    labeled,
+    underLabel(
+      () =>
+        cells.join(canonicalize(args[0], unwrap, false) as string | undefined),
+      labeled,
     ),
   );
 });
@@ -355,7 +384,7 @@ export const labeledJoin: ArrayMethodShim = overReceiver((receiver, args) => {
  * element once. Precision cost: the keys of public elements beside a labeled one are built in the
  * labeled region too, so a mint inside a public `toString` is reported sensitive.
  */
-function sortDefault(xs: readonly unknown[]): unknown[] {
+function sortDefault(xs: readonly unknown[], level: Level): unknown[] {
   const unwrap = openUnwrap();
   const defined: { plain: unknown; element: unknown }[] = [];
   const undefinedOnes: unknown[] = [];
@@ -366,8 +395,9 @@ function sortDefault(xs: readonly unknown[]): unknown[] {
   }
   if (defined.length < 2)
     return [...defined.map((d) => d.element), ...undefinedOnes];
-  const keyed = underLabel(() =>
-    defined.map((d) => ({ key: String(d.plain), element: d.element })),
+  const keyed = underLabel(
+    () => defined.map((d) => ({ key: String(d.plain), element: d.element })),
+    level,
   );
   keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return [...keyed.map((k) => k.element), ...undefinedOnes];
@@ -378,17 +408,20 @@ export const labeledToSorted: ArrayMethodShim = overReceiver(
   (receiver, args, apply) => {
     const { xs, boxed } = open(receiver);
     const comparator = args[0];
-    let labeled = boxed || isLabeled(comparator);
+    let labeled = raise(boxed, levelOf(comparator));
     const plainComparator = unlabel(comparator);
     if (plainComparator === undefined) {
-      labeled ||= labeledInArrays(xs);
+      labeled = raise(labeled, levelInArrays(xs));
       const cellAbsorber = joinAbsorbersDeep(xs);
-      if (cellAbsorber) return labelIf(labeled, unlabel(cellAbsorber));
+      if (cellAbsorber) return labelAt(labeled, unlabel(cellAbsorber));
       // The native sort coerces nothing with fewer than two elements.
-      if (xs.length < 2) return labelIf(labeled, [...xs]);
-      return labelIf(labeled, labeled ? sortDefault(xs) : [...xs].sort());
+      if (xs.length < 2) return labelAt(labeled, [...xs]);
+      return labelAt(
+        labeled,
+        labeled ? sortDefault(xs, labeled) : [...xs].sort(),
+      );
     }
-    if (isAbsorbing(plainComparator)) return labelIf(labeled, comparator);
+    if (isAbsorbing(plainComparator)) return labelAt(labeled, comparator);
     if (typeof plainComparator !== 'function')
       throwLabeled(
         labeled,
@@ -403,25 +436,25 @@ export const labeledToSorted: ArrayMethodShim = overReceiver(
     const defined = items.filter((x) => unlabel(x) !== undefined);
     const trailing = items.filter((x) => unlabel(x) === undefined);
     // Setting undefined aside reads every element, so with two or more a labeled one decides the order.
-    labeled ||= items.length > 1 && items.some(isLabeled);
+    if (items.length > 1) labeled = raise(labeled, maxLevel(items, levelOf));
     const sorted = defined.sort((a, b) => {
-      const pair = boxed ? [label(a), label(b)] : [a, b];
+      const pair = [labelAt(boxed, a), labelAt(boxed, b)];
       const verdict = call(plainComparator, pair, apply, labeled);
-      labeled ||= isLabeled(verdict);
+      labeled = raise(labeled, levelOf(verdict));
       const plain = unlabel(verdict);
       if (isAbsorbing(plain)) {
         absorbers.push(plain);
         return 0;
       }
       // The sort coerces the verdict to a number; over a label that runs as a labeled region.
-      if (labeled) return underLabel(() => Number(coercible(plain)));
+      if (labeled) return underLabel(() => Number(coercible(plain)), labeled);
       return (
         typeof plain === 'object' && plain !== null ? coercible(plain) : plain
       ) as number;
     });
     const out = trailing.length ? [...sorted, ...trailing] : sorted;
     const absorber = joinAbsorbers(absorbers);
-    return labelIf(labeled, absorber ?? out);
+    return labelAt(labeled, absorber ?? out);
   },
 );
 
@@ -434,11 +467,16 @@ export function labeledSpread(source: unknown): Absorbing | readonly unknown[] {
     return source;
   }
   const inner = unlabel(source);
+  const level = levelOf(source);
   if (isAbsorbing(inner)) return source as Absorbing;
   if (!Array.isArray(inner))
-    throwLabeled(true, new TypeError('Spread source must be an array'));
+    throwLabeled(level, new TypeError('Spread source must be an array'));
   // Reading out of the labeled array may run an accessor: in the region.
-  return underLabel(() =>
-    Array.from(inner as readonly unknown[], (element) => label(element)),
+  return underLabel(
+    () =>
+      Array.from(inner as readonly unknown[], (element) =>
+        labelAt(level, element),
+      ),
+    level,
   );
 }

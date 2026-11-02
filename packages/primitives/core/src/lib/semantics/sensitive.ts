@@ -1,11 +1,13 @@
-import { openWalk, walkSensitive } from './sensitive-walk';
+import { openWalk, visitSensitive, walkSensitive } from './sensitive-walk';
 import {
+  alwaysTwin,
   isSentinel,
   isStrictSentinels,
   labeledTwin,
   reportError,
 } from './sentinel';
 import {
+  addAlways,
   addLabel,
   PLACEHOLDER_MARKER,
   SENSITIVE,
@@ -116,6 +118,77 @@ function boxObject(value: object): object {
   const box = mintBox(value);
   SENSITIVE.objectBox.set(value, box);
   return box;
+}
+
+/**
+ * Declares a value always sensitive: labeled exactly as {@link sensitive} labels it, and a member
+ * of the always class, which every hook of the algebra propagates (a result any always-sensitive
+ * operand reached is always sensitive too), so a reader that clears ordinary sensitive values can
+ * still refuse these (see {@link isAlwaysSensitive}). While the mode is off this is the identity and
+ * registers nothing. While it is on: an always-sensitive value is itself; a primitive gets a fresh
+ * box; an object, or the inner object of an ordinary box, gets its one always box; a sentinel, or a
+ * labeled twin, gets the one always twin of its plain sentinel.
+ */
+export function alwaysSensitive(value: unknown): unknown {
+  if (!POLICY.mode) return value;
+  if (typeof value !== 'object' || value === null) {
+    if (typeof value === 'function') return alwaysObject(value);
+    const box = mintBox(value);
+    addAlways(box);
+    return box;
+  }
+  if (SENSITIVE.always.has(value)) return value;
+  if (SENSITIVE.inner.has(value))
+    return alwaysSensitive(SENSITIVE.inner.get(value));
+  if (isSentinel(value)) return alwaysTwin(value);
+  return alwaysObject(value);
+}
+
+function alwaysObject(value: object): object {
+  const known = SENSITIVE.alwaysOf.get(value);
+  if (known) return known;
+  const box = mintBox(value);
+  addAlways(box);
+  SENSITIVE.alwaysOf.set(value, box);
+  return box;
+}
+
+/**
+ * Whether `value` itself is an always-sensitive box or twin (whatever the mode): one level, no walk,
+ * no allocation. A reader that clears ordinary sensitive values field by field asks this per box and
+ * withholds what answers true; {@link isAlwaysSensitive} is the deep form.
+ */
+export function isAlwaysBoxed(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    SENSITIVE.always.has(value) &&
+    (SENSITIVE.inner.has(value) || isSentinel(value))
+  );
+}
+
+/**
+ * Whether `value` is, or holds, an always-sensitive label (whatever the mode): deep through boxes,
+ * arrays and plain objects, the reach of {@link unboxAll}. A reader that clears sensitive values
+ * asks this first and withholds what answers true.
+ */
+export function isAlwaysSensitive(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (SENSITIVE.always.has(value)) return true;
+  if (COUNTERS.registered === 0) return false;
+  let found = false;
+  const walk = openWalk(
+    (v) =>
+      SENSITIVE.inner.has(v) ? { into: SENSITIVE.inner.get(v) } : undefined,
+    true,
+    {
+      visit: (v) => {
+        if (SENSITIVE.always.has(v)) found = true;
+      },
+    },
+  );
+  visitSensitive(value, walk);
+  return found;
 }
 
 /**

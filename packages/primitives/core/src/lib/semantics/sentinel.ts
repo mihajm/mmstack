@@ -1,7 +1,9 @@
-import { sensitive } from './sensitive';
+import { alwaysSensitive, sensitive } from './sensitive';
 import {
+  addAlways,
   addLabel,
   hasLabel,
+  mintAlways,
   mintSensitivity,
   SENSITIVE,
 } from './sensitive-registry';
@@ -269,6 +271,29 @@ export function labeledTwin<T extends Sentinel>(sentinel: T): T {
   if (weakSetHas(SENSITIVE.labels, sentinel)) return sentinel;
   const known = SENSITIVE.twin.get(sentinel);
   if (known) return known as T;
+  const twin = mintTwin(sentinel);
+  SENSITIVE.twin.set(sentinel, twin);
+  return twin as T;
+}
+
+/**
+ * @internal The always-sensitive twin of a sentinel: one per absorber, minted like a labeled twin
+ * over the plain absorber a labeled twin stands for (a labeled sentinel with no plain absorber, such
+ * as an error minted labeled, is its own base). An always-sensitive sentinel is its own twin.
+ * Callers check the mode.
+ */
+export function alwaysTwin<T extends Sentinel>(sentinel: T): T {
+  if (weakSetHas(SENSITIVE.always, sentinel)) return sentinel;
+  const base = (SENSITIVE.plain.get(sentinel) ?? sentinel) as Sentinel;
+  const known = SENSITIVE.alwaysOf.get(base);
+  if (known) return known as T;
+  const twin = mintTwin(base);
+  addAlways(twin);
+  SENSITIVE.alwaysOf.set(base, twin);
+  return twin as T;
+}
+
+function mintTwin(sentinel: Sentinel): Sentinel {
   const absorber = sentinel as unknown as Loading | Done | ErrorSentinel;
   let twin: Sentinel;
   if (absorber.kind === 'loading') twin = mint('loading', absorber.source);
@@ -280,9 +305,8 @@ export function labeledTwin<T extends Sentinel>(sentinel: T): T {
     twin = mint('error', undefined, extra);
   }
   addLabel(twin);
-  SENSITIVE.twin.set(sentinel, twin);
   SENSITIVE.plain.set(twin, sentinel);
-  return twin as T;
+  return twin;
 }
 
 export function loading(source?: unknown): Loading {
@@ -380,11 +404,15 @@ function mintError(
     extra['renderableMessage'] = renderableMessage;
   const sentinel = mint('error', undefined, extra) as ErrorSentinel;
   if (sensitivity) {
-    if (sensitivity === 'labeled') addLabel(sentinel);
+    const always = mintAlways(cause);
+    if (sensitivity === 'labeled') {
+      addLabel(sentinel);
+      if (always) addAlways(sentinel);
+    }
     errorReporter?.({
       origin,
       subclass,
-      cause: sensitive(cause),
+      cause: always ? alwaysSensitive(cause) : sensitive(cause),
       sensitive: true,
     });
   } else errorReporter?.({ origin, subclass, cause, sensitive: false });

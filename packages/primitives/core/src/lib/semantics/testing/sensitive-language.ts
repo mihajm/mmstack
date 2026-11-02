@@ -34,7 +34,7 @@ export type Expr =
   | { t: 'and' | 'or' | 'coal'; a: Expr; b: Expr }
   | { t: 'arr'; es: Expr[] }
   | { t: 'obj'; a: Expr; b: Expr }
-  | { t: 'map' | 'filter' | 'find'; a: Expr; body: Expr }
+  | { t: 'map' | 'filter' | 'find' | 'some' | 'every'; a: Expr; body: Expr }
   | { t: 'slice'; a: Expr; s: Expr }
   | { t: 'join'; a: Expr; sep: Expr }
   | { t: 'includes' | 'indexOf'; a: Expr; x: Expr; from?: Expr }

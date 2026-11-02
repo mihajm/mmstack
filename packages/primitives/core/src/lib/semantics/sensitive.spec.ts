@@ -1,10 +1,12 @@
 import {
+  DONE,
   error,
   errorConstant,
   errorEdge,
   errorHidden,
   type ErrorMintReport,
   isAbsorbing,
+  isDone,
   isError,
   isLoading,
   isSentinel,
@@ -13,7 +15,10 @@ import {
   setStrictSentinels,
 } from './sentinel';
 import {
+  alwaysSensitive,
   inSensitiveRegion,
+  isAlwaysBoxed,
+  isAlwaysSensitive,
   isSensitive,
   isSensitiveMode,
   redact,
@@ -562,5 +567,195 @@ describe('sensitive box', () => {
       expect(joinSensitiveRegistry(fresh)).toBe(minted);
       expect(Object.isFrozen(minted)).toBe(true);
     });
+
+    it('[PIN] protocol 2 carries the always class: a protocol-1 slot or a record without it is rejected', () => {
+      const key = Symbol.for('@mmstack/primitives.sensitive');
+      expect(SENSITIVE.protocol).toBe(2);
+      expect(SENSITIVE.always).toBeInstanceOf(WeakSet);
+      expect(SENSITIVE.alwaysOf).toBeInstanceOf(WeakMap);
+      expect(SENSITIVE.counters.alwaysRegion).toBe(0);
+      expect(() =>
+        joinSensitiveRegistry({ [key]: { ...SENSITIVE, protocol: 1 } }),
+      ).toThrow('protocol mismatch');
+      for (const field of ['always', 'alwaysOf'] as const)
+        expect(() =>
+          joinSensitiveRegistry({ [key]: { ...SENSITIVE, [field]: {} } }),
+        ).toThrow('malformed');
+      expect(() =>
+        joinSensitiveRegistry({
+          [key]: { ...SENSITIVE, counters: { region: 0, registered: 0 } },
+        }),
+      ).toThrow('malformed');
+    });
+  });
+});
+
+describe('always-sensitive class', () => {
+  it('[PROVEN] mode off: the identity, registers nothing, and nothing reads as always sensitive', () => {
+    const before = SENSITIVE.counters.registered;
+    const object = { token: TOKEN };
+    const pending = loading();
+    expect(alwaysSensitive(TOKEN)).toBe(TOKEN);
+    expect(alwaysSensitive(object)).toBe(object);
+    expect(alwaysSensitive(pending)).toBe(pending);
+    expect(isAlwaysSensitive(object)).toBe(false);
+    expect(SENSITIVE.counters.registered).toBe(before);
+  });
+
+  it('a primitive gets a fresh box: sensitive, always sensitive, read and redacted like any box', () => {
+    on();
+    const box = alwaysSensitive(TOKEN);
+    expect(isSensitive(box)).toBe(true);
+    expect(isAlwaysSensitive(box)).toBe(true);
+    expect(alwaysSensitive(box)).toBe(box);
+    expect(alwaysSensitive(TOKEN)).not.toBe(box);
+    expect(unbox(box)).toBe(TOKEN);
+    expect(unboxAll([box])).toEqual([TOKEN]);
+    expect(redact({ box })).toEqual({ box: PLACEHOLDER });
+    expect(String(box)).toBe(PLACEHOLDER);
+  });
+
+  it('an object gets its one always box, apart from its ordinary box; an ordinary box upgrades to it', () => {
+    on();
+    const object = { token: TOKEN };
+    const ordinary = sensitive(object);
+    const always = alwaysSensitive(object);
+    expect(always).not.toBe(ordinary);
+    expect(alwaysSensitive(object)).toBe(always);
+    expect(alwaysSensitive(ordinary)).toBe(always);
+    expect(unbox(always)).toBe(object);
+    expect(isAlwaysSensitive(ordinary)).toBe(false);
+    const upgraded = alwaysSensitive(sensitive(TOKEN));
+    expect(isAlwaysSensitive(upgraded)).toBe(true);
+    expect(unbox(upgraded)).toBe(TOKEN);
+  });
+
+  it('[PIN] sensitive() never lowers the class: an always box or twin declared again is itself', () => {
+    on();
+    const box = alwaysSensitive(TOKEN);
+    const twin = alwaysSensitive(loading());
+    expect(sensitive(box)).toBe(box);
+    expect(sensitive(twin)).toBe(twin);
+  });
+
+  it('a sentinel or its labeled twin gets the one always twin of the plain sentinel', () => {
+    on();
+    const pending = loading('src');
+    const twin = alwaysSensitive(pending);
+    expect(isLoading(twin)).toBe(true);
+    expect((twin as { source: unknown }).source).toBe('src');
+    expect(isAlwaysSensitive(twin)).toBe(true);
+    expect(alwaysSensitive(sensitive(pending))).toBe(twin);
+    expect(alwaysSensitive(twin)).toBe(twin);
+    expect(unbox(twin)).toBe(pending);
+    expect(redact(twin)).toBe(PLACEHOLDER);
+    expect(isDone(alwaysSensitive(DONE))).toBe(true);
+    const failure = errorEdge('down');
+    const reported = reports.length;
+    const errorTwin = alwaysSensitive(failure);
+    expect(isError(errorTwin)).toBe(true);
+    expect(reports.length).toBe(reported);
+    expect(unbox(errorTwin)).toBe(failure);
+  });
+
+  it('a labeled error with no plain sentinel is the base of its always twin', () => {
+    on();
+    const labeled = runSensitiveRegion(() => error('boom'));
+    const twin = alwaysSensitive(labeled);
+    expect(twin).not.toBe(labeled);
+    expect(isError(twin)).toBe(true);
+    expect(isAlwaysSensitive(twin)).toBe(true);
+    expect(isAlwaysSensitive(labeled)).toBe(false);
+    expect(unbox(twin)).toBe(labeled);
+  });
+
+  it('[PIN] the reader is deep through boxes, arrays and plain records (the reach of unboxAll)', () => {
+    on();
+    const always = alwaysSensitive(TOKEN);
+    expect(isAlwaysSensitive([1, [always]])).toBe(true);
+    expect(isAlwaysSensitive({ a: { b: always } })).toBe(true);
+    expect(isAlwaysSensitive(sensitive([always]))).toBe(true);
+    expect(isAlwaysSensitive(sensitive({ a: always }))).toBe(true);
+    expect(isAlwaysSensitive([sensitive(TOKEN), { a: sensitive(1) }])).toBe(
+      false,
+    );
+    expect(isAlwaysSensitive(TOKEN)).toBe(false);
+  });
+
+  it('[PIN] the one-level reader: true for an always box or twin itself, never for what holds one', () => {
+    on();
+    const box = alwaysSensitive(TOKEN);
+    const twin = alwaysSensitive(loading());
+    const labeledError = runSensitiveRegion(() => error('boom'));
+    const thrown = new Error(TOKEN);
+    SENSITIVE.labels.add(thrown);
+    SENSITIVE.always.add(thrown);
+    expect(isAlwaysBoxed(box)).toBe(true);
+    expect(isAlwaysBoxed(twin)).toBe(true);
+    expect(isAlwaysBoxed(alwaysSensitive(labeledError))).toBe(true);
+    expect(isAlwaysBoxed(sensitive(TOKEN))).toBe(false);
+    expect(isAlwaysBoxed(sensitive(loading()))).toBe(false);
+    expect(isAlwaysBoxed(labeledError)).toBe(false);
+    expect(isAlwaysBoxed([box])).toBe(false);
+    expect(isAlwaysBoxed(sensitive([box]))).toBe(false);
+    expect(isAlwaysBoxed(thrown)).toBe(false);
+    expect(isAlwaysBoxed(TOKEN)).toBe(false);
+    expect(isAlwaysBoxed(null)).toBe(false);
+    // Mode-independent: a box minted while on answers the same once the mode is off.
+    setSensitiveMode(false);
+    expect(isAlwaysBoxed(box)).toBe(true);
+    expect(isAlwaysBoxed(twin)).toBe(true);
+    // A per-field cleared view, the way a consumer builds one: always boxes withheld, others read.
+    on();
+    const record = {
+      user: sensitive('ada'),
+      key: box,
+      tags: [sensitive('x'), twin],
+    };
+    const cleared = (v: unknown): unknown =>
+      isAlwaysBoxed(v)
+        ? PLACEHOLDER
+        : Array.isArray(v)
+          ? v.map(cleared)
+          : isSensitive(v)
+            ? cleared(unbox(v))
+            : typeof v === 'object' && v !== null && !isSentinel(v)
+              ? Object.fromEntries(
+                  Object.entries(v).map(([k, x]) => [k, cleared(x)]),
+                )
+              : v;
+    expect(cleared(record)).toEqual({
+      user: 'ada',
+      key: PLACEHOLDER,
+      tags: ['x', PLACEHOLDER],
+    });
+  });
+
+  it('[PIN S7] equality tells an always label from an ordinary one at equal value', () => {
+    on();
+    const eq = sensitiveEqual<unknown>(
+      (a, b) => JSON.stringify(a) === JSON.stringify(b),
+    );
+    expect(eq(sensitive(TOKEN), sensitive(TOKEN))).toBe(true);
+    expect(eq(alwaysSensitive(TOKEN), alwaysSensitive(TOKEN))).toBe(true);
+    expect(eq(sensitive(TOKEN), alwaysSensitive(TOKEN))).toBe(false);
+    expect(eq({ a: [sensitive(TOKEN)] }, { a: [alwaysSensitive(TOKEN)] })).toBe(
+      false,
+    );
+  });
+
+  it('an error minted over an always-sensitive cause reports that box; a thrown always label mints always', () => {
+    on();
+    const cause = alwaysSensitive(TOKEN);
+    const hidden = errorEdge(cause);
+    expect(isAlwaysSensitive(hidden)).toBe(false);
+    expect(reports.at(-1)).toMatchObject({ sensitive: true, cause });
+    const thrown = new Error(TOKEN);
+    SENSITIVE.labels.add(thrown);
+    SENSITIVE.always.add(thrown);
+    const minted = error(thrown, 'evaluation');
+    expect(isAlwaysSensitive(minted)).toBe(true);
+    expect(isAlwaysSensitive(reports.at(-1)?.cause)).toBe(true);
+    expect(unbox(reports.at(-1)?.cause)).toBe(thrown);
   });
 });

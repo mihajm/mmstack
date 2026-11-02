@@ -1275,7 +1275,7 @@ setErrorReporter((report) => {
 });
 ```
 
-**Hidden mints.** `errorHidden(cause, origin = 'evaluation')` mints an error whose report is sensitive with a boxed cause while the error itself stays plain, even inside a labeled region. An evaluator that keeps one error per cause mints it this way and hands out `sensitive(err)` where the occurrence is labeled, so a cause seen first inside a region and later outside it is reported once. With the mode off it is `error(cause, origin)`.
+**Hidden mints.** `errorHidden(cause, origin = 'evaluation')` mints an error whose report is sensitive with a boxed cause while the error itself stays plain, even inside a labeled region. An evaluator that keeps one error per cause mints it this way and hands out `sensitive(err)` where the occurrence is labeled, so a cause seen first inside a region and later outside it is reported once. With the mode off it is `error(cause, origin)`. `errorUnreported(cause, origin = 'evaluation')` mints the same error as `error(cause, origin)` (same shape, labeled under the same conditions, absorbing and ranking the same) without reporting it, for an evaluator that already reported this fault through another mint and needs a sentinel for a second channel: report a fault seen first under a label with `errorHidden`, and hand a later plain reader `errorUnreported(cause)`, so the fault is reported once in both modes.
 
 **Regions.** `inSensitiveRegion()` tells whether a `runSensitiveRegion` is open; with the mode off it is always false.
 

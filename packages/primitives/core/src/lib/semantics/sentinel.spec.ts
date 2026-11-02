@@ -1,19 +1,34 @@
 import { invoke } from '@mmstack/primitives/algebra';
+import { joinAbsorbers } from './algebra';
+import {
+  redact,
+  runSensitiveRegion,
+  sensitive,
+  setSensitiveMode,
+} from './sensitive';
 import {
   DONE,
+  error,
+  type ErrorMintReport,
+  errorUnreported,
   SENTINEL_KINDS,
   SentinelRegistryError,
+  ifError,
   ifLoading,
   isAbsorbing,
   isDone,
+  isError,
   isLoading,
   isSentinel,
   isSentinelAware,
   joinSentinelRegistry,
   loading,
   sentinelAware,
+  setErrorReporter,
   setStrictSentinels,
 } from './sentinel';
+
+const PLACEHOLDER = '[mmstack sensitive]';
 import type { SentinelRegistry } from './sentinel';
 
 // Strict sentinels: these rows pin the throwing leak guards an evaluator is proven against.
@@ -287,5 +302,65 @@ describe('[PIN registry] the sentinel registry — one Symbol.for slot holding a
       expect(invoke(foreign, [pending], applyCall)).toBe('ran');
       expect(received[0]).toBe(pending);
     });
+  });
+});
+
+describe('[PIN] unreported error mint', () => {
+  // Strict sentinels stay on (file-level hooks); the reporter is installed per test.
+  let reports: ErrorMintReport[];
+  beforeEach(() => {
+    reports = [];
+    setErrorReporter((r) => reports.push(r));
+  });
+  afterEach(() => setErrorReporter(undefined));
+
+  const cause = new TypeError('cannot read a of undefined');
+  const ownFields = (e: object) =>
+    Object.fromEntries(Object.entries(e).map(([k, v]) => [k, v]));
+
+  it('emits no report, mode off or on', () => {
+    errorUnreported(cause);
+    errorUnreported(cause, 'authored');
+    setSensitiveMode(true);
+    try {
+      errorUnreported(cause);
+      errorUnreported(sensitive(cause));
+    } finally {
+      setSensitiveMode(false);
+    }
+    expect(reports).toEqual([]);
+    error(cause, 'evaluation');
+    expect(reports).toHaveLength(1);
+  });
+
+  it('absorbs, ranks and settles exactly like its reported sibling, and has its shape', () => {
+    const reported = error(cause, 'evaluation');
+    const unreported = errorUnreported(cause);
+    expect(isSentinel(unreported)).toBe(true);
+    expect(isError(unreported)).toBe(true);
+    expect(isAbsorbing(unreported)).toBe(true);
+    expect(isDone(unreported)).toBe(false);
+    expect(Object.isFrozen(unreported)).toBe(true);
+    // Same own fields (kind, source, origin): equal by fingerprint, distinct by identity.
+    expect(ownFields(unreported)).toEqual(ownFields(reported));
+    expect(unreported).not.toBe(reported);
+    expect(joinAbsorbers([1, unreported])).toBe(unreported);
+    expect(joinAbsorbers([unreported, loading()])?.kind).toBe('loading');
+    expect(ifError(unreported, 'fallback')).toBe('fallback');
+    expect(ifLoading(unreported, 'fallback')).toBe(unreported);
+    expect(errorUnreported(cause, 'authored').origin).toBe('authored');
+  });
+
+  it('is labeled under the same conditions as error(...): inside a region, over a labeled cause', () => {
+    setSensitiveMode(true);
+    try {
+      expect(redact(errorUnreported(cause))).not.toBe(PLACEHOLDER);
+      expect(redact(runSensitiveRegion(() => errorUnreported(cause)))).toBe(
+        PLACEHOLDER,
+      );
+      expect(reports).toEqual([]);
+    } finally {
+      setSensitiveMode(false);
+    }
   });
 });

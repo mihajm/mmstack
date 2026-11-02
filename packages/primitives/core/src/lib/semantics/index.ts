@@ -9,6 +9,7 @@ export {
   errorConstant,
   errorEdge,
   errorHidden,
+  errorUnreported,
   type ErrorMintReport,
   type ErrorOrigin,
   type ErrorReporter,

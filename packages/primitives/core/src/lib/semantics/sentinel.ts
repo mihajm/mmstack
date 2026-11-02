@@ -398,6 +398,7 @@ function mintError(
   renderableMessage: string | undefined,
   subclass: ErrorSubclass,
   sensitivity = mintSensitivity(cause),
+  report = true,
 ): ErrorSentinel {
   const extra: Record<string, unknown> = { origin };
   if (renderableMessage !== undefined)
@@ -409,13 +410,15 @@ function mintError(
       addLabel(sentinel);
       if (always) addAlways(sentinel);
     }
-    errorReporter?.({
-      origin,
-      subclass,
-      cause: always ? alwaysSensitive(cause) : sensitive(cause),
-      sensitive: true,
-    });
-  } else errorReporter?.({ origin, subclass, cause, sensitive: false });
+    if (report)
+      errorReporter?.({
+        origin,
+        subclass,
+        cause: always ? alwaysSensitive(cause) : sensitive(cause),
+        sensitive: true,
+      });
+  } else if (report)
+    errorReporter?.({ origin, subclass, cause, sensitive: false });
   return sentinel;
 }
 
@@ -447,6 +450,28 @@ export function errorHidden(
     undefined,
     'author-fault',
     SENSITIVE.policy.mode ? 'hidden' : undefined,
+  );
+}
+
+/**
+ * An error minted exactly as `error(cause, origin)` mints it (same kind, origin and shape, labeled
+ * under the same conditions; it absorbs, ranks and settles the same) but never reported: no entry
+ * reaches the reporter. For a caller that already reported this occurrence through another mint and
+ * now needs a second sentinel for another channel, such as an evaluator that reported a fault hidden
+ * (`errorHidden`) under a label and later hands a plain reader the same fault. Like every error it
+ * is value-free: a caller that keeps the cause for diagnostics keeps it beside the sentinel.
+ */
+export function errorUnreported(
+  cause: unknown,
+  origin: ErrorOrigin = 'evaluation',
+): ErrorSentinel {
+  return mintError(
+    origin,
+    cause,
+    undefined,
+    'author-fault',
+    mintSensitivity(cause),
+    false,
   );
 }
 

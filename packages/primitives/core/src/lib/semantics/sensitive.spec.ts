@@ -5,6 +5,8 @@ import {
   errorEdge,
   errorHidden,
   type ErrorMintReport,
+  errorUnreported,
+  type ErrorSentinel,
   isAbsorbing,
   isDone,
   isError,
@@ -757,5 +759,62 @@ describe('always-sensitive class', () => {
     expect(isAlwaysSensitive(minted)).toBe(true);
     expect(isAlwaysSensitive(reports.at(-1)?.cause)).toBe(true);
     expect(unbox(reports.at(-1)?.cause)).toBe(thrown);
+  });
+});
+
+describe('per-channel fault minting (the shape of an evaluator that contains throws)', () => {
+  // One fault, one report, in both modes: the first occurrence reports (hidden when it is
+  // labeled); a later occurrence on the other channel gets a sentinel of its own without a report.
+  // The cause rides beside the sentinel in the evaluator's own record, never on it.
+  type Entry = {
+    hidden?: ErrorSentinel;
+    labeled?: ErrorSentinel;
+    plain?: ErrorSentinel;
+  };
+  const run = (mode: boolean, mintPlainAfterHidden = errorUnreported) => {
+    setSensitiveMode(mode);
+    const records = new WeakMap<object, { cause: unknown }>();
+    const entry: Entry = {};
+    const recorded = (e: ErrorSentinel, cause: unknown) => {
+      records.set(e, { cause });
+      return e;
+    };
+    const fault = (cause: unknown, labeled: boolean): ErrorSentinel => {
+      if (!(mode && labeled))
+        return (entry.plain ??= recorded(
+          entry.hidden
+            ? mintPlainAfterHidden(cause, 'evaluation')
+            : error(cause, 'evaluation'),
+          cause,
+        ));
+      entry.hidden ??= recorded(errorHidden(cause, 'evaluation'), cause);
+      return (entry.labeled ??= sensitive(entry.hidden) as ErrorSentinel);
+    };
+    const cause = new TypeError(TOKEN);
+    const first = fault(cause, true);
+    const second = fault(cause, false);
+    const again = fault(cause, false);
+    return { first, second, again, records, cause, count: reports.length };
+  };
+
+  it('[PROVEN] labeled first, plain second: one report, and the plain channel gets the real cause as a value', () => {
+    const on = run(true);
+    expect(on.count).toBe(1);
+    expect(reports[0]).toMatchObject({ sensitive: true, origin: 'evaluation' });
+    expect(unbox(reports[0].cause)).toBe(on.cause);
+    expect(redact(on.first)).toBe(PLACEHOLDER);
+    expect(isError(on.second)).toBe(true);
+    expect(redact(on.second)).toBe(on.second);
+    expect(on.records.get(on.second)?.cause).toBe(on.cause);
+    expect(on.again).toBe(on.second);
+    // Erasure: mode off reports the same number of times.
+    reports.length = 0;
+    expect(run(false).count).toBe(on.count);
+  });
+
+  it('[FINDING] minting the plain channel with a reporting mint reports twice with the mode on', () => {
+    expect(run(true, error).count).toBe(2);
+    reports.length = 0;
+    expect(run(false, error).count).toBe(1);
   });
 });

@@ -261,6 +261,21 @@ Presence is an ephemeral side channel. It is never persisted, never conflicts, a
 automatically when a peer leaves. The payload is yours to shape: cursors, selection, "who is
 here", or an agent's current activity.
 
+## Directed frames
+
+```ts
+mesh.send(origin, { ask: 'list' }); // to one member, by origin
+const stop = mesh.direct(({ from, data }) => reply(from, data));
+```
+
+`send` and `direct` carry ephemeral payloads to one member only: the relay routes each frame to
+`to` and never persists it. A frame for an origin that is not in the room is lost, and so is one
+that arrives with no listener. A frame that arrives before the welcome is held and handed over
+right after it, unless its sender leaves first; at most 256 are held. The library refuses a foreign
+frame version (`v` other than `MESH_DIRECT_VERSION`) before any listener sees it; payload versions
+live inside `data`, and `data` must be defined. An agent seat has the same pair. Peer links never
+see these frames; `signaling` stays WebRTC negotiation only.
+
 ## Trust
 
 Pass a `policy` and (when your policy reads claims) a `ctx`, and the client validates each write

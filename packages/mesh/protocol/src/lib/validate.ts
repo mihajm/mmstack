@@ -1,4 +1,4 @@
-import type { Dot, OpEnvelope, SyncOp } from './wire';
+import type { ClientDirectMsg, Dot, OpEnvelope, SyncOp } from './wire';
 
 const hasControlChar = (s: string): boolean => {
   for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) < 0x20) return true;
@@ -53,5 +53,20 @@ export function validateEnvelope(env: OpEnvelope): string | null {
     if (seenPaths.has(key)) return 'dup-path';
     seenPaths.add(key);
   }
+  return null;
+}
+
+/**
+ * Well-formedness check for a received `direct` frame: a short reason string when it must be
+ * dropped, or `null`. `to` is a clean origin, `v` a non-negative integer, and `data` defined.
+ * The relay drops a malformed frame without a reply, the same way it drops a frame for an origin
+ * that is not a member.
+ */
+export function validateDirect(msg: ClientDirectMsg): string | null {
+  if (!msg || typeof msg !== 'object') return 'frame';
+  if (!isCleanId(msg.to)) return 'to';
+  if (!Number.isSafeInteger(msg.v) || msg.v < 0) return 'v';
+  // JSON cannot carry `undefined`, so an in-process frame must not either
+  if (!('data' in msg) || msg.data === undefined) return 'data';
   return null;
 }

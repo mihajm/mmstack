@@ -142,8 +142,31 @@ export type ClientSignalMsg = {
   readonly data: unknown;
 };
 
+/**
+ * Version of the `direct` frame, stamped by the sending client. A receiver that does not speak a
+ * frame's `v` reads nothing else of it.
+ */
+export const MESH_DIRECT_VERSION = 1;
+
+/**
+ * A directed ephemeral frame: an opaque payload for one other member. The relay routes it to
+ * `to` only and never persists it. Use it for application traffic between peers; `signal` stays
+ * WebRTC negotiation only.
+ */
+export type ClientDirectMsg = {
+  readonly t: 'direct';
+  readonly room: string;
+  readonly to: string;
+  readonly v: number;
+  readonly data: unknown;
+};
+
 export type ClientMsg =
-  HelloMsg | ClientEnvMsg | ClientPresenceMsg | ClientSignalMsg;
+  | HelloMsg
+  | ClientEnvMsg
+  | ClientPresenceMsg
+  | ClientSignalMsg
+  | ClientDirectMsg;
 
 /** The tri-state join answer, plus the current presence roster. */
 /**
@@ -227,6 +250,15 @@ export type ServerSignalMsg = {
   readonly data: unknown;
 };
 
+/** A `direct` frame as delivered: the relay stamps `from` with the sender's origin. */
+export type ServerDirectMsg = {
+  readonly t: 'direct';
+  readonly room: string;
+  readonly from: string;
+  readonly v: number;
+  readonly data: unknown;
+};
+
 /**
  * The room's settled vector moved: per origin, the stamp of the last version in that origin's
  * contiguously admitted prefix. Nothing new from an origin can arrive at or below its entry
@@ -271,5 +303,6 @@ export type ServerMsg =
   | EjectMsg
   | MemberMsg
   | ServerSignalMsg
+  | ServerDirectMsg
   | SettledMsg
   | DropMsg;

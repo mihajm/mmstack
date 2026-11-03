@@ -34,11 +34,17 @@ import {
   type WritableSignalStore,
   type Hlc,
 } from '@mmstack/primitives/core';
-import { meshSession, type MeshSession, type MeshStatus } from './session';
+import {
+  deliverDirect,
+  meshSession,
+  type MeshDirect,
+  type MeshSession,
+  type MeshStatus,
+} from './session';
 import type { MeshTransportFactory } from './transport';
 import type { SignalingPort } from './peer-links';
 
-export type { MeshStatus } from './session';
+export type { MeshDirect, MeshStatus } from './session';
 
 export type MeshPeer = PresenceState;
 
@@ -228,6 +234,16 @@ export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   /** Publish this client's ephemeral presence payload (cursor, section, activity…). */
   setPresence(data: unknown): void;
   /**
+   * Send an ephemeral payload to one member, by origin. The relay routes it to that member only
+   * and never persists it; with no connection, or `to` not in the room, it is lost.
+   */
+  send(to: string, data: unknown): void;
+  /**
+   * Listen for `direct` frames addressed to this client; returns the unsubscribe. A frame that
+   * arrives with no listener is lost. Peer links on {@link MeshSyncRef.signaling} never see them.
+   */
+  direct(cb: (msg: MeshDirect) => void): () => void;
+  /**
    * Fork the synced store for isolated, reviewable edits (an agent branch, a staged change). The
    * fork observes the room as it is now; committing emits its diff citing only those observed
    * writes, so an edit that lands on the room while the fork is open stays a concurrent value the
@@ -263,6 +279,7 @@ export function meshSync<T extends object>(
   // the last roster the links on the port were given; a socket drop blanks the session's, not this
   let roster: readonly string[] = [];
   const signalingListeners = new Set<(msg: ServerMsg) => void>();
+  const directListeners = new Set<(msg: MeshDirect) => void>();
   let earlySignals: ServerMsg[] | null = [];
   // the ICE servers of the last welcome, for peer links that attach after it
   let welcomeIce: readonly IceServer[] | undefined;
@@ -470,6 +487,7 @@ export function meshSync<T extends object>(
           }
         },
         onMessage: signalMessage,
+        onDirect: (msg) => deliverDirect(directListeners, msg),
         onRefused: (env, reason) => {
           refused.update((n) => n + 1);
           opt.onRefused?.(env, reason);
@@ -708,6 +726,11 @@ export function meshSync<T extends object>(
     setPresence: (data) => {
       if (session) session.setPresence(data);
       else pendingPresence = { data };
+    },
+    send: (to, data) => session?.sendDirect(to, data),
+    direct: (cb) => {
+      directListeners.add(cb);
+      return () => directListeners.delete(cb);
     },
     fork: (forkOpt) => {
       const f = forkStore(

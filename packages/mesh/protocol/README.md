@@ -112,7 +112,7 @@ for floods that exceed the application's capacity.
 
 `limits.maxEnvelopesPerSecond` is an optional token bucket per writer **per room**, with a burst
 of twice the configured rate. It survives reconnects while the room is retained, but is not a
-connection or ingress limit: hello, presence, and signaling messages bypass it, and envelope
+connection or ingress limit: hello, presence, signal and direct messages bypass it, and envelope
 validation runs before it. Configure it as an operation budget alongside adapter protections.
 
 ```ts
@@ -240,7 +240,7 @@ const relay = createRelay({
 Return nothing and the relay releases the envelope at once — the memory-adapter behaviour, and
 the default. Return a **promise** and the relay holds everything that carries that envelope (its
 echo, the settled notice emitted with it, and any welcome answered while it is in flight) until
-the promise resolves. Presence, signal, membership and ejection are not document state and always
+the promise resolves. Presence, signal, direct, membership and ejection are not document state and always
 pass immediately.
 
 ```ts
@@ -343,3 +343,17 @@ person's call.
 The relay also routes opaque `signal` messages between peers by origin, which is all a
 peer-to-peer topology needs from a server. `@mmstack/mesh`'s `webRtcMesh` uses it to negotiate
 data channels; the relay itself carries no media and inspects no payloads.
+
+## Directed frames
+
+`direct` carries an opaque payload from one member to one other member, by origin. The client
+sends `{ t: 'direct', room, to, v, data }`; the relay stamps the sender's origin and delivers
+`{ t: 'direct', room, from, v, data }` to `to` only. `v` is the frame version
+(`MESH_DIRECT_VERSION`); a receiver that does not speak it reads nothing else. The client library
+refuses a foreign frame version; payload versions live inside `data`. `data` must be defined, so
+an in-process frame and one sent as JSON are judged the same.
+
+The relay routes it the way it routes `signal`: only between members of the room, never
+persisted, never held behind a commit, and in order per connection. A frame for an origin that is
+not a member, or a malformed one (`validateDirect`), reaches no one and gets no reply. Use
+`direct` for application traffic between peers; `signal` stays WebRTC negotiation only.

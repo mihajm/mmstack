@@ -23,7 +23,12 @@ import {
   type OpEnvelope,
 } from '@mmstack/primitives/core';
 import type { SeatSync } from './mesh-sync';
-import { meshSession, type MeshStatus } from './session';
+import {
+  deliverDirect,
+  meshSession,
+  type MeshDirect,
+  type MeshStatus,
+} from './session';
 import type { MeshTransportFactory } from './transport';
 
 const microtaskDriver = (): OpLogDriver => (run) => {
@@ -160,6 +165,16 @@ export type AgentSeat<T extends object> = {
   whenAcked(): Promise<void>;
   /** Publish this seat's ephemeral presence payload (e.g. `{ name, kind: 'agent' }`). */
   setPresence(data: unknown): void;
+  /**
+   * Send an ephemeral payload to one member, by origin. The relay routes it to that member only
+   * and never persists it; with no connection, or `to` not in the room, it is lost.
+   */
+  send(to: string, data: unknown): void;
+  /**
+   * Listen for `direct` frames addressed to this seat; returns the unsubscribe. A frame that
+   * arrives with no listener is lost.
+   */
+  direct(cb: (msg: MeshDirect) => void): () => void;
   /** Authority surface over this seat's op-sync; see {@link SeatSync}. */
   readonly sync: SeatSync<T>;
   close(): void;
@@ -201,6 +216,7 @@ export function agentSeat<T extends object>(
   }) as OpSync<T>;
 
   const listeners = new Set<(event: SeatEvent) => void>();
+  const directListeners = new Set<(msg: MeshDirect) => void>();
   const emit = (event: SeatEvent): void => {
     for (const cb of [...listeners]) cb(event);
   };
@@ -233,6 +249,7 @@ export function agentSeat<T extends object>(
         emit({ kind: 'change', ...batch });
       },
       onResync: (seq) => emit({ kind: 'resync', seq }),
+      onDirect: (msg) => deliverDirect(directListeners, msg),
       onRefused: (env, reason) => {
         diverged = true; // the write stays applied until the rehydrate that follows lands
         opt.onRefused?.(env, reason);
@@ -311,6 +328,11 @@ export function agentSeat<T extends object>(
       return session.whenAcked();
     },
     setPresence: (data) => session.setPresence(data),
+    send: (to, data) => session.sendDirect(to, data),
+    direct: (cb) => {
+      directListeners.add(cb);
+      return () => directListeners.delete(cb);
+    },
     sync: {
       override: (fn) => sync.override(fn),
       captureFrontier: () => sync.captureFrontier(),

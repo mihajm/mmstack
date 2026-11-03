@@ -11,6 +11,7 @@ export {
 } from './lib/agent-seat';
 export {
   meshSync,
+  type MeshDirect,
   type MeshPeer,
   type MeshStatus,
   type MeshSyncOptions,

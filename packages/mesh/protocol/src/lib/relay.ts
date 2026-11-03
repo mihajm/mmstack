@@ -7,7 +7,7 @@ import {
 } from './policy';
 import { createRanges, recordAdmission, type Ranges } from './ranges';
 import { createRegisterStore, type RegisterStore } from './register';
-import { validateEnvelope } from './validate';
+import { validateDirect, validateEnvelope } from './validate';
 import {
   MESH_PROTO_VERSION,
   type ClientMsg,
@@ -69,7 +69,7 @@ export type RelayOptions = {
    * the envelope (its echo, the settled notice emitted with it, and any welcome answered
    * while it is in flight) until that promise resolves: a connection is told a write is safe
    * only once the adapter says it is, the way a database returns from `COMMIT` after its log
-   * is written. Messages that are not document state — presence, signal, membership,
+   * is written. Messages that are not document state — presence, signal, direct, membership,
    * ejection — always pass immediately.
    *
    * A rejected promise STALLS the room: the envelope and everything queued behind it stay
@@ -776,6 +776,25 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                   t: 'signal',
                   room: msg.room,
                   from: member.origin,
+                  data: msg.data,
+                });
+                break;
+              }
+            }
+            return;
+          }
+
+          // routed like `signal` and never persisted; a malformed frame or one for an origin
+          // that is not a member reaches no one
+          if (msg.t === 'direct') {
+            if (validateDirect(msg) !== null) return;
+            for (const target of room.members) {
+              if (target.origin === msg.to) {
+                target.socket.send({
+                  t: 'direct',
+                  room: msg.room,
+                  from: member.origin,
+                  v: msg.v,
                   data: msg.data,
                 });
                 break;

@@ -1,5 +1,7 @@
+import { isDevMode } from '@angular/core';
 import {
   checkEnvelope,
+  MESH_DIRECT_VERSION,
   MESH_PROTO_VERSION,
   type ClientSignalMsg,
   type OpPolicy,
@@ -7,6 +9,7 @@ import {
   type PresenceState,
   type PrincipalCtx,
   type SeqEnvelope,
+  type ServerDirectMsg,
   type ServerMsg,
 } from '@mmstack/mesh-protocol';
 import {
@@ -27,6 +30,31 @@ export type MeshStatus =
   | 'ejected'
   | 'closed';
 
+/** A `direct` frame as a seat or a synced store hands it over: `from` is the sender's origin. */
+export type MeshDirect = {
+  readonly from: string;
+  readonly v: number;
+  readonly data: unknown;
+};
+
+/**
+ * Hands `msg` to every listener; a throwing listener never interrupts the session or the others.
+ * @internal
+ */
+export const deliverDirect = (
+  listeners: ReadonlySet<(msg: MeshDirect) => void>,
+  msg: ServerDirectMsg,
+): void => {
+  const out: MeshDirect = { from: msg.from, v: msg.v, data: msg.data };
+  for (const cb of [...listeners]) {
+    try {
+      cb(out);
+    } catch {
+      // a consumer's failure stays its own
+    }
+  }
+};
+
 /** One sequenced remote envelope's ops, attributed to the writer that made them. */
 export type RemoteBatch = {
   /** The relay's total-order stamp for this batch. */
@@ -45,8 +73,17 @@ export type MeshSessionHooks = {
   onOrigin?(origin: string): void;
   /** Relay membership, independent of presence; undefined while disconnected or before welcome. */
   onMembers?(members: readonly string[] | undefined): void;
-  /** A room message after the session has processed it, for consumers sharing its connection. */
+  /**
+   * A room message after the session has processed it, for consumers sharing its connection.
+   * `direct` frames never pass here; they go to {@link MeshSessionHooks.onDirect} only.
+   */
   onMessage?(msg: ServerMsg): void;
+  /**
+   * A `direct` frame addressed to this session, in the frame version this side speaks; any other
+   * version is refused unread. One that arrives before the current connection's welcome is held
+   * (up to 256) and handed over right after it, unless its sender leaves first.
+   */
+  onDirect?(msg: ServerDirectMsg): void;
   /** A welcome or envelope arrived — the shell's "last synced" moment. */
   onSynced?(): void;
   /** The presence roster changed (welcome replace, join/leave, teardown clear). */
@@ -141,10 +178,14 @@ export type MeshSession = {
   setPresence(data: unknown): void;
   /** Send peer signaling over the current connection without a second hello. */
   sendSignal(msg: ClientSignalMsg): void;
+  /** Send a `direct` frame to one member over the current connection; lost when there is none. */
+  sendDirect(to: string, data: unknown): void;
   close(): void;
 };
 
 const RECONNECT_BASE_MS = 500;
+/** `direct` frames held before a welcome, per connection: the bound peer links keep for signals. */
+const HELD_DIRECTS = 256;
 
 export function meshSession<T extends object>(
   opt: MeshSessionOptions<T>,
@@ -176,6 +217,11 @@ export function meshSession<T extends object>(
   let reconnectTimer: unknown;
   let unsubs: (() => void)[] = [];
   let closed = false;
+  // a `direct` frame waits for the welcome of its connection, as peer links hold signals
+  let welcomedHere = false;
+  let heldDirects: ServerDirectMsg[] = [];
+  let versionWarned = false;
+  let heldWarned = false;
   let ackFailure: Error | undefined;
   const ackWaiters: {
     resolve: () => void;
@@ -212,6 +258,7 @@ export function meshSession<T extends object>(
       releaseAckWaiters();
     }
     unacked.clear();
+    heldDirects = [];
     transport?.close();
     transport = null;
     peers = new Map();
@@ -344,6 +391,13 @@ export function meshSession<T extends object>(
             room: opt.room,
             data: presenceData,
           });
+        welcomedHere = true;
+        const replay = heldDirects;
+        heldDirects = [];
+        for (const held of replay) {
+          if (closed) return;
+          hooks.onDirect?.(held);
+        }
         return;
       }
       case 'env':
@@ -358,6 +412,9 @@ export function meshSession<T extends object>(
         return;
       }
       case 'member': {
+        // a leave discards what that origin sent before the welcome
+        if (msg.gone)
+          heldDirects = heldDirects.filter((h) => h.from !== msg.origin);
         if (members === undefined || msg.origin === sync.origin) return;
         members = msg.gone
           ? members.filter((origin) => origin !== msg.origin)
@@ -395,14 +452,41 @@ export function meshSession<T extends object>(
     }
   };
 
+  const receiveDirect = (msg: ServerDirectMsg): void => {
+    // a frame version this side does not speak is refused whole: nothing else of it is read
+    if (msg.v !== MESH_DIRECT_VERSION) {
+      if (isDevMode() && !versionWarned) {
+        versionWarned = true;
+        console.warn(
+          `[@mmstack/mesh] dropped a direct frame of version ${String(msg.v)}; this side speaks ${MESH_DIRECT_VERSION}`,
+        );
+      }
+      return;
+    }
+    if (welcomedHere) hooks.onDirect?.(msg);
+    else if (heldDirects.length < HELD_DIRECTS) heldDirects.push(msg);
+    else if (isDevMode() && !heldWarned) {
+      heldWarned = true;
+      console.warn(
+        `[@mmstack/mesh] more than ${HELD_DIRECTS} direct frames arrived before the welcome; the rest are dropped`,
+      );
+    }
+  };
+
   const connect = (): void => {
     if (closed) return;
     for (const unsub of unsubs.splice(0)) unsub();
     const t = opt.transport();
     transport = t;
+    welcomedHere = false;
+    heldDirects = [];
     unsubs = [
       t.onMessage((msg) => {
         if (closed || transport !== t || msg.room !== opt.room) return;
+        if (msg.t === 'direct') {
+          receiveDirect(msg);
+          return;
+        }
         handle(msg);
         if (!closed || msg.t === 'reject' || msg.t === 'eject')
           hooks.onMessage?.(msg);
@@ -410,6 +494,8 @@ export function meshSession<T extends object>(
       t.onClose(() => {
         if (closed || transport !== t) return;
         transport = null;
+        welcomedHere = false;
+        heldDirects = [];
         members = undefined;
         hooks.onMembers?.(members);
         setStatus('reconnecting');
@@ -470,6 +556,16 @@ export function meshSession<T extends object>(
     peers: () => peers,
     sendSignal: (msg) => {
       if (!closed && msg.room === opt.room) transport?.send(msg);
+    },
+    sendDirect: (to, data) => {
+      if (closed) return;
+      transport?.send({
+        t: 'direct',
+        room: opt.room,
+        to,
+        v: MESH_DIRECT_VERSION,
+        data,
+      });
     },
     setPresence: (data) => {
       presenceData = data;

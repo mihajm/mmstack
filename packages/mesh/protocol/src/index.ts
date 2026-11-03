@@ -14,7 +14,7 @@ export {
   type Ranges,
 } from './lib/ranges';
 export { createRegisterStore, type RegisterStore } from './lib/register';
-export { validateEnvelope } from './lib/validate';
+export { validateDirect, validateEnvelope } from './lib/validate';
 export {
   createRelay,
   type Relay,
@@ -27,7 +27,9 @@ export {
   type RoomState,
 } from './lib/relay';
 export {
+  MESH_DIRECT_VERSION,
   MESH_PROTO_VERSION,
+  type ClientDirectMsg,
   type ClientEnvMsg,
   type ClientMsg,
   type ClientPresenceMsg,
@@ -45,6 +47,7 @@ export {
   type RegisterCheckpoint,
   type RejectMsg,
   type SeqEnvelope,
+  type ServerDirectMsg,
   type ServerEnvMsg,
   type ServerMsg,
   type ServerPresenceMsg,

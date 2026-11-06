@@ -1,5 +1,14 @@
-import { createRelay } from '@mmstack/mesh-protocol';
-import { directTransport, webSocketTransport } from './transport';
+import {
+  createRelay,
+  type RegisterCheckpoint,
+  type ServerMsg,
+} from '@mmstack/mesh-protocol';
+import { agentSeat } from './agent-seat';
+import {
+  directTransport,
+  webSocketTransport,
+  type MeshTransportFactory,
+} from './transport';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -59,6 +68,43 @@ describe('webSocketTransport', () => {
 });
 
 describe('directTransport', () => {
+  /**
+   * A socket peer's messages cross as JSON text, which drops object keys holding `undefined` and
+   * turns such array slots into `null`. A direct peer must leave the relay, and receive from it,
+   * exactly what a socket peer would; otherwise the two kinds of peer hold different states.
+   */
+  it('carries messages both ways as JSON would', async () => {
+    let registers: readonly RegisterCheckpoint[] = [];
+    const relay = createRelay({
+      onCommit: (_room, _env, state) => {
+        registers = state.checkpoint();
+      },
+    });
+    const inbound: ServerMsg[] = [];
+    const inner = directTransport(relay, { writer: 'w', kind: 'agent' });
+    const transport: MeshTransportFactory = () => {
+      const t = inner();
+      t.onMessage((m) => inbound.push(m));
+      return t;
+    };
+    const s = agentSeat<{ tasks: Record<string, unknown> }>(
+      { tasks: {} },
+      { room: 'direct-json', writer: 'w', transport },
+    );
+    await Promise.resolve();
+    s.setAtPath('tasks.t1', {
+      title: 't',
+      note: undefined,
+      tags: ['a', undefined],
+    });
+    await s.whenAcked();
+
+    expect(registers.length).toBeGreaterThan(0);
+    expect(registers).toEqual(JSON.parse(JSON.stringify(registers)));
+    expect(inbound.length).toBeGreaterThan(0);
+    expect(inbound).toEqual(JSON.parse(JSON.stringify(inbound)));
+  });
+
   it('reports a normal close (1000, empty reason)', () => {
     const transport = directTransport(createRelay(), { writer: 'w' })();
     const closes: [number, string][] = [];

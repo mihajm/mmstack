@@ -57,10 +57,19 @@ export function createRanges(initial: readonly VersionRange[] = []): Ranges {
   };
 }
 
+const laterThan = (a: Hlc, b: Hlc): boolean =>
+  a.p > b.p || (a.p === b.p && a.l > b.l);
+
 /** A room's admission evidence as it is held while the room runs. */
 export type AdmissionEvidence = {
   readonly ranges: Map<string, Ranges>;
   readonly settled: Map<string, Hlc>;
+  /** The first stamp admitted from each origin in this generation: the settled exemption's floor. */
+  readonly firstStamps?: Map<string, Hlc>;
+  /** The highest stamp ever admitted from each origin, across generations: the next cut's `preCutMax`. */
+  readonly everMax?: Map<string, Hlc>;
+  /** Admitted versions per origin per generation instance, kept across cuts. */
+  readonly receipts?: Map<string, Map<string, Ranges>>;
 };
 
 /**
@@ -73,8 +82,27 @@ export type AdmissionEvidence = {
  */
 export function recordAdmission(
   evidence: AdmissionEvidence,
-  env: { readonly origin: string; readonly version: number; readonly hlc: Hlc },
+  env: {
+    readonly origin: string;
+    readonly version: number;
+    readonly hlc: Hlc;
+    readonly instance?: string;
+  },
 ): void {
+  if (evidence.firstStamps && !evidence.firstStamps.has(env.origin)) {
+    evidence.firstStamps.set(env.origin, env.hlc);
+  }
+  const max = evidence.everMax?.get(env.origin);
+  if (evidence.everMax && (!max || laterThan(env.hlc, max)))
+    evidence.everMax.set(env.origin, env.hlc);
+  if (evidence.receipts && env.instance !== undefined) {
+    let byInstance = evidence.receipts.get(env.origin);
+    if (!byInstance)
+      evidence.receipts.set(env.origin, (byInstance = new Map()));
+    let got = byInstance.get(env.instance);
+    if (!got) byInstance.set(env.instance, (got = createRanges()));
+    got.add(env.version);
+  }
   let held = evidence.ranges.get(env.origin);
   if (!held) evidence.ranges.set(env.origin, (held = createRanges()));
   const before = held.prefix();

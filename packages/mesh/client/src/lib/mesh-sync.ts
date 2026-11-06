@@ -37,14 +37,24 @@ import {
 import {
   deliverDirect,
   meshSession,
+  type CompactionState,
+  type MeshConflict,
   type MeshDirect,
   type MeshSession,
   type MeshStatus,
+  type SessionRecord,
 } from './session';
 import type { MeshTransportFactory } from './transport';
 import type { SignalingPort } from './peer-links';
 
-export type { MeshDirect, MeshStatus } from './session';
+export type {
+  CompactionState,
+  ConflictCause,
+  Intent,
+  MeshConflict,
+  MeshDirect,
+  MeshStatus,
+} from './session';
 
 export type MeshPeer = PresenceState;
 
@@ -173,8 +183,14 @@ export type MeshSyncOptions = {
   };
 };
 
-/** The shape persisted under `outbox.key`: the writing boot's origin, the emit high-water, and the tail. */
-type PersistedOutbox = {
+/**
+ * The client's durable record, persisted under `outbox.key` as ONE unit: the writing boot's origin,
+ * the emit high-water and the tail, and the session's record beside them (the tail's generation
+ * fields and evidence, its intents, unresolved conflicts and an owed snapshot). No registers and no
+ * sequence knowledge: a restart never trusts stale registers — it holds none, asks for a snapshot
+ * and resends the tail first.
+ */
+type PersistedOutbox = SessionRecord & {
   /** The origin of the boot that wrote the slot; the next boot mints its own and resends the tail verbatim. */
   readonly origin: string;
   readonly version: number;
@@ -257,6 +273,20 @@ export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   ): SyncedFork<T & Record<string, any>>;
   /** Authority surface over the CURRENT op-sync (it is rebuilt on restore); see {@link SeatSync}. */
   readonly sync: SeatSync<T>;
+  /**
+   * Writes that will never be admitted as they stand: a write a compaction cut could not replay
+   * (it cites something the cut folded away) or one the relay refused. Each offers `discard()` or
+   * `reauthor()` (write its values again, citing the current state). Persisted with the outbox.
+   */
+  readonly conflicts: Signal<readonly MeshConflict[]>;
+  /** The room's compaction state as the relay last announced it; undefined before any notice. */
+  readonly compaction: Signal<CompactionState | undefined>;
+  /**
+   * The member pressed (`true`) or released Compact: the client declares itself ready for a
+   * consensus cut whenever nothing it wrote is outstanding, re-declaring on every change. A
+   * reconnect or a new generation releases it.
+   */
+  declareReady(pressed: boolean): void;
   close(): void;
 };
 
@@ -319,6 +349,8 @@ export function meshSync<T extends object>(
   const refused = signal(0);
   const droppedInvalid = signal(0);
   const peerMap = signal<ReadonlyMap<string, MeshPeer>>(new Map());
+  const conflicts = signal<readonly MeshConflict[]>([]);
+  const compaction = signal<CompactionState | undefined>(undefined);
   const peers = computed(() => [...peerMap().values()]);
   const policyVersion = opt.policyVersion ?? 0;
 
@@ -376,6 +408,7 @@ export function meshSync<T extends object>(
       ...(instance ? { instance } : {}),
       floors: sync.floors(),
       ...(clock ? { clock } : {}),
+      ...session.record(),
     };
     const { store, key } = opt.outbox;
     // Capture before queueing: teardown clears the session's tail immediately after this call.
@@ -467,6 +500,9 @@ export function meshSync<T extends object>(
       policyVersion,
       schemaVersion: opt.schemaVersion,
       instance: restore?.instance,
+      record: restore,
+      // the recorded raw ops re-stamped against the current registers, as one new envelope
+      reauthor: (intent) => sync.emitOps(intent.raws, { bump: intent.bump }),
       reconnect: opt.reconnect,
       hooks: {
         onOrigin: (value) => origin.set(value),
@@ -512,6 +548,8 @@ export function meshSync<T extends object>(
         onDisconnect: (code, reason) => opt.onDisconnect?.(code, reason),
         onSynced: () => lastSyncedAt.set(Date.now()),
         onPeers: (map) => peerMap.set(map),
+        onConflicts: (list) => conflicts.set(list),
+        onCompaction: (state) => compaction.set(state),
         onOutboxChange: () => {
           void persistOutbox();
           acked.set(!session?.hasUnacked());
@@ -757,6 +795,9 @@ export function meshSync<T extends object>(
         rebase: recapture,
       };
     },
+    conflicts: conflicts.asReadonly(),
+    compaction: compaction.asReadonly(),
+    declareReady: (pressed) => session?.declareReady(pressed),
     sync: {
       override: (fn) => (started ? sync.override(fn) : fn()),
       captureFrontier: () => (started ? sync.captureFrontier() : { seq: 0 }),

@@ -6,23 +6,89 @@ import {
   type PrincipalCtx,
 } from './policy';
 import { createRanges, recordAdmission, type Ranges } from './ranges';
-import { createRegisterStore, type RegisterStore } from './register';
+import { createRegisterStore, extentOf, pathKey, type RegisterStore } from './register';
 import { validateDirect, validateEnvelope } from './validate';
 import {
   MESH_PROTO_VERSION,
   type ClientMsg,
+  type Dot,
   type DropMsg,
+  type GenerationReason,
+  type GenerationRecord,
   type Hlc,
   type IceServer,
+  type Key,
   type OpEnvelope,
   type PresenceState,
   type RegisterCheckpoint,
+  type Receipts,
   type RejectMsg,
   type SeqEnvelope,
   type ServerMsg,
+  type TailPolicy,
   type VersionRange,
   type WelcomeBody,
 } from './wire';
+
+/** A refusal the room journals: repeated, unchanged, on every resend of the same envelope. */
+export type JournaledRefusal = 'citation' | 'epoch-bump';
+
+/** A cut's row in the room's logical sequence: the whole generation record. */
+export type CutRow = {
+  readonly kind: 'cut';
+  readonly seq: number;
+  readonly record: GenerationRecord;
+};
+
+/** A journaled refusal's row: the envelope it refused, by identity, and why. */
+export type RefuseRow = {
+  readonly kind: 'refuse';
+  readonly seq: number;
+  readonly instance: string;
+  readonly origin: string;
+  readonly version: number;
+  readonly reason: JournaledRefusal;
+};
+
+/** A row of the room's logical sequence that is not an envelope. */
+export type RelayRow = CutRow | RefuseRow;
+
+/**
+ * What a citation is judged against: the generation's frozen seed extent and `preCutMax`, and the
+ * generation's first stamps and settled vector.
+ */
+export type CoverContext = {
+  readonly extent: Readonly<Record<string, Readonly<Record<string, Hlc>>>>;
+  readonly preCutMax: Readonly<Record<string, Hlc>>;
+  firstStamp(origin: string): Hlc | undefined;
+  settled(origin: string): Hlc | undefined;
+};
+
+const stampLte = (a: Hlc, b: Hlc): boolean => a.p < b.p || (a.p === b.p && a.l <= b.l);
+
+/**
+ * Is the cited `dot` at `path` covered? Two regimes, the cut as boundary. A dot at or below its
+ * origin's `preCutMax` was written before the cut: only the frozen seed extent answers for it. A
+ * later dot is covered by the extent, by the store's retained state, or by the settled exemption
+ * floored at the cited origin's first stamp of this generation (no floor, no exemption). Run on
+ * every envelope, fresh or replayed, and by a client against its own installed state.
+ */
+export function admits(
+  store: RegisterStore,
+  ctx: CoverContext,
+  path: readonly Key[],
+  dot: Dot,
+): boolean {
+  const ext = ctx.extent[pathKey(path)]?.[dot.origin];
+  const byExtent = !!ext && stampLte(dot.hlc, ext);
+  const pre = ctx.preCutMax[dot.origin];
+  if (pre && stampLte(dot.hlc, pre)) return byExtent;
+  if (byExtent || store.covers(path, dot)) return true;
+  const done = ctx.settled(dot.origin);
+  if (!done || !stampLte(dot.hlc, done)) return false;
+  const floor = ctx.firstStamp(dot.origin);
+  return !!floor && stampLte(floor, dot.hlc);
+}
 
 /** What the relay needs from a connection — implement over ws, a DO WebSocket, or a test pair. */
 export type RelaySocket = {
@@ -87,6 +153,41 @@ export type RelayOptions = {
    * further. Fires once, for the envelope that failed. Report it and restart the process —
    * there is no in-place recovery, by design.
    */
+  /**
+   * The persistence egress for the rows of the room's logical sequence that are not envelopes: a
+   * cut (the whole generation record) and a journaled refusal. Same contract as
+   * {@link RelayOptions.onCommit}: synchronous, before anything the row decides leaves the relay,
+   * and a returned promise holds every later answer of the room until it resolves (a rejection
+   * stalls the room, see {@link RoomInfo.stalled}). A migration's cut is its envelope's commit:
+   * `onCommit` reports it, with {@link RoomState.generation} already the new record.
+   */
+  readonly onRow?: (room: string, row: RelayRow, state: RoomState) => void | Promise<void>;
+  /**
+   * Generation cuts the relay takes on its own. Arming either needs `policy.verifyCitations`: a cut
+   * without the citation gate lets a dropped dot replay, so {@link createRelay} refuses to start.
+   */
+  readonly compaction?: {
+    /**
+     * The tombstone budget, held against {@link RegisterStore.droppableTombstones}. Hard budget =
+     * max(`floor`, `factor` × the registers a cut keeps), evaluated on every commit: over it, the
+     * room cuts at once. Soft budget = half of it: over it, the room cuts after the next QUIET
+     * commit — one arriving at least `quietMs` (default 2000) after the room's previous admitted
+     * commit, measured with `now`. No timers: a room that never goes quiet waits for the hard
+     * budget.
+     */
+    readonly budget?: {
+      readonly floor: number;
+      readonly factor: number;
+      readonly quietMs?: number;
+    };
+    /** Cut when every connected member has declared itself ready (`compact` messages). */
+    readonly consensus?: boolean;
+  };
+  /**
+   * The durability promise an `onRow` returned for `row` rejected: the room is stalled, exactly as
+   * for {@link RelayOptions.onDurabilityFailed}. Fires once, for the row that failed.
+   */
+  readonly onRowDurabilityFailed?: (room: string, row: RelayRow, cause: unknown) => void;
   readonly onDurabilityFailed?: (
     room: string,
     env: SeqEnvelope,
@@ -166,6 +267,15 @@ export type RoomState = {
   readonly settled: Readonly<Record<string, Hlc>>;
   /** The room's data shape; restored via {@link Relay.hydrate}. */
   readonly schemaVersion: number;
+  /**
+   * The current generation record, its `firstStamps` and `receipts` as of this commit. Persist it
+   * with the checkpoint; hand it back through {@link RoomSnapshot.generation}.
+   */
+  readonly generation: GenerationRecord;
+  /** Per origin, the highest stamp the room ever held: the next cut's `preCutMax`. */
+  readonly everMax: Readonly<Record<string, Hlc>>;
+  /** This generation's journaled refusals, by `origin#version`. */
+  readonly refused: Readonly<Record<string, JournaledRefusal>>;
 };
 
 /** A persisted room to restore via {@link Relay.hydrate}. */
@@ -190,6 +300,17 @@ export type RoomSnapshot = {
   readonly ranges?: Readonly<Record<string, readonly VersionRange[]>>;
   /** The settled vector captured with the checkpoint (see {@link RoomState.settled}). */
   readonly settled?: Readonly<Record<string, Hlc>>;
+  /**
+   * The generation record captured with the checkpoint (see {@link RoomState.generation}). Its
+   * `instance` wins over {@link RoomSnapshot.instance}; journal entries before its `seq` belong to
+   * an earlier generation and are not served, and an entry after it from another generation is an
+   * inconsistent checkpoint: hydrate throws.
+   */
+  readonly generation?: GenerationRecord;
+  /** See {@link RoomState.everMax}. */
+  readonly everMax?: Readonly<Record<string, Hlc>>;
+  /** See {@link RoomState.refused}. */
+  readonly refused?: Readonly<Record<string, JournaledRefusal>>;
 };
 
 export type RelayConnection = {
@@ -248,6 +369,22 @@ export type Relay = {
    * away.
    */
   unload(name: string, options?: { readonly discard?: boolean }): boolean;
+  /**
+   * Cut the room's generation: a new instance, register state reset to the seed, admission
+   * evidence and journaled refusals cleared, receipts kept, every member re-welcomed with the
+   * seed once the cut row is durable. `compaction` and `consensus` seed from the retained state
+   * ({@link RegisterStore.compactionSeed}) and replay tails; `migration` and `rollback` take the
+   * supplied seed and discard them. False for a room this relay does not hold, a stalled room, a
+   * room (or a supplied seed) whose root register holds no live `set`, or a missing seed. Throws
+   * for `compaction` or `consensus` without `policy.verifyCitations`.
+   */
+  cut(
+    name: string,
+    options: {
+      readonly reason: Exclude<GenerationReason, 'genesis'>;
+      readonly seed?: readonly RegisterCheckpoint[];
+    },
+  ): boolean;
 };
 
 /**
@@ -258,7 +395,7 @@ export type Relay = {
  * is the whole behaviour of a relay whose adapter stores synchronously.
  */
 type Release = {
-  submit(run: () => void, done?: Promise<void>, env?: SeqEnvelope): void;
+  submit(run: () => void, done?: Promise<void>, held?: SeqEnvelope | RelayRow): void;
   /** Something is queued or in flight: a fresh answer must queue behind it. */
   busy(): boolean;
   /** A durability promise rejected; the queue will never drain on its own again. */
@@ -268,12 +405,12 @@ type Release = {
 };
 
 const createRelease = (
-  onFail: (env: SeqEnvelope | undefined, cause: unknown) => void,
+  onFail: (held: SeqEnvelope | RelayRow | undefined, cause: unknown) => void,
 ): Release => {
   type Item = {
     readonly run: () => void;
     readonly done?: Promise<void>;
-    readonly env?: SeqEnvelope;
+    readonly held?: SeqEnvelope | RelayRow;
   };
   const queue: Item[] = [];
   let stalled = false;
@@ -290,7 +427,7 @@ const createRelease = (
             await head.done;
           } catch (cause) {
             stalled = true;
-            onFail(head.env, cause);
+            onFail(head.held, cause);
             break;
           }
         }
@@ -308,12 +445,12 @@ const createRelease = (
   };
 
   return {
-    submit: (run, done, env) => {
+    submit: (run, done, held) => {
       if (!stalled && !draining && queue.length === 0 && done === undefined) {
         run();
         return;
       }
-      queue.push({ run, done, env });
+      queue.push({ run, done, held });
       if (!stalled) void drain();
     },
     busy: () => draining || queue.length > 0,
@@ -332,6 +469,28 @@ type Member = {
   origin: string;
   /** Set by a `'connection'`-scoped ejection: this connection is done in this room. */
   ejected: boolean;
+  /** Declared ready for a consensus cut in the current generation; never persisted. */
+  ready: boolean;
+};
+
+/** The immutable part of the current generation (first stamps and receipts live on the room). */
+type Head = {
+  readonly seq: number;
+  readonly index: number;
+  readonly reason: GenerationReason;
+  readonly policy: TailPolicy;
+  readonly seed: readonly RegisterCheckpoint[];
+  readonly extent: Readonly<Record<string, Readonly<Record<string, Hlc>>>>;
+  readonly preCutMax: Readonly<Record<string, Hlc>>;
+};
+const GENESIS: Head = {
+  seq: 0,
+  index: 0,
+  reason: 'genesis',
+  policy: 'discard',
+  seed: [],
+  extent: {},
+  preCutMax: {},
 };
 
 type Bucket = { tokens: number; last: number };
@@ -345,6 +504,17 @@ type Room = {
   ranges: Map<string, Ranges>;
   /** Per origin, the stamp of the last contiguously admitted version. */
   settled: Map<string, Hlc>;
+  head: Head;
+  firstStamps: Map<string, Hlc>;
+  everMax: Map<string, Hlc>;
+  receipts: Map<string, Map<string, Ranges>>;
+  refused: Map<string, JournaledRefusal>;
+  /** Over the soft budget: cut at the next commit that finds nothing in flight. */
+  softDue: boolean;
+  /** The percent of the hard budget the last notice carried: a commit that keeps it sends none. */
+  noticed?: number;
+  /** When the room's previous admitted commit arrived (`opt.now`): what makes a commit quiet. */
+  lastCommit?: number;
   journal: SeqEnvelope[];
   members: Set<Member>;
   presence: Map<string, { peer: PresenceState; by: Member }>;
@@ -373,6 +543,12 @@ let instanceCounter = 0;
  * (the overwhelmingly common case) are unaffected.
  */
 export function createRelay(opt: RelayOptions = {}): Relay {
+  const armed = !!opt.compaction?.budget || !!opt.compaction?.consensus;
+  if (armed && !opt.policy?.verifyCitations) {
+    throw new Error(
+      'mesh relay: compaction cuts need policy.verifyCitations — without the citation gate a cut lets a dropped write replay',
+    );
+  }
   const rooms = new Map<string, Room>();
   const policyVersion = opt.policyVersion ?? 0;
   const journalLimit = opt.journalLimit ?? 1000;
@@ -402,13 +578,21 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         registers: createRegisterStore(),
         ranges: new Map(),
         settled: new Map(),
+        head: GENESIS,
+        firstStamps: new Map(),
+        everMax: new Map(),
+        receipts: new Map(),
+        refused: new Map(),
+        softDue: false,
         journal: [],
         members: new Set(),
         presence: new Map(),
         ejected: new Set(),
         buckets: new Map(),
-        release: createRelease((env, cause) => {
-          if (env) opt.onDurabilityFailed?.(name, env, cause);
+        release: createRelease((held, cause) => {
+          if (!held) return;
+          if ('kind' in held) opt.onRowDurabilityFailed?.(name, held, cause);
+          else opt.onDurabilityFailed?.(name, held, cause);
         }),
       };
       rooms.set(name, room);
@@ -444,6 +628,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       gone: true,
     });
     member.socket.close?.();
+    left(name, room);
+  };
+  /** A member left: the census may now be unanimous. */
+  const left = (name: string, room: Room): void => {
+    notice(name, room);
+    census(name, room);
   };
 
   const eject = (
@@ -505,8 +695,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     return false;
   };
 
-  const hlcLte = (a: Hlc, b: Hlc): boolean =>
-    a.p < b.p || (a.p === b.p && a.l <= b.l);
   const wmOf = (room: Room): Record<string, number> => {
     const out: Record<string, number> = {};
     for (const [origin, r] of room.ranges) out[origin] = r.max();
@@ -520,50 +708,215 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const settledRecord = (room: Room): Record<string, Hlc> =>
     Object.fromEntries(room.settled);
 
-  const checkAdmission = (
+  const recordOf = (m: ReadonlyMap<string, Hlc>): Record<string, Hlc> => Object.fromEntries(m);
+  const receiptsRecord = (room: Room): Receipts => {
+    const out: Record<string, Record<string, readonly VersionRange[]>> = {};
+    for (const [origin, byInstance] of room.receipts) {
+      out[origin] = {};
+      for (const [instance, r] of byInstance) out[origin][instance] = r.toJSON();
+    }
+    return out;
+  };
+  const coverCtx = (room: Room): CoverContext => ({
+    extent: room.head.extent,
+    preCutMax: room.head.preCutMax,
+    firstStamp: (origin) => room.firstStamps.get(origin),
+    settled: (origin) => room.settled.get(origin),
+  });
+  const generationOf = (room: Room): GenerationRecord => ({
+    instance: room.instance,
+    seq: room.head.seq,
+    index: room.head.index,
+    reason: room.head.reason,
+    policy: room.head.policy,
+    seed: room.head.seed,
+    extent: room.head.extent,
+    preCutMax: room.head.preCutMax,
+    firstStamps: recordOf(room.firstStamps),
+    receipts: receiptsRecord(room),
+  });
+  const stateOf = (room: Room): RoomState => ({
+    seq: room.seq,
+    instance: room.instance,
+    checkpoint: () => room.registers.checkpoint(),
+    wm: wmOf(room),
+    ranges: rangesRecord(room),
+    settled: settledRecord(room),
+    schemaVersion: room.schemaVersion,
+    generation: generationOf(room),
+    everMax: recordOf(room.everMax),
+    refused: Object.fromEntries(room.refused),
+  });
+  /** What every snapshot welcome carries besides its registers or seed, read now. */
+  const snapshotOf = (room: Room) =>
+    ({
+      mode: 'snapshot',
+      wm: wmOf(room),
+      index: room.head.index,
+      reason: room.head.reason,
+      policy: room.head.policy,
+      extent: room.head.extent,
+      preCutMax: room.head.preCutMax,
+      firstStamps: recordOf(room.firstStamps),
+      receipts: receiptsRecord(room),
+      ranges: rangesRecord(room),
+      settled: settledRecord(room),
+    }) as const;
+  /** The rootedness precondition of a cut that keeps dots: the root register holds a live `set`. */
+  const rooted = (registers: RegisterStore): boolean =>
+    registers.siblings([]).some((s) => s.kind === 'set');
+  /** The count as whole percent of the hard budget: the notice cadence after a commit. */
+  const percentOf = (room: Room, count: number): number => {
+    const hard = hardBudget(room);
+    return hard > 0 ? Math.floor((100 * count) / hard) : count;
+  };
+  const hardBudget = (room: Room): number => {
+    const b = opt.compaction?.budget;
+    return b ? Math.max(b.floor, b.factor * room.registers.keptRegisters()) : 0;
+  };
+
+  /** Broadcast the room's compaction state, ordered behind the document traffic it describes. */
+  const notice = (name: string, room: Room): void => {
+    if (!armed) return;
+    const count = room.registers.droppableTombstones();
+    room.noticed = percentOf(room, count);
+    const msg: ServerMsg = {
+      t: 'compaction',
+      room: name,
+      count,
+      budget: hardBudget(room),
+      ready: [...room.members].filter((m) => m.ready).map((m) => m.origin),
+    };
+    room.release.submit(() => broadcast(room, msg));
+  };
+
+  /**
+   * The cut itself, synchronous so no admission falls between capture and boundary: capture the
+   * seed, mint the instance, freeze extent and preCutMax, reset registers to the seed (its
+   * baselines ride along), clear admission evidence, refusals and readiness; receipts and the
+   * logical sequence carry on. `row` is the migration envelope that is itself the cut row.
+   * Answers the members present at the cut and the cut welcome's document half.
+   */
+  const cutRoom = (
+    room: Room,
+    reason: Exclude<GenerationReason, 'genesis'>,
+    supplied: readonly RegisterCheckpoint[] | undefined,
+    row?: SeqEnvelope,
+  ) => {
+    const replay = reason === 'compaction' || reason === 'consensus';
+    const seed = replay ? room.registers.compactionSeed() : (supplied ?? []);
+    const preCutMax = new Map(room.everMax);
+    for (const r of seed) {
+      for (const x of r.siblings) {
+        const cur = preCutMax.get(x.origin);
+        if (!cur || !stampLte(x.hlc, cur)) preCutMax.set(x.origin, x.hlc);
+      }
+    }
+    room.instance = mintInstance();
+    room.registers.reset();
+    room.registers.load(seed);
+    room.ranges.clear();
+    room.settled.clear();
+    room.firstStamps.clear();
+    room.refused.clear();
+    for (const [origin, h] of preCutMax) room.everMax.set(origin, h);
+    for (const m of room.members) m.ready = false;
+    room.softDue = false;
+    room.head = {
+      seq: row ? row.seq : ++room.seq,
+      index: room.head.index + 1,
+      reason,
+      policy: replay ? 'replay' : 'discard',
+      seed,
+      extent: extentOf(seed),
+      preCutMax: recordOf(preCutMax),
+    };
+    room.journal = row ? [row] : [];
+    const doc = {
+      seq: room.seq,
+      instance: room.instance,
+      schemaVersion: room.schemaVersion,
+      ...snapshotOf(room),
+      seed,
+    } as const;
+    return { audience: [...room.members], doc };
+  };
+  /** The re-welcome after a cut: the seed and the record to every member present at the cut. */
+  const rewelcome =
+    (name: string, room: Room, cut: ReturnType<typeof cutRoom>) => (): void => {
+      for (const member of cut.audience) {
+        if (!room.members.has(member) || member.ejected) continue;
+        member.socket.send({
+          t: 'welcome',
+          room: name,
+          ...cut.doc,
+          peers: [...room.presence.values()].map((e) => e.peer),
+          members: [...room.members].filter((m) => m !== member).map((m) => m.origin),
+          ...iceFor(name, member.origin),
+        });
+      }
+    };
+  /** A cut with no envelope behind it: its own row, persisted before the re-welcome. */
+  const cutNow = (
+    name: string,
+    room: Room,
+    reason: Exclude<GenerationReason, 'genesis'>,
+    seed?: readonly RegisterCheckpoint[],
+  ): void => {
+    const cut = cutRoom(room, reason, seed);
+    const row: CutRow = { kind: 'cut', seq: room.head.seq, record: generationOf(room) };
+    const done = opt.onRow?.(name, row, stateOf(room));
+    room.release.submit(rewelcome(name, room, cut), done ?? undefined, row);
+    notice(name, room);
+  };
+
+  /** Census: every connected member declared ready in this generation ⇒ a consensus cut. */
+  const census = (name: string, room: Room): void => {
+    if (!opt.compaction?.consensus || room.release.stalled()) return;
+    const members = [...room.members].filter((m) => !m.ejected && !room.ejected.has(m.ctx.writer));
+    if (!members.length || !members.every((m) => m.ready) || !rooted(room.registers)) return;
+    cutNow(name, room, 'consensus');
+  };
+  /** The tombstone budget after a commit: hard ⇒ cut now; soft ⇒ cut after a quiet commit. */
+  const budget = (name: string, room: Room, quiet: boolean): void => {
+    if (!opt.compaction?.budget || room.release.stalled() || !rooted(room.registers)) return;
+    const count = room.registers.droppableTombstones();
+    const hard = hardBudget(room);
+    if (count > hard / 2) room.softDue = true;
+    if (count > hard || (room.softDue && quiet)) cutNow(name, room, 'compaction');
+    else if (room.noticed !== percentOf(room, count)) notice(name, room);
+  };
+
+  /**
+   * The admission gate after the refusals that eject nobody: an epoch raised past the room's
+   * baseline by a writer the policy does not allow, then a cite the generation does not cover.
+   * Refused, never ejected: an honest writer lands the refusal as a conflict.
+   */
+  const gate = (
     name: string,
     room: Room,
     env: OpEnvelope,
     ctx: PrincipalCtx,
     info: PolicyRoomInfo,
-  ): PolicyViolation | null => {
+  ): JournaledRefusal | null => {
     const policy = opt.policy;
-    if (!policy || (!policy.canBump && !policy.verifyCitations)) return null;
-    for (const op of env.ops) {
-      if (policy.canBump) {
-        const observed = room.registers.maxEpoch(op.path);
+    if (policy?.canBump) {
+      for (const op of env.ops) {
         if (
-          op.epoch > observed &&
+          op.epoch > room.registers.maxEpoch(op.path) &&
           !policy.canBump(ctx, op.path, op.epoch, name, info)
         ) {
-          return {
-            writer: ctx.writer,
-            reason: 'epoch-bump',
-            path: op.path,
-            detail: `epoch ${op.epoch} > observed ${observed}`,
-          };
+          return 'epoch-bump';
         }
       }
-      if (!policy.verifyCitations) continue;
-      for (const c of op.cites) {
-        // a cite at or below the origin's settled stamp names a write the room received and may
-        // have collected: honest by construction, and exempt from coverage
-        const done = room.settled.get(c.origin);
-        if (done && hlcLte(c.hlc, done)) continue;
-        // a self-citation of this very envelope's dot is ignored at ingest (born-dead guard)
-        if (
-          c.origin === env.origin &&
-          c.hlc.p === env.hlc.p &&
-          c.hlc.l === env.hlc.l
-        )
-          continue;
-        if (!room.registers.covers(op.path, c)) {
-          return {
-            writer: ctx.writer,
-            reason: 'unknown-citation',
-            path: op.path,
-            detail: `cites ${c.origin}@${c.hlc.p}.${c.hlc.l}`,
-          };
+    }
+    if (policy?.verifyCitations) {
+      const cover = coverCtx(room);
+      for (const op of env.ops) {
+        for (const c of op.cites) {
+          // a self-citation of this very envelope's dot is ignored at ingest (born-dead guard)
+          if (c.origin === env.origin && c.hlc.p === env.hlc.p && c.hlc.l === env.hlc.l) continue;
+          if (!admits(room.registers, cover, op.path, c)) return 'citation';
         }
       }
     }
@@ -593,6 +946,24 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       rooms.delete(name);
       return true;
     },
+    cut: (name, options) => {
+      const room = rooms.get(name);
+      if (!room || room.release.stalled()) return false;
+      const replay = options.reason === 'compaction' || options.reason === 'consensus';
+      if (replay && !opt.policy?.verifyCitations) {
+        throw new Error(
+          `mesh relay: a ${options.reason} cut needs policy.verifyCitations — without the citation gate a cut lets a dropped write replay`,
+        );
+      }
+      if (replay ? !rooted(room.registers) : !options.seed) return false;
+      if (!replay) {
+        const check = createRegisterStore();
+        check.load(options.seed ?? []);
+        if (!rooted(check)) return false;
+      }
+      cutNow(name, room, options.reason, options.seed);
+      return true;
+    },
     hydrate: (name, snapshot) => {
       const room = roomOf(name);
       if (room.seq !== 0 || room.members.size > 0 || room.journal.length > 0)
@@ -612,12 +983,58 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         room.settled.set(origin, h);
       }
       if (snapshot.instance !== undefined) room.instance = snapshot.instance;
+      const g = snapshot.generation;
+      if (g) {
+        room.instance = g.instance;
+        room.head = {
+          seq: g.seq,
+          index: g.index,
+          reason: g.reason,
+          policy: g.policy,
+          seed: g.seed,
+          extent: g.extent,
+          preCutMax: g.preCutMax,
+        };
+        for (const [origin, h] of Object.entries(g.firstStamps)) room.firstStamps.set(origin, h);
+        for (const [origin, byInstance] of Object.entries(g.receipts)) {
+          const held = new Map<string, Ranges>();
+          for (const [instance, r] of Object.entries(byInstance)) {
+            held.set(instance, createRanges(r));
+          }
+          room.receipts.set(origin, held);
+        }
+      } else {
+        // a snapshot from before generation records: the room never cut, so it has no pre-cut dots
+        // and floor 0 leaves the settled exemption exactly the within-generation rule
+        for (const origin of Object.keys(snapshot.settled ?? {})) {
+          room.firstStamps.set(origin, { p: 0, l: 0 });
+        }
+      }
+      for (const [origin, h] of Object.entries(snapshot.everMax ?? {})) room.everMax.set(origin, h);
+      for (const [key, why] of Object.entries(snapshot.refused ?? {})) room.refused.set(key, why);
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
+      // a room whose cuts keep dots must be rooted: its root register holds a live `set`
+      if (armed && room.seq > 0 && !rooted(room.registers)) {
+        rooms.delete(name);
+        throw new Error(
+          `mesh relay: room ${name} refused — its root register holds no live set, so a compaction cut cannot preserve it`,
+        );
+      }
       if (snapshot.journal) {
+        const head = room.head.seq;
         const journal = snapshot.journal
-          .filter((e) => e.seq <= snapshot.seq)
+          .filter((e) => e.seq <= snapshot.seq && e.seq >= head)
           .sort((a, b) => a.seq - b.seq);
+        // the first entry may be the migration envelope that cut the generation; every later one
+        // belongs to it, or the checkpoint mixes generations and the room must not boot
+        const stray = g && journal.find((e) => e.seq > head && e.instance !== room.instance);
+        if (stray) {
+          rooms.delete(name);
+          throw new Error(
+            `mesh relay: room ${name} refused — inconsistent checkpoint, seq ${stray.seq} belongs to generation ${stray.instance}, not ${room.instance}`,
+          );
+        }
         // entries written under an older protocol form a prefix (the version changes only at an
         // upgrade); a delta answer must never serve them, so the journal starts at the first
         // current-version entry and a client behind it is answered with a snapshot instead
@@ -641,6 +1058,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             origin: member.origin,
             gone: true,
           });
+          left(name, room);
           maybeEvictEmpty(name); // last member left a never-seeded room: reclaim it
         }
         joined.clear();
@@ -710,6 +1128,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               ctx,
               origin: msg.origin,
               ejected: false,
+              ready: false,
             };
             joined.set(msg.room, member);
             room.members.add(member);
@@ -742,9 +1161,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                       ),
                     }
                   : {
-                      mode: 'snapshot',
+                      ...snapshotOf(room),
                       registers: room.registers.checkpoint(),
-                      wm: wmOf(room),
                     };
 
             // the roster is NOT document state: read it when the welcome actually goes out,
@@ -763,6 +1181,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 ...iceFor(msg.room, member.origin),
               });
             });
+            notice(msg.room, room); // a joiner is not ready: the census changed
             return;
           }
 
@@ -800,6 +1219,16 @@ export function createRelay(opt: RelayOptions = {}): Relay {
                 break;
               }
             }
+            return;
+          }
+
+          // readiness for a consensus cut, bound to the generation it names
+          if (msg.t === 'compact') {
+            if (!opt.compaction?.consensus || msg.instance !== room.instance) return;
+            if (member.ready === (msg.ready === true)) return;
+            member.ready = msg.ready === true;
+            notice(msg.room, room);
+            census(msg.room, room);
             return;
           }
 
@@ -843,7 +1272,32 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               origin: env.origin,
               version: env.version,
               reason,
+              seq: room.seq,
             });
+          };
+          // a journaled refusal is answered behind the durability of its row, and again on every
+          // resend, with the room's sequence as of the reply
+          const answer = (
+            reason: JournaledRefusal,
+            done?: Promise<void>,
+            row?: RefuseRow,
+          ): void => {
+            opt.onDrop?.(msg.room, env, reason);
+            const reply: ServerMsg = {
+              t: 'drop',
+              room: msg.room,
+              origin: env.origin,
+              version: env.version,
+              reason,
+              seq: room.seq,
+            };
+            room.release.submit(
+              () => {
+                if (room.members.has(member)) member.socket.send(reply);
+              },
+              done,
+              row,
+            );
           };
           // the generation fence first: nothing written in another generation is answered by
           // this generation's evidence, not even as a duplicate
@@ -860,6 +1314,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // admission evidence: a version the room holds is a resend, and the answer is its
           // acknowledgement — never a second sequence number
           if (ranges?.has(env.version)) return refuse('duplicate');
+          // refused stays refused for the generation, and the writer hears it again
+          const key = `${env.origin}#${env.version}`;
+          const was = room.refused.get(key);
+          if (was) return answer(was);
           // below the maximum yet never admitted: not a loss in transit on one FIFO connection
           // with in-order resend, so a configuration that violates that assumption
           if (ranges && env.version < ranges.max()) return refuse('order');
@@ -872,33 +1330,50 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             seq: room.seq, // before this envelope is sequenced: 0 on an empty room
             siblings: (path) => room.registers.siblings(path),
           };
-          const judged =
-            checkEnvelope(opt.policy, env, ctx, msg.room, info) ??
-            checkAdmission(msg.room, room, env, ctx, info);
+          const judged = checkEnvelope(opt.policy, env, ctx, msg.room, info);
           if (judged) {
             eject(msg.room, room, member, judged);
             return;
           }
+          const refused = gate(msg.room, room, env, ctx, info);
+          if (refused) {
+            room.refused.set(key, refused);
+            const row: RefuseRow = {
+              kind: 'refuse',
+              seq: ++room.seq,
+              instance: room.instance,
+              origin: env.origin,
+              version: env.version,
+              reason: refused,
+            };
+            return answer(refused, opt.onRow?.(msg.room, row, stateOf(room)) ?? undefined, row);
+          }
+          // quiet: this commit arrives at least `quietMs` after the room's previous admitted commit
+          const at = now();
+          const quiet =
+            room.lastCommit !== undefined &&
+            at - room.lastCommit >= (opt.compaction?.budget?.quietMs ?? 2000);
+          room.lastCommit = at;
           const seqEnv: SeqEnvelope = { ...env, seq: ++room.seq };
           room.journal.push(seqEnv);
-          let bumped = false;
-          if (
-            env.schemaVersion !== undefined &&
-            env.schemaVersion > room.schemaVersion
-          ) {
-            // a migration is a generation cut: a new nonce, every piece of evidence dropped,
-            // every member re-welcomed under it. The migration envelope belongs to the
-            // generation it closed and is not recorded in the new one's ranges.
-            room.schemaVersion = env.schemaVersion;
-            room.instance = mintInstance();
-            room.registers.reset();
-            room.ranges.clear();
-            room.settled.clear();
-            room.journal = [seqEnv];
-            bumped = true;
+          // a migration is a generation cut whose row is its own envelope: admitted (and
+          // receipted) in the generation it closes, its root write is the new generation's seed
+          const migrates =
+            env.schemaVersion !== undefined && env.schemaVersion > room.schemaVersion;
+          recordAdmission(room, env);
+          let cut: ReturnType<typeof cutRoom> | undefined;
+          if (migrates) {
+            const minted = createRegisterStore();
+            minted.ingest(env);
+            const seed = minted
+              .checkpoint()
+              .filter((r) => r.siblings.length > 0)
+              .map((r) => ({ ...r, water: {} }));
+            room.schemaVersion = env.schemaVersion as number;
+            cut = cutRoom(room, 'migration', seed, seqEnv);
+          } else {
+            room.registers.ingest(env);
           }
-          room.registers.ingest(env);
-          if (!bumped) recordAdmission(room, env);
           // garbage collection runs when the delta tail trims, on the settled vector: it removes
           // only what no future write can observe, so the notice is parity for clients, not a gate
           let moved: Readonly<Record<string, Hlc>> | undefined;
@@ -915,26 +1390,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // welcome's document half is captured at hello, after this ingest), and sending it
           // again would hand that member one change twice.
           const audience = [...room.members];
-          // the re-welcome after a cut reads its document half now, like a hello would
-          const rewelcome = bumped
-            ? ({
-                seq: room.seq,
-                instance: room.instance,
-                schemaVersion: room.schemaVersion,
-                mode: 'snapshot',
-                registers: room.registers.checkpoint(),
-                wm: wmOf(room),
-              } as const)
-            : undefined;
-          const done = opt.onCommit?.(msg.room, seqEnv, {
-            seq: room.seq,
-            instance: room.instance,
-            checkpoint: () => room.registers.checkpoint(),
-            wm: wmOf(room),
-            ranges: rangesRecord(room),
-            settled: settledRecord(room),
-            schemaVersion: room.schemaVersion,
-          });
+          const done = opt.onCommit?.(msg.room, seqEnv, stateOf(room));
           room.release.submit(
             () => {
               const echo: ServerMsg = { t: 'env', room: msg.room, env: seqEnv };
@@ -946,25 +1402,13 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               if (moved) {
                 broadcast(room, { t: 'settled', room: msg.room, settled: moved });
               }
-              if (rewelcome) {
-                for (const member of audience) {
-                  if (!room.members.has(member) || member.ejected) continue;
-                  member.socket.send({
-                    t: 'welcome',
-                    room: msg.room,
-                    ...rewelcome,
-                    peers: [...room.presence.values()].map((e) => e.peer),
-                    members: [...room.members]
-                      .filter((m) => m !== member)
-                      .map((m) => m.origin),
-                    ...iceFor(msg.room, member.origin),
-                  });
-                }
-              }
+              if (cut) rewelcome(msg.room, room, cut)();
             },
             done ?? undefined,
             seqEnv,
           );
+          if (cut) notice(msg.room, room);
+          else budget(msg.room, room, quiet);
         },
       };
     },

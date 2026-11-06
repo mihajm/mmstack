@@ -37,9 +37,12 @@ export type SyncOp = StoreOp & {
  * position instead of keeping the winner whole, so a v3 and a v4 replica holding the same
  * registers materialize different arrays. Either way the relay rejects envelopes from any other
  * version outright rather than silently mixing incompatible emitters into a room, and a hydrated
- * journal keeps only its current-version suffix (see `Relay.hydrate`).
+ * journal keeps only its current-version suffix (see `Relay.hydrate`). Version 5 introduces the
+ * generation cut: snapshot welcomes carry the generation record (a cut's own welcome its seed
+ * instead of `registers`), citations and unauthorized bumps are refused with a `drop` that carries
+ * the room's sequence, and an empty path segment is malformed.
  */
-export const MESH_PROTO_VERSION = 4;
+export const MESH_PROTO_VERSION = 5;
 
 export type OpEnvelope = {
   readonly proto: number;
@@ -171,7 +174,8 @@ export type ClientMsg =
   | ClientEnvMsg
   | ClientPresenceMsg
   | ClientSignalMsg
-  | ClientDirectMsg;
+  | ClientDirectMsg
+  | ClientCompactMsg;
 
 /** The tri-state join answer, plus the current presence roster. */
 /**
@@ -182,13 +186,34 @@ export type ClientMsg =
 export type WelcomeBody =
   | { readonly mode: 'up-to-date' }
   | { readonly mode: 'delta'; readonly envs: readonly SeqEnvelope[] }
-  | {
-      readonly mode: 'snapshot';
+  | (SnapshotState & {
+      /**
+       * The cut's own welcome: the generation record's immutable seed, sent once, to the members
+       * present at the cut. Never alongside `registers`.
+       */
+      readonly seed: readonly RegisterCheckpoint[];
+      readonly registers?: undefined;
+    })
+  | (SnapshotState & {
       /** The room's retained register state; the client folds it with its own policy. */
       readonly registers: readonly RegisterCheckpoint[];
-      /** Per-origin envelope-version high-water marks at the snapshot point. */
-      readonly wm: Readonly<Record<string, number>>;
-    };
+      readonly seed?: undefined;
+    });
+
+/** What every snapshot welcome carries besides its registers (or the seed). */
+export type SnapshotState = GenerationFields & {
+  readonly mode: 'snapshot';
+  /** Per-origin envelope-version high-water marks at the snapshot point. */
+  readonly wm: Readonly<Record<string, number>>;
+  /** The first stamp admitted from each origin in this generation, as of the welcome's seq. */
+  readonly firstStamps: Readonly<Record<string, Hlc>>;
+  /** Admitted versions per origin per generation, carried across cuts (see {@link Receipts}). */
+  readonly receipts: Receipts;
+  /** This generation's admitted-version ranges per origin, as of the welcome's seq. */
+  readonly ranges: Readonly<Record<string, readonly VersionRange[]>>;
+  /** This generation's settled vector, as of the welcome's seq. */
+  readonly settled: Readonly<Record<string, Hlc>>;
+};
 
 /** One ICE server as a browser takes it; the relay may issue these in a welcome. */
 export type IceServer = {
@@ -286,19 +311,103 @@ export type SettledMsg = {
  * The others refuse an honest writer: `'generation'` (written in another room generation),
  * `'schema'` (a data shape older than the room's), `'order'` (a version below the origin's
  * admitted maximum that was never admitted — impossible on one FIFO connection with in-order
- * resend, so a configuration that violates that assumption). A refused write is not in the
- * room; the writer drops it and rehydrates.
+ * resend, so a configuration that violates that assumption), `'epoch-bump'` (an epoch above the
+ * room's baseline from a writer the policy does not let raise it) and `'citation'` (a cite the
+ * room's state does not cover). The last two are journaled with the room and repeated on every
+ * resend. A refused write is not in the room; the writer drops it and rehydrates.
  */
 export type DropMsg = {
   readonly t: 'drop';
   readonly room: string;
   readonly origin: string;
   readonly version: number;
-  readonly reason: 'duplicate' | 'generation' | 'schema' | 'order';
+  readonly reason:
+    'duplicate' | 'generation' | 'schema' | 'order' | 'citation' | 'epoch-bump';
+  /**
+   * The room's sequence as of this reply. A refusal journaled by the room (`'citation'`,
+   * `'epoch-bump'`) is answered again, unchanged but for this field, on every resend of the same
+   * envelope; a writer owes itself a snapshot at or past this sequence before trusting its view.
+   */
+  readonly seq: number;
 };
 
 /** An inclusive range of admitted envelope versions for one origin. */
 export type VersionRange = readonly [from: number, to: number];
+
+/** Why a generation began. `genesis` is a room's first generation; every other reason is a cut. */
+export type GenerationReason =
+  'genesis' | 'migration' | 'compaction' | 'rollback' | 'consensus';
+
+/**
+ * What the new generation does with a tail written in the previous one: `discard` (migration,
+ * rollback: the reset is the intent) or `replay` (compaction, consensus: verbatim resend, each
+ * envelope gated on its cites).
+ */
+export type TailPolicy = 'discard' | 'replay';
+
+/**
+ * Admitted versions per envelope origin, per generation instance. The one admission evidence a
+ * cut never clears: a writer trims its persisted tail by exact membership here.
+ */
+export type Receipts = Readonly<
+  Record<string, Readonly<Record<string, readonly VersionRange[]>>>
+>;
+
+/** The immutable fields of a generation, carried by every snapshot welcome of it. */
+export type GenerationFields = {
+  /** The generation's ordinal in the room: 0 for genesis, one more at every cut. */
+  readonly index: number;
+  readonly reason: GenerationReason;
+  readonly policy: TailPolicy;
+  /**
+   * The frozen seed extent: per register path key, per origin, the highest stamp the seed
+   * retains. The only witness to a dot written before the cut.
+   */
+  readonly extent: Readonly<Record<string, Readonly<Record<string, Hlc>>>>;
+  /**
+   * Per origin, the highest stamp the room held before the cut (seed dots included): a cited dot
+   * at or below it is pre-cut and answered by `extent` alone.
+   */
+  readonly preCutMax: Readonly<Record<string, Hlc>>;
+};
+
+/**
+ * The generation record, minted at a cut and persisted whole before anything is answered under
+ * the new instance. `seq` is the cut's own row in the room's logical sequence, which never
+ * restarts. `firstStamps` is empty at the cut and grows during the generation; `receipts` are
+ * the ones carried across the cut.
+ */
+export type GenerationRecord = GenerationFields & {
+  readonly instance: string;
+  readonly seq: number;
+  /** The live siblings the generation starts from, original dots, no watermarks. */
+  readonly seed: readonly RegisterCheckpoint[];
+  readonly firstStamps: Readonly<Record<string, Hlc>>;
+  readonly receipts: Receipts;
+};
+
+/**
+ * A member's declared readiness for a consensus cut, re-sent on every change. Bound to the
+ * generation: a declaration naming another `instance` is ignored. Safety never depends on it.
+ */
+export type ClientCompactMsg = {
+  readonly t: 'compact';
+  readonly room: string;
+  readonly instance: string;
+  readonly ready: boolean;
+};
+
+/**
+ * The room's compaction state: the counted droppable tombstones, the hard budget (0 when the
+ * room arms none) and the origins of the members currently declared ready.
+ */
+export type CompactionMsg = {
+  readonly t: 'compaction';
+  readonly room: string;
+  readonly count: number;
+  readonly budget: number;
+  readonly ready: readonly string[];
+};
 
 export type ServerMsg =
   | WelcomeMsg
@@ -310,4 +419,5 @@ export type ServerMsg =
   | ServerSignalMsg
   | ServerDirectMsg
   | SettledMsg
-  | DropMsg;
+  | DropMsg
+  | CompactionMsg;

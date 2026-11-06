@@ -92,6 +92,15 @@ function scripted() {
       },
     ],
     wm: { ox: 1 },
+    index: 0,
+    reason: 'genesis',
+    policy: 'discard',
+    extent: {},
+    preCutMax: {},
+    firstStamps: {},
+    receipts: {},
+    ranges: {},
+    settled: {},
   });
   const direct = (from: string, data: unknown): ServerMsg => ({
     t: 'direct',

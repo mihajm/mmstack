@@ -1323,19 +1323,56 @@ describe('opSync', () => {
     expect(b().v).toBe('resolved');
   });
 
-  it('[PIN proto 4] the protocol is 4 (K-diff: the no-policy array fold changed) and a v3 envelope is dropped', () => {
-    expect(OP_PROTO_VERSION).toBe(4);
+  it('[PIN proto 5] the protocol is 5 (the generation cut) and v3 / v4 envelopes are dropped', () => {
+    expect(OP_PROTO_VERSION).toBe(5);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const { a, syncA } = pair();
-      syncA.receive({
-        ...env([set(['v'], 'v3')], { p: 99, writer: 'z' }),
-        proto: 3,
-      });
+      for (const proto of [3, 4]) {
+        syncA.receive({
+          ...env([set(['v'], `v${proto}`)], { p: 99, writer: 'z' }),
+          proto,
+        });
+      }
       expect(a().v).toBe('init');
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('[PIN proto 5] hydrate loads a proto 4 checkpoint as current (the register shape is unchanged) and refuses proto 2', () => {
+    const { a, b, syncA, syncB } = pair();
+    b.set({ v: 'from-b', n: { x: 1 } });
+    syncB.flush();
+    const cp = syncB.snapshot();
+    syncA.hydrate({ ...cp, proto: 4 });
+    expect(a().v).toBe('from-b');
+    expect(() => syncA.hydrate({ ...cp, proto: 2 })).toThrow(/loads only protocol 3/);
+  });
+
+  it('emitOps stamps raw ops with the current cites as ONE envelope, applies them to the store, and hands the intent to subscribers', () => {
+    const { a, b, syncA, syncB } = pair();
+    const seen: { env: OpEnvelope; raws?: unknown; bump?: boolean }[] = [];
+    syncA.subscribe((env, ctx) => seen.push({ env, raws: ctx?.raws, bump: ctx?.bump }));
+    const toA = pipe(syncB, syncA);
+    b.set({ v: 'b', n: { x: 2 } });
+    syncB.flush();
+    toA();
+    const raws = [{ kind: 'set' as const, path: ['v'], next: 'again' }];
+    syncA.emitOps(raws, { bump: true });
+    expect(a().v).toBe('again');
+    expect(seen).toHaveLength(1);
+    const [{ env }] = seen;
+    expect(env.ops.map((op) => [op.kind, op.path, op.cites.map((c) => c.origin)])).toEqual([
+      ['set', ['v'], [syncB.origin]],
+    ]);
+    expect(env.ops[0].epoch).toBe(1); // the override
+    expect(seen[0].raws).toEqual(raws);
+    expect(seen[0].bump).toBe(true);
+    a.set({ ...a(), n: { x: 5 } });
+    syncA.flush();
+    expect(seen[1].bump).toBe(false); // an ordinary write's intent
+    expect(seen[1].raws).toEqual([{ kind: 'set', path: ['n', 'x'], next: 5, prev: 2 }]);
   });
 
   it('drops foreign-proto envelopes with a dev warning', () => {
@@ -2767,6 +2804,11 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
       'control char in a path segment',
       mutate((e) => (e.ops[0] = { ...e.ops[0], path: [`a${CTRL}`] })),
       'path-control',
+    ],
+    [
+      'an empty path segment (collides with its parent register)',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], path: [''] })),
+      'path-empty',
     ],
     [
       'delete at root',

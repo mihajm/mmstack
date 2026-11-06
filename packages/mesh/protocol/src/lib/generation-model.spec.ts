@@ -521,7 +521,7 @@ describe('generation: the real relay', () => {
     conn2.receive({ t: 'env', room: 'r', env }); // the old-generation envelope, byte for byte
     expect(relay2.room('r')?.seq).toBe(0);
     expect(sent2.filter((m) => m.t === 'drop')).toEqual([
-      { t: 'drop', room: 'r', origin: 'o', version: 1, reason: 'generation' },
+      { t: 'drop', room: 'r', origin: 'o', version: 1, reason: 'generation', seq: 0 },
     ]);
   });
 });

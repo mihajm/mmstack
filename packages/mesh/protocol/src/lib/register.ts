@@ -11,6 +11,40 @@ const SEP = ''; // unit separator: keeps joined path keys prefix-unambiguous
 const keyOf = (path: readonly Key[]): string => path.map(String).join(SEP);
 
 /**
+ * The register identity of a path: its segments as strings, joined with the unit separator. The
+ * key of the generation record's `extent`. Sound only for paths `validateEnvelope` accepts (no
+ * empty segment, no control character), and the root's key is the empty string.
+ */
+export const pathKey = keyOf;
+
+/** The frozen extent of a seed: per register path key, per origin, the highest retained stamp. */
+export function extentOf(
+  seed: readonly RegisterCheckpoint[],
+): Record<string, Record<string, Hlc>> {
+  const out: Record<string, Record<string, Hlc>> = {};
+  for (const r of seed) {
+    const at = (out[keyOf(r.path)] ??= {});
+    for (const s of r.siblings) {
+      const cur = at[s.origin];
+      if (!cur || compareHlc(s.hlc, cur) > 0) at[s.origin] = s.hlc;
+    }
+  }
+  return out;
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null;
+/** Does `value` hold the relative path `rel` (every step an own key of an object)? */
+const contains = (value: unknown, rel: readonly Key[]): boolean => {
+  let cur = value;
+  for (const seg of rel) {
+    if (!isObj(cur) || !Object.hasOwn(cur, String(seg))) return false;
+    cur = cur[String(seg)];
+  }
+  return true;
+};
+
+/**
  * A sibling as the register keeps it: only a `set` keeps `prev` (a merge fold's ancestor). A
  * checkpoint written before that rule may hold a delete sibling with the whole deleted record as
  * `prev`; loading it drops the field, so the next checkpoint no longer carries it.
@@ -82,6 +116,27 @@ export type RegisterStore = {
    * one dot: a later write from the same origin at the path answers yes as well.
    */
   covers(path: readonly Key[], dot: Dot): boolean;
+  /**
+   * May a compaction cut drop the register at `path`? Only when no fold can observe it: it holds
+   * no live `set`, at most one live sibling that is not a `clear`, no register below it holds a
+   * live `set`, and, when it holds a live `delete`, no live `set` at a proper ancestor has a value
+   * containing the path. Decided on retention alone: no fold, no winner. True where nothing is
+   * retained.
+   */
+  droppable(path: readonly Key[]): boolean;
+  /**
+   * The seed of a compaction cut: every register that is not {@link droppable}, with its live
+   * siblings (original dots, full identity), no watermarks, and its epoch baseline when above 0.
+   */
+  compactionSeed(): RegisterCheckpoint[];
+  /**
+   * The registers a compaction cut would drop that hold exactly one retained sibling, a `delete`,
+   * and no watermark: the count a tombstone budget is held against. Maintained as the store
+   * changes; equal to a full scan by construction.
+   */
+  droppableTombstones(): number;
+  /** The registers a compaction cut would keep: the size of its seed. Maintained like the count. */
+  keptRegisters(): number;
 };
 
 export function createRegisterStore(): RegisterStore {
@@ -99,23 +154,137 @@ export function createRegisterStore(): RegisterStore {
     else if (epoch > cur.epoch) cur.epoch = epoch;
   };
 
+  // The cut's keep rule depends on a register's own live siblings, on the registers below it
+  // (a live `set` there) and on the live `set` values above it. A path tree indexes both
+  // directions, so a write reclassifies only its path's ancestors and descendants.
+  type Node = { readonly children: Set<string>; setBelow: number };
+  const nodes = new Map<string, Node>();
+  const liveSet = new Map<string, boolean>();
+  const cls = new Map<string, { kept: boolean; lone: boolean }>();
+  let tombstones = 0;
+  let keptCount = 0;
+
+  /** The keys of every proper prefix of `path`, root first. */
+  const prefixKeys = (path: readonly Key[]): string[] => {
+    const out: string[] = [];
+    let key = '';
+    for (let i = 0; i < path.length; i++) {
+      out.push(key);
+      key = i === 0 ? String(path[0]) : key + SEP + String(path[i]);
+    }
+    return out;
+  };
+  const ensureNode = (path: readonly Key[]): void => {
+    let parent: Node | undefined;
+    for (const key of [...prefixKeys(path), keyOf(path)]) {
+      let node = nodes.get(key);
+      if (!node) nodes.set(key, (node = { children: new Set(), setBelow: 0 }));
+      parent?.children.add(key);
+      parent = node;
+    }
+  };
+
   const regAt = (path: readonly Key[]): Reg => {
     const key = keyOf(path);
     let reg = registers.get(key);
     if (!reg) {
       reg = { path, siblings: new Map(), water: new Map() };
       registers.set(key, reg);
+      ensureNode(path);
     }
     return reg;
   };
 
+  const liveOf = (reg: Reg | undefined): SyncSibling[] => {
+    if (!reg) return [];
+    const live: SyncSibling[] = [];
+    for (const s of reg.siblings.values()) {
+      const w = reg.water.get(s.origin);
+      if (!w || compareHlc(s.hlc, w) > 0) live.push(s);
+    }
+    return live;
+  };
+  /** A live `set` at a proper ancestor whose value contains `path`. */
+  const masked = (path: readonly Key[]): boolean =>
+    prefixKeys(path).some((key, i) =>
+      liveOf(registers.get(key)).some(
+        (s) => s.kind === 'set' && contains(s.value, path.slice(i)),
+      ),
+    );
+  const keeps = (path: readonly Key[], live: readonly SyncSibling[]): boolean =>
+    live.length > 0 &&
+    (live.some((s) => s.kind === 'set') ||
+      (nodes.get(keyOf(path))?.setBelow ?? 0) > 0 ||
+      (live.some((s) => s.kind === 'delete') && masked(path)) ||
+      live.filter((s) => s.kind !== 'clear').length >= 2);
+
+  /** Records whether the register holds a live `set`, carrying a change to every ancestor. */
+  const refreshLiveSet = (key: string): void => {
+    const reg = registers.get(key);
+    const now = liveOf(reg).some((s) => s.kind === 'set');
+    if ((liveSet.get(key) ?? false) === now) return;
+    if (reg && now) liveSet.set(key, true);
+    else liveSet.delete(key);
+    for (const up of prefixKeys(reg?.path ?? [])) {
+      const node = nodes.get(up);
+      if (node) node.setBelow += now ? 1 : -1;
+    }
+  };
+  const classify = (key: string): void => {
+    const prev = cls.get(key);
+    if (prev?.kept) keptCount--;
+    if (prev?.lone) tombstones--;
+    const reg = registers.get(key);
+    if (!reg) {
+      cls.delete(key);
+      return;
+    }
+    const kept = keeps(reg.path, liveOf(reg));
+    const only =
+      reg.siblings.size === 1 ? [...reg.siblings.values()][0] : undefined;
+    const lone = !kept && only?.kind === 'delete' && reg.water.size === 0;
+    cls.set(key, { kept, lone });
+    if (kept) keptCount++;
+    if (lone) tombstones++;
+  };
+  const below = (key: string, out: Set<string>): void => {
+    for (const child of nodes.get(key)?.children ?? []) {
+      out.add(child);
+      below(child, out);
+    }
+  };
+  /** Reclassify after `touched` changed: their ancestors and descendants are the only others. */
+  const reclassify = (touched: ReadonlyMap<string, readonly Key[]>): void => {
+    for (const key of touched.keys()) refreshLiveSet(key);
+    const affected = new Set<string>();
+    for (const [key, path] of touched) {
+      affected.add(key);
+      for (const up of prefixKeys(path)) affected.add(up);
+      below(key, affected);
+    }
+    for (const key of affected) if (registers.has(key)) classify(key);
+  };
+  /** The full scan: every register reclassified from nothing. */
+  const recount = (): void => {
+    nodes.clear();
+    liveSet.clear();
+    cls.clear();
+    tombstones = 0;
+    keptCount = 0;
+    for (const reg of registers.values()) ensureNode(reg.path);
+    for (const key of registers.keys()) refreshLiveSet(key);
+    for (const key of registers.keys()) classify(key);
+  };
+
   return {
     ingest: (env) => {
+      const touched = new Map<string, readonly Key[]>();
       for (const op of env.ops) {
         // a delete or clear at the root has no parent register to abstain to; retaining one would
         // ship register state a client can only materialize as a blanked document, so drop it
         if (!op.path.length && op.kind !== 'set') continue;
         const reg = regAt(op.path);
+        touched.set(keyOf(op.path), op.path);
         raiseEpoch(op.path, op.epoch ?? 0);
         for (const c of op.cites ?? []) {
           // a self-citation would born-dead the write; ignore it (matches the client register)
@@ -142,6 +311,7 @@ export function createRegisterStore(): RegisterStore {
           reg.siblings.set(env.origin, sib);
         }
       }
+      reclassify(touched);
     },
 
     checkpoint: () => {
@@ -187,6 +357,7 @@ export function createRegisterStore(): RegisterStore {
           if (!cur || compareHlc(h, cur) > 0) reg.water.set(origin, h);
         }
       }
+      recount();
     },
 
     settle: (settled) => {
@@ -211,22 +382,15 @@ export function createRegisterStore(): RegisterStore {
           registers.delete(key);
         }
       }
+      recount();
     },
     reset: () => {
       registers.clear();
       epochs.clear();
+      recount();
     },
 
-    siblings: (path) => {
-      const reg = registers.get(keyOf(path));
-      if (!reg) return [];
-      const live: SyncSibling[] = [];
-      for (const s of reg.siblings.values()) {
-        const w = reg.water.get(s.origin);
-        if (!w || compareHlc(s.hlc, w) > 0) live.push(s);
-      }
-      return live;
-    },
+    siblings: (path) => liveOf(registers.get(keyOf(path))),
 
     maxEpoch: (path) => {
       const key = keyOf(path);
@@ -245,5 +409,28 @@ export function createRegisterStore(): RegisterStore {
       const w = reg.water.get(dot.origin);
       return !!w && compareHlc(dot.hlc, w) <= 0;
     },
+
+    droppable: (path) => !keeps(path, liveOf(registers.get(keyOf(path)))),
+
+    compactionSeed: () => {
+      const seed: RegisterCheckpoint[] = [];
+      for (const [key, reg] of registers) {
+        const live = liveOf(reg);
+        if (!keeps(reg.path, live)) continue;
+        let epoch = epochs.get(key)?.epoch ?? 0;
+        for (const s of reg.siblings.values())
+          if (s.epoch > epoch) epoch = s.epoch;
+        seed.push({
+          path: reg.path,
+          siblings: live,
+          water: {},
+          ...(epoch > 0 ? { epoch } : {}),
+        });
+      }
+      return seed;
+    },
+
+    droppableTombstones: () => tombstones,
+    keptRegisters: () => keptCount,
   };
 }

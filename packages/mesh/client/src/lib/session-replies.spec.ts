@@ -43,26 +43,48 @@ const welcome = (instance: string, seq = 0): ServerMsg => ({
   mode: 'up-to-date',
 });
 
-const snapshotWelcome = (instance: string, seq: number, title: string): ServerMsg => ({
-  t: 'welcome',
-  room: 'r',
-  seq,
-  instance,
-  schemaVersion: 0,
-  peers: [],
-  members: [],
-  mode: 'snapshot',
-  registers: [
+/**
+ * A snapshot welcome: generation `index` (0 = genesis) with its record fields. A cut's own welcome
+ * carries the seed; `policy` is what that generation does with an earlier generation's tail.
+ */
+const snapshotWelcome = (
+  instance: string,
+  seq: number,
+  title: string,
+  gen: { index?: number; policy?: 'discard' | 'replay'; receipts?: Record<string, Record<string, [number, number][]>> } = {},
+): ServerMsg => {
+  const registers = [
     {
       path: [],
       siblings: [
-        { kind: 'set', value: { title, count: 0 }, writer: 'seed', origin: 'seed', hlc: { p: 1, l: 0 }, epoch: 0 },
+        { kind: 'set' as const, value: { title, count: 0 }, writer: 'seed', origin: 'seed', hlc: { p: 1, l: 0 }, epoch: 0 },
       ],
       water: {},
     },
-  ],
-  wm: { seed: 1 },
-});
+  ];
+  const index = gen.index ?? 0;
+  return {
+    t: 'welcome',
+    room: 'r',
+    seq,
+    instance,
+    schemaVersion: 0,
+    peers: [],
+    members: [],
+    mode: 'snapshot',
+    ...(index > 0 ? { seed: registers } : { registers }),
+    wm: index > 0 ? {} : { seed: 1 },
+    index,
+    reason: index === 0 ? 'genesis' : gen.policy === 'replay' ? 'compaction' : 'migration',
+    policy: gen.policy ?? 'discard',
+    extent: { '': { seed: { p: 1, l: 0 } } },
+    preCutMax: index > 0 ? { seed: { p: 1, l: 0 } } : {},
+    firstStamps: index > 0 ? {} : { seed: { p: 1, l: 0 } },
+    receipts: gen.receipts ?? {},
+    ranges: index > 0 ? {} : { seed: [[1, 1]] },
+    settled: index > 0 ? {} : { seed: { p: 1, l: 0 } },
+  } as ServerMsg;
+};
 
 const sentEnvs = (wire: ReturnType<typeof scripted>): OpEnvelope[] =>
   wire.sent.filter((m): m is Extract<ClientMsg, { t: 'env' }> => m.t === 'env').map((m) => m.env);
@@ -81,14 +103,14 @@ describe('session: the relay answers every envelope it does not echo', () => {
     expect(a.acked()).toBe(false);
     const barrier = a.whenAcked();
     // the echo was lost; the resend after a reconnect is answered "duplicate"
-    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'duplicate' });
+    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'duplicate', seq: 1 });
     await expect(barrier).resolves.toBeUndefined();
     expect(a.acked()).toBe(true);
     expect(a.snapshot().title).toBe('mine');
     a.close();
   });
 
-  it('a "generation" refusal rejects the barrier, hands the envelope out, and asks for a fresh snapshot', async () => {
+  it('a "generation" reply keeps the write for the new generation and asks for a fresh snapshot; a migration (discard) then refuses it', async () => {
     const wire = scripted();
     const refused: { env: OpEnvelope; reason: string }[] = [];
     const a = agentSeat<Doc>(initial(), {
@@ -102,22 +124,25 @@ describe('session: the relay answers every envelope it does not echo', () => {
     const [env] = sentEnvs(wire);
     const barrier = a.whenAcked();
     const hellosBefore = hellos(wire).length;
-    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'generation' });
-    await expect(barrier).rejects.toThrow('refused: generation');
-    expect(refused).toEqual([{ env: expect.objectContaining({ version: env.version }), reason: 'generation' }]);
-    expect(refused[0].env.ops[0]).toMatchObject({ kind: 'set', path: ['title'], next: 'stale' });
+    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'generation', seq: 4 });
+    // the write is not refused by the reply: it waits for the welcome that names the new generation
+    expect(refused).toEqual([]);
+    expect(a.acked()).toBe(false);
     // the rehydrate: one more hello, without a sequence, so the relay answers with a snapshot
     const after = hellos(wire);
     expect(after.length).toBe(hellosBefore + 1);
     expect(after[after.length - 1].seq).toBeUndefined();
-    expect(a.stableSnapshot()).toBeNull(); // the refused write is still shown until the snapshot lands
-    wire.push(snapshotWelcome('g2', 5, 'theirs'));
+    expect(a.stableSnapshot()).toBeNull(); // the write is still shown until the snapshot lands
+    wire.push(snapshotWelcome('g2', 5, 'theirs', { index: 1, policy: 'discard' }));
+    await expect(barrier).rejects.toThrow('refused: generation');
+    expect(refused).toEqual([{ env: expect.objectContaining({ version: env.version }), reason: 'generation' }]);
+    expect(refused[0].env.ops[0]).toMatchObject({ kind: 'set', path: ['title'], next: 'stale' });
     expect(a.snapshot().title).toBe('theirs'); // gone locally: the room never had it
     expect(a.status()).toBe('live');
     a.close();
   });
 
-  it('a welcome naming a new generation refuses the whole unacknowledged tail and replaces the applied state', async () => {
+  it('a migration welcome (policy discard) refuses the whole unacknowledged tail and replaces the applied state', async () => {
     const wire = scripted();
     const refused: string[] = [];
     const a = agentSeat<Doc>(initial(), {
@@ -131,8 +156,8 @@ describe('session: the relay answers every envelope it does not echo', () => {
     a.setAtPath('count', 3);
     const barrier = a.whenAcked();
     expect(sentEnvs(wire).every((e) => e.instance === 'g1')).toBe(true);
-    // the cut: the relay re-welcomes under a new nonce with its snapshot
-    wire.push(snapshotWelcome('g2', 2, 'fresh'));
+    // the cut: the relay re-welcomes under a new nonce with its seed
+    wire.push(snapshotWelcome('g2', 2, 'fresh', { index: 1, policy: 'discard' }));
     await expect(barrier).rejects.toThrow('refused: generation');
     expect(refused).toEqual(['generation', 'generation']);
     expect(a.snapshot()).toEqual({ title: 'fresh', count: 0 });

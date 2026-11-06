@@ -48,8 +48,13 @@ import type { WritableSignalStore } from './types';
  * and `merge3` decides "unchanged" by value. A v3 and a v4 replica holding the same registers
  * materialize different arrays, so they must not share a room; the register format is unchanged,
  * so a v3 checkpoint still loads (it is re-materialized under the v4 fold, see `hydrate`).
+ *
+ * Version 5 changes the room contract around the same shape: a relay room may be cut into a new
+ * generation (a snapshot welcome carries the generation record, a cut's own welcome its seed), an
+ * empty path segment is rejected (`path-empty`), and citations are refused rather than ejected. A v4
+ * client cannot read a cut welcome, so the fence moves with the relay's.
  */
-export const OP_PROTO_VERSION = 4;
+export const OP_PROTO_VERSION = 5;
 
 type Key = string | number;
 
@@ -173,6 +178,9 @@ export function validateEnvelope(env: OpEnvelope): string | null {
       return 'kind';
     if (!Array.isArray(op.path)) return 'path';
     for (const seg of op.path) {
+      // the register store keys a path by its segments joined with a control character, so an
+      // empty segment or a control character inside one would make two paths one register
+      if (seg === '') return 'path-empty';
       if (typeof seg === 'string' && hasControlChar(seg)) return 'path-control';
       if (seg === '__proto__') return 'path-proto';
     }
@@ -1569,6 +1577,12 @@ export type OpSync<T = unknown> = {
   /** Synchronously emit any pending local delta now. */
   flush(): void;
   /**
+   * Apply raw ops to the store and emit them as ONE envelope, stamped like any local write: cites
+   * and epochs from the current registers (`bump`: as an authority override), expansion clears
+   * included. For re-writing a recorded intent as a new write.
+   */
+  emitOps(ops: readonly StoreOp[], opt?: { readonly bump?: boolean }): void;
+  /**
    * Run `fn` and emit the writes it makes as authority-bumped ops: each written path gets
    * epoch `max(observed at that path) + 1`, and a bumped subtree replace bumps every path it
    * clears, so concurrent edits under it lose the fold instead of surviving. Scoped and
@@ -1733,7 +1747,7 @@ export function opSync<T extends object>(
 
   /** `root`: the store value these ops produced, captured now (before a fork-commit reconcile). */
   const emitLocal = (ops: readonly StoreOp[], root: unknown): void => {
-    const ctx: EmitContext = { root };
+    const ctx: EmitContext = { root, raws: ops, bump: bumping };
     const frontier = scopeFrontier;
     const stamped = conv.stamp(ops, { bump: bumping, frontier });
     if (isDevMode()) lintWireValues(stamped);
@@ -1829,6 +1843,17 @@ export function opSync<T extends object>(
       drainOutbox();
       log.flush();
     },
+    emitOps: (ops, o) => {
+      log.flush(); // earlier pending writes emit first, on their own
+      log.apply(ops); // the store shows the write, echo-free
+      const was = bumping;
+      bumping = was || !!o?.bump;
+      try {
+        emitLocal(ops, untracked(source));
+      } finally {
+        bumping = was;
+      }
+    },
     override: (fn) => {
       log.flush(); // earlier pending writes emit un-bumped
       bumping = true;
@@ -1885,13 +1910,15 @@ export function opSync<T extends object>(
     hydrate: (state, pending) => {
       // absent = written before the field existed = 3; below 3 registers lack cites + epoch, above
       // they may mean something this fold cannot read: neither is guessed at
+      // 4 is the current register shape too (5 changed the room contract, not the checkpoint)
       if (
         state.proto !== undefined &&
         state.proto !== 3 &&
+        state.proto !== 4 &&
         state.proto !== OP_PROTO_VERSION
       ) {
         throw new Error(
-          `[@mmstack/primitives] cannot hydrate a checkpoint written by protocol ${state.proto}: this replica speaks protocol ${OP_PROTO_VERSION} and loads only protocol 3 (or unversioned) and ${OP_PROTO_VERSION} checkpoints`,
+          `[@mmstack/primitives] cannot hydrate a checkpoint written by protocol ${state.proto}: this replica speaks protocol ${OP_PROTO_VERSION} and loads only protocol 3 (or unversioned), 4 and ${OP_PROTO_VERSION} checkpoints`,
         );
       }
       log.flush();

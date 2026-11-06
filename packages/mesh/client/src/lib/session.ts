@@ -105,6 +105,8 @@ export type MeshSessionHooks = {
    * emit-side check spares the room the round trip; it is never the enforcement.
    */
   onLocalReject?(violation: PolicyViolation): void;
+  /** The transport closed and a reconnect is scheduled; `code` is the close code (1009 = message too big). */
+  onDisconnect?(code: number, reason: string): void;
   /**
    * Teardown is starting; fired before the unacked tail is dropped, so a shell can persist
    * it (and release any single-writer locks) while it is still intact.
@@ -491,7 +493,7 @@ export function meshSession<T extends object>(
         if (!closed || msg.t === 'reject' || msg.t === 'eject')
           hooks.onMessage?.(msg);
       }),
-      t.onClose(() => {
+      t.onClose((code, reason) => {
         if (closed || transport !== t) return;
         transport = null;
         welcomedHere = false;
@@ -499,6 +501,7 @@ export function meshSession<T extends object>(
         members = undefined;
         hooks.onMembers?.(members);
         setStatus('reconnecting');
+        hooks.onDisconnect?.(code, reason);
         const delay = Math.min(
           opt.reconnect?.maxDelayMs ?? 15_000,
           RECONNECT_BASE_MS * 2 ** attempts++,

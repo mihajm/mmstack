@@ -7,7 +7,7 @@ import { prng } from './prng';
 /** A controllable inner transport: records outbound sends, lets a test push inbound/close. */
 function mockInner() {
   let msgCb: ((m: ServerMsg) => void) | null = null;
-  let closeCb: (() => void) | null = null;
+  let closeCb: ((code: number, reason: string) => void) | null = null;
   const sent: ClientMsg[] = [];
   let closed = false;
   const factory: MeshTransportFactory = () => ({
@@ -16,14 +16,14 @@ function mockInner() {
     onClose: (cb) => ((closeCb = cb), () => (closeCb = null)),
     close: () => {
       closed = true;
-      closeCb?.();
+      closeCb?.(1000, '');
     },
   });
   return {
     factory,
     sent,
     deliverFromRelay: (m: ServerMsg) => msgCb?.(m),
-    innerClose: () => closeCb?.(),
+    innerClose: () => closeCb?.(1000, ''),
     get closed() {
       return closed;
     },

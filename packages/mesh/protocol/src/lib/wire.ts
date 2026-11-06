@@ -76,7 +76,12 @@ export type SyncSibling = {
   readonly kind: 'set' | 'delete' | 'clear';
   /** The written value for a `set`; absent for `delete`/`clear`. */
   readonly value?: unknown;
-  /** The emitter's inversion hint, kept for value-merging folds on the client. */
+  /**
+   * On a `set` sibling only: the value the write replaced, the ancestor a value-merging fold
+   * merges this sibling against. A `delete` or `clear` sibling never carries it, even though a
+   * delete op on the wire does: there `prev` is the emitter's own inversion basis (undo, rebase,
+   * replay), which reads the op and never a retained sibling.
+   */
   readonly prev?: unknown;
   readonly writer: string;
   readonly origin: string;

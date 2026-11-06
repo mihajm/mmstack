@@ -33,7 +33,7 @@ export function pairHub() {
   const makeHalf = (): Half => {
     const messageCbs = new Set<(f: string) => void>();
     const openCbs = new Set<() => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     const buffered: string[] = [];
     const inbound: string[] = [];
     let remote: Half | null = null;
@@ -78,7 +78,7 @@ export function pairHub() {
       fireClose: () => {
         if (dead) return;
         open = false;
-        for (const cb of [...closeCbs]) cb();
+        for (const cb of [...closeCbs]) cb(1000, '');
       },
       link: (other) => {
         remote = other;

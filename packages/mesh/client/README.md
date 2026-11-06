@@ -502,7 +502,9 @@ post-migration by construction, and journal replay stays correct forever.
   SSR-side room.
 
 A transport is a small interface (`send`, `onMessage`, `onClose`, `close`), so wiring a custom
-one is a few lines.
+one is a few lines. `onClose` reports the close `code` and `reason` (a 1009 means the relay
+closed because a frame was too big), and `meshSync`'s `onDisconnect` option surfaces them
+when a reconnect is scheduled.
 
 ## Peer to peer
 

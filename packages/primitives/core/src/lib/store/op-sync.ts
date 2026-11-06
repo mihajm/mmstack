@@ -123,6 +123,7 @@ export type Conflicted<T = unknown> = {
   /**
    * The runner-up's `prev`: the value the second sibling replaced when it wrote. It is NOT a
    * common ancestor of the siblings; across a causal gap the winner may never have seen it.
+   * Absent when the runner-up is a delete: a retained delete keeps no `prev`.
    */
   readonly ancestor?: T;
 };
@@ -534,7 +535,12 @@ export type SyncSibling = {
   readonly kind: 'set' | 'delete' | 'clear';
   /** The written value for a `set`; absent for `delete`/`clear`. */
   readonly value?: unknown;
-  /** The emitter's inversion hint, kept for value-merging folds; irrelevant to convergence. */
+  /**
+   * On a `set` sibling only: the value the write replaced, the ancestor a value-merging fold
+   * merges this sibling against. A `delete` or `clear` sibling never carries it, even though a
+   * delete op on the wire does: there `prev` is the emitter's own inversion basis (undo, rebase,
+   * replay), which reads the op and never a retained sibling.
+   */
   readonly prev?: unknown;
   readonly writer: string;
   readonly origin: string;
@@ -571,6 +577,18 @@ export type FoldPolicyEntry = {
   /** `'todos.*.title'` or a segment array; `'*'` matches exactly one segment. */
   readonly path: string | readonly Key[];
   readonly fold: FoldFn;
+};
+
+/**
+ * A sibling as the register keeps it: only a `set` keeps `prev` (a merge fold's ancestor). A
+ * checkpoint written before that rule may hold a delete sibling with the whole deleted record as
+ * `prev`; loading it drops the field, so the next checkpoint no longer carries it.
+ */
+const retained = (s: SyncSibling): SyncSibling => {
+  if (s.kind === 'set' || !Object.hasOwn(s, 'prev')) return s;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { prev: _dropped, ...rest } = s;
+  return rest;
 };
 
 const kindClass = (k: SyncSibling['kind']): number => (k === 'clear' ? 0 : 1);
@@ -623,7 +641,8 @@ const preserveFold: FoldFn = (siblings) => {
     siblings: values,
     mine: values[0],
     theirs: values[1],
-    // the runner-up's `prev` (what it replaced), not a common ancestor of the siblings
+    // the runner-up's `prev` (what it replaced), not a common ancestor of the siblings; absent
+    // when the runner-up is a delete, which keeps no `prev`
     ancestor: ordered[1].prev,
   };
   return { kind: 'set', value: conflicted };
@@ -1202,8 +1221,9 @@ export function createConvergingApply(opt?: {
             epoch: sop.epoch ?? 0,
           };
           if (op.kind === 'set') sib.value = op.next;
-          if (op.kind !== 'clear' && Object.hasOwn(op, 'prev')) {
-            sib.prev = (op as { prev?: unknown }).prev;
+          // the op keeps `prev` for its emitter's inversion; the register keeps it on a set only
+          if (op.kind === 'set' && Object.hasOwn(op, 'prev')) {
+            sib.prev = op.prev;
           }
           reg.siblings.set(env.origin, sib);
           setSeq(key, env.origin, seq);
@@ -1313,7 +1333,7 @@ export function createConvergingApply(opt?: {
           observeApplied(s.origin, s.hlc);
           const cur = reg.siblings.get(s.origin);
           if (!cur || compareHlc(s.hlc, cur.hlc) > 0) {
-            reg.siblings.set(s.origin, s);
+            reg.siblings.set(s.origin, retained(s));
             setSeq(key, s.origin, seq);
           }
         }

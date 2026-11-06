@@ -44,6 +44,7 @@ import {
   type SeqEnvelope,
   type ServerMsg,
   type SyncOp,
+  type SyncSibling,
   type StoreOp,
 } from './wire';
 
@@ -1208,6 +1209,102 @@ describe('createRegisterStore — settle keeps tombstones and baselines', () => 
     const reloaded = createRegisterStore();
     reloaded.load(store.checkpoint());
     expect(reloaded.maxEpoch(['x'])).toBe(5);
+  });
+});
+
+describe('createRegisterStore: a delete sibling carries no prev', () => {
+  // `prev` on a retained sibling is the ancestor a client merge fold reads, and folds read it on
+  // set siblings only; a delete op on the wire keeps its own `prev` for the emitter's inversion
+  const rEnv = (origin: string, ops: SyncOp[], p: number): OpEnvelope => ({
+    proto: MESH_PROTO_VERSION,
+    instance: 'g',
+    origin,
+    writer: origin,
+    version: p,
+    hlc: { p, l: 0 },
+    policyVersion: 0,
+    ops,
+  });
+  const setWithPrev = (path: Key[], next: unknown, prev: unknown): SyncOp => ({
+    kind: 'set',
+    path,
+    next,
+    prev,
+    cites: [],
+    epoch: 0,
+  });
+
+  it('ingest retains a set sibling prev and drops a delete sibling prev', () => {
+    const store = createRegisterStore();
+    const gone = rEnv('oa', [del(['k'], { big: 'record' })], 1);
+    store.ingest(gone);
+    store.ingest(rEnv('ob', [setWithPrev(['k'], 2, 1)], 2));
+    const sibs = regAt(store.checkpoint(), ['k'])?.siblings ?? [];
+    const d = sibs.find((s) => s.kind === 'delete') as SyncSibling;
+    const s = sibs.find((s) => s.kind === 'set') as SyncSibling;
+    expect(Object.hasOwn(d, 'prev')).toBe(false);
+    expect(Object.hasOwn(s, 'prev')).toBe(true);
+    expect(s.prev).toBe(1);
+    expect(Object.hasOwn(gone.ops[0], 'prev')).toBe(true);
+  });
+
+  it('load strips prev from an older checkpoint delete sibling, so the next checkpoint is clean', () => {
+    const old: RegisterCheckpoint[] = [
+      {
+        path: ['k'],
+        siblings: [
+          {
+            kind: 'delete',
+            prev: { big: 'record' },
+            writer: 'oa',
+            origin: 'oa',
+            hlc: { p: 1, l: 0 },
+            epoch: 0,
+          },
+          {
+            kind: 'set',
+            value: 2,
+            prev: 1,
+            writer: 'ob',
+            origin: 'ob',
+            hlc: { p: 2, l: 0 },
+            epoch: 0,
+          },
+        ],
+        water: {},
+      },
+    ];
+    const store = createRegisterStore();
+    store.load(old);
+    const sibs = regAt(store.checkpoint(), ['k'])?.siblings ?? [];
+    expect(sibs).toHaveLength(2);
+    const d = sibs.find((s) => s.kind === 'delete') as SyncSibling;
+    const s = sibs.find((s) => s.kind === 'set') as SyncSibling;
+    expect(Object.hasOwn(d, 'prev')).toBe(false);
+    expect(s.prev).toBe(1);
+    expect(Object.hasOwn(old[0].siblings[0], 'prev')).toBe(true);
+  });
+
+  it('a joiner welcome carries the delete tombstone without the deleted record', () => {
+    const relay = createRelay();
+    const a = client(relay, 'wa', 'oa');
+    a.hello();
+    a.env([set(['forks', 'f1'], { big: 'record' })]);
+    a.env([
+      del(
+        ['forks', 'f1'],
+        { big: 'record' },
+        { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] },
+      ),
+    ]);
+    const b = client(relay, 'wb', 'ob');
+    b.hello();
+    const sibs =
+      regAt(snapshotOf(b.sock).registers, ['forks', 'f1'])?.siblings ?? [];
+    expect(sibs).toEqual([
+      expect.objectContaining({ kind: 'delete', origin: 'oa' }),
+    ]);
+    expect(Object.hasOwn(sibs[0], 'prev')).toBe(false);
   });
 });
 

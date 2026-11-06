@@ -26,6 +26,7 @@ import type { SeatSync } from './mesh-sync';
 import {
   deliverDirect,
   meshSession,
+  type MeshConflict,
   type MeshDirect,
   type MeshStatus,
 } from './session';
@@ -132,6 +133,11 @@ export type AgentSeat<T extends object> = {
   stableSnapshot(): StableSnapshot<T> | null;
   /** Run local writes and emit them to the room as one envelope, like any peer's edit. */
   write(fn: () => void): void;
+  /**
+   * The seat's writes that will never be admitted as they stand (a replay a compaction cut could not
+   * carry, or a relay refusal), each with `discard()` and `reauthor()`.
+   */
+  conflicts(): readonly MeshConflict[];
   /** Path-addressed write (`'a.b.c'` or segments), emitted immediately. */
   setAtPath(path: string | readonly (string | number)[], value: unknown): void;
   /**
@@ -236,6 +242,8 @@ export function agentSeat<T extends object>(
     policyVersion,
     schemaVersion: opt.schemaVersion,
     reconnect: opt.reconnect,
+    // the recorded raw ops re-stamped against the current registers, as one new envelope
+    reauthor: (intent) => sync.emitOps(intent.raws, { bump: intent.bump }),
     hooks: {
       onStatus: (s, reason) => {
         if (s === 'live') welcomed = true;
@@ -250,6 +258,10 @@ export function agentSeat<T extends object>(
       },
       onResync: (seq) => emit({ kind: 'resync', seq }),
       onDirect: (msg) => deliverDirect(directListeners, msg),
+      onConflicts: (list) => {
+        // a refused write stays applied until the rehydrate that follows lands
+        if (list.some((c) => c.cause !== 'uncovered')) diverged = true;
+      },
       onRefused: (env, reason) => {
         diverged = true; // the write stays applied until the rehydrate that follows lands
         opt.onRefused?.(env, reason);
@@ -291,6 +303,7 @@ export function agentSeat<T extends object>(
       fn();
       sync.flush();
     },
+    conflicts: () => session.conflicts(),
     setAtPath: (path, value) => {
       setAtPath(doc, path, value);
       sync.flush();

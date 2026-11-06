@@ -29,6 +29,7 @@ import {
   createRelay,
   type Relay,
   type RelayConnection,
+  type RelayRow,
   type RelaySocket,
   type RoomSnapshot,
   type RoomState,
@@ -147,10 +148,10 @@ const snapshotOf = (sock: ReturnType<typeof socket>) => {
   const welcome = [...sock.sent]
     .reverse()
     .find((m) => m.t === 'welcome') as Extract<ServerMsg, { t: 'welcome' }>;
-  if (welcome.mode !== 'snapshot') {
-    throw new Error(`expected snapshot welcome, got ${welcome.mode}`);
+  if (welcome.mode !== 'snapshot' || !welcome.registers) {
+    throw new Error(`expected a current snapshot welcome, got ${welcome.mode}`);
   }
-  return welcome;
+  return { ...welcome, registers: welcome.registers };
 };
 
 const regAt = (
@@ -322,25 +323,25 @@ describe('createRelay', () => {
     });
   });
 
-  it('[PIN proto 4] the relay speaks protocol 4 (K-diff fold) and refuses a v3 hello and a v3 envelope', () => {
-    expect(MESH_PROTO_VERSION).toBe(4);
+  it('[PIN proto 5] the relay speaks protocol 5 (the generation cut) and refuses a v4 hello and a v4 envelope', () => {
+    expect(MESH_PROTO_VERSION).toBe(5);
     const relay = createRelay();
     const sock = socket();
     relay.connect(sock, { writer: 'w' }).receive({
       t: 'hello',
       room: 'r',
       origin: 'o',
-      proto: 3,
+      proto: 4,
       policyVersion: 0,
     });
     expect(last(sock)).toMatchObject({
       t: 'reject',
       reason: 'proto',
-      expected: 4,
+      expected: 5,
     });
     const a = client(relay, 'wa', 'oa');
     a.hello();
-    a.env([set(['x'], 1)], { proto: 3 });
+    a.env([set(['x'], 1)], { proto: 4 });
     expect(a.sock.closed).toBe(true);
   });
 
@@ -1425,27 +1426,28 @@ describe('createRelay: an origin settles from the version it entered the generat
 });
 
 describe('createRelay: epoch-bump admission (canBump)', () => {
-  it('tripwire: an unauthorized epoch RAISE ejects with "epoch-bump"; the whole envelope is rejected, never an op mid-log', () => {
+  it('an unauthorized epoch RAISE is refused "epoch-bump" — journaled, answered, never ejected; the whole envelope is rejected, never an op mid-log', () => {
     const violations: PolicyViolation[] = [];
+    const rows: RelayRow[] = [];
     const relay = createRelay({
       policy: { canBump: (ctx) => ctx.claims?.['role'] === 'owner' },
       onViolation: (_room, v) => violations.push(v),
+      onRow: (_room, row) => void rows.push(row),
     });
     const a = client(relay, 'wa', 'oa'); // no owner claim
     a.hello();
     // first op is clean; the second claims precedence — nothing of the envelope may land
     a.env([set(['ok'], 1), set(['doc'], 'mine', { epoch: 1 })]);
 
-    expect(violations).toEqual([
-      {
-        writer: 'wa',
-        reason: 'epoch-bump',
-        path: ['doc'],
-        detail: 'epoch 1 > observed 0',
-      },
+    expect(violations).toEqual([]);
+    expect(a.sock.closed).toBe(false);
+    const drop = { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'epoch-bump', seq: 1 };
+    expect(a.sock.sent.filter((m) => m.t === 'drop')).toEqual([drop]);
+    expect(rows).toEqual([
+      { kind: 'refuse', seq: 1, instance: expect.any(String), origin: 'oa', version: 1, reason: 'epoch-bump' },
     ]);
-    expect(a.sock.closed).toBe(true);
-    expect(relay.room('r')).toMatchObject({ seq: 0 }); // the clean first op did not sequence either
+    // the refusal's row took a seq; the clean first op did not sequence
+    expect(relay.room('r')).toMatchObject({ seq: 1, journal: 0 });
   });
 
   it('an authorized bump is admitted; an unauthorized writer CARRYING (or trailing) the observed epoch is always admitted without consulting authority', () => {
@@ -1501,7 +1503,7 @@ describe('createRelay: epoch-bump admission (canBump)', () => {
 });
 
 describe('createRelay: citation-existence admission (verifyCitations)', () => {
-  it('tripwire: a cite of a dot the room has no record of ejects with "unknown-citation" (the forged-watermark vector)', () => {
+  it('a cite of a dot the room has no record of is refused "citation" — journaled, answered, never ejected (the forged-watermark vector)', () => {
     const violations: PolicyViolation[] = [];
     const relay = createRelay({
       policy: { verifyCitations: true },
@@ -1519,19 +1521,15 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
       set(['doc'], 'kill', { cites: [{ origin: 'oa', hlc: { p: 99, l: 0 } }] }),
     ]);
 
-    expect(violations).toEqual([
-      {
-        writer: 'wf',
-        reason: 'unknown-citation',
-        path: ['doc'],
-        detail: 'cites oa@99.0',
-      },
+    expect(violations).toEqual([]);
+    expect(forger.sock.closed).toBe(false);
+    expect(forger.sock.sent.filter((m) => m.t === 'drop')).toEqual([
+      { t: 'drop', room: 'r', origin: 'of', version: 1, reason: 'citation', seq: 2 },
     ]);
-    expect(forger.sock.closed).toBe(true);
-    expect(relay.room('r')).toMatchObject({ seq: 1 });
+    expect(relay.room('r')).toMatchObject({ seq: 2, journal: 1 });
   });
 
-  it('an ejected envelope leaves no admission evidence: its origin gets no ranges entry and no high-water mark', () => {
+  it('a refused envelope leaves no admission evidence: its origin gets no ranges entry and no high-water mark', () => {
     let state: RoomState | undefined;
     const relay = createRelay({
       policy: { verifyCitations: true },
@@ -1549,7 +1547,7 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     ]);
     a.env([set(['doc'], 'again')]);
 
-    // an empty entry would ride into every later checkpoint, one per origin ever ejected
+    // an empty entry would ride into every later checkpoint, one per origin ever refused
     expect(state?.ranges).toEqual({ oa: [[1, 2]] });
     expect(state?.wm).toEqual({ oa: 2 });
   });
@@ -1961,9 +1959,9 @@ describe('createRelay: per-room policy authority', () => {
     expect(
       writeTo('w3', 'o3', 'owned-room', [set(['x'], 1, { epoch: 1 })]).closed,
     ).toBe(false);
-    expect(
-      writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]).closed,
-    ).toBe(true);
+    const refused = writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]);
+    expect(refused.closed).toBe(false); // refused, not ejected
+    expect(refused.sent.filter((m) => m.t === 'drop')).toMatchObject([{ reason: 'epoch-bump' }]);
   });
 });
 
@@ -2238,7 +2236,7 @@ describe('createRelay: durable release', () => {
       else if (m.t === 'welcome' && m.mode === 'delta') {
         for (const e of m.envs) held.add(envKey(e));
       } else if (m.t === 'welcome' && m.mode === 'snapshot') {
-        for (const reg of m.registers) {
+        for (const reg of m.registers ?? []) {
           for (const sib of reg.siblings) {
             const k = byDot.get(dotKey(sib));
             if (k) held.add(k);
@@ -2287,7 +2285,7 @@ describe('createRelay: durable release', () => {
           if (!durable.has(envKey(e))) late(`welcome/delta ${envKey(e)}`);
         }
       } else if (msg.t === 'welcome' && msg.mode === 'snapshot') {
-        for (const reg of msg.registers) {
+        for (const reg of msg.registers ?? []) {
           for (const sib of reg.siblings) {
             if (!durableDots.has(dotKey(sib))) {
               late(`welcome/snapshot ${dotKey(sib)}`);
@@ -2475,7 +2473,7 @@ describe('createRelay: durable release', () => {
       const welcome = last(probe) as Extract<ServerMsg, { t: 'welcome' }>;
       const recovered = new Set<string>();
       if (welcome.mode === 'snapshot') {
-        for (const reg of welcome.registers) {
+        for (const reg of welcome.registers ?? []) {
           for (const sib of reg.siblings) {
             recovered.add(dotKey(sib));
           }
@@ -2520,7 +2518,7 @@ describe('createRelay: durable release', () => {
       { t: 'welcome' }
     >;
     expect(welcome.mode).toBe('snapshot');
-    if (welcome.mode !== 'snapshot') throw new Error('unreachable');
+    if (welcome.mode !== 'snapshot' || !welcome.registers) throw new Error('unreachable');
     expect(welcome.seq).toBe(1);
     expect(regAt(welcome.registers, ['a'])).toBeDefined();
     expect(regAt(welcome.registers, ['later'])).toBeUndefined();
@@ -2668,7 +2666,7 @@ describe('createRelay: refusals answered with a drop', () => {
     expect(relay.room('r')?.seq).toBe(1);
     expect(reasons).toEqual(['duplicate']);
     expect(dropsTo(a.sock)).toEqual([
-      { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'duplicate' },
+      { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'duplicate', seq: 1 },
     ]);
     expect(dropsTo(b.sock)).toEqual([]); // the submitter alone hears it
     expect(b.sock.sent.filter((m) => m.t === 'env').length).toBe(echoed);

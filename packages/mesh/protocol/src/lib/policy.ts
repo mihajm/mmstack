@@ -54,9 +54,10 @@ export type OpPolicy = {
    * (it claims new precedence) and is admitted only if this grants it; an op at or below the
    * observed max CARRIES existing precedence forward and is always admitted regardless of
    * authority — any writer that observed a bumped op must be able to cite it and carry its
-   * epoch, or writes at bumped paths stop merging. Violations eject with reason
-   * `'epoch-bump'`. Relay-side only (a direct peer-to-peer room bypasses it); omit to leave
-   * epochs ungated.
+   * epoch, or writes at bumped paths stop merging. A denied raise is refused with a `drop`
+   * (reason `'epoch-bump'`), journaled with the room and repeated on every resend; nobody is
+   * ejected. Relay-side only (a direct peer-to-peer room bypasses it); omit to leave epochs
+   * ungated.
    */
   canBump?(
     ctx: PrincipalCtx,
@@ -66,15 +67,17 @@ export type OpPolicy = {
     info?: PolicyRoomInfo,
   ): boolean;
   /**
-   * Reject an op citing a dot the room has no record of at that path (reason
-   * `'unknown-citation'`): defense in depth against forged citations, which would raise a
-   * victim origin's supersession watermark and kill writes it never made. Known-partial by
-   * design — citing a REAL dot the writer never actually observed still passes. Cites at or
-   * below the room's compaction frontier are exempt: the relay can no longer verify them
-   * there, and a forged cite below the frontier can kill nothing (below-frontier deliveries
-   * are already rejected at admission). Enable only for rooms where every op transits the
-   * relay AND the relay is durable (hydrated across restarts): a room that loses its retained
-   * state forgets the dots honest writers still cite.
+   * Refuse an envelope citing a dot the room's state does not cover at that path (a `drop`,
+   * reason `'citation'`, journaled and repeated on every resend): defense in depth against
+   * forged citations, which would raise a victim origin's supersession watermark and kill
+   * writes it never made, and the gate that keeps a dot a generation cut dropped from being
+   * cited back. Known-partial by design — citing a REAL dot the writer never actually observed
+   * still passes. Coverage is two-regime (see `admits`): a dot from before the current
+   * generation's cut is covered by the cut's frozen seed extent alone; a later one by retained
+   * state, or by the settled exemption floored at the cited origin's first stamp of the
+   * generation. Enable only for rooms where every op transits the relay AND the relay is durable
+   * (hydrated across restarts): a room that loses its retained state forgets the dots honest
+   * writers still cite. Required for any relay that arms compaction cuts.
    */
   readonly verifyCitations?: boolean;
 };

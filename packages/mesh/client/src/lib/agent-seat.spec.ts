@@ -528,7 +528,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
     });
     const settled: SeqEnvelope = {
       proto: OP_PROTO_VERSION,
-      instance: '',
+      instance: 'i1',
       origin: 'peer-b',
       writer: 'agent-b',
       version: 1,
@@ -620,7 +620,7 @@ describe('agentSeat schema honesty (scripted relay)', () => {
   ): SeqEnvelope {
     return {
       proto: OP_PROTO_VERSION,
-      instance: '',
+      instance: 'i1',
       origin,
       writer,
       version,

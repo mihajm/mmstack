@@ -36,6 +36,9 @@ export function validateEnvelope(env: OpEnvelope): string | null {
     if (op.kind !== 'set' && op.kind !== 'delete' && op.kind !== 'clear') return 'kind';
     if (!Array.isArray(op.path)) return 'path';
     for (const seg of op.path) {
+      // the register store keys a path by its segments joined with a control character, so an
+      // empty segment or a control character inside one would make two paths one register
+      if (seg === '') return 'path-empty';
       if (typeof seg === 'string' && hasControlChar(seg)) return 'path-control';
       if (seg === '__proto__') return 'path-proto';
     }

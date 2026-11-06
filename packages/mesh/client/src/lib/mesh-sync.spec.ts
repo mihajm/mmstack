@@ -851,7 +851,7 @@ describe('ingress validation (client ↔ relay twin)', () => {
       const version = pick([1, 0, -1, 2.5, 7]);
       const hlc = pick([{ p: 1, l: 0 }, { p: NaN, l: 0 }, { p: 2 } as any]);
       const kind = pick(['set', 'delete', 'clear', 'weird']);
-      const path = pick([['a'], ['a', 'b'], [], [`c${CTRL}`], 'nope' as any]);
+      const path = pick([['a'], ['a', 'b'], [], [`c${CTRL}`], [''], ['a', ''], 'nope' as any]);
       const epoch = pick([0, 1, -1, NaN]);
       const cites = pick([
         [],

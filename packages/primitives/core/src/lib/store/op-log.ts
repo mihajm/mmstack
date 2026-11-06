@@ -39,7 +39,16 @@ export type StoreOp =
  * diffed from, captured when the batch was emitted: a subscriber notified later (a deferred sync
  * envelope) still sees the root of THIS change, not the store as it is by then.
  */
-export type EmitContext = { readonly root?: unknown };
+export type EmitContext = {
+  readonly root?: unknown;
+  /**
+   * Set by `opSync`: the raw ops the envelope was stamped from (before cites, epochs and expansion
+   * clears) and whether they were stamped as an authority override — the write's intent, what a
+   * later re-stamp rebuilds from.
+   */
+  readonly raws?: readonly StoreOp[];
+  readonly bump?: boolean;
+};
 
 /** One emission: every op derived from one commit window (a tick), in path order. */
 export type OpBatch = {

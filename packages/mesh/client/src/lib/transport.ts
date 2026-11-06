@@ -72,9 +72,16 @@ export function webSocketTransport(
   };
 }
 
+/** A message as it reads after a JSON hop: keys holding `undefined` gone, such array slots `null`. */
+const asJson = <T>(msg: T): T => JSON.parse(JSON.stringify(msg)) as T;
+
 /**
  * Connects directly to an in-process `createRelay` — no network. The backbone of full-loop
  * tests, and handy for single-process demos or an SSR-side room.
+ *
+ * Messages cross as JSON in both directions, as they would over a socket, so a direct peer holds
+ * exactly what a socket peer would. Handed over by reference, an `undefined` an emitter wrote
+ * would reach relay memory where a socket peer's would have been dropped.
  */
 export function directTransport(
   relay: Relay,
@@ -89,7 +96,8 @@ export function directTransport(
       {
         send: (msg) => {
           if (!open) return;
-          for (const cb of [...messageCbs]) cb(msg);
+          const wired = asJson(msg);
+          for (const cb of [...messageCbs]) cb(wired);
         },
         close: () => {
           if (!open) return;
@@ -103,7 +111,7 @@ export function directTransport(
 
     return {
       send: (msg) => {
-        if (open) connection.receive(msg);
+        if (open) connection.receive(asJson(msg));
       },
       onMessage: (cb) => {
         messageCbs.add(cb);

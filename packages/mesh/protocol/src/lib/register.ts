@@ -10,6 +10,18 @@ import type {
 const SEP = ''; // unit separator: keeps joined path keys prefix-unambiguous
 const keyOf = (path: readonly Key[]): string => path.map(String).join(SEP);
 
+/**
+ * A sibling as the register keeps it: only a `set` keeps `prev` (a merge fold's ancestor). A
+ * checkpoint written before that rule may hold a delete sibling with the whole deleted record as
+ * `prev`; loading it drops the field, so the next checkpoint no longer carries it.
+ */
+const retained = (s: SyncSibling): SyncSibling => {
+  if (s.kind === 'set' || !Object.hasOwn(s, 'prev')) return s;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { prev: _dropped, ...rest } = s;
+  return rest;
+};
+
 const compareHlc = (a: Hlc, b: Hlc): number =>
   a.p !== b.p ? a.p - b.p : a.l - b.l;
 
@@ -123,8 +135,9 @@ export function createRegisterStore(): RegisterStore {
             epoch: op.epoch ?? 0,
           };
           if (op.kind === 'set') sib.value = op.next;
-          if (op.kind !== 'clear' && Object.hasOwn(op, 'prev')) {
-            sib.prev = (op as { prev?: unknown }).prev;
+          // the op keeps `prev` for its emitter's inversion; the room keeps it on a set only
+          if (op.kind === 'set' && Object.hasOwn(op, 'prev')) {
+            sib.prev = op.prev;
           }
           reg.siblings.set(env.origin, sib);
         }
@@ -166,7 +179,7 @@ export function createRegisterStore(): RegisterStore {
         for (const s of r.siblings) {
           const cur = reg.siblings.get(s.origin);
           if (!cur || compareHlc(s.hlc, cur.hlc) > 0) {
-            reg.siblings.set(s.origin, s);
+            reg.siblings.set(s.origin, retained(s));
           }
         }
         for (const [origin, h] of Object.entries(r.water)) {

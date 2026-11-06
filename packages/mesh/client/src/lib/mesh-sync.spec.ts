@@ -504,6 +504,24 @@ describe('meshSync (full loop over an in-process relay)', () => {
     expect(b.s() as object).toEqual({ keep: 1 });
   });
 
+  it('reports the close code through onDisconnect', () => {
+    const relay = createRelay();
+    const inner = directTransport(relay, { writer: 'wa' });
+    let current: ReturnType<typeof inner> | null = null;
+    const seen: [number, string][] = [];
+    TestBed.runInInjectionContext(() =>
+      meshSync(store<State>(initial()), {
+        room: 'case-1',
+        writer: 'wa',
+        transport: () => (current = inner()),
+        onDisconnect: (code, reason) => seen.push([code, reason]),
+      }),
+    );
+    flush();
+    current!.close();
+    expect(seen).toEqual([[1000, '']]);
+  });
+
   it('reconnects via delta and rebases offline local writes onto the room', () => {
     vi.useFakeTimers();
     try {

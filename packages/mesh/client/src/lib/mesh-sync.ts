@@ -123,6 +123,8 @@ export type MeshSyncOptions = {
   /** Register with the nearest transition scope so (re)connection surfaces as `pending`. */
   readonly register?: 'track' | 'suspend';
   readonly onEject?: (reason: string) => void;
+  /** The connection dropped and a reconnect is scheduled; `code` is the close code (1009 = message too big, 1006 = dropped). */
+  readonly onDisconnect?: (code: number, reason: string) => void;
   /** A write the relay refused (see `MeshSessionHooks.onRefused`); the envelope carries its values. */
   readonly onRefused?: (
     env: OpEnvelope,
@@ -507,6 +509,7 @@ export function meshSync<T extends object>(
             opt.onEject?.(reason);
           }
         },
+        onDisconnect: (code, reason) => opt.onDisconnect?.(code, reason),
         onSynced: () => lastSyncedAt.set(Date.now()),
         onPeers: (map) => peerMap.set(map),
         onOutboxChange: () => {

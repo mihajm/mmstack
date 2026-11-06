@@ -50,7 +50,7 @@ export function chaosLink(
   const transport: MeshTransportFactory = () => {
     const t: MeshTransport = inner();
     const messageCbs = new Set<(m: ServerMsg) => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     let open = true;
 
     const shut = (): void => {
@@ -58,7 +58,7 @@ export function chaosLink(
       open = false;
       live.delete(shut);
       t.close();
-      for (const cb of [...closeCbs]) cb();
+      for (const cb of [...closeCbs]) cb(1000, '');
     };
     live.add(shut);
 

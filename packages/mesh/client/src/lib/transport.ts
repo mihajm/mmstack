@@ -13,7 +13,8 @@ import type {
 export type MeshTransport = {
   send(msg: ClientMsg): void;
   onMessage(cb: (msg: ServerMsg) => void): () => void;
-  onClose(cb: () => void): () => void;
+  /** `code` and `reason` are the close frame's (1006 for a dropped connection, 1000 for a normal close). */
+  onClose(cb: (code: number, reason: string) => void): () => void;
   close(): void;
 };
 
@@ -30,7 +31,7 @@ export function webSocketTransport(
   return () => {
     const ws = new WebSocket(url, protocols);
     const messageCbs = new Set<(msg: ServerMsg) => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     const pending: string[] = [];
 
     ws.onopen = () => {
@@ -48,8 +49,8 @@ export function webSocketTransport(
       }
       for (const cb of [...messageCbs]) cb(msg);
     };
-    ws.onclose = () => {
-      for (const cb of [...closeCbs]) cb();
+    ws.onclose = (event) => {
+      for (const cb of [...closeCbs]) cb(event.code, event.reason);
     };
 
     return {
@@ -81,7 +82,7 @@ export function directTransport(
 ): MeshTransportFactory {
   return () => {
     const messageCbs = new Set<(msg: ServerMsg) => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     let open = true;
 
     const connection = relay.connect(
@@ -94,7 +95,7 @@ export function directTransport(
           if (!open) return;
           open = false;
           connection.disconnect();
-          for (const cb of [...closeCbs]) cb();
+          for (const cb of [...closeCbs]) cb(1000, '');
         },
       },
       ctx,
@@ -116,7 +117,7 @@ export function directTransport(
         if (!open) return;
         open = false;
         connection.disconnect();
-        for (const cb of [...closeCbs]) cb();
+        for (const cb of [...closeCbs]) cb(1000, '');
       },
     };
   };

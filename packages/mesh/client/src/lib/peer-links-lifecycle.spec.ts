@@ -611,7 +611,7 @@ describe('peerLinks recovery', () => {
   /** A transport the test feeds by hand, standing in for a relay connection. */
   function handTransport() {
     const cbs = new Set<(msg: ServerMsg) => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     const sent: ClientMsg[] = [];
     let made = 0;
     const factory = () => {
@@ -633,7 +633,7 @@ describe('peerLinks recovery', () => {
       },
       drop: () => {
         cbs.clear();
-        for (const cb of [...closeCbs]) cb();
+        for (const cb of [...closeCbs]) cb(1000, '');
         closeCbs.clear();
       },
     };

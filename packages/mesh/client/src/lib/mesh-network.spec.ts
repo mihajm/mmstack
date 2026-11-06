@@ -21,7 +21,7 @@ function nodeWsTransport(url: () => string): MeshTransportFactory {
   return () => {
     const ws = new NodeWebSocket(url());
     const messageCbs = new Set<(msg: ServerMsg) => void>();
-    const closeCbs = new Set<() => void>();
+    const closeCbs = new Set<(code: number, reason: string) => void>();
     const pending: string[] = [];
 
     ws.on('open', () => {
@@ -32,7 +32,7 @@ function nodeWsTransport(url: () => string): MeshTransportFactory {
       for (const cb of [...messageCbs]) cb(msg);
     });
     ws.on('close', () => {
-      for (const cb of [...closeCbs]) cb();
+      for (const cb of [...closeCbs]) cb(1000, '');
     });
     ws.on('error', () => undefined);
 

@@ -1,4 +1,5 @@
-import { webSocketTransport } from './transport';
+import { createRelay } from '@mmstack/mesh-protocol';
+import { directTransport, webSocketTransport } from './transport';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -6,7 +7,7 @@ class FakeWebSocket {
   readyState = FakeWebSocket.OPEN;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number; reason: string }) => void) | null = null;
   readonly sent: string[] = [];
   constructor(readonly url: string) {
     instances.push(this);
@@ -46,5 +47,23 @@ describe('webSocketTransport', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('passes the close code and reason to onClose listeners', () => {
+    const transport = webSocketTransport('ws://relay.test')();
+    const closes: [number, string][] = [];
+    transport.onClose((code, reason) => closes.push([code, reason]));
+    instances[0].onclose?.({ code: 1009, reason: 'message too big' });
+    expect(closes).toEqual([[1009, 'message too big']]);
+  });
+});
+
+describe('directTransport', () => {
+  it('reports a normal close (1000, empty reason)', () => {
+    const transport = directTransport(createRelay(), { writer: 'w' })();
+    const closes: [number, string][] = [];
+    transport.onClose((code, reason) => closes.push([code, reason]));
+    transport.close();
+    expect(closes).toEqual([[1000, '']]);
   });
 });

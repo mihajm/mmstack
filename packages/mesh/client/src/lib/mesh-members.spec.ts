@@ -31,7 +31,7 @@ async function settle() {
 
 function wire() {
   let receive!: (msg: ServerMsg) => void;
-  let disconnect!: () => void;
+  let disconnect!: (code: number, reason: string) => void;
   const sent: ClientMsg[] = [];
   const transport: MeshTransportFactory = () => ({
     send: (msg) => {
@@ -51,7 +51,7 @@ function wire() {
     transport,
     sent,
     receive: (msg: ServerMsg) => receive(msg),
-    disconnect: () => disconnect(),
+    disconnect: () => disconnect(1000, ''),
   };
 }
 

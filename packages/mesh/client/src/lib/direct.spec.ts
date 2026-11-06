@@ -51,7 +51,7 @@ function seat(relay: Relay, writer: string) {
 function scripted() {
   const sent: ClientMsg[] = [];
   let deliver: (m: ServerMsg) => void = () => undefined;
-  let closeCb: () => void = () => undefined;
+  let closeCb: (code: number, reason: string) => void = () => undefined;
   let opened = 0;
   const factory: MeshTransportFactory = () => {
     opened++;
@@ -104,7 +104,7 @@ function scripted() {
     factory,
     sent,
     deliver: (m: ServerMsg) => deliver(m),
-    drop: () => closeCb(),
+    drop: () => closeCb(1000, ''),
     opened: () => opened,
     welcome,
     direct,

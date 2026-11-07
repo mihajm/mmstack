@@ -16,9 +16,11 @@ import {
   type OpEnvelope,
   type OpLogDriver,
 } from '@mmstack/primitives/core';
+import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
 import { agentSeat } from './agent-seat';
 import { intentOf, trimByReceipts, welcomeVerdict } from './generation';
+import { meshSync } from './mesh-sync';
 import { meshSession, type MeshSession, type SessionRecord } from './session';
 import type { MeshTransportFactory } from './transport';
 
@@ -426,6 +428,29 @@ describe('session: census readiness is client-declared (R16-5)', () => {
     wire.push({ t: 'compaction', room: 'r', count: 3, budget: 300, ready: ['x'] });
     expect(seen).toEqual([{ count: 3, budget: 300, ready: ['x'] }]);
     session.close();
+  });
+});
+
+describe('meshSync: the generation signal', () => {
+  it('a cut welcome flips it; a same-generation welcome does not', () => {
+    const wire = scripted();
+    const mesh = TestBed.runInInjectionContext(() =>
+      meshSync(store<Doc>(initial()), { room: 'r', writer: 'w', transport: wire.factory }),
+    );
+    expect(mesh.generation()).toBeUndefined();
+    wire.push(snapshot('g1', 1));
+    const first = mesh.generation();
+    expect(first).toEqual({ instance: 'g1', index: 0, reason: 'genesis', policy: 'discard' });
+    wire.push(snapshot('g1', 2)); // the installed generation: untouched
+    expect(mesh.generation()).toBe(first);
+    wire.push(snapshot('g2', 3, { index: 1, policy: 'replay' })); // the cut's welcome
+    expect(mesh.generation()).toEqual({
+      instance: 'g2',
+      index: 1,
+      reason: 'compaction',
+      policy: 'replay',
+    });
+    mesh.close();
   });
 });
 

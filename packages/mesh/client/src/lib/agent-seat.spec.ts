@@ -4,8 +4,10 @@ import {
   createRelay,
   pathPrefixAcl,
   type ClientMsg,
+  type CutRow,
   type PrincipalCtx,
   type Relay,
+  type RelayRow,
   type SeqEnvelope,
   type ServerMsg,
 } from '@mmstack/mesh-protocol';
@@ -1261,5 +1263,40 @@ describe('agentSeat — seeding a fresh room under a root-write policy', () => {
     expect(await sent(false)).toEqual([
       [{ path: ['lint'], next: { suppress: { k: entry } } }],
     ]);
+  });
+});
+
+describe('agentSeat — consensus readiness', () => {
+  it('a seat declares and the relay census counts it; a seat with an outstanding write is not ready until it drains', () => {
+    const rows: RelayRow[] = [];
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      compaction: { consensus: true },
+      onRow: (_r, row) => void rows.push(row),
+    });
+    const a = seat(relay, 'agent-a');
+    const gated = gatedTransport(relay, { writer: 'agent-b', kind: 'agent' });
+    const b = seat(relay, 'agent-b', { transport: gated.factory });
+    a.s.write(() => a.s.doc.title.set('rooted'));
+    const before = relay.room('case-1')?.instance;
+
+    a.s.declareReady(true);
+    expect(rows).toHaveLength(0); // b has not declared
+    expect(a.s.compaction()?.ready).toHaveLength(1); // the census counts the seat
+
+    gated.pause(); // b's echo is held back: its write stays outstanding
+    b.s.write(() => b.s.doc.nested.b.set(1));
+    b.s.declareReady(true);
+    expect(b.s.acked()).toBe(false);
+    expect(rows).toHaveLength(0); // pressed, but not ready while the write is outstanding
+    expect(relay.room('case-1')?.instance).toBe(before);
+
+    gated.resume(); // the echo lands: the outbox drains, b declares ready, the census cuts
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as CutRow).record.reason).toBe('consensus');
+    expect(relay.room('case-1')?.instance).not.toBe(before);
+    expect(a.s.compaction()?.ready).toEqual([]); // a new generation releases every press
+    a.s.close();
+    b.s.close();
   });
 });

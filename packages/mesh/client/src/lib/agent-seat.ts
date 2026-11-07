@@ -1,3 +1,4 @@
+import { signal, type Signal } from '@angular/core';
 import { createWatch } from '@angular/core/primitives/signals';
 import type {
   OpPolicy,
@@ -26,6 +27,7 @@ import type { SeatSync } from './mesh-sync';
 import {
   deliverDirect,
   meshSession,
+  type CompactionState,
   type MeshConflict,
   type MeshDirect,
   type MeshStatus,
@@ -115,7 +117,7 @@ export type AgentSeatOptions = {
   /** A write the relay refused; it is not in the room, and the doc was rehydrated. The envelope carries its values. */
   readonly onRefused?: (
     env: OpEnvelope,
-    reason: 'generation' | 'schema' | 'order',
+    reason: 'generation' | 'schema' | 'order' | 'compacting',
   ) => void;
 };
 
@@ -138,6 +140,14 @@ export type AgentSeat<T extends object> = {
    * carry, or a relay refusal), each with `discard()` and `reauthor()`.
    */
   conflicts(): readonly MeshConflict[];
+  /** The room's compaction state as the relay last announced it; undefined before any notice. */
+  readonly compaction: Signal<CompactionState | undefined>;
+  /**
+   * The seat pressed (`true`) or released Compact: it declares itself ready for a consensus cut
+   * whenever it is connected and nothing it wrote is outstanding, re-declaring on every change. A
+   * reconnect or a new generation releases it.
+   */
+  declareReady(pressed: boolean): void;
   /** Path-addressed write (`'a.b.c'` or segments), emitted immediately. */
   setAtPath(path: string | readonly (string | number)[], value: unknown): void;
   /**
@@ -226,6 +236,7 @@ export function agentSeat<T extends object>(
   const emit = (event: SeatEvent): void => {
     for (const cb of [...listeners]) cb(event);
   };
+  const compaction = signal<CompactionState | undefined>(undefined);
   let welcomed = false;
   let diverged = false;
   let terminated = false;
@@ -258,6 +269,7 @@ export function agentSeat<T extends object>(
       },
       onResync: (seq) => emit({ kind: 'resync', seq }),
       onDirect: (msg) => deliverDirect(directListeners, msg),
+      onCompaction: (state) => compaction.set(state),
       onConflicts: (list) => {
         // a refused write stays applied until the rehydrate that follows lands
         if (list.some((c) => c.cause !== 'uncovered')) diverged = true;
@@ -304,6 +316,8 @@ export function agentSeat<T extends object>(
       sync.flush();
     },
     conflicts: () => session.conflicts(),
+    compaction: compaction.asReadonly(),
+    declareReady: (pressed) => session.declareReady(pressed),
     setAtPath: (path, value) => {
       setAtPath(doc, path, value);
       sync.flush();

@@ -38,6 +38,7 @@ import {
   deliverDirect,
   meshSession,
   type CompactionState,
+  type GenerationState,
   type MeshConflict,
   type MeshDirect,
   type MeshSession,
@@ -50,6 +51,7 @@ import type { SignalingPort } from './peer-links';
 export type {
   CompactionState,
   ConflictCause,
+  GenerationState,
   Intent,
   MeshConflict,
   MeshDirect,
@@ -138,7 +140,7 @@ export type MeshSyncOptions = {
   /** A write the relay refused (see `MeshSessionHooks.onRefused`); the envelope carries its values. */
   readonly onRefused?: (
     env: OpEnvelope,
-    reason: 'generation' | 'schema' | 'order',
+    reason: 'generation' | 'schema' | 'order' | 'compacting',
   ) => void;
   /**
    * Hold the connection until the local base is assembled. `meshSync` awaits this before it connects
@@ -282,6 +284,12 @@ export type MeshSyncRef<T extends object = Record<string, unknown>> = {
   /** The room's compaction state as the relay last announced it; undefined before any notice. */
   readonly compaction: Signal<CompactionState | undefined>;
   /**
+   * The room generation this client installed: set by every snapshot welcome of a new generation
+   * (a cut's welcome flips it), untouched by one of the installed generation. Undefined until the
+   * first snapshot welcome and after a room was recreated without its record.
+   */
+  readonly generation: Signal<GenerationState | undefined>;
+  /**
    * The member pressed (`true`) or released Compact: the client declares itself ready for a
    * consensus cut whenever nothing it wrote is outstanding, re-declaring on every change. A
    * reconnect or a new generation releases it.
@@ -351,6 +359,7 @@ export function meshSync<T extends object>(
   const peerMap = signal<ReadonlyMap<string, MeshPeer>>(new Map());
   const conflicts = signal<readonly MeshConflict[]>([]);
   const compaction = signal<CompactionState | undefined>(undefined);
+  const generation = signal<GenerationState | undefined>(undefined);
   const peers = computed(() => [...peerMap().values()]);
   const policyVersion = opt.policyVersion ?? 0;
 
@@ -550,6 +559,7 @@ export function meshSync<T extends object>(
         onPeers: (map) => peerMap.set(map),
         onConflicts: (list) => conflicts.set(list),
         onCompaction: (state) => compaction.set(state),
+        onGeneration: (next) => generation.set(next),
         onOutboxChange: () => {
           void persistOutbox();
           acked.set(!session?.hasUnacked());
@@ -797,6 +807,7 @@ export function meshSync<T extends object>(
     },
     conflicts: conflicts.asReadonly(),
     compaction: compaction.asReadonly(),
+    generation: generation.asReadonly(),
     declareReady: (pressed) => session?.declareReady(pressed),
     sync: {
       override: (fn) => (started ? sync.override(fn) : fn()),

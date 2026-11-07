@@ -38,6 +38,12 @@ export type CutRow = {
   readonly kind: 'cut';
   readonly seq: number;
   readonly record: GenerationRecord;
+  /**
+   * The droppable tombstones the room counted just before the cut
+   * ({@link RegisterStore.droppableTombstones}); a compaction or consensus cut's seed leaves
+   * every one of them out.
+   */
+  readonly dropped: number;
 };
 
 /** A journaled refusal's row: the envelope it refused, by identity, and why. */
@@ -125,6 +131,13 @@ export type RelayOptions = {
   readonly now?: () => number;
   readonly onViolation?: (room: string, violation: PolicyViolation) => void;
   /**
+   * A room this relay arms cuts for cannot be cut as it stands: hydrated with no live `set` in
+   * its root register (`'unrooted'`), the precondition of a cut that keeps dots. The room is
+   * served; budget and consensus cuts and {@link Relay.cut} wait until its root holds a live
+   * `set`. Pure observation, for the operator's log.
+   */
+  readonly onUncuttable?: (room: string, reason: 'unrooted') => void;
+  /**
    * The persistence egress: fired synchronously once an envelope is sequenced and retained
    * into the room's register state, and BEFORE anything carrying it leaves the relay. The
    * envelope is the persistence record (append it to a journal); `state` carries the retained
@@ -200,12 +213,13 @@ export type RelayOptions = {
    * written in another room generation; `'schema'` a stale-schema straggler after a
    * migration; `'order'` a version below the origin's admitted maximum that was never
    * admitted. None of the senders is malicious. Pure observation, zero semantic effect;
-   * synchronous and never awaited, like {@link RelayOptions.onCommit}.
+   * synchronous and never awaited, like {@link RelayOptions.onCommit}. (`'compacting'` is a
+   * host's refusal, never the relay's.)
    */
   readonly onDrop?: (
     room: string,
     env: OpEnvelope,
-    reason: DropMsg['reason'],
+    reason: Exclude<DropMsg['reason'], 'compacting'>,
   ) => void;
   /**
    * Observation of a rejected hello: an ejected writer knocking again (`'unauthorized'`), or
@@ -804,6 +818,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     row?: SeqEnvelope,
   ) => {
     const replay = reason === 'compaction' || reason === 'consensus';
+    const dropped = room.registers.droppableTombstones();
     const seed = replay ? room.registers.compactionSeed() : (supplied ?? []);
     const preCutMax = new Map(room.everMax);
     for (const r of seed) {
@@ -839,7 +854,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       ...snapshotOf(room),
       seed,
     } as const;
-    return { audience: [...room.members], doc };
+    return { audience: [...room.members], doc, dropped };
   };
   /** The re-welcome after a cut: the seed and the record to every member present at the cut. */
   const rewelcome =
@@ -864,7 +879,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     seed?: readonly RegisterCheckpoint[],
   ): void => {
     const cut = cutRoom(room, reason, seed);
-    const row: CutRow = { kind: 'cut', seq: room.head.seq, record: generationOf(room) };
+    const row: CutRow = {
+      kind: 'cut',
+      seq: room.head.seq,
+      record: generationOf(room),
+      dropped: cut.dropped,
+    };
     const done = opt.onRow?.(name, row, stateOf(room));
     room.release.submit(rewelcome(name, room, cut), done ?? undefined, row);
     notice(name, room);
@@ -1014,13 +1034,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       for (const [key, why] of Object.entries(snapshot.refused ?? {})) room.refused.set(key, why);
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
-      // a room whose cuts keep dots must be rooted: its root register holds a live `set`
-      if (armed && room.seq > 0 && !rooted(room.registers)) {
-        rooms.delete(name);
-        throw new Error(
-          `mesh relay: room ${name} refused — its root register holds no live set, so a compaction cut cannot preserve it`,
-        );
-      }
       if (snapshot.journal) {
         const head = room.head.seq;
         const journal = snapshot.journal
@@ -1040,6 +1053,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         // current-version entry and a client behind it is answered with a snapshot instead
         const first = journal.findIndex((e) => e.proto === MESH_PROTO_VERSION);
         room.journal = keepTail(first === -1 ? [] : journal.slice(first));
+      }
+      // a cut that keeps dots needs a live root `set`: an unrooted room is served, never cut
+      // (`budget`, `census` and `cut` check it at every decision)
+      if (armed && room.seq > 0 && !rooted(room.registers)) {
+        opt.onUncuttable?.(name, 'unrooted');
       }
       return true;
     },
@@ -1264,7 +1282,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
           // Refusals that eject nobody. The submitter alone hears them, at once: a `drop`
           // carries no committed state, so it never waits behind durability.
-          const refuse = (reason: DropMsg['reason']): void => {
+          const refuse = (reason: Exclude<DropMsg['reason'], 'compacting'>): void => {
             opt.onDrop?.(msg.room, env, reason);
             member.socket.send({
               t: 'drop',

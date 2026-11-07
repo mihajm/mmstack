@@ -78,6 +78,9 @@ export type CompactionState = {
   readonly ready: readonly string[];
 };
 
+/** The room generation the client installed, as its snapshot welcome named it. */
+export type GenerationState = Pick<InstalledGeneration, 'instance' | 'index' | 'reason' | 'policy'>;
+
 /**
  * The session's durable half, persisted as one unit with the outbox: the fields of the generation
  * the tail was written in and its admission evidence, the intents of the pending writes, unresolved
@@ -198,16 +201,23 @@ export type MeshSessionHooks = {
    * `'generation'` — written in a room generation that a cut with the `discard` policy closed (a
    * migration or a rollback: the reset is the intent), or in a room recreated without its
    * generation record; `'schema'` — a data shape older than the room's; `'order'` — a version
-   * below this origin's admitted maximum that was never admitted (a second tab on one origin). The
-   * session drops the write locally and hydrates from a fresh snapshot; the envelope carries the
+   * below this origin's admitted maximum that was never admitted (a second tab on one origin);
+   * `'compacting'` — a host refused a write from a connection declared ready for the current
+   * generation (the relay itself never sends it). The session drops the write locally and hydrates from a fresh snapshot; the envelope carries the
    * values, so the application can offer to write them again. Any `whenAcked` waiter rejects.
    * A write a compaction cut replays is never refused here: it is resent, or it is a conflict.
    */
-  onRefused?(env: OpEnvelope, reason: 'generation' | 'schema' | 'order'): void;
+  onRefused?(env: OpEnvelope, reason: 'generation' | 'schema' | 'order' | 'compacting'): void;
   /** The unresolved conflicts changed (a write classified, discarded or re-authored). */
   onConflicts?(conflicts: readonly MeshConflict[]): void;
   /** The relay announced the room's compaction state (count, budget, ready members). */
   onCompaction?(state: CompactionState): void;
+  /**
+   * A snapshot welcome of a NEW generation installed (a cut's welcome, or the first snapshot of
+   * the session); `undefined` when the room was recreated without its record. A welcome of the
+   * installed generation never fires it.
+   */
+  onGeneration?(generation: GenerationState | undefined): void;
 };
 
 export type MeshSessionOptions<T extends object> = {
@@ -481,7 +491,10 @@ export function meshSession<T extends object>(
     if (unacked.size === 0) releaseAckWaiters();
     declare();
   };
-  const refuse = (env: OpEnvelope, reason: 'generation' | 'schema' | 'order'): void => {
+  const refuse = (
+    env: OpEnvelope,
+    reason: 'generation' | 'schema' | 'order' | 'compacting',
+  ): void => {
     unacked.delete(unackedKey(env));
     intents.delete(unackedKey(env));
     hooks.onRefused?.(env, reason);
@@ -549,6 +562,7 @@ export function meshSession<T extends object>(
     cover = createRegisterStore();
     maxSeq = 0;
     owed = undefined; // its threshold belongs to the dead room's sequence
+    hooks.onGeneration?.(undefined);
   };
 
   /**
@@ -624,6 +638,13 @@ export function meshSession<T extends object>(
     owed = owedAfterInstall(owed, msg.seq);
     if (keep.length > replayed.length) hooks.onConflicts?.(conflicts());
     hooks.onOutboxChange?.();
+    if (newer)
+      hooks.onGeneration?.({
+        instance: gen.instance,
+        index: gen.index,
+        reason: gen.reason,
+        policy: gen.policy,
+      });
   };
 
   const handle = (msg: ServerMsg): void => {

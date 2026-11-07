@@ -345,7 +345,7 @@ describe('relay: the compaction cut', () => {
     expect(info?.seq).toBe(5); // four envelopes, then the cut row
     expect(rows).toHaveLength(1);
     const row = rows[0] as CutRow;
-    expect(row).toMatchObject({ kind: 'cut', seq: 5 });
+    expect(row).toMatchObject({ kind: 'cut', seq: 5, dropped: 3 }); // the droppable count it removed
     expect(row.record).toMatchObject({
       instance: info?.instance,
       seq: 5,
@@ -482,6 +482,7 @@ describe('relay: consensus (declared readiness)', () => {
     b.compact(true);
     expect(rows).toHaveLength(1);
     expect((rows[0] as CutRow).record).toMatchObject({ reason: 'consensus', policy: 'replay' });
+    expect((rows[0] as CutRow).dropped).toBe(1); // the one droppable tombstone, `gone`
     expect(relay.room('r')?.instance).not.toBe(g0);
     // readiness resets with the generation: re-declaring the old instance does nothing
     a.compact(true, g0);
@@ -560,15 +561,50 @@ describe('relay: hydrate and the boot assertions', () => {
       /inconsistent checkpoint/,
     );
   });
-  it('a relay that arms compaction cuts refuses to boot a room with no live root set', () => {
+  it('an unrooted room under an armed relay is SERVED and reported uncuttable; it never cuts until its root holds a live set', () => {
+    const uncuttable: [string, string][] = [];
+    const rows: RelayRow[] = [];
     const relay = createRelay({
       policy: { verifyCitations: true },
-      compaction: { consensus: true },
+      compaction: { consensus: true, budget: { floor: 0, factor: 0 } },
+      onRow: (_r, row) => void rows.push(row),
+      onUncuttable: (room, reason) => void uncuttable.push([room, reason]),
     });
-    expect(() =>
-      relay.hydrate('r', { seq: 1, registers: [{ path: ['k'], siblings: [], water: {} }] }),
-    ).toThrow(/root register/);
-    expect(relay.room('r')).toBeUndefined();
+    const sib = { writer: 'z', origin: 'z', hlc: { p: 1, l: 0 }, epoch: 0 };
+    const tomb: RegisterCheckpoint = {
+      path: ['k'],
+      siblings: [{ kind: 'delete', ...sib }],
+      water: {},
+    };
+    expect(relay.hydrate('r', { seq: 1, registers: [tomb] })).toBe(true);
+    expect(uncuttable).toEqual([['r', 'unrooted']]);
+    const a = member(relay, 'a');
+    a.hello();
+    expect(a.welcomes()).toHaveLength(1); // served
+    a.env([del(['x'])]); // over the hard budget, but unrooted: no cut
+    a.compact(true); // the only member is ready, but unrooted: no cut
+    expect(relay.cut('r', { reason: 'compaction' })).toBe(false);
+    expect(rows).toHaveLength(0);
+    expect(relay.room('r')?.seq).toBe(2);
+    a.env([set([], { k: 1 })]); // rooted now: this commit's budget decision cuts
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as CutRow).record.reason).toBe('compaction');
+    // a rooted room, or a relay that arms no cuts, reports nothing
+    const quiet: string[] = [];
+    const plain = createRelay({ onUncuttable: (room) => void quiet.push(room) });
+    expect(plain.hydrate('r', { seq: 1, registers: [tomb] })).toBe(true);
+    const rootedRelay = createRelay({
+      policy: { verifyCitations: true },
+      compaction: { consensus: true },
+      onUncuttable: (room) => void quiet.push(room),
+    });
+    const root: RegisterCheckpoint = {
+      path: [],
+      siblings: [{ kind: 'set', value: { k: 1 }, ...sib }],
+      water: {},
+    };
+    expect(rootedRelay.hydrate('r', { seq: 1, registers: [root] })).toBe(true);
+    expect(quiet).toEqual([]);
   });
 });
 

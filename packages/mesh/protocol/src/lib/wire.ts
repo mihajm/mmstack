@@ -314,7 +314,10 @@ export type SettledMsg = {
  * resend, so a configuration that violates that assumption), `'epoch-bump'` (an epoch above the
  * room's baseline from a writer the policy does not let raise it) and `'citation'` (a cite the
  * room's state does not cover). The last two are journaled with the room and repeated on every
- * resend. A refused write is not in the room; the writer drops it and rehydrates.
+ * resend. `'compacting'` is a HOST refusal the relay itself never emits: a host may answer a write
+ * from a connection that declared itself ready for the current generation (`compact`) with it,
+ * without forwarding the write. A refused write is not in the room; the writer drops it and
+ * rehydrates.
  */
 export type DropMsg = {
   readonly t: 'drop';
@@ -322,7 +325,13 @@ export type DropMsg = {
   readonly origin: string;
   readonly version: number;
   readonly reason:
-    'duplicate' | 'generation' | 'schema' | 'order' | 'citation' | 'epoch-bump';
+    | 'duplicate'
+    | 'generation'
+    | 'schema'
+    | 'order'
+    | 'citation'
+    | 'epoch-bump'
+    | 'compacting';
   /**
    * The room's sequence as of this reply. A refusal journaled by the room (`'citation'`,
    * `'epoch-bump'`) is answered again, unchanged but for this field, on every resend of the same

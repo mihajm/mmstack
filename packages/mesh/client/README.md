@@ -499,7 +499,11 @@ post-migration by construction, and journal replay stays correct forever.
 - `webSocketTransport(url)` for a relay over WebSocket.
 - `directTransport(relay, ctx)` connects straight to an in-process `createRelay`, with no
   network. It is the backbone of the tests, and useful for a single-process demo or an
-  SSR-side room.
+  SSR-side room. Messages cross as JSON both ways, so a direct peer holds exactly what a socket
+  peer would. `directTransport(relay, ctx, { byReference: true })` hands the relay's messages
+  over by reference instead: a snapshot welcome then costs the peer no copy of the room, at the
+  price that the peer must never mutate what it receives, since it holds the relay's own
+  objects. The peer's own messages still cross as JSON.
 
 A transport is a small interface (`send`, `onMessage`, `onClose`, `close`), so wiring a custom
 one is a few lines. `onClose` reports the close `code` and `reason` (a 1009 means the relay

@@ -22,6 +22,7 @@ export {
 } from './lib/mesh-sync';
 export {
   directTransport,
+  type DirectTransportOptions,
   webSocketTransport,
   type MeshTransport,
   type MeshTransportFactory,

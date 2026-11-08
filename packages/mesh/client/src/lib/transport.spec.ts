@@ -105,6 +105,54 @@ describe('directTransport', () => {
     expect(inbound).toEqual(JSON.parse(JSON.stringify(inbound)));
   });
 
+  it('byReference: the relay’s messages reach the peer as the relay’s own objects; the peer’s still cross as JSON', async () => {
+    let registers: readonly RegisterCheckpoint[] = [];
+    const relay = createRelay({
+      onCommit: (_room, _env, state) => {
+        registers = state.checkpoint();
+      },
+    });
+    const inbound: ServerMsg[] = [];
+    const inner = directTransport(
+      relay,
+      { writer: 'w', kind: 'agent' },
+      { byReference: true },
+    );
+    const transport: MeshTransportFactory = () => {
+      const t = inner();
+      t.onMessage((m) => inbound.push(m));
+      return t;
+    };
+    const s = agentSeat<{ tasks: Record<string, unknown> }>(
+      { tasks: {} },
+      { room: 'direct-ref', writer: 'w', transport },
+    );
+    await Promise.resolve();
+    s.setAtPath('tasks.t1', {
+      title: 't',
+      note: undefined,
+      tags: ['a', undefined],
+    });
+    await s.whenAcked();
+
+    // outbound: still the JSON hop — the relay never saw the `undefined`s
+    expect(registers).toEqual(JSON.parse(JSON.stringify(registers)));
+    // inbound: the echo's envelope is the relay's object, not a copy of it
+    type Echo = { t: 'env'; env: { ops: readonly { next?: unknown }[] } };
+    const held = inbound
+      .filter((m): m is Echo => m.t === 'env')
+      .flatMap((m) => m.env.ops.map((op) => op.next))
+      .find((next) => (next as { title?: unknown } | undefined)?.title === 't');
+    expect(held).toEqual({ title: 't', tags: ['a', null] });
+    const sibling = registers
+      .flatMap((r) => r.siblings)
+      .find((x) => x.kind === 'set' && x.value === held);
+    expect(
+      sibling,
+      'the peer holds the very object the relay retained',
+    ).toBeDefined();
+  });
+
   it('reports a normal close (1000, empty reason)', () => {
     const transport = directTransport(createRelay(), { writer: 'w' })();
     const closes: [number, string][] = [];

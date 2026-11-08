@@ -130,9 +130,11 @@ export type RegisterStore = {
    */
   compactionSeed(): RegisterCheckpoint[];
   /**
-   * The registers a compaction cut would drop that hold exactly one retained sibling, a `delete`,
-   * and no watermark: the count a tombstone budget is held against. Maintained as the store
-   * changes; equal to a full scan by construction.
+   * The registers a compaction cut would drop that hold exactly one retained sibling, a tombstone
+   * (a `delete` or a `clear`), and no watermark: the count a tombstone budget is held against.
+   * Nothing but a cut ever reclaims such a register — `settle` collects only what a watermark
+   * covers — and a room's dead branches leave thousands of lone `clear`s behind. Maintained as the
+   * store changes; equal to a full scan by construction.
    */
   droppableTombstones(): number;
   /** The registers a compaction cut would keep: the size of its seed. Maintained like the count. */
@@ -242,7 +244,11 @@ export function createRegisterStore(): RegisterStore {
     const kept = keeps(reg.path, liveOf(reg));
     const only =
       reg.siblings.size === 1 ? [...reg.siblings.values()][0] : undefined;
-    const lone = !kept && only?.kind === 'delete' && reg.water.size === 0;
+    const lone =
+      !kept &&
+      only !== undefined &&
+      only.kind !== 'set' &&
+      reg.water.size === 0;
     cls.set(key, { kept, lone });
     if (kept) keptCount++;
     if (lone) tombstones++;

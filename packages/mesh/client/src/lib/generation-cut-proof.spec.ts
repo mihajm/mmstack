@@ -182,11 +182,16 @@ type OEnv = {
     readonly cites?: readonly OCite[];
   }[];
 };
-const oGe = (a: OStamp, b: OStamp): boolean => a.p > b.p || (a.p === b.p && a.l >= b.l);
+const oGe = (a: OStamp, b: OStamp): boolean =>
+  a.p > b.p || (a.p === b.p && a.l >= b.l);
 /** The store keys a register by `String(segment)` joined: the oracle uses the same identity. */
-const oPathKey = (path: readonly (string | number)[]): string => JSON.stringify(path.map(String));
+const oPathKey = (path: readonly (string | number)[]): string =>
+  JSON.stringify(path.map(String));
 
-type OMarks = Map<string, { sib: Map<string, OStamp>; mark: Map<string, OStamp> }>;
+type OMarks = Map<
+  string,
+  { sib: Map<string, OStamp>; mark: Map<string, OStamp> }
+>;
 type OState = {
   readonly extent: Map<string, Map<string, OStamp>>;
   readonly preCutMax: ReadonlyMap<string, OStamp>;
@@ -227,14 +232,19 @@ function oPreCutMax(heldBefore: readonly OCite[]): Map<string, OStamp> {
   return m;
 }
 
-function oView(seed: OSeed, preCutMax: ReadonlyMap<string, OStamp>, envs: readonly OEnv[]): OState {
+function oView(
+  seed: OSeed,
+  preCutMax: ReadonlyMap<string, OStamp>,
+  envs: readonly OEnv[],
+): OState {
   const gen: OMarks = new Map();
   for (const e of envs) {
     for (const op of e.ops) {
       const r = oReg(gen, op.path);
       oRaise(r.sib, e.origin, e.hlc);
       for (const c of op.cites ?? []) {
-        if (c.origin === e.origin && c.hlc.p === e.hlc.p && c.hlc.l === e.hlc.l) continue;
+        if (c.origin === e.origin && c.hlc.p === e.hlc.p && c.hlc.l === e.hlc.l)
+          continue;
         oRaise(r.mark, c.origin, c.hlc);
       }
     }
@@ -242,7 +252,11 @@ function oView(seed: OSeed, preCutMax: ReadonlyMap<string, OStamp>, envs: readon
   return { extent: oExtent(seed), preCutMax, gen };
 }
 
-const oCovered = (s: OState, path: readonly (string | number)[], c: OCite): boolean => {
+const oCovered = (
+  s: OState,
+  path: readonly (string | number)[],
+  c: OCite,
+): boolean => {
   const k = oPathKey(path);
   const ext = s.extent.get(k)?.get(c.origin);
   const pre = s.preCutMax.get(c.origin);
@@ -260,7 +274,12 @@ function oUncovered(s: OState, env: OEnv): OCite[] {
   const out: OCite[] = [];
   for (const op of env.ops) {
     for (const c of op.cites ?? []) {
-      if (c.origin === env.origin && c.hlc.p === env.hlc.p && c.hlc.l === env.hlc.l) continue;
+      if (
+        c.origin === env.origin &&
+        c.hlc.p === env.hlc.p &&
+        c.hlc.l === env.hlc.l
+      )
+        continue;
       if (!oCovered(s, op.path, c)) out.push(c);
     }
   }
@@ -270,7 +289,10 @@ const oracleDecide = (s: OState, env: OEnv): OVerdict =>
   oUncovered(s, env).length ? 'conflict' : 'apply';
 
 describe('generation cut: the covers oracle on its own', () => {
-  const sib = (origin: string, p: number): OCite => ({ origin, hlc: { p, l: 0 } });
+  const sib = (origin: string, p: number): OCite => ({
+    origin,
+    hlc: { p, l: 0 },
+  });
   const seed = [{ path: ['x'], siblings: [sib('A', 10), sib('B', 20)] }];
   const pre = oPreCutMax([sib('A', 12), sib('B', 20), sib('D', 15)]);
   const env = (cites: OCite[], path = ['x']): OEnv => ({
@@ -301,7 +323,11 @@ describe('generation cut: the covers oracle on its own', () => {
     ).toHaveLength(2);
   });
   it('a new-generation dot is covered by the generation registers (sibling or mark); a create with no cites applies', () => {
-    const e1: OEnv = { origin: 'E', hlc: { p: 50, l: 0 }, ops: [{ path: ['x'], cites: [] }] };
+    const e1: OEnv = {
+      origin: 'E',
+      hlc: { p: 50, l: 0 },
+      ops: [{ path: ['x'], cites: [] }],
+    };
     const e2: OEnv = {
       origin: 'A',
       hlc: { p: 60, l: 0 },
@@ -314,7 +340,9 @@ describe('generation cut: the covers oracle on its own', () => {
   });
   it('path identity is the store identity: a numeric and a string segment are one register', () => {
     const s = oView([{ path: ['1'], siblings: [sib('A', 10)] }], pre, []);
-    expect(oracleDecide(s, env([sib('A', 10)], [1 as unknown as string]))).toBe('apply');
+    expect(oracleDecide(s, env([sib('A', 10)], [1 as unknown as string]))).toBe(
+      'apply',
+    );
   });
 });
 
@@ -323,8 +351,10 @@ describe('generation cut: the covers oracle on its own', () => {
 type Fold = ReturnType<typeof createConvergingApply>;
 type Store = ReturnType<typeof createRegisterStore>;
 
-const compareHlc = (a: Hlc, b: Hlc): number => (a.p !== b.p ? a.p - b.p : a.l - b.l);
-const pathKey = (path: readonly Key[]): string => path.map(String).join('\u001f');
+const compareHlc = (a: Hlc, b: Hlc): number =>
+  a.p !== b.p ? a.p - b.p : a.l - b.l;
+const pathKey = (path: readonly Key[]): string =>
+  path.map(String).join('\u001f');
 const isPrefix = (a: readonly Key[], b: readonly Key[]): boolean =>
   a.length < b.length && a.every((s, i) => String(s) === String(b[i]));
 
@@ -338,7 +368,8 @@ const mulberry32 = (seed: number): (() => number) => {
   };
 };
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null;
 /**
  * PRESENCE-PRESERVING canonical form (verifier-owned): a present `undefined` is not an absent key,
  * an array hole is not an `undefined` slot, key order is ignored. JSON hides both distinctions.
@@ -359,10 +390,14 @@ const pcanon = (x: unknown): string => {
     .join(',')}}`;
 };
 
-const lookup = (tree: unknown, path: readonly Key[]): { found: boolean; value: unknown } => {
+const lookup = (
+  tree: unknown,
+  path: readonly Key[],
+): { found: boolean; value: unknown } => {
   let cur = tree;
   for (const seg of path) {
-    if (!isObj(cur) || !Object.hasOwn(cur, String(seg))) return { found: false, value: undefined };
+    if (!isObj(cur) || !Object.hasOwn(cur, String(seg)))
+      return { found: false, value: undefined };
     cur = cur[String(seg)];
   }
   return { found: true, value: cur };
@@ -386,7 +421,11 @@ const PATHS: readonly (readonly Key[])[] = [
 const ARRAY_PATHS: readonly (readonly Key[])[] = [['l'], ['m'], ['n']];
 /** The room's migration document: the genesis root register's value. */
 const INITIAL = { a: 0, b: { c: 0 }, d: { e: { f: 0 } } };
-const rootSibling = (origin: string, hlc: Hlc, value: unknown): SyncSibling => ({
+const rootSibling = (
+  origin: string,
+  hlc: Hlc,
+  value: unknown,
+): SyncSibling => ({
   kind: 'set',
   origin,
   writer: 'system',
@@ -397,7 +436,8 @@ const rootSibling = (origin: string, hlc: Hlc, value: unknown): SyncSibling => (
 
 // ─── fold configurations (§14 T1 SCOPE: selecting = theorem, synthesizing = declared residual) ─
 
-type FoldCfg = 'default' | 'custom' | 'preserve' | 'synth' | 'positional' | 'ancestor';
+type FoldCfg =
+  'default' | 'custom' | 'preserve' | 'synth' | 'positional' | 'ancestor';
 /** SELECTING folds: the output at a path is one live sibling's kind + value, or abstention. */
 const SELECTING_CFGS: readonly FoldCfg[] = ['default', 'custom'];
 /** SYNTHESIZING folds (the declared T1 residual): `preserve` markers; a clear turned into a delete. */
@@ -412,16 +452,21 @@ const loserFold: FoldFn = (siblings) => {
   const pick = siblings
     .filter((s) => s.epoch === top)
     .reduce((m, s) => (compareSiblings(s, m) < 0 ? s : m));
-  return pick.kind === 'set' ? { kind: 'set', value: pick.value } : { kind: pick.kind };
+  return pick.kind === 'set'
+    ? { kind: 'set', value: pick.value }
+    : { kind: pick.kind };
 };
 /**
  * A custom SYNTHESIZING fold (astra's re-audit counterexample 3): pure and epoch-respecting, it
  * turns a LONE clear into a delete (a kind no live sibling has); otherwise the default winner.
  */
 const clearToDeleteFold: FoldFn = (siblings) => {
-  if (siblings.length === 1 && siblings[0].kind === 'clear') return { kind: 'delete' };
+  if (siblings.length === 1 && siblings[0].kind === 'clear')
+    return { kind: 'delete' };
   const top = siblings.reduce((m, s) => (compareSiblings(s, m) > 0 ? s : m));
-  return top.kind === 'set' ? { kind: 'set', value: top.value } : { kind: top.kind };
+  return top.kind === 'set'
+    ? { kind: 'set', value: top.value }
+    : { kind: top.kind };
 };
 const DEPTHS = [['*'], ['*', '*'], ['*', '*', '*']];
 /**
@@ -474,7 +519,12 @@ const oLive = (r: RegisterCheckpoint): SyncSibling[] =>
 const oContains = (value: unknown, rel: readonly Key[]): boolean => {
   let cur = value;
   for (const seg of rel) {
-    if (typeof cur !== 'object' || cur === null || !Object.hasOwn(cur, String(seg))) return false;
+    if (
+      typeof cur !== 'object' ||
+      cur === null ||
+      !Object.hasOwn(cur, String(seg))
+    )
+      return false;
     cur = (cur as Record<string, unknown>)[String(seg)];
   }
   return true;
@@ -483,7 +533,10 @@ const oSegs = (p: readonly Key[]): string[] => p.map(String);
 const oUnder = (a: readonly Key[], b: readonly Key[]): boolean =>
   a.length < b.length && oSegs(a).every((s, i) => s === String(b[i]));
 
-type OKept = Map<string, { path: readonly Key[]; live: SyncSibling[]; baseline: number }>;
+type OKept = Map<
+  string,
+  { path: readonly Key[]; live: SyncSibling[]; baseline: number }
+>;
 /** The registers D-a′ KEEPS in a source (by the oracle's own path key); every other one is droppable. */
 function oKept(src: readonly RegisterCheckpoint[]): OKept {
   const regs: OKept = new Map();
@@ -497,7 +550,8 @@ function oKept(src: readonly RegisterCheckpoint[]): OKept {
     });
   }
   const all = [...regs.values()];
-  const hasSet = (x: { live: SyncSibling[] }) => x.live.some((s) => s.kind === 'set');
+  const hasSet = (x: { live: SyncSibling[] }) =>
+    x.live.some((s) => s.kind === 'set');
   const kept: OKept = new Map();
   for (const [k, x] of regs) {
     if (!x.live.length) continue;
@@ -507,7 +561,11 @@ function oKept(src: readonly RegisterCheckpoint[]): OKept {
       all.some(
         (a) =>
           oUnder(a.path, x.path) &&
-          a.live.some((s) => s.kind === 'set' && oContains(s.value, x.path.slice(a.path.length))),
+          a.live.some(
+            (s) =>
+              s.kind === 'set' &&
+              oContains(s.value, x.path.slice(a.path.length)),
+          ),
       );
     const multi = x.live.filter((s) => s.kind !== 'clear').length >= 2;
     if (hasSet(x) || deeper || masks || multi) kept.set(k, x);
@@ -529,15 +587,18 @@ function oStructural(
       out.push(`${x.path.join('.')} must be kept`);
       continue;
     }
-    if (Object.keys(r.water).length) out.push(`${x.path.join('.')} keeps marks`);
+    if (Object.keys(r.water).length)
+      out.push(`${x.path.join('.')} keeps marks`);
     const want = x.live.map(pcanon).sort();
     const have = r.siblings.map(pcanon).sort();
     if (JSON.stringify(want) !== JSON.stringify(have))
       out.push(`${x.path.join('.')} siblings ${have} vs live ${want}`);
     const eff = Math.max(r.epoch ?? 0, ...r.siblings.map((s) => s.epoch));
-    if (eff !== x.baseline) out.push(`${x.path.join('.')} baseline ${eff} vs ${x.baseline}`);
+    if (eff !== x.baseline)
+      out.push(`${x.path.join('.')} baseline ${eff} vs ${x.baseline}`);
   }
-  for (const k of got.keys()) if (!kept.has(k)) out.push(`${k} kept but droppable`);
+  for (const k of got.keys())
+    if (!kept.has(k)) out.push(`${k} kept but droppable`);
   return out;
 }
 
@@ -574,11 +635,18 @@ type PosMode = 'policy' | 'default' | 'ancestor';
  * The REAL fold's output at one register: its siblings and marks loaded at the ROOT of a fresh fold
  * (positional and `noPolicyFold` read no path), materialized. `undefined` unless the fold sets.
  */
-function oFoldAt(r: RegisterCheckpoint, mode: PosMode): { value: unknown } | undefined {
+function oFoldAt(
+  r: RegisterCheckpoint,
+  mode: PosMode,
+): { value: unknown } | undefined {
   const f = createConvergingApply(
     mode === 'default'
       ? {}
-      : { policies: [{ path: [], merge: mode === 'policy' ? positional : ancestorMerge }] },
+      : {
+          policies: [
+            { path: [], merge: mode === 'policy' ? positional : ancestorMerge },
+          ],
+        },
   );
   f.load([{ path: [], siblings: r.siblings, water: r.water }]);
   const live = f.liveAt([]);
@@ -597,7 +665,12 @@ function oIndexMode(src: readonly RegisterCheckpoint[]): boolean {
         let cur = s.value;
         for (const seg of r.path.slice(a.path.length)) {
           if (Array.isArray(cur)) return true;
-          if (typeof cur !== 'object' || cur === null || !Object.hasOwn(cur, String(seg))) break;
+          if (
+            typeof cur !== 'object' ||
+            cur === null ||
+            !Object.hasOwn(cur, String(seg))
+          )
+            break;
           cur = (cur as Record<string, unknown>)[String(seg)];
         }
       }
@@ -605,9 +678,17 @@ function oIndexMode(src: readonly RegisterCheckpoint[]): boolean {
   }
   return false;
 }
-type PosVerdict = { violations: string[]; folds: number; synth: number; arrays: number };
+type PosVerdict = {
+  violations: string[];
+  folds: number;
+  synth: number;
+  arrays: number;
+};
 /** L1 + L2 over a cut source, per fold mode; `synth` counts outputs no single live sibling holds. */
-function oPositional(src: readonly RegisterCheckpoint[], mode: PosMode): PosVerdict {
+function oPositional(
+  src: readonly RegisterCheckpoint[],
+  mode: PosMode,
+): PosVerdict {
   const v: PosVerdict = { violations: [], folds: 0, synth: 0, arrays: 0 };
   const out = new Map<string, { path: readonly Key[]; value: unknown }>();
   for (const r of src) {
@@ -631,9 +712,16 @@ function oPositional(src: readonly RegisterCheckpoint[], mode: PosMode): PosVerd
   }
   const kept = oKept(src);
   for (const d of src) {
-    if (kept.has(oPathKey(d.path)) || !oLive(d).some((s) => s.kind === 'delete')) continue;
+    if (
+      kept.has(oPathKey(d.path)) ||
+      !oLive(d).some((s) => s.kind === 'delete')
+    )
+      continue;
     for (const a of out.values())
-      if (oUnder(a.path, d.path) && oContains(a.value, d.path.slice(a.path.length)))
+      if (
+        oUnder(a.path, d.path) &&
+        oContains(a.value, d.path.slice(a.path.length))
+      )
         v.violations.push(
           `L2 dropped delete at ${d.path.join('.')} lies inside the ${mode} fold output at ${a.path.join('.') || '<root>'}`,
         );
@@ -642,7 +730,12 @@ function oPositional(src: readonly RegisterCheckpoint[], mode: PosMode): PosVerd
 }
 
 describe('generation cut: the positional path-closure oracle on its own (r9)', () => {
-  const arr = (origin: string, p: number, value: unknown, prev?: unknown): SyncSibling => ({
+  const arr = (
+    origin: string,
+    p: number,
+    value: unknown,
+    prev?: unknown,
+  ): SyncSibling => ({
     kind: 'set',
     origin,
     writer: origin,
@@ -666,7 +759,10 @@ describe('generation cut: the positional path-closure oracle on its own (r9)', (
   it('the REAL fold merges two concurrent edits of different slots into a value no live sibling holds — path-closed (L1), under the explicit policy and the no-policy default alike', () => {
     const r: RegisterCheckpoint = {
       path: ['l'],
-      siblings: [arr('A', 5, ['X', 'b'], ['a', 'b']), arr('B', 6, ['a', 'Y'], ['a', 'b'])],
+      siblings: [
+        arr('A', 5, ['X', 'b'], ['a', 'b']),
+        arr('B', 6, ['a', 'Y'], ['a', 'b']),
+      ],
       water: {},
     };
     for (const mode of ['policy', 'default'] as const) {
@@ -683,7 +779,10 @@ describe('generation cut: the positional path-closure oracle on its own (r9)', (
     const anc = [{ x: 1, z: 9 }];
     const r: RegisterCheckpoint = {
       path: ['m'],
-      siblings: [arr('A', 5, [{ x: 1, y: 2 }], anc), arr('B', 6, [{ x: 3, z: 9 }], anc)],
+      siblings: [
+        arr('A', 5, [{ x: 1, y: 2 }], anc),
+        arr('B', 6, [{ x: 3, z: 9 }], anc),
+      ],
       water: {},
     };
     expect(oFoldAt(r, 'policy')).toEqual({ value: [{ x: 3, y: 2 }] }); // z deleted by A, kept by B unchanged ⇒ deleted
@@ -694,7 +793,10 @@ describe('generation cut: the positional path-closure oracle on its own (r9)', (
       root,
       {
         path: ['m'],
-        siblings: [arr('A', 5, [{}], [{ x: 1 }]), arr('B', 6, [{}], [{ x: 1 }])],
+        siblings: [
+          arr('A', 5, [{}], [{ x: 1 }]),
+          arr('B', 6, [{}], [{ x: 1 }]),
+        ],
         water: {},
       },
       { path: ['m', 0, 'x'], siblings: [del('C', 7)], water: {} },
@@ -709,7 +811,10 @@ describe('generation cut: the positional path-closure oracle on its own (r9)', (
     expect(pcanon(materializeRegs(seed, 'positional'))).toBe(
       pcanon(materializeRegs(regs, 'positional')),
     );
-    expect(lookup(materializeRegs(regs, 'ancestor'), ['m'])).toEqual({ found: true, value: [{}] });
+    expect(lookup(materializeRegs(regs, 'ancestor'), ['m'])).toEqual({
+      found: true,
+      value: [{}],
+    });
     expect(lookup(materializeRegs(seed, 'ancestor'), ['m'])).toEqual({
       found: true,
       value: [{ x: 1 }],
@@ -781,10 +886,12 @@ function lAck(l: Ledger, env: OpEnvelope): void {
     if (!marks) l.marks.set(key, (marks = new Map()));
     const sop = op as SyncOp;
     for (const c of sop.cites ?? []) {
-      if (c.origin === env.origin && oGe(c.hlc, env.hlc) && oGe(env.hlc, c.hlc)) continue;
+      if (c.origin === env.origin && oGe(c.hlc, env.hlc) && oGe(env.hlc, c.hlc))
+        continue;
       oRaise(marks, c.origin, c.hlc);
       for (const r of at)
-        if (!r.done && r.origin === c.origin && oGe(c.hlc, r.hlc)) r.done = 'superseded';
+        if (!r.done && r.origin === c.origin && oGe(c.hlc, r.hlc))
+          r.done = 'superseded';
     }
     const rec: LRec = {
       what: `${env.instance}:${env.origin}#${env.version}@${key}`,
@@ -798,7 +905,9 @@ function lAck(l: Ledger, env: OpEnvelope): void {
         hlc: env.hlc,
         epoch: sop.epoch ?? 0,
         ...(op.kind === 'set' ? { value: op.next } : {}),
-        ...(op.kind === 'set' && Object.hasOwn(op, 'prev') ? { prev: op.prev } : {}),
+        ...(op.kind === 'set' && Object.hasOwn(op, 'prev')
+          ? { prev: op.prev }
+          : {}),
       }),
     };
     const cited = marks.get(env.origin);
@@ -827,7 +936,8 @@ function lHiddenRecs(
   regs: readonly RegisterCheckpoint[],
 ): { rec: LRec; why: string; justified: boolean }[] {
   const byKey = new Map<string, RegisterCheckpoint>();
-  for (const r of regs) if (!byKey.has(oPathKey(r.path))) byKey.set(oPathKey(r.path), r);
+  for (const r of regs)
+    if (!byKey.has(oPathKey(r.path))) byKey.set(oPathKey(r.path), r);
   const out: { rec: LRec; why: string; justified: boolean }[] = [];
   for (const rec of l.recs) {
     if (rec.done) continue;
@@ -871,7 +981,8 @@ function lCut(
   const unfit = new Map<LRec, string>();
   if (!minted && !unchecked) {
     for (const x of lMissingRecs(l, src)) unfit.set(x.rec, x.why); // R20-1 retention
-    for (const x of lHiddenRecs(l, src)) if (!x.justified) unfit.set(x.rec, x.why); // R19-1
+    for (const x of lHiddenRecs(l, src))
+      if (!x.justified) unfit.set(x.rec, x.why); // R19-1
   }
   const refused: string[] = [];
   for (const r of l.recs) {
@@ -937,13 +1048,21 @@ function lMissingRecs(
     if (r.done) continue;
     const got = held.get(r.key)?.get(r.origin);
     if (got !== r.sib)
-      out.push({ rec: r, why: `${r.what}: ${got === undefined ? 'absent' : `holds ${got}`}` });
+      out.push({
+        rec: r,
+        why: `${r.what}: ${got === undefined ? 'absent' : `holds ${got}`}`,
+      });
   }
   return out;
 }
 
 describe('generation cut: the T3 ledger on its own', () => {
-  const env = (origin: string, p: number, ops: SyncOp[], version = 1): OpEnvelope => ({
+  const env = (
+    origin: string,
+    p: number,
+    ops: SyncOp[],
+    version = 1,
+  ): OpEnvelope => ({
     proto: MESH_PROTO_VERSION,
     instance: 'g0',
     policyVersion: 0,
@@ -966,47 +1085,81 @@ describe('generation cut: the T3 ledger on its own', () => {
   it('a retained record passes; a missing or altered one fails; a cited or same-origin-replaced one is discharged', () => {
     const l = newLedger();
     lAck(l, env('A', 10, [set(['x'], 1)]));
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('A', 10, 1)], water: {} }])).toEqual([]);
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('A', 10, 1)], water: {} }]),
+    ).toEqual([]);
     expect(lMissing(l, [])).toHaveLength(1);
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('A', 10, 2)], water: {} }])).toHaveLength(1);
-    lAck(l, env('B', 20, [set(['x'], 'b', [{ origin: 'A', hlc: { p: 12, l: 0 } }])]));
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('B', 20, 'b')], water: {} }])).toEqual([]);
-    lAck(l, env('B', 30, [set(['x'], 'b2')], 2)); // no cite: B's own newer write replaces B@20
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('B', 30, 'b2')], water: {} }])).toEqual([]);
-    lAck(l, env('C', 25, [set(['x'], 'c')])); // nothing cites C@25: it must be retained
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('B', 30, 'b2')], water: {} }])).toHaveLength(
-      1,
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('A', 10, 2)], water: {} }]),
+    ).toHaveLength(1);
+    lAck(
+      l,
+      env('B', 20, [set(['x'], 'b', [{ origin: 'A', hlc: { p: 12, l: 0 } }])]),
     );
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('B', 20, 'b')], water: {} }]),
+    ).toEqual([]);
+    lAck(l, env('B', 30, [set(['x'], 'b2')], 2)); // no cite: B's own newer write replaces B@20
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('B', 30, 'b2')], water: {} }]),
+    ).toEqual([]);
+    lAck(l, env('C', 25, [set(['x'], 'c')])); // nothing cites C@25: it must be retained
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('B', 30, 'b2')], water: {} }]),
+    ).toHaveLength(1);
   });
   it('a cite acknowledged BEFORE the op it cites (P2P order) still supersedes it', () => {
     const l = newLedger();
-    lAck(l, env('A', 20, [set(['x'], 'a', [{ origin: 'C', hlc: { p: 10, l: 0 } }])]));
+    lAck(
+      l,
+      env('A', 20, [set(['x'], 'a', [{ origin: 'C', hlc: { p: 10, l: 0 } }])]),
+    );
     lAck(l, env('C', 10, [set(['x'], 'c')]));
-    expect(lMissing(l, [{ path: ['x'], siblings: [sib('A', 20, 'a')], water: {} }])).toEqual([]);
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [sib('A', 20, 'a')], water: {} }]),
+    ).toEqual([]);
   });
   it('R16-1: an acked cite must SUPPRESS — the cited sibling under its watermark or gone passes; live again fails; a cut moves the cites to the old marks', () => {
     const l = newLedger();
     lAck(l, env('A', 10, [{ ...set(['x'], 1), epoch: 5 } as SyncOp]));
-    lAck(l, env('B', 20, [set(['x'], 2, [{ origin: 'A', hlc: { p: 10, l: 0 } }])]));
+    lAck(
+      l,
+      env('B', 20, [set(['x'], 2, [{ origin: 'A', hlc: { p: 10, l: 0 } }])]),
+    );
     const a: SyncSibling = { ...sib('A', 10, 1), epoch: 5 };
     const marked = { A: { p: 10, l: 0 } };
     expect(
-      lSuppress(l.marks, [{ path: ['x'], siblings: [a, sib('B', 20, 2)], water: marked }]),
+      lSuppress(l.marks, [
+        { path: ['x'], siblings: [a, sib('B', 20, 2)], water: marked },
+      ]),
     ).toEqual([]);
-    expect(lSuppress(l.marks, [{ path: ['x'], siblings: [sib('B', 20, 2)], water: {} }])).toEqual(
-      [],
-    );
     expect(
-      lSuppress(l.marks, [{ path: ['x'], siblings: [a, sib('B', 20, 2)], water: {} }]),
+      lSuppress(l.marks, [
+        { path: ['x'], siblings: [sib('B', 20, 2)], water: {} },
+      ]),
+    ).toEqual([]);
+    expect(
+      lSuppress(l.marks, [
+        { path: ['x'], siblings: [a, sib('B', 20, 2)], water: {} },
+      ]),
     ).toHaveLength(1); // the watermark is lost: A@10 (epoch 5) is live again and wins
-    expect(lMissing(l, [{ path: ['x'], siblings: [a, sib('B', 20, 2)], water: {} }])).toEqual([]); // retention alone passes it
+    expect(
+      lMissing(l, [{ path: ['x'], siblings: [a, sib('B', 20, 2)], water: {} }]),
+    ).toEqual([]); // retention alone passes it
     lCut(l, [{ path: ['x'], siblings: [sib('B', 20, 2)], water: {} }], false);
     expect(l.marks.size).toBe(0);
-    expect(lSuppress(l.oldMarks, [{ path: ['x'], siblings: [a], water: {} }])).toHaveLength(1);
+    expect(
+      lSuppress(l.oldMarks, [{ path: ['x'], siblings: [a], water: {} }]),
+    ).toHaveLength(1);
   });
   it('a cut discharges what D-a′ drops and nothing else; a minted seed discharges everything', () => {
     const l = newLedger();
-    lAck(l, env('A', 10, [{ kind: 'delete', path: ['k'], prev: undefined, cites: [], epoch: 0 }]));
+    lAck(
+      l,
+      env('A', 10, [
+        { kind: 'delete', path: ['k'], prev: undefined, cites: [], epoch: 0 },
+      ]),
+    );
     lAck(l, env('B', 11, [set(['y'], 1)]));
     const del: SyncSibling = {
       kind: 'delete',
@@ -1047,8 +1200,13 @@ describe('generation cut: the T3 ledger on its own', () => {
     // and as the driver reaches it: B's acked write cites A ⇒ A superseded, its watermark justified
     const cited = newLedger();
     lAck(cited, env('A', 10, [set(['x'], 1)]));
-    lAck(cited, env('B', 20, [set(['x'], 2, [{ origin: 'A', hlc: { p: 10, l: 0 } }])]));
-    expect(lHidden(cited, [{ ...hidden[0], siblings: [a, sib('B', 20, 2)] }])).toEqual([]);
+    lAck(
+      cited,
+      env('B', 20, [set(['x'], 2, [{ origin: 'A', hlc: { p: 10, l: 0 } }])]),
+    );
+    expect(
+      lHidden(cited, [{ ...hidden[0], siblings: [a, sib('B', 20, 2)] }]),
+    ).toEqual([]);
     // the cut: x is set-free-live (nothing live) ⇒ D-a′ drops it; the r7 cut discharged A's record
     const r7 = structuredClone(l);
     expect(lCut(r7, hidden, false, true)).toEqual([]);
@@ -1070,7 +1228,15 @@ describe('generation cut: the T3 ledger on its own', () => {
     const altered: RegisterCheckpoint[] = [
       {
         path: ['x'],
-        siblings: [{ kind: 'delete', origin: 'A', writer: 'A', hlc: { p: 10, l: 0 }, epoch: 0 }],
+        siblings: [
+          {
+            kind: 'delete',
+            origin: 'A',
+            writer: 'A',
+            hlc: { p: 10, l: 0 },
+            epoch: 0,
+          },
+        ],
         water: {},
       }, // A's acked `set x=1` became a delete at the same dot
     ];
@@ -1086,7 +1252,9 @@ describe('generation cut: the T3 ledger on its own', () => {
       const l = mk();
       const refused = lCut(l, src, false);
       expect(refused).toHaveLength(1);
-      expect(refused[0]).toContain(`not discharged as dropped: g0:A#1@["x"]: ${why}`);
+      expect(refused[0]).toContain(
+        `not discharged as dropped: g0:A#1@["x"]: ${why}`,
+      );
       expect(l.recs[0].done).toBeUndefined();
       expect(lMissing(l, [])).toEqual(['g0:A#1@["x"]: absent']); // still named after the cut
     }
@@ -1094,7 +1262,9 @@ describe('generation cut: the T3 ledger on its own', () => {
     const del = newLedger();
     lAck(
       del,
-      env('A', 10, [{ kind: 'delete', path: ['k'], prev: undefined, cites: [], epoch: 0 }]),
+      env('A', 10, [
+        { kind: 'delete', path: ['k'], prev: undefined, cites: [], epoch: 0 },
+      ]),
     );
     const k: SyncSibling = {
       kind: 'delete',
@@ -1103,7 +1273,9 @@ describe('generation cut: the T3 ledger on its own', () => {
       hlc: { p: 10, l: 0 },
       epoch: 0,
     };
-    expect(lCut(del, [{ path: ['k'], siblings: [k], water: {} }], false)).toEqual([]);
+    expect(
+      lCut(del, [{ path: ['k'], siblings: [k], water: {} }], false),
+    ).toEqual([]);
     expect(del.recs[0].done).toBe('dropped');
   });
 });
@@ -1138,22 +1310,34 @@ const SEED_NEUTERS = [
   'clearMasks',
 ] as const satisfies readonly (keyof SeedRule)[];
 
-type LiveReg = { readonly path: readonly Key[]; readonly live: readonly SyncSibling[] };
+type LiveReg = {
+  readonly path: readonly Key[];
+  readonly live: readonly SyncSibling[];
+};
 /**
  * The D-a′ keep rule over live registers (impl-shaped; one rule for the seed builder AND the D11
  * count). Kept iff it holds a live `set`, or a live `set` below it, or ≥ 2 live non-clear siblings,
  * or a live DELETE whose path a live `set` value at a proper ancestor contains. No fold, no winner.
  */
-function keepRule(all: readonly LiveReg[], rule: SeedRule = {}): (x: LiveReg) => boolean {
+function keepRule(
+  all: readonly LiveReg[],
+  rule: SeedRule = {},
+): (x: LiveReg) => boolean {
   const hasSet = (x: LiveReg) => x.live.some((s) => s.kind === 'set');
-  const deeper = (x: LiveReg) => all.some((d) => isPrefix(x.path, d.path) && hasSet(d));
+  const deeper = (x: LiveReg) =>
+    all.some((d) => isPrefix(x.path, d.path) && hasSet(d));
   const masks = (x: LiveReg) =>
     all.some(
       (a) =>
         isPrefix(a.path, x.path) &&
-        a.live.some((s) => s.kind === 'set' && lookup(s.value, x.path.slice(a.path.length)).found),
+        a.live.some(
+          (s) =>
+            s.kind === 'set' &&
+            lookup(s.value, x.path.slice(a.path.length)).found,
+        ),
     );
-  const multi = (x: LiveReg) => x.live.filter((s) => s.kind !== 'clear').length >= 2;
+  const multi = (x: LiveReg) =>
+    x.live.filter((s) => s.kind !== 'clear').length >= 2;
   return (x) =>
     !!x.live.length &&
     (hasSet(x) ||
@@ -1202,16 +1386,24 @@ function reaperSeed(
     return e > 0 ? { epoch: e } : {};
   };
   const keep = keepRule(all, rule);
-  const seed: RegisterCheckpoint[] = all
-    .filter(keep)
-    .map((x) => ({ path: x.path, siblings: [...x.live], water: {}, ...baseline(x.path) }));
+  const seed: RegisterCheckpoint[] = all.filter(keep).map((x) => ({
+    path: x.path,
+    siblings: [...x.live],
+    water: {},
+    ...baseline(x.path),
+  }));
   if (rule.materializerKeep) {
     // r3: a dropped tombstone is kept iff its path shows in the DEFAULT fold's materialization
     for (const x of all
       .filter((y) => !keep(y) && y.live.some((s) => s.kind === 'delete'))
       .sort((a, b) => a.path.length - b.path.length)) {
       if (lookup(materializeRegs(seed), x.path).found)
-        seed.push({ path: x.path, siblings: [...x.live], water: {}, ...baseline(x.path) });
+        seed.push({
+          path: x.path,
+          siblings: [...x.live],
+          water: {},
+          ...baseline(x.path),
+        });
     }
   }
   return seed;
@@ -1224,7 +1416,11 @@ const storeOf = (regs: readonly RegisterCheckpoint[]): Store => {
   return st;
 };
 
-const mintedSeed = (value: unknown, instance: string, stamp: Hlc): RegisterCheckpoint[] => [
+const mintedSeed = (
+  value: unknown,
+  instance: string,
+  stamp: Hlc,
+): RegisterCheckpoint[] => [
   {
     path: [],
     siblings: [rootSibling(instance, stamp, value === undefined ? {} : value)],
@@ -1271,7 +1467,11 @@ const seedExtent = (seed: readonly RegisterCheckpoint[]): Extent => {
   return ext;
 };
 const extentCanon = (e: Extent): string =>
-  JSON.stringify([...e].map(([k, m]) => [k, [...m].sort(([a], [b]) => (a < b ? -1 : 1))]).sort());
+  JSON.stringify(
+    [...e]
+      .map(([k, m]) => [k, [...m].sort(([a], [b]) => (a < b ? -1 : 1))])
+      .sort(),
+  );
 const raise = (t: Record<string, Hlc>, o: string, h: Hlc): void => {
   if (!t[o] || compareHlc(h, t[o]) > 0) t[o] = h;
 };
@@ -1326,12 +1526,20 @@ const admit = (r: Admission, e: OpEnvelope, bridge = false): boolean => {
 };
 
 /** D7: per ENVELOPE origin, per generation, the exact admitted version set (and its maximum). */
-type Receipts = Map<string, Map<string, { through: number; versions: Set<number> }>>;
+type Receipts = Map<
+  string,
+  Map<string, { through: number; versions: Set<number> }>
+>;
 const cloneReceipts = (r: Receipts): Receipts =>
   new Map(
     [...r].map(([o, m]) => [
       o,
-      new Map([...m].map(([i, x]) => [i, { through: x.through, versions: new Set(x.versions) }])),
+      new Map(
+        [...m].map(([i, x]) => [
+          i,
+          { through: x.through, versions: new Set(x.versions) },
+        ]),
+      ),
     ]),
   );
 const receiptsCanon = (r: Receipts): string =>
@@ -1342,7 +1550,11 @@ const receiptsCanon = (r: Receipts): string =>
         o,
         [...m]
           .sort(([a], [b]) => (a < b ? -1 : 1))
-          .map(([i, x]) => [i, x.through, [...x.versions].sort((a, b) => a - b)]),
+          .map(([i, x]) => [
+            i,
+            x.through,
+            [...x.versions].sort((a, b) => a - b),
+          ]),
       ]),
   );
 
@@ -1350,7 +1562,11 @@ type JournalEntry =
   | { readonly kind: 'env'; readonly env: OpEnvelope }
   | { readonly kind: 'cut'; readonly gen: Gen }
   /** F-9: a refusal is durable — a late duplicate of a refused envelope is refused again (D-b″: replied again). */
-  | { readonly kind: 'refuse'; readonly key: string; readonly cause: ConflictCause };
+  | {
+      readonly kind: 'refuse';
+      readonly key: string;
+      readonly cause: ConflictCause;
+    };
 
 /** What the relay persists and recovers (C8 + D-f obligation ii: extent, preCutMax, floors). */
 type RelayCore = {
@@ -1383,14 +1599,22 @@ const victim = (e: OpEnvelope): boolean => e.version % 4 === 3;
  * n43 / R19-1 (a retention defect, never the register code — `settle`/`load` raise water only from
  * cites): water[origin] at `path` raised to `hlc` on every given store, the sibling left in place.
  */
-const excessWater = (stores: readonly Store[], path: readonly Key[], origin: string, hlc: Hlc) => {
-  for (const s of stores) s.load([{ path, siblings: [], water: { [origin]: hlc } }]);
+const excessWater = (
+  stores: readonly Store[],
+  path: readonly Key[],
+  origin: string,
+  hlc: Hlc,
+) => {
+  for (const s of stores)
+    s.load([{ path, siblings: [], water: { [origin]: hlc } }]);
 };
 
 /** n43c / R20-1 (a retention defect): the register at `path` removed whole from every given store. */
 const dropRegister = (stores: readonly Store[], path: readonly Key[]) => {
   for (const s of stores) {
-    const rest = s.checkpoint().filter((r) => pathKey(r.path) !== pathKey(path));
+    const rest = s
+      .checkpoint()
+      .filter((r) => pathKey(r.path) !== pathKey(path));
     s.reset();
     s.load(rest);
   }
@@ -1410,13 +1634,19 @@ function applyEntry(core: RelayCore, entry: JournalEntry): boolean {
     core.preCutMax = g.preCutMax;
     for (const s of core.stores) {
       const baselines = core.carryBaselines
-        ? s.checkpoint().map((r) => ({ path: r.path, siblings: [], water: {}, epoch: r.epoch }))
+        ? s.checkpoint().map((r) => ({
+            path: r.path,
+            siblings: [],
+            water: {},
+            epoch: r.epoch,
+          }))
         : [];
       s.reset();
       s.load(g.seed);
       s.load(baselines);
     }
-    for (const r of g.seed) for (const s of r.siblings) raise(core.everMax, s.origin, s.hlc);
+    for (const r of g.seed)
+      for (const s of r.siblings) raise(core.everMax, s.origin, s.hlc);
     core.admission = newAdmission();
     core.refused = new Map();
     return false;
@@ -1429,23 +1659,34 @@ function applyEntry(core: RelayCore, entry: JournalEntry): boolean {
   if (!admit(core.admission, e, core.bridgeHoles)) return false;
   const stored: OpEnvelope =
     core.corruptIngest && victim(e)
-      ? { ...e, ops: e.ops.map((op) => (op.kind === 'set' ? { ...op, next: 'corrupt' } : op)) }
+      ? {
+          ...e,
+          ops: e.ops.map((op) =>
+            op.kind === 'set' ? { ...op, next: 'corrupt' } : op,
+          ),
+        }
       : core.dropWater && victim(e)
         ? { ...e, ops: e.ops.map((op) => ({ ...op, cites: [] })) }
         : e;
-  if (!(core.omitIngest && victim(e))) for (const s of core.stores) s.ingest(stored);
+  if (!(core.omitIngest && victim(e)))
+    for (const s of core.stores) s.ingest(stored);
   if (core.excessWater && victim(e)) {
     // n43 at a commit: the victim's first `set`, still live (uncited) on every store, is hidden
     const op = e.ops.find((x) => x.kind === 'set');
     const live = (s: Store): boolean =>
-      !!op && s.siblings(op.path).some((x) => x.origin === e.origin && !compareHlc(x.hlc, e.hlc));
-    if (op && core.stores.every(live)) excessWater(core.stores, op.path, e.origin, e.hlc);
+      !!op &&
+      s
+        .siblings(op.path)
+        .some((x) => x.origin === e.origin && !compareHlc(x.hlc, e.hlc));
+    if (op && core.stores.every(live))
+      excessWater(core.stores, op.path, e.origin, e.hlc);
   }
   raise(core.everMax, e.origin, e.hlc);
   let byInstance = core.receipts.get(e.origin);
   if (!byInstance) core.receipts.set(e.origin, (byInstance = new Map()));
   let rc = byInstance.get(e.instance);
-  if (!rc) byInstance.set(e.instance, (rc = { through: 0, versions: new Set() }));
+  if (!rc)
+    byInstance.set(e.instance, (rc = { through: 0, versions: new Set() }));
   rc.versions.add(e.version);
   rc.through = Math.max(rc.through, e.version);
   return true;
@@ -1471,7 +1712,10 @@ type CoversCtx = {
   readonly preCutMax: StampTable;
   readonly admission: Admission;
 };
-const extentRecords = new WeakMap<Extent, Record<string, Record<string, Hlc>>>();
+const extentRecords = new WeakMap<
+  Extent,
+  Record<string, Record<string, Hlc>>
+>();
 /** The wire shape of a frozen extent (cached: an extent never changes within its generation). */
 const extentRecord = (e: Extent): Record<string, Record<string, Hlc>> => {
   let r = extentRecords.get(e);
@@ -1500,7 +1744,9 @@ function admits(
       extent: mode.noExtent ? {} : extentRecord(ctx.extent),
       preCutMax,
       firstStamp: (o) =>
-        mode.unflooredExempt && ctx.admission.settled[o] ? BELOW_ALL : ctx.admission.first[o],
+        mode.unflooredExempt && ctx.admission.settled[o]
+          ? BELOW_ALL
+          : ctx.admission.first[o],
       settled: (o) => ctx.admission.settled[o],
     },
     path,
@@ -1535,7 +1781,9 @@ function clientCovered(
       extent: mode.noExtent ? {} : extentRecord(ctx.extent),
       preCutMax,
       firstStamp: (o) =>
-        mode.unflooredExempt && ctx.admission.settled[o] ? BELOW_ALL : ctx.admission.first[o],
+        mode.unflooredExempt && ctx.admission.settled[o]
+          ? BELOW_ALL
+          : ctx.admission.first[o],
       settled: (o) => ctx.admission.settled[o],
     },
     env,
@@ -1551,19 +1799,25 @@ function trimPerInstance<T extends TailEntry>(
   receipts: Receipts,
 ): { readonly trimmed: T[]; readonly keep: T[] } {
   const sorted = [...pending].sort(
-    (a, b) => a.env.version - b.env.version || (a.env.origin < b.env.origin ? -1 : 1),
+    (a, b) =>
+      a.env.version - b.env.version || (a.env.origin < b.env.origin ? -1 : 1),
   );
   const trimmed: T[] = [];
   const keep: T[] = [];
   for (const t of sorted)
-    (receipts.get(t.env.origin)?.get(t.env.instance)?.versions.has(t.env.version)
+    (receipts
+      .get(t.env.origin)
+      ?.get(t.env.instance)
+      ?.versions.has(t.env.version)
       ? trimmed
       : keep
     ).push(t);
   return { trimmed, keep };
 }
 /** The wire shape of the harness receipts (exact admitted versions as ranges), for the real trim. */
-const receiptsWire = (r: Receipts): Record<string, Record<string, [number, number][]>> => {
+const receiptsWire = (
+  r: Receipts,
+): Record<string, Record<string, [number, number][]>> => {
   const out: Record<string, Record<string, [number, number][]>> = {};
   for (const [o, m] of r) {
     out[o] = {};
@@ -1648,7 +1902,8 @@ type TailEntry = {
   readonly version: number;
   readonly env: OpEnvelope;
 };
-type ConflictCause = 'uncovered' | 'unauthorized' | 'refused-cite' | 'refused-epoch';
+type ConflictCause =
+  'uncovered' | 'unauthorized' | 'refused-cite' | 'refused-epoch';
 type Conflict = { readonly entry: TailEntry; readonly cause: ConflictCause };
 /**
  * D-d: a welcome is a MESSAGE — queued, reorderable, duplicable. It carries the generation record
@@ -1766,7 +2021,12 @@ type ClientRecord = {
   rehydrateOwed?: number;
 };
 
-type Outcome = { admitted: number; conflicts: number; discarded: number; trimmed: number };
+type Outcome = {
+  admitted: number;
+  conflicts: number;
+  discarded: number;
+  trimmed: number;
+};
 
 type World = {
   readonly variant: Variant;
@@ -1841,7 +2101,11 @@ const genInstance = (w: World, origin: string): boolean =>
   w.gens.some((g) => g.instance === origin);
 const outcomeOf = (w: World, id: string): Outcome => {
   let o = w.outcomes.get(id);
-  if (!o) w.outcomes.set(id, (o = { admitted: 0, conflicts: 0, discarded: 0, trimmed: 0 }));
+  if (!o)
+    w.outcomes.set(
+      id,
+      (o = { admitted: 0, conflicts: 0, discarded: 0, trimmed: 0 }),
+    );
   return o;
 };
 const ownerOf = (w: World, origin: string): Replica | undefined => {
@@ -1857,9 +2121,16 @@ function createWorld(
 ): World {
   const seed: RegisterCheckpoint[] = rootless
     ? []
-    : [{ path: [], siblings: [rootSibling('g0', { p: 1, l: 0 }, INITIAL)], water: {} }];
+    : [
+        {
+          path: [],
+          siblings: [rootSibling('g0', { p: 1, l: 0 }, INITIAL)],
+          water: {},
+        },
+      ];
   const preCutMax: Record<string, Hlc> = {};
-  for (const r of seed) for (const s of r.siblings) raise(preCutMax, s.origin, s.hlc);
+  for (const r of seed)
+    for (const s of r.siblings) raise(preCutMax, s.origin, s.hlc);
   const held: OCite[] = seed.flatMap((r) =>
     r.siblings.map((s) => ({ origin: s.origin, hlc: s.hlc })),
   );
@@ -1987,7 +2258,11 @@ function persist(w: World, rep: Replica): void {
   for (const x of rep.pending) {
     const o = outcomeOf(w, x.id);
     if (x.kind !== 'trimmed' && o.admitted > 0)
-      fail(w, 'T3', `acked intent ${x.id} reached the tail policy as ${x.kind}`);
+      fail(
+        w,
+        'T3',
+        `acked intent ${x.id} reached the tail policy as ${x.kind}`,
+      );
     o[x.kind] += 1;
   }
   rep.pending = [];
@@ -2004,7 +2279,9 @@ function persist(w: World, rep: Replica): void {
       instance: rep.instance,
       seq: full ? rep.seq : 0,
       // n33: a record without the generation record fields (recovery has no extent / preCutMax)
-      gen: w.variant.recordNoGen ? { ...rep.gen, extent: new Map(), preCutMax: {} } : rep.gen,
+      gen: w.variant.recordNoGen
+        ? { ...rep.gen, extent: new Map(), preCutMax: {} }
+        : rep.gen,
       u: full ? rep.u.checkpoint() : [],
       c: full ? rep.c.checkpoint() : [],
       rk: full ? rep.rk.checkpoint() : [],
@@ -2041,7 +2318,10 @@ function reload(w: World, rep: Replica, reboot = false): void {
     w.authored.set(rep.origin, []);
     count(w, 'reboots');
   }
-  const mk = (cp: RegisterCheckpoint[], floors: ClientRecord['floorsU']): Fold => {
+  const mk = (
+    cp: RegisterCheckpoint[],
+    floors: ClientRecord['floorsU'],
+  ): Fold => {
     const f = foldOf(rep.cfg, rep.origin);
     f.load(cp);
     if (!w.variant.noFloorRestore) f.restoreFloors(floors);
@@ -2070,7 +2350,8 @@ function reload(w: World, rep: Replica, reboot = false): void {
     // record's generation are re-applied over the empty folds; unsequenced peer copies are gone with
     // the memory (production relay rooms carry none, charter §17), so the verifier forgets them too
     (w.peerIngested.get(rep.id) as Set<string>).clear();
-    for (const t of rep.tail) if (t.instance === rep.instance) ingestApply(w, rep, t.env, true);
+    for (const t of rep.tail)
+      if (t.instance === rep.instance) ingestApply(w, rep, t.env, true);
     count(w, 'restartsNoRegisters');
   }
   rep.inbox = [];
@@ -2157,13 +2438,28 @@ function ingestApply(
 /** The PATH ENCODING / shape precondition: everything the harness puts on the wire passes `validateEnvelope`. */
 const wireCheck = (w: World, env: OpEnvelope): void => {
   const bad = validateEnvelope(env);
-  if (bad) fail(w, 'wire', `${gkey(env)} is malformed (${bad}): ${JSON.stringify(env.ops)}`);
+  if (bad)
+    fail(
+      w,
+      'wire',
+      `${gkey(env)} is malformed (${bad}): ${JSON.stringify(env.ops)}`,
+    );
 };
 
 /** Put an envelope on the wire from a replica: outbox, queue, local ingest. */
-function put(w: World, rep: Replica, intent: Intent, env: OpEnvelope): TailEntry {
+function put(
+  w: World,
+  rep: Replica,
+  intent: Intent,
+  env: OpEnvelope,
+): TailEntry {
   wireCheck(w, env);
-  const entry: TailEntry = { intent, instance: env.instance, version: env.version, env };
+  const entry: TailEntry = {
+    intent,
+    instance: env.instance,
+    version: env.version,
+    env,
+  };
   rep.tail.push(entry);
   w.envs.set(gkey(env), env);
   w.envIntent.set(gkey(env), intent);
@@ -2186,12 +2482,27 @@ function put(w: World, rep: Replica, intent: Intent, env: OpEnvelope): TailEntry
  * A cite of a dot that THIS generation admitted (or this replica applied) yet sits at or below its
  * origin's preCutMax — a replayed refused-hole op — is the D-f residual, classed `D6-residual` (F-11).
  */
-function engineCheck(w: World, rep: Replica, env: OpEnvelope, what: string): void {
+/** The dots of every envelope `admitted` names in generation `instance`, as `origin@p.l`. */
+function generationDots(
+  w: World,
+  instance: string,
+  admitted: ReadonlySet<string>,
+): Set<string> {
   const genDots = new Set<string>();
-  for (const k of rep.admission.admitted) {
-    const e = w.envs.get(`${rep.instance}:${k}`);
+  for (const k of admitted) {
+    const e = w.envs.get(`${instance}:${k}`);
     if (e) genDots.add(`${e.origin}@${e.hlc.p}.${e.hlc.l}`);
   }
+  return genDots;
+}
+
+function engineCheck(
+  w: World,
+  rep: Replica,
+  env: OpEnvelope,
+  what: string,
+): void {
+  const genDots = generationDots(w, rep.instance, rep.admission.admitted);
   for (const c of oUncovered(oracleView(w, rep), env)) {
     const residual = genDots.has(`${c.origin}@${c.hlc.p}.${c.hlc.l}`);
     fail(
@@ -2210,7 +2521,12 @@ function disciplineCheck(w: World, rep: Replica, ops: readonly SyncOp[]): void {
   for (const op of ops)
     for (const c of op.cites ?? []) {
       if (ownerOf(w, c.origin)?.id === rep.id) continue;
-      if (w.held.some((h) => h.origin === c.origin && compareHlc(h.hlc, c.hlc) === 0)) continue;
+      if (
+        w.held.some(
+          (h) => h.origin === c.origin && compareHlc(h.hlc, c.hlc) === 0,
+        )
+      )
+        continue;
       fail(
         w,
         'stamp-discipline',
@@ -2224,14 +2540,20 @@ function author(
   w: World,
   id: string,
   raw: StoreOp | readonly StoreOp[],
-  opt: { bump?: boolean; lower?: (op: SyncOp) => SyncOp; reauthorOf?: string } = {},
+  opt: {
+    bump?: boolean;
+    lower?: (op: SyncOp) => SyncOp;
+    reauthorOf?: string;
+  } = {},
 ): TailEntry | null {
   const rep = w.replicas.get(id) as Replica;
   if (rep.rebase && !w.variant.authorDuringRebase) {
     count(w, 'authorBlockedByRebase');
     return null;
   }
-  const raws = Array.isArray(raw) ? (raw as readonly StoreOp[]) : [raw as StoreOp];
+  const raws = Array.isArray(raw)
+    ? (raw as readonly StoreOp[])
+    : [raw as StoreOp];
   const intent: Intent = {
     id: `${id}:${++rep.intents}`,
     replica: id,
@@ -2241,7 +2563,9 @@ function author(
   };
   // R17-1 HONEST STAMPING: cite only what the relay delivered (welcome, sequenced delta) or own dots —
   // the replica still FOLDS peer copies for display, it never cites them; n42 stamps from the full view
-  let ops = (w.variant.citePeer ? rep.u : rep.rk).stamp(raws, { bump: intent.bump });
+  let ops = (w.variant.citePeer ? rep.u : rep.rk).stamp(raws, {
+    bump: intent.bump,
+  });
   if (opt.lower) ops = ops.map(opt.lower);
   disciplineCheck(w, rep, ops);
   w.clock += 1;
@@ -2263,7 +2587,12 @@ function author(
 // ─── ingress, refusal, welcomes ─────────────────────────────────────────────
 
 /** Classify a tail entry that will never be admitted (durable with the client record). */
-function classify(w: World, rep: Replica, t: TailEntry, kind: 'conflicts' | 'discarded'): void {
+function classify(
+  w: World,
+  rep: Replica,
+  t: TailEntry,
+  kind: 'conflicts' | 'discarded',
+): void {
   rep.pending.push({ id: t.intent.id, kind });
   count(w, kind);
   if (w.leaked.has(t.intent.id)) count(w, `censusLeak:${kind}`); // n39: counted, never hidden
@@ -2289,7 +2618,12 @@ const repCtx = (rep: Replica): CoversCtx => ({
 });
 
 type RelayAnswer =
-  'admitted' | 'duplicate' | 'order' | 'generation' | 'epoch-bump' | 'unknown-citation';
+  | 'admitted'
+  | 'duplicate'
+  | 'order'
+  | 'generation'
+  | 'epoch-bump'
+  | 'unknown-citation';
 
 /**
  * Relay ingress: instance fence (D10), C5 duplicate/order, the epoch-bump gate, and — for REPLAYED
@@ -2316,7 +2650,11 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
   }
   const intent = w.envIntent.get(gkey(e));
   // statistics / classification ONLY (R16-6): the admission path below never reads them
-  const kind = w.replayed.has(gkey(e)) ? 'replay' : intent?.reauthorOf ? 'reauthor' : 'fresh';
+  const kind = w.replayed.has(gkey(e))
+    ? 'replay'
+    : intent?.reauthorOf
+      ? 'reauthor'
+      : 'fresh';
   if (intent?.reauthorOf) count(w, 'reauthorDelivered');
   if (e.version < maxOf(r.admission, e.origin)) {
     if (intent && first && !outcomeOf(w, intent.id).admitted)
@@ -2336,6 +2674,13 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
   // n40 restores r5's harness-only discrimination (fresh writes unverified)
   const view = relayOracleView(w);
   let refuse = false;
+  // the F-11 route at the relay (RULED 2026-11-07, "note only"): every refused cite names a dot THIS
+  // generation admitted at or below its origin's preCutMax — a stale-stamped hole filler landed after
+  // the cut (an A1 violator: one origin's stamps ran backwards). The two-regime rule reads the dot as
+  // pre-cut and the frozen extent lacks it; the honest author lands a Conflict. The same residual the
+  // engine check classes `D6-residual`; reached in the base sweep once budget cuts are frequent.
+  let residualRoute = true;
+  let genDots: Set<string> | undefined;
   for (const op of w.variant.ungatedFresh && kind === 'fresh' ? [] : e.ops) {
     for (const c of op.cites ?? []) {
       if (selfCite(e, c)) continue;
@@ -2343,20 +2688,38 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
       const bad = !oCovered(view, op.path, c); // per cite AND per path
       if (bad) count(w, ok ? 'tripwireMiss' : 'tripwireCaught');
       if (bad && ok)
-        fail(w, 'tripwire', `${gkey(e)}: the relay admits uncovered cite ${c.origin}@${c.hlc.p}`);
+        fail(
+          w,
+          'tripwire',
+          `${gkey(e)}: the relay admits uncovered cite ${c.origin}@${c.hlc.p}`,
+        );
       if (!bad && !ok)
         fail(
           w,
           'D6-refusal',
           `${gkey(e)}: the relay refuses cite ${c.origin}@${c.hlc.p} its own generation holds`,
         );
-      if (!ok) refuse = true;
+      if (!ok) {
+        refuse = true;
+        genDots ??= generationDots(w, r.instance, r.admission.admitted);
+        if (!genDots.has(`${c.origin}@${c.hlc.p}.${c.hlc.l}`))
+          residualRoute = false;
+      }
     }
   }
   count(w, `gate:${kind}`);
   if (refuse) {
     count(w, `gateRefused:${kind}`);
-    freshRefused(w, e, kind, 'unknown-citation');
+    if (kind !== 'replay' && w.envIntent.has(gkey(e)) && residualRoute) {
+      count(w, 'freshRefusedResidual');
+      fail(
+        w,
+        'D6-residual',
+        `${gkey(e)} (${kind}) refused at the relay: it cites a dot this generation admitted below its origin's preCutMax (F-11)`,
+      );
+    } else {
+      freshRefused(w, e, kind, 'unknown-citation');
+    }
     drop(w, e, 'refused-cite');
     return 'unknown-citation';
   }
@@ -2365,7 +2728,10 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
     const regs = r.c.checkpoint();
     const decided = e.ops.some((op) => {
       const reg = regs.find((x) => pathKey(x.path) === pathKey(op.path));
-      return (op.epoch ?? 0) > Math.max(0, ...(reg?.siblings ?? []).map((x) => x.epoch));
+      return (
+        (op.epoch ?? 0) >
+        Math.max(0, ...(reg?.siblings ?? []).map((x) => x.epoch))
+      );
     });
     if (decided) count(w, 'reachF4');
   }
@@ -2382,7 +2748,11 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
     if (intent.reauthorOf) count(w, 'reauthorAdmitted');
     o.admitted += 1;
     if (o.admitted > 1)
-      fail(w, 'T3-double', `intent ${intent.id} admitted twice (latest ${gkey(e)})`);
+      fail(
+        w,
+        'T3-double',
+        `intent ${intent.id} admitted twice (latest ${gkey(e)})`,
+      );
     if (o.conflicts || o.discarded)
       fail(w, 'T3', `intent ${intent.id} admitted after it was classified`);
   }
@@ -2395,7 +2765,12 @@ function toRelay(w: World, e: OpEnvelope, first = true): RelayAnswer {
  * R17-1 D6′ STRENGTHENED: a relay refusal of an honest FRESH write (fresh or re-authored) is
  * unreachable. Under n42 (peer-held cites) it is reached and must still land in Conflict.
  */
-function freshRefused(w: World, e: OpEnvelope, kind: string, why: RelayAnswer): void {
+function freshRefused(
+  w: World,
+  e: OpEnvelope,
+  kind: string,
+  why: RelayAnswer,
+): void {
   if (kind === 'replay' || !w.envIntent.has(gkey(e))) return;
   count(w, 'freshRefused');
   fail(w, 'D6-fresh', `${gkey(e)} (${kind}) refused at the relay (${why})`);
@@ -2442,7 +2817,8 @@ function reply(w: World, e: OpEnvelope, cause: ConflictCause): void {
   // R16-2: rehydration is OWED (durable with the record) until a welcome with seq ≥ this one installs
   const seq = w.journal.length;
   (w.owedTruth.get(rep.id) as Map<string, number>).set(gkey(e), seq);
-  if (!w.variant.noOwed) rep.rehydrateOwed = owedAfterRefusal(rep.rehydrateOwed, seq); // S3: the session's
+  if (!w.variant.noOwed)
+    rep.rehydrateOwed = owedAfterRefusal(rep.rehydrateOwed, seq); // S3: the session's
   postWelcome(w, rep); // the refusal rehydrates: a same-generation welcome drops the refused op locally
 }
 
@@ -2453,12 +2829,18 @@ function reply(w: World, e: OpEnvelope, cause: ConflictCause): void {
  * envelope of this generation, ingested or deduplicated (n38: only when ingested — r5); a peer copy
  * is retained (`peerHeld`) until its relay echo arrives or it is fenced.
  */
-function toReplica(w: World, e: OpEnvelope, rep: Replica): 'ok' | 'dup' | 'future' | 'dead' {
+function toReplica(
+  w: World,
+  e: OpEnvelope,
+  rep: Replica,
+): 'ok' | 'dup' | 'future' | 'dead' {
   const seq = w.seqOf.get(gkey(e));
   const echoed = w.peerIngested.get(rep.id) as Set<string>;
   if (e.instance !== rep.instance && !w.variant.noReplicaFence) {
     count(w, 'fenced');
-    return genOf(w, e.instance).index > genOf(w, rep.instance).index ? 'future' : 'dead';
+    return genOf(w, e.instance).index > genOf(w, rep.instance).index
+      ? 'future'
+      : 'dead';
   }
   const relayed = seq !== undefined && e.instance === rep.instance;
   const learnSeq = (): void => {
@@ -2493,7 +2875,11 @@ function toReplica(w: World, e: OpEnvelope, rep: Replica): 'ok' | 'dup' | 'futur
  * The relay posts a welcome MESSAGE from its own core: the cut's own welcome carries the seed, a
  * later one the current registers; both the record fields and admission / receipts as of `seq`.
  */
-function postWelcome(w: World, rep: Replica, seed?: readonly RegisterCheckpoint[]): void {
+function postWelcome(
+  w: World,
+  rep: Replica,
+  seed?: readonly RegisterCheckpoint[],
+): void {
   const g = genOf(w, w.relay.instance); // the relay's own persisted cut row (index, policy)
   rep.inbox.push({
     instance: g.instance,
@@ -2514,12 +2900,22 @@ function postWelcome(w: World, rep: Replica, seed?: readonly RegisterCheckpoint[
  * (registers + instance/seq/admission + outbox trim/rebase persist as one record); `crashAt`
  * crashes after stage 1 (registers), 2 (instance/admission) or 3 (outbox) — n18 persists per stage.
  */
-function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number): void {
+function deliverWelcome(
+  w: World,
+  rep: Replica,
+  index: number,
+  crashAt?: number,
+): void {
   const [msg] = rep.inbox.splice(index, 1);
   if (!msg) return;
   // S3: the REAL client fence (the session's `welcomeVerdict`); n21 / n34 override its answer here
   const verdict = welcomeVerdict(
-    { index: rep.gen.index, instance: rep.instance, seq: rep.seq, maxSeq: rep.maxSeq },
+    {
+      index: rep.gen.index,
+      instance: rep.instance,
+      seq: rep.seq,
+      maxSeq: rep.maxSeq,
+    },
     msg,
   );
   const newer = verdict === 'newer';
@@ -2542,14 +2938,27 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   const g = genOf(w, msg.instance); // VERIFIER only: the census record and the welcome-content check
   const regs = msg.seed ?? (msg.registers as readonly RegisterCheckpoint[]);
   if (msg.seed && pcanon(msg.seed) !== pcanon(g.seed))
-    fail(w, 'welcome', `${msg.instance} cut welcome carries a seed other than the cut's`);
-  if (extentCanon(msg.extent) !== extentCanon(g.extent) && !w.variant.checkpointNoExtent)
-    fail(w, 'welcome', `${msg.instance} welcome carries an extent other than the cut's`);
+    fail(
+      w,
+      'welcome',
+      `${msg.instance} cut welcome carries a seed other than the cut's`,
+    );
+  if (
+    extentCanon(msg.extent) !== extentCanon(g.extent) &&
+    !w.variant.checkpointNoExtent
+  )
+    fail(
+      w,
+      'welcome',
+      `${msg.instance} welcome carries an extent other than the cut's`,
+    );
   if (!newer) {
     // D-b″: RESEND the outbox before own un-admitted writes are treated as live — a refused envelope
     // is answered again (`drop` ⇒ Conflict + rehydrate) instead of being re-applied as pending
     for (const t of rep.tail.filter(
-      (x) => x.instance === msg.instance && !msg.admission.admitted.has(keyOfEnv(x.env)),
+      (x) =>
+        x.instance === msg.instance &&
+        !msg.admission.admitted.has(keyOfEnv(x.env)),
     ))
       if (rep.tail.includes(t)) toRelay(w, t.env);
   }
@@ -2559,7 +2968,8 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   const own = rep.tail.filter(
     (t) =>
       t.instance === msg.instance &&
-      (w.variant.reapplyAdmitted || !msg.admission.admitted.has(keyOfEnv(t.env))),
+      (w.variant.reapplyAdmitted ||
+        !msg.admission.admitted.has(keyOfEnv(t.env))),
   );
   rep.u = foldOf(rep.cfg, rep.origin);
   rep.u.load(regs);
@@ -2576,7 +2986,12 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   const wasRebase = !!rep.rebase;
   rep.instance = msg.instance;
   rep.seq = msg.seq;
-  rep.gen = { index: msg.index, policy: msg.policy, extent: msg.extent, preCutMax: msg.preCutMax };
+  rep.gen = {
+    index: msg.index,
+    policy: msg.policy,
+    extent: msg.extent,
+    preCutMax: msg.preCutMax,
+  };
   rep.admission = cloneAdmission(msg.admission);
   for (const t of own) admit(rep.admission, t.env);
   // R16-3: peer-held envelopes of this generation the snapshot has not admitted are RE-INGESTED
@@ -2588,7 +3003,8 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
       rep.peerHeld.delete(k);
       continue;
     }
-    if (rep.admission.admitted.has(keyOfEnv(e)) || w.variant.noPeerRetain) continue;
+    if (rep.admission.admitted.has(keyOfEnv(e)) || w.variant.noPeerRetain)
+      continue;
     if (!admit(rep.admission, e)) {
       rep.peerHeld.delete(k);
       count(w, 'peerOrderDropped');
@@ -2611,11 +3027,16 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
     );
     const real = w.variant.trimPerInstance
       ? trimPerInstance(prior, msg.receipts)
-      : trimByReceipts(prior, w.variant.noReceipts ? {} : receiptsWire(msg.receipts));
+      : trimByReceipts(
+          prior,
+          w.variant.noReceipts ? {} : receiptsWire(msg.receipts),
+        );
     // R26-1: a version held by ANY instance of its origin's receipts was admitted
     const heldAnywhere = (t: TailEntry): boolean =>
       !w.variant.noReceipts &&
-      [...(msg.receipts.get(t.env.origin)?.values() ?? [])].some((x) => x.versions.has(t.version));
+      [...(msg.receipts.get(t.env.origin)?.values() ?? [])].some((x) =>
+        x.versions.has(t.version),
+      );
     const pending = [...real.trimmed, ...real.keep].sort(
       (a, b) => a.version - b.version || (a.env.origin < b.env.origin ? -1 : 1),
     );
@@ -2623,8 +3044,15 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
     rep.tail = rep.tail.filter((t) => t.instance === msg.instance);
     const keep: TailEntry[] = [];
     for (const t of pending) {
-      const rc = w.variant.noReceipts ? undefined : msg.receipts.get(t.env.origin)?.get(t.instance);
-      if (rc && t.version <= rc.through && !rc.versions.has(t.version) && !heldAnywhere(t)) {
+      const rc = w.variant.noReceipts
+        ? undefined
+        : msg.receipts.get(t.env.origin)?.get(t.instance);
+      if (
+        rc &&
+        t.version <= rc.through &&
+        !rc.versions.has(t.version) &&
+        !heldAnywhere(t)
+      ) {
         count(w, 'holesBelowThrough');
         if (w.variant.trimByMax)
           fail(
@@ -2633,7 +3061,10 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
             `${gkey(t.env)} (${t.intent.id}) trimmed by admittedThrough ${rc.through} but never admitted: LOST`,
           );
       }
-      if (trimmedByReal.has(t) || (!!rc && !!w.variant.trimByMax && t.version <= rc.through)) {
+      if (
+        trimmedByReal.has(t) ||
+        (!!rc && !!w.variant.trimByMax && t.version <= rc.through)
+      ) {
         rep.pending.push({ id: t.intent.id, kind: 'trimmed' });
         count(w, 'trimmed');
         continue;
@@ -2682,13 +3113,22 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   }
   // D3″ client half: floors = own retained siblings' epochs ∪ own re-applied writes' epochs
   const want = new Map<string, number>();
-  const up = (k: string, e: number) => e > 0 && want.set(k, Math.max(want.get(k) ?? 0, e));
+  const up = (k: string, e: number) =>
+    e > 0 && want.set(k, Math.max(want.get(k) ?? 0, e));
   for (const r of regs)
-    for (const s of r.siblings) if (s.origin === rep.origin) up(pathKey(r.path), s.epoch);
-  for (const t of own) for (const op of t.env.ops) up(pathKey(op.path), op.epoch ?? 0);
-  const have = new Map(rep.u.emissionFloors().map((f) => [pathKey(f.path), f.epoch]));
+    for (const s of r.siblings)
+      if (s.origin === rep.origin) up(pathKey(r.path), s.epoch);
+  for (const t of own)
+    for (const op of t.env.ops) up(pathKey(op.path), op.epoch ?? 0);
+  const have = new Map(
+    rep.u.emissionFloors().map((f) => [pathKey(f.path), f.epoch]),
+  );
   if (JSON.stringify([...want].sort()) !== JSON.stringify([...have].sort()))
-    fail(w, 'T2b', `${rep.id} floors ${JSON.stringify([...have])} vs ${JSON.stringify([...want])}`);
+    fail(
+      w,
+      'T2b',
+      `${rep.id} floors ${JSON.stringify([...have])} vs ${JSON.stringify([...want])}`,
+    );
   count(w, newer ? 'installNewer' : 'installSame');
   if (!rep.installed) count(w, 'installAfterRestart');
   rep.installed = true;
@@ -2730,7 +3170,12 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   for (const t of own) {
     if (!w.refused.has(gkey(t.env))) continue;
     if (w.relay.instance !== msg.instance) count(w, 'refusalAcrossCut');
-    else fail(w, 'D6-drop', `${rep.id} re-applied refused ${gkey(t.env)} as a pending own write`);
+    else
+      fail(
+        w,
+        'D6-drop',
+        `${rep.id} re-applied refused ${gkey(t.env)} as a pending own write`,
+      );
   }
   // R16-2: an installed welcome at or past the owed refusal completes the rehydration
   const wasOwed = rep.rehydrateOwed;
@@ -2738,7 +3183,8 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   rep.rehydrateOwed = w.variant.owedClears
     ? undefined
     : owedAfterInstall(rep.rehydrateOwed, msg.seq);
-  if (wasOwed !== undefined && rep.rehydrateOwed === undefined) count(w, 'rehydrateCompleted');
+  if (wasOwed !== undefined && rep.rehydrateOwed === undefined)
+    count(w, 'rehydrateCompleted');
   // charter §24 (D-S3-5, R16-2 "keeps requesting"): an install BELOW the owed seq does not complete
   // the rehydration — the client asks for a snapshot again
   if (rep.rehydrateOwed !== undefined && msg.seq < rep.rehydrateOwed) {
@@ -2750,7 +3196,10 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
   // R16-5: the welcome's admission set tells the client which own envelopes the relay admitted
   if (newer) rep.acked = new Set();
   for (const t of rep.tail)
-    if (t.instance === msg.instance && msg.admission.admitted.has(keyOfEnv(t.env)))
+    if (
+      t.instance === msg.instance &&
+      msg.admission.admitted.has(keyOfEnv(t.env))
+    )
       rep.acked.add(keyOfEnv(t.env));
   declare(w, rep);
   persist(w, rep);
@@ -2758,7 +3207,8 @@ function deliverWelcome(w: World, rep: Replica, index: number, crashAt?: number)
 
 /** Pins: the relay posts the current welcome and it is installed at once. */
 function learn(w: World, rep: Replica): void {
-  if (rep.installed && rep.instance === w.relay.instance && !rep.inbox.length) return;
+  if (rep.installed && rep.instance === w.relay.instance && !rep.inbox.length)
+    return;
   postWelcome(w, rep);
   deliverWelcome(w, rep, rep.inbox.length - 1);
 }
@@ -2815,8 +3265,10 @@ function replayOne(w: World, rep: Replica, crashAt?: number): void {
       if (selfCite(env, c)) continue;
       const pre = g.preCutMax[c.origin];
       const isPre = !!pre && compareHlc(c.hlc, pre) <= 0;
-      if (isPre && admits(st, ctx, op.path, c) && !st.covers(op.path, c)) count(w, 'reachF2a');
-      if (isPre && !admits(st, ctx, op.path, c) && st.covers(op.path, c)) count(w, 'reachF7');
+      if (isPre && admits(st, ctx, op.path, c) && !st.covers(op.path, c))
+        count(w, 'reachF2a');
+      if (isPre && !admits(st, ctx, op.path, c) && st.covers(op.path, c))
+        count(w, 'reachF7');
     }
   }
   const verdict = oracleDecide(oracleView(w, rep), env);
@@ -2829,7 +3281,10 @@ function replayOne(w: World, rep: Replica, crashAt?: number): void {
   }
   const authorized = !t.intent.bump || w.canBump(rep.id); // OPEN-5: a revoked bump is surfaced
   if ((!covered && !w.variant.noPrecheck) || !authorized) {
-    rep.unresolved.push({ entry: t, cause: authorized ? 'uncovered' : 'unauthorized' });
+    rep.unresolved.push({
+      entry: t,
+      cause: authorized ? 'uncovered' : 'unauthorized',
+    });
     if (stage(2)) return;
     classify(w, rep, t, 'conflicts');
     stage(4);
@@ -2838,7 +3293,12 @@ function replayOne(w: World, rep: Replica, crashAt?: number): void {
   engineCheck(w, rep, env, 'replay');
   wireCheck(w, env);
   // stage 2: outbox + wire
-  rep.tail.push({ intent: t.intent, instance: env.instance, version: env.version, env });
+  rep.tail.push({
+    intent: t.intent,
+    instance: env.instance,
+    version: env.version,
+    env,
+  });
   w.envs.set(gkey(env), env);
   w.envIntent.set(gkey(env), t.intent);
   w.replayed.add(gkey(env));
@@ -2869,7 +3329,12 @@ function resolve(w: World, rep: Replica, reauthor: boolean): void {
     return;
   }
   const bump = c.entry.intent.bump && w.canBump(rep.id);
-  if (author(w, rep.id, c.entry.intent.raws, { bump, reauthorOf: c.entry.intent.id }))
+  if (
+    author(w, rep.id, c.entry.intent.raws, {
+      bump,
+      reauthorOf: c.entry.intent.id,
+    })
+  )
     count(w, 'reauthored');
 }
 
@@ -2883,7 +3348,11 @@ function ledgerCheck(w: World, store: Store, label: string): void {
   const regs = store.checkpoint();
   const missing = lMissing(w.ledger, regs);
   if (missing.length)
-    fail(w, 'ledger', `${label}: ${missing.length} acked op(s) lost, ${missing[0]}`);
+    fail(
+      w,
+      'ledger',
+      `${label}: ${missing.length} acked op(s) lost, ${missing[0]}`,
+    );
   if (!w.variant.r7Ledger) {
     const hidden = lHiddenRecs(w.ledger, regs);
     count(w, 'hiddenJustified', hidden.filter((x) => x.justified).length);
@@ -2892,7 +3361,11 @@ function ledgerCheck(w: World, store: Store, label: string): void {
   }
   const live = lSuppress(w.ledger.marks, regs);
   if (live.length)
-    fail(w, 'ledger', `${label}: ${live.length} acked supersession(s) lost, ${live[0]}`);
+    fail(
+      w,
+      'ledger',
+      `${label}: ${live.length} acked supersession(s) lost, ${live[0]}`,
+    );
   const back = lSuppress(w.ledger.oldMarks, regs, (o) => o === 'G');
   for (const line of back) fail(w, 'T3-resurrect', `${label}: ${line}`);
   count(w, 'ledgerChecks');
@@ -2922,7 +3395,12 @@ function cut(
           hid = { path: r.path, dot: { origin: x.origin, hlc: x.hlc } };
     }
     if (hid) {
-      excessWater([w.relay.u, w.relay.c], hid.path, hid.dot.origin, hid.dot.hlc);
+      excessWater(
+        [w.relay.u, w.relay.c],
+        hid.path,
+        hid.dot.origin,
+        hid.dot.hlc,
+      );
       count(w, 'excessAtCut');
     }
   }
@@ -2945,7 +3423,10 @@ function cut(
     }
   }
   const pre = w.relay.c.checkpoint();
-  if (pcanon(materializeRegs(w.relay.u.checkpoint())) !== pcanon(materializeRegs(pre)))
+  if (
+    pcanon(materializeRegs(w.relay.u.checkpoint())) !==
+    pcanon(materializeRegs(pre))
+  )
     fail(w, 'compaction', `relay twins materialize differently at the cut`);
   const src = source ?? pre;
   const index = w.gens.length;
@@ -2957,7 +3438,8 @@ function cut(
     seed = mintedSeed(materializeRegs(src), instance, w.maxHlc);
   }
   if (keeps) {
-    for (const m of oStructural(src, seed)) fail(w, 'T1', `${instance} (${reason}): ${m}`);
+    for (const m of oStructural(src, seed))
+      fail(w, 'T1', `${instance} (${reason}): ${m}`);
     // reach: registers each D-a′ clause decides (kept multi-live; clear-only dropped though contained)
     const st = createRegisterStore();
     st.load(src);
@@ -2975,9 +3457,13 @@ function cut(
   const posCfg: FoldCfg = w.variant.ancestorMerge ? 'ancestor' : 'positional';
   const idxMode = keeps && oIndexMode(src);
   if (keeps) {
-    for (const mode of [w.variant.ancestorMerge ? 'ancestor' : 'policy', 'default'] as const) {
+    for (const mode of [
+      w.variant.ancestorMerge ? 'ancestor' : 'policy',
+      'default',
+    ] as const) {
       const v = oPositional(src, mode);
-      for (const m of v.violations) fail(w, 'positional-closure', `${instance} (${reason}): ${m}`);
+      for (const m of v.violations)
+        fail(w, 'positional-closure', `${instance} (${reason}): ${m}`);
       if (mode === 'default') continue;
       count(w, 'posArrayRegisters', v.arrays);
       count(w, 'posFolds', v.folds);
@@ -2986,7 +3472,9 @@ function cut(
     count(w, idxMode ? 'cutsIndexMode' : 'cutsUnitMode');
     if (
       !idxMode &&
-      src.some((r) => oLive(r).some((x) => x.kind === 'set' && Array.isArray(x.value)))
+      src.some((r) =>
+        oLive(r).some((x) => x.kind === 'set' && Array.isArray(x.value)),
+      )
     )
       count(w, 'cutsUnitArrays');
   }
@@ -3002,8 +3490,12 @@ function cut(
         keeps &&
         cfg === 'preserve' &&
         !!w.variant.dropMultiLive &&
-        pcanon(materializeRegs(reaperSeed(src, { ...w.variant, dropMultiLive: false }), cfg)) ===
-          before;
+        pcanon(
+          materializeRegs(
+            reaperSeed(src, { ...w.variant, dropMultiLive: false }),
+            cfg,
+          ),
+        ) === before;
       // r9: a departure under the positional fold is `T1-positional` (ASSERTED) when no register sits
       // below an array; with INDEX-mode registers (out of the domain: arrays are UNIT values) it is
       // the reported contrast `T1-index`. The no-policy default (also positional on arrays) stays
@@ -3024,7 +3516,9 @@ function cut(
       );
     }
   }
-  const seedDots = seed.flatMap((r) => r.siblings.map((s) => ({ origin: s.origin, hlc: s.hlc })));
+  const seedDots = seed.flatMap((r) =>
+    r.siblings.map((s) => ({ origin: s.origin, hlc: s.hlc })),
+  );
   const preCutMax: Record<string, Hlc> = { ...w.relay.everMax };
   for (const d of seedDots) raise(preCutMax, d.origin, d.hlc);
   const oPre = oPreCutMax([...w.held, ...seedDots]);
@@ -3086,11 +3580,16 @@ function cut(
   w.journal.push(entry);
   if (w.recovered) applyEntry(w.recovered, entry);
   ledgerCheck(w, w.relay.c, `after cut ${instance}`);
-  if (w.recovered) ledgerCheck(w, w.recovered.stores[0], `recovered, after cut ${instance}`);
+  if (w.recovered)
+    ledgerCheck(w, w.recovered.stores[0], `recovered, after cut ${instance}`);
   w.held.push(...seedDots);
   for (const r of seed)
     for (const s of r.siblings)
-      w.dots.push({ instance, path: r.path, dot: { origin: s.origin, hlc: s.hlc } });
+      w.dots.push({
+        instance,
+        path: r.path,
+        dot: { origin: s.origin, hlc: s.hlc },
+      });
   w.declared.clear(); // the relay resets every declaration (R16-5)
   for (const rep of w.replicas.values()) {
     rep.pressed = false; // a new generation starts with nobody pressed
@@ -3117,8 +3616,10 @@ const readyValue = (w: World, rep: Replica): boolean =>
     outstanding:
       !!w.variant.dishonestReady && rep.id === 'C'
         ? 0 // n39: declares ready with a tail
-        : rep.tail.filter((t) => !(t.instance === rep.instance && rep.acked.has(keyOfEnv(t.env))))
-            .length,
+        : rep.tail.filter(
+            (t) =>
+              !(t.instance === rep.instance && rep.acked.has(keyOfEnv(t.env))),
+          ).length,
   });
 /** Send the client's ready flag if it changed (synchronous message; a disconnected member has none). */
 function declare(w: World, rep: Replica): void {
@@ -3144,31 +3645,48 @@ function consensusCheck(w: World): Gen | null {
 
 // ─── observation (every step) ────────────────────────────────────────────────
 
-const OBSERVED_PATHS: readonly (readonly Key[])[] = [[], ...PATHS, ...ARRAY_PATHS];
+const OBSERVED_PATHS: readonly (readonly Key[])[] = [
+  [],
+  ...PATHS,
+  ...ARRAY_PATHS,
+];
 const stampOf = (fold: Fold): unknown =>
   [...PATHS, ...ARRAY_PATHS].map((path) =>
-    fold
-      .stamp([{ kind: 'set', path, next: 0 }])
-      .map((op) => ({ cites: op.cites, epoch: op.epoch, kind: op.kind, path: op.path })),
+    fold.stamp([{ kind: 'set', path, next: 0 }]).map((op) => ({
+      cites: op.cites,
+      epoch: op.epoch,
+      kind: op.kind,
+      path: op.path,
+    })),
   );
 
-/** All lone tombstones: a register whose only retained sibling is a delete and that keeps no mark. */
+/**
+ * All lone tombstones: a register whose only retained sibling is a tombstone — a `delete` or a
+ * `clear` — and that keeps no mark. A lone `clear` is what a dead branch leaves at every path it
+ * once held (Scotland: 11,096 of 12,395 registers); nothing but a cut reclaims it, so D11 counts it.
+ */
 const loneTombstones = (s: Store): RegisterCheckpoint[] =>
   s
     .checkpoint()
     .filter(
       (r) =>
-        r.siblings.length === 1 && r.siblings[0].kind === 'delete' && !Object.keys(r.water).length,
+        r.siblings.length === 1 &&
+        r.siblings[0].kind !== 'set' &&
+        !Object.keys(r.water).length,
     );
 /**
  * D11 counts DROPPABLE lone tombstones only, by the D-a′ keep rule the seed builder runs (no fold,
- * no materializer). For a lone tombstone (one live delete) the multi-live clause is vacuous and the
- * containment clause always applies, so the count equals the r4 count — stated, and pinned by Q5/F-3.
+ * no materializer). For a lone tombstone (one live delete or clear) the multi-live clause is
+ * vacuous; the containment clause applies to a delete, never to a clear (a clear masks nothing).
  */
 function droppableTombstonesScan(s: Store): number {
-  const all: LiveReg[] = s.checkpoint().map((r) => ({ path: r.path, live: s.siblings(r.path) }));
+  const all: LiveReg[] = s
+    .checkpoint()
+    .map((r) => ({ path: r.path, live: s.siblings(r.path) }));
   const keep = keepRule(all);
-  return loneTombstones(s).filter((t) => !keep({ path: t.path, live: s.siblings(t.path) })).length;
+  return loneTombstones(s).filter(
+    (t) => !keep({ path: t.path, live: s.siblings(t.path) }),
+  ).length;
 }
 /** S2: the real store's MAINTAINED count (P-4); the full scan above is its oracle (class `count`). */
 const droppableTombstones = (s: Store): number => s.droppableTombstones();
@@ -3204,8 +3722,16 @@ function observe(w: World): void {
       );
     // a refused envelope may sit in an outbox only between a crash and the next resend (D-b″)
     for (const t of r.tail)
-      if (!r.resendOwed && t.instance === relay.instance && w.refused.has(gkey(t.env)))
-        fail(w, 'D6-drop', `${r.id} still holds refused ${gkey(t.env)} in its outbox`);
+      if (
+        !r.resendOwed &&
+        t.instance === relay.instance &&
+        w.refused.has(gkey(t.env))
+      )
+        fail(
+          w,
+          'D6-drop',
+          `${r.id} still holds refused ${gkey(t.env)} in its outbox`,
+        );
     // R16-5: an honest client's declaration is its current ready value (every change was re-sent)
     if (r.connected && !(w.variant.dishonestReady && r.id === 'C')) {
       const d = w.declared.get(r.id);
@@ -3224,9 +3750,14 @@ function observe(w: World): void {
     const owed = w.owedTruth.get(r.id) as Map<string, number>;
     for (const k of r.admission.admitted) {
       const g = `${r.instance}:${k}`;
-      if (!w.refused.has(g) || owed.has(g) || relay.instance !== r.instance) continue;
+      if (!w.refused.has(g) || owed.has(g) || relay.instance !== r.instance)
+        continue;
       if (ownerOf(w, k.split('#')[0])?.id !== r.id) continue; // a third party's copy: the R16-3 finding
-      fail(w, 'D6-visible', `${r.id} still materializes its refused ${g} with no rehydration owed`);
+      fail(
+        w,
+        'D6-visible',
+        `${r.id} still materializes its refused ${g} with no rehydration owed`,
+      );
     }
   }
   // D3″: maxEpoch = seed baselines + retained epochs ∪ the generation's admitted ops, exactly
@@ -3235,11 +3766,16 @@ function observe(w: World): void {
     let expect = 0;
     for (const r of gen.seed) {
       if (pathKey(r.path) !== pathKey(path)) continue;
-      expect = Math.max(expect, r.epoch ?? 0, ...r.siblings.map((s) => s.epoch));
+      expect = Math.max(
+        expect,
+        r.epoch ?? 0,
+        ...r.siblings.map((s) => s.epoch),
+      );
     }
     for (const k of relay.admission.admitted) {
       for (const op of w.envs.get(`${relay.instance}:${k}`)?.ops ?? [])
-        if (pathKey(op.path) === pathKey(path)) expect = Math.max(expect, op.epoch ?? 0);
+        if (pathKey(op.path) === pathKey(path))
+          expect = Math.max(expect, op.epoch ?? 0);
     }
     const eu = relay.u.maxEpoch(path);
     if (eu !== relay.c.maxEpoch(path))
@@ -3255,7 +3791,9 @@ function observe(w: World): void {
   // a refused dot can still carry a supersession mark injected by an unverified fresh write, and that
   // mark's collection changes `covers` (F-10, inside the declared fresh-write non-coverage)
   const heldNow = new Set(
-    gen.seed.flatMap((r) => r.siblings.map((s) => `${s.origin}@${s.hlc.p}.${s.hlc.l}`)),
+    gen.seed.flatMap((r) =>
+      r.siblings.map((s) => `${s.origin}@${s.hlc.p}.${s.hlc.l}`),
+    ),
   );
   for (const k of relay.admission.admitted) {
     const e = w.envs.get(`${relay.instance}:${k}`);
@@ -3263,10 +3801,14 @@ function observe(w: World): void {
   }
   const current = w.dots.filter(
     (d) =>
-      d.instance === relay.instance && heldNow.has(`${d.dot.origin}@${d.dot.hlc.p}.${d.dot.hlc.l}`),
+      d.instance === relay.instance &&
+      heldNow.has(`${d.dot.origin}@${d.dot.hlc.p}.${d.dot.hlc.l}`),
   );
   for (const { path, dot } of current) {
-    if (admits(relay.u, relayCtx(relay), path, dot) !== admits(relay.c, relayCtx(relay), path, dot))
+    if (
+      admits(relay.u, relayCtx(relay), path, dot) !==
+      admits(relay.c, relayCtx(relay), path, dot)
+    )
       fail(
         w,
         'compaction',
@@ -3281,23 +3823,43 @@ function observe(w: World): void {
   if (rec) {
     const store = rec.stores[0];
     if (rec.instance !== relay.instance)
-      fail(w, 'recovery', `recovered instance ${rec.instance} vs ${relay.instance}`);
+      fail(
+        w,
+        'recovery',
+        `recovered instance ${rec.instance} vs ${relay.instance}`,
+      );
     if (pcanon(materializeRegs(store.checkpoint())) !== ju)
       fail(w, 'recovery', `joiner from recovered relay differs`);
     for (const path of OBSERVED_PATHS)
       if (store.maxEpoch(path) !== relay.u.maxEpoch(path))
         fail(w, 'recovery', `recovered maxEpoch(${path})`);
     for (const { path, dot } of current) {
-      if (admits(relay.u, relayCtx(relay), path, dot) !== admits(store, relayCtx(rec), path, dot))
-        fail(w, 'recovery', `recovered admission for ${dot.origin}@${dot.hlc.p} on ${path}`);
+      if (
+        admits(relay.u, relayCtx(relay), path, dot) !==
+        admits(store, relayCtx(rec), path, dot)
+      )
+        fail(
+          w,
+          'recovery',
+          `recovered admission for ${dot.origin}@${dot.hlc.p} on ${path}`,
+        );
     }
     if (extentCanon(rec.extent) !== extentCanon(relay.extent))
       fail(w, 'recovery', `recovered seed extent`);
-    if (JSON.stringify(rec.admission.first) !== JSON.stringify(relay.admission.first))
+    if (
+      JSON.stringify(rec.admission.first) !==
+      JSON.stringify(relay.admission.first)
+    )
       fail(w, 'recovery', `recovered exemption floors`);
-    if (JSON.stringify(rec.admission.settled) !== JSON.stringify(relay.admission.settled))
+    if (
+      JSON.stringify(rec.admission.settled) !==
+      JSON.stringify(relay.admission.settled)
+    )
       fail(w, 'recovery', `recovered settled vector`);
-    if ([...rec.admission.admitted].sort().join() !== [...relay.admission.admitted].sort().join())
+    if (
+      [...rec.admission.admitted].sort().join() !==
+      [...relay.admission.admitted].sort().join()
+    )
       fail(w, 'recovery', `recovered ranges`);
     if (receiptsCanon(rec.receipts) !== receiptsCanon(relay.receipts))
       fail(w, 'recovery', `recovered receipts`);
@@ -3313,14 +3875,19 @@ function observe(w: World): void {
 function owedCheck(w: World): void {
   for (const [id, owed] of w.owedTruth)
     for (const [g, q] of owed)
-      fail(w, 'D6-live', `${id} still owes the rehydration of refused ${g} (seq ${q})`);
+      fail(
+        w,
+        'D6-live',
+        `${id} still owes the rehydration of refused ${g} (seq ${q})`,
+      );
 }
 
 /** T3 at the end of a run: every intent is admitted once, a conflict, discarded — or still pending. */
 function finalClassification(w: World): void {
   const pending = new Set<string>();
   for (const r of w.replicas.values())
-    for (const t of [...r.tail, ...(r.rebase?.remaining ?? [])]) pending.add(t.intent.id);
+    for (const t of [...r.tail, ...(r.rebase?.remaining ?? [])])
+      pending.add(t.intent.id);
   for (const r of w.replicas.values()) {
     for (let i = 1; i <= r.intents; i++) {
       const id = `${r.id}:${i}`;
@@ -3332,7 +3899,8 @@ function finalClassification(w: World): void {
           'T3',
           `intent ${id} vanished: never admitted, conflicted or discarded, and not pending`,
         );
-      if (classes > 1 && o.admitted < 2) fail(w, 'T3', `intent ${id} ended in ${classes} classes`);
+      if (classes > 1 && o.admitted < 2)
+        fail(w, 'T3', `intent ${id} ended in ${classes} classes`);
     }
   }
 }
@@ -3346,7 +3914,9 @@ function relayCheckpoint(w: World): void {
     at: w.journal.length,
     registers: w.relay.c.checkpoint(),
     admission,
-    receipts: w.variant.checkpointNoReceipts ? new Map() : cloneReceipts(w.relay.receipts),
+    receipts: w.variant.checkpointNoReceipts
+      ? new Map()
+      : cloneReceipts(w.relay.receipts),
     instance: w.relay.instance,
     extent: w.variant.checkpointNoExtent ? new Map() : w.relay.extent,
     preCutMax: w.relay.preCutMax,
@@ -3420,23 +3990,36 @@ function enforceBudget(w: World, budget: number): void {
     const maintained = droppableTombstones(w.relay.c);
     const scan = droppableTombstonesScan(w.relay.c);
     if (maintained !== scan)
-      fail(w, 'count', `maintained droppable-tombstone count ${maintained} vs full scan ${scan}`);
+      fail(
+        w,
+        'count',
+        `maintained droppable-tombstone count ${maintained} vs full scan ${scan}`,
+      );
     return maintained;
   };
   if (!w.variant.noBudget && counted() > budget) {
     if ([...w.replicas.values()].some((x) => x.tail.length || x.rebase))
       count(w, 'budgetCutUnderLoad');
-    if ([...w.replicas.values()].some((x) => x.pressed)) count(w, 'budgetCutDuringCensus');
+    if ([...w.replicas.values()].some((x) => x.pressed))
+      count(w, 'budgetCutDuringCensus');
     cut(w, 'reaper', 'replay');
     count(w, 'budgetCuts');
   }
   if (counted() > budget)
-    fail(w, 'liveness', `counted tombstones ${counted()} > budget ${budget} after the cut`);
+    fail(
+      w,
+      'liveness',
+      `counted tombstones ${counted()} > budget ${budget} after the cut`,
+    );
 }
 
 // ─── the random driver ───────────────────────────────────────────────────────
 
-const CONTAINERS: readonly string[] = [pathKey(['b']), pathKey(['d']), pathKey(['d', 'e'])];
+const CONTAINERS: readonly string[] = [
+  pathKey(['b']),
+  pathKey(['d']),
+  pathKey(['d', 'e']),
+];
 
 /**
  * Classes that record an ACCEPTED residual — they never stop a run and are reported, not asserted:
@@ -3465,7 +4048,8 @@ function run(
   // residual sweep runs synthesizing ones. Each replica picks its own configuration.
   const w = createWorld(ids, variant, (writer) => writer !== 'C'); // C never had bump authority
   for (const rep of w.replicas.values()) {
-    rep.cfg = variant.cfg ?? pick(variant.residual ? RESIDUAL_CFGS : SELECTING_CFGS);
+    rep.cfg =
+      variant.cfg ?? pick(variant.residual ? RESIDUAL_CFGS : SELECTING_CFGS);
     rep.u = foldOf(rep.cfg, rep.id);
     rep.c = foldOf(rep.cfg, rep.id);
     rep.rk = foldOf(rep.cfg, rep.id);
@@ -3516,7 +4100,8 @@ function run(
     const k = pathKey(path);
     if (!CONTAINERS.includes(k) || rnd() < 0.6) return n;
     if (k === pathKey(['b'])) return rnd() < 0.5 ? {} : { c: n };
-    if (k === pathKey(['d'])) return rnd() < 0.4 ? {} : { e: rnd() < 0.5 ? {} : { f: n } };
+    if (k === pathKey(['d']))
+      return rnd() < 0.4 ? {} : { e: rnd() < 0.5 ? {} : { f: n } };
     return rnd() < 0.5 ? {} : { f: n };
   };
   const rawOp = (path: readonly Key[]): StoreOp => {
@@ -3538,7 +4123,8 @@ function run(
   const elemFor = (path: readonly Key[]): unknown => {
     const n = Math.floor(ra() * 100);
     if (path[0] === 'l') return n;
-    if (path[0] === 'm') return ra() < 0.5 ? { x: n } : { x: n, y: Math.floor(ra() * 100) };
+    if (path[0] === 'm')
+      return ra() < 0.5 ? { x: n } : { x: n, y: Math.floor(ra() * 100) };
     return [n, Math.floor(ra() * 100)];
   };
   /** A slot edited in place: a scalar, a record key set/added/removed, an inner array slot. */
@@ -3546,7 +4132,8 @@ function run(
     if (path[0] === 'm' && isObj(slot)) {
       const k = ra();
       const copy = { ...slot };
-      if (k < 0.3 && Object.keys(copy).length > 1) delete copy[pickA(Object.keys(copy))];
+      if (k < 0.3 && Object.keys(copy).length > 1)
+        delete copy[pickA(Object.keys(copy))];
       else copy[k < 0.65 ? 'x' : 'y'] = Math.floor(ra() * 100);
       return copy;
     }
@@ -3590,8 +4177,19 @@ function run(
               };
       } else if (path[0] === 'n' && Array.isArray(slot) && slot.length) {
         const j = Math.floor(ra() * slot.length);
-        raw = { kind: 'set', path: [...path, i, j], next: Math.floor(ra() * 100), prev: slot[j] };
-      } else raw = { kind: 'set', path: [...path, i], next: editSlot(path, slot), prev: slot };
+        raw = {
+          kind: 'set',
+          path: [...path, i, j],
+          next: Math.floor(ra() * 100),
+          prev: slot[j],
+        };
+      } else
+        raw = {
+          kind: 'set',
+          path: [...path, i],
+          next: editSlot(path, slot),
+          prev: slot,
+        };
       count(w, 'arrayIndexOps');
     } else if (Array.isArray(cur) && k < 0.88) {
       const next = cur.slice();
@@ -3616,7 +4214,12 @@ function run(
       raw = { kind: 'set', path, next, prev: cur };
     } else if (!Array.isArray(cur) && k < 0.88) {
       const len = 2 + Math.floor(ra() * 2);
-      raw = { kind: 'set', path, next: Array.from({ length: len }, () => elemFor(path)), ...prev };
+      raw = {
+        kind: 'set',
+        path,
+        next: Array.from({ length: len }, () => elemFor(path)),
+        ...prev,
+      };
     } else if (k < 0.96) raw = { kind: 'delete', path, prev: undefined };
     else raw = { kind: 'clear', path };
     if (author(w, id, raw)) count(w, 'arrayWrites');
@@ -3635,7 +4238,9 @@ function run(
     if (!catchUp(R0(x))) return;
     const was = at(x);
     if (was.found && !wireable(was.value)) return;
-    const base = Array.from({ length: 2 + Math.floor(ra() * 3) }, () => elemFor(path));
+    const base = Array.from({ length: 2 + Math.floor(ra() * 3) }, () =>
+      elemFor(path),
+    );
     const b = commit(R0(x), {
       kind: 'set',
       path,
@@ -3643,7 +4248,8 @@ function run(
       ...(was.found ? { prev: was.value } : {}),
     });
     if (!b) return;
-    for (const id of [y, z]) if (!catchUp(R0(id)) || toReplica(w, b.env, R0(id)) !== 'ok') return;
+    for (const id of [y, z])
+      if (!catchUp(R0(id)) || toReplica(w, b.env, R0(id)) !== 'ok') return;
     for (const id of [y, z]) {
       const cur = at(id).value;
       if (!Array.isArray(cur) || !wireable(cur)) return;
@@ -3670,12 +4276,16 @@ function run(
     const Y = R0(y);
     while (Y.inbox.length) deliverWelcome(w, Y, 0); // y installs the minted root BEFORE the delete
     if (Y.instance !== w.relay.instance) return;
-    if (!commit(R0(x), { kind: 'delete', path: ['d', 'e'], prev: undefined })) return;
+    if (!commit(R0(x), { kind: 'delete', path: ['d', 'e'], prev: undefined }))
+      return;
     const before = droppableTombstonesScan(w.relay.c);
     const t = author(w, y, { kind: 'set', path: ['d'], next: { e: 1 } }); // y never saw the delete
     if (!t || toRelay(w, t.env) !== 'admitted') return;
-    const stillLive = w.relay.c.siblings(['d', 'e']).some((s) => s.kind === 'delete');
-    if (stillLive && droppableTombstonesScan(w.relay.c) < before) count(w, 'reachN8');
+    const stillLive = w.relay.c
+      .siblings(['d', 'e'])
+      .some((s) => s.kind === 'delete');
+    if (stillLive && droppableTombstonesScan(w.relay.c) < before)
+      count(w, 'reachN8');
     count(w, 'scenarioN8');
   };
 
@@ -3701,18 +4311,27 @@ function run(
         // D-e: a multi-op envelope (unrelated paths: a nested pair would stamp a duplicate path,
         // which the wire rejects as `dup-path` — a real diff never emits both) under ONE bump flag
         const p2 = pick(
-          PATHS.filter((p) => pathKey(p) !== pathKey(p1) && !isPrefix(p, p1) && !isPrefix(p1, p)),
+          PATHS.filter(
+            (p) =>
+              pathKey(p) !== pathKey(p1) &&
+              !isPrefix(p, p1) &&
+              !isPrefix(p1, p),
+          ),
         );
         raws.push(rawOp(p2));
       }
       const lower =
         rnd() < 0.25
-          ? (op: SyncOp): SyncOp => ({ ...op, epoch: Math.floor(rnd() * ((op.epoch ?? 0) + 1)) })
+          ? (op: SyncOp): SyncOp => ({
+              ...op,
+              epoch: Math.floor(rnd() * ((op.epoch ?? 0) + 1)),
+            })
           : undefined;
       author(w, id, raws, { bump: id !== 'C' && rnd() < 0.15, lower });
     } else if (r < 0.22) {
       const path = pick(PATHS);
-      const stale = ghostVersion > ghostEntry && ghostStale < ghostEntry - 1 && rnd() < 0.3;
+      const stale =
+        ghostVersion > ghostEntry && ghostStale < ghostEntry - 1 && rnd() < 0.3;
       w.clock += 1;
       const v = stale ? ++ghostStale : ++ghostVersion;
       const hlc = stale ? { p: 1 + ghostStale, l: 0 } : { p: w.clock, l: 0 };
@@ -3728,18 +4347,25 @@ function run(
       };
       w.envs.set(gkey(env), env);
       (w.authored.get(GHOST) as OpEnvelope[]).push(env);
-      w.dots.push({ instance: env.instance, path, dot: { origin: GHOST, hlc } });
+      w.dots.push({
+        instance: env.instance,
+        path,
+        dot: { origin: GHOST, hlc },
+      });
     } else if (r < 0.44) {
       const from = pick([...w.authored.keys()]);
       const owner = w.owner.get(from);
-      const targets: (Replica | 'relay')[] = reps().filter((x) => x.id !== owner);
+      const targets: (Replica | 'relay')[] = reps().filter(
+        (x) => x.id !== owner,
+      );
       targets.push('relay');
       const to = pick(targets);
       const key = `${from}>${to === 'relay' ? 'relay' : to.id}`;
       const i = cursor.get(key) ?? 0;
       const queue = w.authored.get(from) as OpEnvelope[];
       if (i < queue.length) {
-        const res = to === 'relay' ? toRelay(w, queue[i]) : toReplica(w, queue[i], to);
+        const res =
+          to === 'relay' ? toRelay(w, queue[i]) : toReplica(w, queue[i], to);
         if (res !== 'future') cursor.set(key, i + 1);
       }
       if (rnd() < 0.2 && i > 0) {
@@ -3772,15 +4398,21 @@ function run(
       const to = pick<Replica | 'relay'>([...reps(), 'relay']);
       if (to === 'relay') {
         const eager: Record<string, Hlc> = {};
-        for (const o of [...w.authored.keys(), ...w.gens.map((g) => g.instance)])
+        for (const o of [
+          ...w.authored.keys(),
+          ...w.gens.map((g) => g.instance),
+        ])
           eager[o] = w.maxHlc;
-        w.relay.c.settle(variant.eagerSettle ? eager : w.relay.admission.settled);
+        w.relay.c.settle(
+          variant.eagerSettle ? eager : w.relay.admission.settled,
+        );
         if (variant.eagerSettle)
           for (const x of reps()) {
             x.c.settle(eager); // eager on every C twin
             x.cov.settle(eager);
           }
-        if (w.recovered && rnd() < 0.5) w.recovered.stores[0].settle(w.recovered.admission.settled);
+        if (w.recovered && rnd() < 0.5)
+          w.recovered.stores[0].settle(w.recovered.admission.settled);
       } else {
         to.c.settle(to.admission.settled);
         to.cov.settle(to.admission.settled);
@@ -3796,7 +4428,9 @@ function run(
       const rep = pick(reps());
       const k = rnd();
       const open = rep.tail.filter(
-        (t) => t.instance === w.relay.instance && !w.relay.admission.admitted.has(keyOfEnv(t.env)),
+        (t) =>
+          t.instance === w.relay.instance &&
+          !w.relay.admission.admitted.has(keyOfEnv(t.env)),
       );
       if (open.length && k < 0.25) {
         const ans = toRelay(w, open[0].env);
@@ -3804,9 +4438,15 @@ function run(
           count(w, 'crashAfterRefusal');
           reload(w, rep);
         }
-      } else if (rep.rebase && k < 0.4) replayStep(w, rep, 1 + Math.floor(rnd() * 4));
+      } else if (rep.rebase && k < 0.4)
+        replayStep(w, rep, 1 + Math.floor(rnd() * 4));
       else if (rep.inbox.length && k < 0.7)
-        deliverWelcome(w, rep, Math.floor(rnd() * rep.inbox.length), 1 + Math.floor(rnd() * 3));
+        deliverWelcome(
+          w,
+          rep,
+          Math.floor(rnd() * rep.inbox.length),
+          1 + Math.floor(rnd() * 3),
+        );
       else reload(w, rep);
       if (rnd() < 0.3) reloadRelayStores(w);
     } else if (r < 0.85) {
@@ -3860,7 +4500,11 @@ function run(
       // at a non-carrying epoch 0; a cut keeps only the newer sibling and the baseline
       const o = pick(['A', 'B']);
       const p = pick(PATHS) as Key[];
-      const a = commit(R0(o), { kind: 'set', path: p, next: 'bump' }, { bump: true });
+      const a = commit(
+        R0(o),
+        { kind: 'set', path: p, next: 'bump' },
+        { bump: true },
+      );
       if (
         a &&
         catchUp(R0('C')) &&
@@ -3928,7 +4572,12 @@ function run(
       const o = pick(['A', 'B']);
       const p = pick(PATHS) as Key[];
       if (catchUp(R0(o)) && catchUp(R0('C'))) {
-        const a = author(w, o, { kind: 'set', path: p, next: 'bump' }, { bump: true });
+        const a = author(
+          w,
+          o,
+          { kind: 'set', path: p, next: 'bump' },
+          { bump: true },
+        );
         const c =
           a &&
           toReplica(w, a.env, R0('C')) === 'ok' &&
@@ -3957,16 +4606,20 @@ function run(
   // nothing reaches everyone; in round 0 it OVERTAKES the queued welcomes (astra's race: a rehydrate
   // older than traffic is rejected), afterwards one relay socket orders them (FIFO: queued welcomes first)
   const traffic = (): void => {
-    const free = reps().filter((x) => !(w.owedTruth.get(x.id) as Map<string, number>).size);
+    const free = reps().filter(
+      (x) => !(w.owedTruth.get(x.id) as Map<string, number>).size,
+    );
     const t = free.length
       ? commit(pick(free), { kind: 'set', path: pick(PATHS), next: 'drain' })
       : null;
     if (t)
-      for (const rep of reps()) if (w.owner.get(t.env.origin) !== rep.id) toReplica(w, t.env, rep);
+      for (const rep of reps())
+        if (w.owner.get(t.env.origin) !== rep.id) toReplica(w, t.env, rep);
   };
   for (let round = 0; round < 4; round++) {
     if (round === 0) traffic();
-    for (const rep of reps()) while (rep.inbox.length) deliverWelcome(w, rep, 0);
+    for (const rep of reps())
+      while (rep.inbox.length) deliverWelcome(w, rep, 0);
     if (round > 0) traffic();
     for (const rep of reps()) persist(w, rep);
     observe(w);
@@ -3974,7 +4627,8 @@ function run(
   for (const rep of reps()) while (rep.inbox.length) deliverWelcome(w, rep, 0);
   owedCheck(w);
   finalClassification(w);
-  for (const [cls, msg] of w.violations) w.violations.set(cls, `seed ${seed} end: ${msg}`);
+  for (const [cls, msg] of w.violations)
+    w.violations.set(cls, `seed ${seed} end: ${msg}`);
   return w;
 }
 
@@ -4017,7 +4671,8 @@ function sweep(
       s.failing.set(cls, (s.failing.get(cls) ?? 0) + 1);
     }
     for (const [k, v] of Object.entries(w.n)) s.n[k] = (s.n[k] ?? 0) + v;
-    for (const k of REACH) if (w.n[k]) s.n[`seeds:${k}`] = (s.n[`seeds:${k}`] ?? 0) + 1;
+    for (const k of REACH)
+      if (w.n[k]) s.n[`seeds:${k}`] = (s.n[`seeds:${k}`] ?? 0) + 1;
   }
   s.ms = Date.now() - t0;
   sweeps.set(name, s);
@@ -4028,11 +4683,15 @@ const SEEDS = 600;
 const STEPS = 100;
 
 const clean = (s: Sweep, ...classes: string[]): void => {
-  for (const c of classes) expect(s.first.get(c), `${c} violated`).toBeUndefined();
+  for (const c of classes)
+    expect(s.first.get(c), `${c} violated`).toBeUndefined();
 };
 /** A neuter must be OBSERVABLE: the named property fails on at least one seed. */
 const observed = (s: Sweep, cls: string): string => {
-  expect(s.failing.get(cls) ?? 0, `${cls} never failed under the neuter`).toBeGreaterThan(0);
+  expect(
+    s.failing.get(cls) ?? 0,
+    `${cls} never failed under the neuter`,
+  ).toBeGreaterThan(0);
   return s.first.get(cls) as string;
 };
 const neuterLog: Record<string, string> = {};
@@ -4084,7 +4743,9 @@ describe('generation cut: properties (r9: positional arrays in the T1 domain, th
     // scope: the seed vs its source at every reaper/consensus cut; migration/rollback = supplied value,
     // default-fold differential only. Synthesizing folds are the declared residual (next property).
     clean(s(), 'T1', 'T1-diff');
-    expect(N(s(), 'cut:reaper') + N(s(), 'cut:consensus')).toBeGreaterThan(1000);
+    expect(N(s(), 'cut:reaper') + N(s(), 'cut:consensus')).toBeGreaterThan(
+      1000,
+    );
   }, 300_000);
   it('T1-POSITIONAL (r9, charter §19 R19-3 — PROVEN): the REAL positional fold is PATH-CLOSED (L1: every key/index of its output is held by a live sibling value) and never covers a tombstone D-a′ drops (L2); materialization under it is identical before/after every reaper/consensus cut (asserted, unit-mode arrays); INDEX-mode registers below arrays are the reported contrast', () => {
     // scope: array-valued registers written as units (studio's `arrays: 'unit'`) with `prev` as the
@@ -4122,7 +4783,15 @@ describe('generation cut: properties (r9: positional arrays in the T1 domain, th
     expect(N(s(), 'seeds:reachF4')).toBeGreaterThanOrEqual(20);
   }, 300_000);
   it('T2c fence + D-d welcomes (§14): no other-generation ingest; stale and older-than-traffic welcomes ignored; welcome content = the cut record; every envelope wire-valid; replicas equal their generation op set', () => {
-    clean(s(), 'T2c', 'converge', 'welcome', 'welcome-order', 'peer-retain', 'wire');
+    clean(
+      s(),
+      'T2c',
+      'converge',
+      'welcome',
+      'welcome-order',
+      'peer-retain',
+      'wire',
+    );
     expect(N(s(), 'echoDeduplicated')).toBeGreaterThan(100); // R16-3: deduplicated echoes advance seq
     expect(N(s(), 'peerReingested')).toBeGreaterThan(20); // and peer copies survive snapshot installs
     expect(N(s(), 'welcomeOlderThanTraffic')).toBeGreaterThan(5);
@@ -4147,12 +4816,17 @@ describe('generation cut: properties (r9: positional arrays in the T1 domain, th
     expect(N(s(), 'gate:reauthor')).toBeGreaterThan(50);
     expect(N(s(), 'gate:replay')).toBeGreaterThan(1000);
     expect(N(s(), 'peerCopies')).toBeGreaterThan(1000); // replicas still FOLD peer copies, never cite them
-    // the accepted F-11 residual needs a LOST refusal reply, which the ruled driver never loses
-    // (`ignoreDrop` is a variant): empty here, carried by its pin
-    clean(s(), 'D6-residual');
+    // the accepted F-11 residual (RULED 2026-11-07; REPORTED, never asserted — see FINDINGS) has two
+    // routes: a LOST refusal reply, which the ruled driver never loses (`ignoreDrop` is a variant;
+    // carried by its pin), and the ghost's stale-stamped hole filler admitted after a cut (an A1
+    // violator: one origin's stamps ran backwards), which the base sweep reaches once budget cuts
+    // are frequent (D11 counts lone clears, 2026-11-08). Either way the author lands a Conflict.
+    expect(N(s(), 'freshRefusedResidual')).toBe(
+      s().failing.get('D6-residual') ?? 0,
+    );
     expect(N(s(), 'reauthorAdmitted')).toBeGreaterThan(20);
     neuterLog['D6-fresh (base, 600 seeds)'] =
-      `${s().failing.get('D6-fresh') ?? 0} seeds; relay refusals of any kind ${N(s(), 'relayRefusals')}; peerRefusedRetained ${N(s(), 'peerRefusedRetained')} (R17-2 out-of-production residual, reported)`;
+      `${s().failing.get('D6-fresh') ?? 0} seeds; D6-residual (F-11 ghost route, reported) ${s().failing.get('D6-residual') ?? 0} seeds / ${N(s(), 'freshRefusedResidual')} refusals; relay refusals of any kind ${N(s(), 'relayRefusals')}; peerRefusedRetained ${N(s(), 'peerRefusedRetained')} (R17-2 out-of-production residual, reported)`;
   }, 300_000);
   it('T3: verifier-owned ledger of acknowledged EFFECTS (live, before/after every cut, every recovery); never twice at the relay; one application invocation per intent per fold lifetime; never lost across crash points and reboots', () => {
     clean(
@@ -4188,7 +4862,12 @@ describe('generation cut: properties (r9: positional arrays in the T1 domain, th
     clean(s(), 'compaction');
   }, 300_000);
   it('r9 REPLICA VARIANTS (charter §24): the base runs the NO-PERSIST replica (no registers, no seq knowledge; a restart re-applies its pending writes, asks for a snapshot without seq and resends its outbox first); the OLD persisting replica, 600 seeds, keeps every asserted class empty too; `T3-recrash` (R26-1, r9.1) asserted in both', () => {
-    const p = sweep('persisting replica', { persistRegisters: true }, SEEDS, STEPS);
+    const p = sweep(
+      'persisting replica',
+      { persistRegisters: true },
+      SEEDS,
+      STEPS,
+    );
     clean(s(), ...ALL);
     clean(p, ...ALL);
     expect(N(s(), 'restartsNoRegisters')).toBeGreaterThan(1000);
@@ -4208,8 +4887,17 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
   // rides the ADVERSARIAL channel `citePeer` (n42); alone each is 0/600 — stated in the log
   const teeth: [string, Variant, string, ((c: string) => boolean)?][] = [
     ['n2 no receipts', { noReceipts: true }, 'T3-double', look('T3-double')],
-    ['n3′ relay keeps its whole baseline table', { carryBaselines: true }, 'T2b'],
-    ['n4 relay-only fence', { noReplicaFence: true }, 'converge', look('converge')],
+    [
+      'n3′ relay keeps its whole baseline table',
+      { carryBaselines: true },
+      'T2b',
+    ],
+    [
+      'n4 relay-only fence',
+      { noReplicaFence: true },
+      'converge',
+      look('converge'),
+    ],
     ['n5′ seed keeps covered siblings', { keepCovered: true }, 'T1'],
     [
       'n6′ seed drops set-free registers over a live descendant (the seed departs from D-a′; the semantic cost is citability, pinned F-6)',
@@ -4225,14 +4913,26 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
     ['n9 no pre-check', { noPrecheck: true }, 'D6-engine', () => false],
     ['n10 D9 off', { authorDuringRebase: true }, 'T3-order', look('T3-order')],
     ['n11′ unfloored exemption', { unflooredExempt: true }, 'T2a', look('T2a')],
-    ['n12 drop effect-bearing tombstones (r2 literal D4′)', { dropEffectTombstones: true }, 'T1'],
-    ['n12′ r3 WINNER-BASED keep rule (killed by D-a)', { materializerKeep: true }, 'T1'],
+    [
+      'n12 drop effect-bearing tombstones (r2 literal D4′)',
+      { dropEffectTombstones: true },
+      'T1',
+    ],
+    [
+      'n12′ r3 WINNER-BASED keep rule (killed by D-a)',
+      { materializerKeep: true },
+      'T1',
+    ],
     [
       'n13a checkpoint without the frozen extent (relay crash makes it authoritative)',
       { checkpointNoExtent: true },
       'recovery',
     ],
-    ['n13b checkpoint without the exemption floors', { checkpointNoFloors: true }, 'recovery'],
+    [
+      'n13b checkpoint without the exemption floors',
+      { checkpointNoFloors: true },
+      'recovery',
+    ],
     ['n14 no frozen extent', { noExtent: true }, 'T2a-gc', look('T2a-gc')],
     ['n16 seed without baselines', { noSeedBaselines: true }, 'T1'],
     [
@@ -4241,14 +4941,24 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
       'crash',
       look('crash'),
     ],
-    ['n19 replay persisted in stages', { nonAtomicReplay: true }, 'T3', look('T3')],
+    [
+      'n19 replay persisted in stages',
+      { nonAtomicReplay: true },
+      'T3',
+      look('T3'),
+    ],
     [
       'n20 eager collection at the relay, across generations',
       { eagerSettle: true },
       'compaction',
       look('compaction'),
     ],
-    ['n21 stale welcomes installed', { acceptStale: true }, 'crash', look('crash')],
+    [
+      'n21 stale welcomes installed',
+      { acceptStale: true },
+      'crash',
+      look('crash'),
+    ],
     // n22 (a reload forgets client floors) is PINNED: it needs an own bumped sibling superseded by a
     // non-carrying write and collected on the C twin before a reload — 0/600 at random
     // refused holes replay only if the refusal reply is lost (refusals land in Conflict otherwise)
@@ -4399,19 +5109,31 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
           ? 600
           : T;
       const x = sweep(label, variant, seeds, STEPS, stopOn);
-      neuterLog[label] = `${x.failing.get(cls) ?? 0}/${seeds}: ${observed(x, cls)}`;
+      neuterLog[label] =
+        `${x.failing.get(cls) ?? 0}/${seeds}: ${observed(x, cls)}`;
     }, 120_000);
   }
   it('n9: the ruled relay tripwire catches EVERY uncovered replayed cite (per cite)', () => {
-    const x = sweep('n9 no pre-check', { noPrecheck: true }, T, STEPS, () => false);
+    const x = sweep(
+      'n9 no pre-check',
+      { noPrecheck: true },
+      T,
+      STEPS,
+      () => false,
+    );
     expect(N(x, 'tripwireCaught')).toBeGreaterThan(0);
     expect(N(x, 'tripwireMiss')).toBe(0);
     expect(x.failing.get('tripwire') ?? 0).toBe(0);
-    neuterLog['n9 tripwire'] = `caught ${N(x, 'tripwireCaught')} missed ${N(x, 'tripwireMiss')}`;
+    neuterLog['n9 tripwire'] =
+      `caught ${N(x, 'tripwireCaught')} missed ${N(x, 'tripwireMiss')}`;
   }, 120_000);
   it("n39 (R16-5): a DISHONEST ready (C declares ready with a tail) ⇒ consensus cuts fire anyway, C's tail replays under D5′ and its conflicts are COUNTED; convergence, T1, T2, T3 and every other class stay intact", () => {
-    const x = sweep('n39 dishonest ready', { dishonestReady: true }, 300, STEPS, (c) =>
-      c !== 'consensus' ? !FINDINGS.has(c) : false,
+    const x = sweep(
+      'n39 dishonest ready',
+      { dishonestReady: true },
+      300,
+      STEPS,
+      (c) => (c !== 'consensus' ? !FINDINGS.has(c) : false),
     );
     clean(x, ...ALL.filter((c) => c !== 'consensus'));
     neuterLog['n39 dishonest ready'] =
@@ -4419,14 +5141,20 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
     expect(N(x, 'censusLeaked')).toBeGreaterThan(0);
   }, 120_000);
   it('n42 (R17-1): fresh writes cite PEER-HELD dots (r6 stamping) ⇒ D6-fresh fails at random; every such refusal is REPLIED, lands in Conflict and is rehydrated (also across crashes); convergence, T1, T2, T3 and every other class stay intact — the adversarial channel degrades to conflicts, never divergence', () => {
-    const x = sweep('n42 cite peer-held dots', { citePeer: true }, SEEDS, STEPS, (c) =>
-      PEER_CHANNEL.includes(c) ? false : !FINDINGS.has(c),
+    const x = sweep(
+      'n42 cite peer-held dots',
+      { citePeer: true },
+      SEEDS,
+      STEPS,
+      (c) => (PEER_CHANNEL.includes(c) ? false : !FINDINGS.has(c)),
     );
     clean(x, ...ALL.filter((c) => !PEER_CHANNEL.includes(c)));
-    clean(x, 'D6-residual');
+    // D6-residual is REPORTED (FINDINGS): the ghost route reaches it here as in base
     observed(x, 'stamp-discipline');
     // the refusal machinery (D-b, D-b″, R16-2) at random lives here since R17-1 (r6 asserted it in base)
-    expect(N(x, 'refusalConflicts')).toBe(N(x, 'refusalReplies') - N(x, 'refusalDuplicates'));
+    expect(N(x, 'refusalConflicts')).toBe(
+      N(x, 'refusalReplies') - N(x, 'refusalDuplicates'),
+    );
     expect(N(x, 'seeds:refusalConflicts')).toBeGreaterThan(50);
     expect(N(x, 'seeds:crashAfterRefusal')).toBeGreaterThan(20); // D-b″ crash point reached
     expect(N(x, 'seeds:refusalRelearned')).toBeGreaterThan(20); // and the refusal re-learned on resend
@@ -4452,11 +5180,17 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
     let dropped = 0;
     const failing: Record<string, number> = {};
     for (let seed = 0; seed < T; seed++) {
-      const w = run(seed, STEPS, { excessWatermarkAtCut: true, r7Ledger: true });
+      const w = run(seed, STEPS, {
+        excessWatermarkAtCut: true,
+        r7Ledger: true,
+      });
       for (const c of w.violations.keys()) failing[c] = (failing[c] ?? 0) + 1;
       if (!w.n['excessDropped']) continue;
       dropped += 1;
-      if (!w.n['excessKept'] && ![...w.violations.keys()].some((c) => !FINDINGS.has(c)))
+      if (
+        !w.n['excessKept'] &&
+        ![...w.violations.keys()].some((c) => !FINDINGS.has(c))
+      )
         silent += 1;
     }
     expect(failing['ledger-discharge'] ?? 0).toBe(0); // R19-1 off: never named as a discharge
@@ -4493,34 +5227,59 @@ describe('generation cut: teeth (each neuter observable at random)', () => {
   it('n44 (r9): under a non-path-closed array merge L1 fails at random (600 seeds, never stopping); the materialization departure it enables needs a dropped index-mode delete inside the invented key — PINNED (oracle unit test "n44 shape"), reported here', () => {
     // reason: a T1 departure needs two live array sets whose `prev` holds a key at a slot neither
     // value holds AND a lone index-mode delete exactly there — L1 alone is the random tooth
-    const x = sweep('n44 full', { ancestorMerge: true }, 600, STEPS, () => false);
+    const x = sweep(
+      'n44 full',
+      { ancestorMerge: true },
+      600,
+      STEPS,
+      () => false,
+    );
     observed(x, 'positional-closure');
     neuterLog['n44 full'] =
       `positional-closure ${x.failing.get('positional-closure') ?? 0}/600, T1-positional ${x.failing.get('T1-positional') ?? 0}/600 (${x.first.get('T1-positional') ?? '-'}), T1-index ${x.failing.get('T1-index') ?? 0}/600 (${x.first.get('T1-index') ?? '-'})`;
   }, 300_000);
   it('n17 (demonstration, not a D11 violation): the OLD metric — every lone tombstone counted — storms', () => {
     const x = sweep('n17', { countAllLone: true }, T, STEPS, look('liveness'));
-    neuterLog['n17'] = `${x.failing.get('liveness') ?? 0}/${T}: ${observed(x, 'liveness')}`;
+    neuterLog['n17'] =
+      `${x.failing.get('liveness') ?? 0}/${T}: ${observed(x, 'liveness')}`;
   }, 120_000);
   it('report', { timeout: 300_000 }, () => {
     const before = sweep('r4-no-scenarios', { noScenarios: true }, 200, STEPS);
     neuterLog['reach-without-scenarios'] =
       `F-2a ${N(before, 'seeds:reachF2a')} F-4 ${N(before, 'seeds:reachF4')} F-7 ${N(before, 'seeds:reachF7')} refusals ${N(before, 'seeds:refusalConflicts')} (of 200 seeds)`;
     const counts = Object.fromEntries(
-      [...sweeps].map(([k, v]) => [k, { ms: v.ms, failing: Object.fromEntries(v.failing) }]),
+      [...sweeps].map(([k, v]) => [
+        k,
+        { ms: v.ms, failing: Object.fromEntries(v.failing) },
+      ]),
     );
     console.log(
-      JSON.stringify({ neuters: neuterLog, sweeps: counts, base: sweeps.get('base')?.n }, null, 1),
+      JSON.stringify(
+        { neuters: neuterLog, sweeps: counts, base: sweeps.get('base')?.n },
+        null,
+        1,
+      ),
     );
   });
 });
 
 // ─── pinned schedules (never retired; every r1–r3 pin kept, re-expressed where the premise changed) ─
 
-const W = (variant: Variant = {}, canBump?: (writer: string) => boolean, rootless = false): World =>
-  createWorld(['A', 'B', 'C'], variant, canBump, rootless);
-const setOp = (path: Key[], next: unknown): StoreOp => ({ kind: 'set', path, next });
-const delOp = (path: Key[]): StoreOp => ({ kind: 'delete', path, prev: undefined });
+const W = (
+  variant: Variant = {},
+  canBump?: (writer: string) => boolean,
+  rootless = false,
+): World => createWorld(['A', 'B', 'C'], variant, canBump, rootless);
+const setOp = (path: Key[], next: unknown): StoreOp => ({
+  kind: 'set',
+  path,
+  next,
+});
+const delOp = (path: Key[]): StoreOp => ({
+  kind: 'delete',
+  path,
+  prev: undefined,
+});
 const clearOp = (path: Key[]): StoreOp => ({ kind: 'clear', path });
 const R = (w: World, id: string): Replica => w.replicas.get(id) as Replica;
 const sync = (w: World): void => {
@@ -4529,7 +5288,8 @@ const sync = (w: World): void => {
 const replayAll = (w: World, id: string): void => {
   while (R(w, id).rebase && R(w, id).installed) replayStep(w, R(w, id));
 };
-const lastTail = (w: World, id: string): TailEntry => R(w, id).tail[R(w, id).tail.length - 1];
+const lastTail = (w: World, id: string): TailEntry =>
+  R(w, id).tail[R(w, id).tail.length - 1];
 const relayValue = (w: World, path: Key[], cfg: FoldCfg = 'default'): unknown =>
   lookup(materializeRegs(w.relay.c.checkpoint(), cfg), path).value;
 const okWorld = (w: World): void => {
@@ -4580,7 +5340,8 @@ const outcome = (w: World, id: string): Outcome => {
 describe('generation cut: pinned — authority and replay (Q1–Q4, F-4)', () => {
   it('Q1: astra epoch carry AGREES with U (retained epoch 5); Miha epoch schedule still splits U and C (clear-only register dropped with its baseline)', () => {
     const a = W({}, owner);
-    for (let i = 0; i < 5; i++) copyTo(a, committed(a, 'A', setOp(['x'], i), { bump: true }), 'B');
+    for (let i = 0; i < 5; i++)
+      copyTo(a, committed(a, 'A', setOp(['x'], i), { bump: true }), 'B');
     cut(a, 'reaper', 'replay');
     expect(a.relay.c.maxEpoch(['x'])).toBe(5);
     const carry = author(a, 'B', setOp(['x'], 'b')) as TailEntry;
@@ -4614,7 +5375,9 @@ describe('generation cut: pinned — authority and replay (Q1–Q4, F-4)', () =>
       ops: [{ kind: 'set', path: ['x'], next: 1, cites: [], epoch: 5 }],
     };
     expect(toRelay(u, raw)).toBe('admitted');
-    expect(toRelay(c, { ...raw, instance: c.relay.instance })).toBe('epoch-bump'); // the old U≡C theorem fails
+    expect(toRelay(c, { ...raw, instance: c.relay.instance })).toBe(
+      'epoch-bump',
+    ); // the old U≡C theorem fails
     learn(c, R(c, 'C'));
     replayAll(c, 'C');
     expect(R(c, 'C').unresolved.map((x) => x.cause)).toEqual(['uncovered']);
@@ -4661,18 +5424,24 @@ describe('generation cut: pinned — authority and replay (Q1–Q4, F-4)', () =>
       return w;
     };
     const ok = schedule({}, 'set');
-    expect(outcome(ok, 'A:1')).toEqual({ admitted: 1, conflicts: 0, discarded: 0, trimmed: 1 });
+    expect(outcome(ok, 'A:1')).toEqual({
+      admitted: 1,
+      conflicts: 0,
+      discarded: 0,
+      trimmed: 1,
+    });
     expect(Object.fromEntries(ok.violations)).toEqual({});
-    expect(schedule({ noReceipts: true }, 'set').violations.get('T3-double')).toMatch(
-      /intent A:1 admitted twice/,
-    );
+    expect(
+      schedule({ noReceipts: true }, 'set').violations.get('T3-double'),
+    ).toMatch(/intent A:1 admitted twice/);
     const del = schedule({ noReceipts: true }, 'delete');
     expect(relayValue(del, ['x'])).toBe('t'); // the delete is undone by a write already applied once
   });
 
   it('Q4(i): an owner bump replays verbatim at 6 over the retained 5; Q4(iii): a former carry replays at 5, admitted', () => {
     const w = W({}, owner);
-    for (let i = 0; i < 5; i++) copyTo(w, committed(w, 'A', setOp(['x'], i), { bump: true }), 'B');
+    for (let i = 0; i < 5; i++)
+      copyTo(w, committed(w, 'A', setOp(['x'], i), { bump: true }), 'B');
     author(w, 'A', setOp(['x'], 'six'), { bump: true });
     author(w, 'B', setOp(['y'], 'b'));
     cut(w, 'reaper', 'replay');
@@ -4682,7 +5451,8 @@ describe('generation cut: pinned — authority and replay (Q1–Q4, F-4)', () =>
     expect(flush(w, 'A')).toEqual(['admitted']);
     expect(w.relay.c.maxEpoch(['x'])).toBe(6);
     const v = W({}, owner);
-    for (let i = 0; i < 5; i++) copyTo(v, committed(v, 'A', setOp(['x'], i), { bump: true }), 'B');
+    for (let i = 0; i < 5; i++)
+      copyTo(v, committed(v, 'A', setOp(['x'], i), { bump: true }), 'B');
     author(v, 'B', setOp(['x'], 'b'));
     cut(v, 'reaper', 'replay');
     learn(v, R(v, 'B'));
@@ -4717,12 +5487,16 @@ describe('generation cut: pinned — authority and replay (Q1–Q4, F-4)', () =>
       replayAll(w, 'C');
       expect(R(w, 'C').unresolved).toEqual([]);
       if (!noSeedBaselines) {
-        expect(g.seed.find((r) => pathKey(r.path) === pathKey(['x']))?.epoch).toBe(5);
+        expect(
+          g.seed.find((r) => pathKey(r.path) === pathKey(['x']))?.epoch,
+        ).toBe(5);
         expect(flush(w, 'C')).toEqual(['admitted']);
         okWorld(w);
       } else {
         expect(flush(w, 'C')).toEqual(['epoch-bump']);
-        expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual(['refused-epoch']); // D-b: the refusal lands in Conflict
+        expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual([
+          'refused-epoch',
+        ]); // D-b: the refusal lands in Conflict
         expect(w.violations.get('T1')).toMatch(/baseline 0 vs 5/);
       }
     }
@@ -4736,7 +5510,9 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       committed(w, 'A', delOp(['d', 'e', 'f']));
       const g = cut(w, 'reaper', 'replay');
       if (!dropEffectTombstones) {
-        expect(g.seed.some((r) => pathKey(r.path) === pathKey(['d', 'e', 'f']))).toBe(true);
+        expect(
+          g.seed.some((r) => pathKey(r.path) === pathKey(['d', 'e', 'f'])),
+        ).toBe(true);
         expect(droppableTombstones(w.relay.c)).toBe(0);
         okWorld(w);
       } else {
@@ -4764,9 +5540,11 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       ).toEqual(['A']);
       committed(w, 'A', setOp(['a'], 1));
       w.relay.c.settle(w.relay.admission.settled);
-      expect(w.relay.c.checkpoint().some((r) => r.siblings.some((x) => x.kind === 'delete'))).toBe(
-        false,
-      );
+      expect(
+        w.relay.c
+          .checkpoint()
+          .some((r) => r.siblings.some((x) => x.kind === 'delete')),
+      ).toBe(false);
       const g = cut(w, 'reaper', 'replay');
       // the root's migration document still contains d.e.f, so a clear-only register there is
       // "effect-bearing" by the literal clause, though a clear abstains under every fold in the domain
@@ -4775,17 +5553,22 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
         okWorld(w);
         continue;
       }
-      expect(w.violations.get('T1')).toMatch(/\["d","e","f"\] kept but droppable/);
+      expect(w.violations.get('T1')).toMatch(
+        /\["d","e","f"\] kept but droppable/,
+      );
       // the residue never cleans: quiet cuts keep it, and a second container re-set only replaces
       // the clear with a newer clear (one register per contained path, for as long as the root holds it)
-      for (let i = 0; i < 3; i++) expect(!!atDEF(cut(w, 'reaper', 'replay'))).toBe(true);
+      for (let i = 0; i < 3; i++)
+        expect(!!atDEF(cut(w, 'reaper', 'replay'))).toBe(true);
       learn(w, R(w, 'A'));
       learn(w, R(w, 'B'));
       committed(w, 'B', setOp(['d', 'e'], {}));
       committed(w, 'A', setOp(['a'], 2));
       w.relay.c.settle(w.relay.admission.settled);
       const last = atDEF(cut(w, 'reaper', 'replay'));
-      expect(last?.siblings.map((x) => [x.kind, x.origin])).toEqual([['clear', 'B']]);
+      expect(last?.siblings.map((x) => [x.kind, x.origin])).toEqual([
+        ['clear', 'B'],
+      ]);
     }
   });
 
@@ -4796,7 +5579,9 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       committed(w, 'B', setOp(['k'], {})); // concurrent: the default-fold WINNER
       copyTo(w, author(w, 'C', delOp(['k', 'k'])) as TailEntry, 'A');
       flush(w, 'C');
-      expect(lookup(materializeRegs(w.relay.c.checkpoint(), 'custom'), ['k'])).toEqual({
+      expect(
+        lookup(materializeRegs(w.relay.c.checkpoint(), 'custom'), ['k']),
+      ).toEqual({
         found: true,
         value: {},
       });
@@ -4807,7 +5592,9 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
         okWorld(w);
       } else {
         expect(kept).toBe(false);
-        expect(materializeRegs(g.seed, 'custom')).toMatchObject({ k: { k: 1 } }); // k resurrects under the custom fold
+        expect(materializeRegs(g.seed, 'custom')).toMatchObject({
+          k: { k: 1 },
+        }); // k resurrects under the custom fold
         expect(w.violations.get('T1-diff')).toMatch(/custom fold/);
         expect(w.violations.get('T1')).toMatch(/k\.k must be kept/);
       }
@@ -4819,10 +5606,17 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       const w = W({ dropMultiLive });
       committed(w, 'A', delOp(['k']));
       committed(w, 'B', delOp(['k'])); // concurrent: neither cites the other
-      expect(lookup(materializeRegs(w.relay.c.checkpoint(), 'preserve'), ['k']).found).toBe(true);
-      expect(lookup(materializeRegs(w.relay.c.checkpoint()), ['k']).found).toBe(false); // default: absent
+      expect(
+        lookup(materializeRegs(w.relay.c.checkpoint(), 'preserve'), ['k'])
+          .found,
+      ).toBe(true);
+      expect(lookup(materializeRegs(w.relay.c.checkpoint()), ['k']).found).toBe(
+        false,
+      ); // default: absent
       const g = cut(w, 'reaper', 'replay');
-      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['k']))).toBe(!dropMultiLive);
+      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['k']))).toBe(
+        !dropMultiLive,
+      );
       if (!dropMultiLive) {
         expect(droppableTombstones(w.relay.c)).toBe(0); // not lone: never counted, never dropped
         okWorld(w);
@@ -4847,7 +5641,9 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
     const g = cut(w, 'reaper', 'replay');
     expect(oStructural(g.source, g.seed)).toEqual([]); // the seed conforms to D-a′ exactly
     for (const cfg of SELECTING_CFGS)
-      expect(pcanon(materializeRegs(g.seed, cfg))).toBe(pcanon(materializeRegs(g.source, cfg)));
+      expect(pcanon(materializeRegs(g.seed, cfg))).toBe(
+        pcanon(materializeRegs(g.source, cfg)),
+      );
     return g;
   };
   it('T1 RESIDUAL demo 1 (astra re-audit): a merge fold reading `prev` (merge = ancestor) synthesizes k.x; the dropped `delete k.x` un-masks it', () => {
@@ -4855,14 +5651,21 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
     committed(w, 'A', { kind: 'set', path: ['k'], next: {}, prev: { x: 1 } }); // the lower-ranked set
     committed(w, 'B', setOp(['k'], {})); // concurrent, same epoch, the winner
     committed(w, 'C', delOp(['k', 'x']));
-    const merge = { policies: [{ path: ['k'], merge: (ancestor: unknown) => ancestor }] };
+    const merge = {
+      policies: [{ path: ['k'], merge: (ancestor: unknown) => ancestor }],
+    };
     expect(lookup(matWith(w.relay.c.checkpoint(), merge), ['k'])).toEqual({
       found: true,
       value: {},
     });
     const g = residualCut(w);
-    expect(g.seed.some((r) => pathKey(r.path) === pathKey(['k', 'x']))).toBe(false);
-    expect(lookup(matWith(g.seed, merge), ['k'])).toEqual({ found: true, value: { x: 1 } }); // un-masked
+    expect(g.seed.some((r) => pathKey(r.path) === pathKey(['k', 'x']))).toBe(
+      false,
+    );
+    expect(lookup(matWith(g.seed, merge), ['k'])).toEqual({
+      found: true,
+      value: { x: 1 },
+    }); // un-masked
     okWorld(w);
   });
 
@@ -4872,10 +5675,15 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
     committed(w, 'B', setOp(['k'], {}));
     committed(w, 'C', delOp(['k', 'siblings']));
     expect(
-      lookup(materializeRegs(w.relay.c.checkpoint(), 'preserve'), ['k', 'siblings']).found,
+      lookup(materializeRegs(w.relay.c.checkpoint(), 'preserve'), [
+        'k',
+        'siblings',
+      ]).found,
     ).toBe(false);
     const g = residualCut(w);
-    expect(lookup(materializeRegs(g.seed, 'preserve'), ['k', 'siblings'])).toEqual({
+    expect(
+      lookup(materializeRegs(g.seed, 'preserve'), ['k', 'siblings']),
+    ).toEqual({
       found: true,
       value: [{}, {}],
     }); // un-masked
@@ -4887,14 +5695,19 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
   it('T1 RESIDUAL demo 3 (astra re-audit): a custom fold turning a lone clear into a delete; the dropped clear-only register un-masks `a`', () => {
     const w = W();
     committed(w, 'A', clearOp(['a']));
-    expect(lookup(materializeRegs(w.relay.c.checkpoint(), 'synth'), ['a']).found).toBe(false);
+    expect(
+      lookup(materializeRegs(w.relay.c.checkpoint(), 'synth'), ['a']).found,
+    ).toBe(false);
     expect(lookup(materializeRegs(w.relay.c.checkpoint()), ['a'])).toEqual({
       found: true,
       value: 0,
     });
     const g = residualCut(w);
     expect(g.seed.some((r) => pathKey(r.path) === pathKey(['a']))).toBe(false);
-    expect(lookup(materializeRegs(g.seed, 'synth'), ['a'])).toEqual({ found: true, value: 0 }); // un-masked
+    expect(lookup(materializeRegs(g.seed, 'synth'), ['a'])).toEqual({
+      found: true,
+      value: 0,
+    }); // un-masked
     expect(w.violations.get('T1-residual')).toMatch(/synth fold/);
     w.violations.delete('T1-residual');
     okWorld(w);
@@ -4904,10 +5717,16 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
   it('R16-4 OUT OF DOMAIN (astra audit #3 Q5): an ABSTAINING root fold (the root register exists, its fold returns `clear`) — before the cut a lone `delete z.x` vivifies `{z:{}}`; D-a′ drops it (no contributing root value contains z.x) and after the cut the room is `undefined`', () => {
     const w = W();
     committed(w, 'A', delOp(['z', 'x']));
-    const abstain = { folds: [{ path: [], fold: (() => ({ kind: 'clear' })) as FoldFn }] };
-    expect(pcanon(matWith(w.relay.c.checkpoint(), abstain))).toBe(pcanon({ z: {} })); // vivified
+    const abstain = {
+      folds: [{ path: [], fold: (() => ({ kind: 'clear' })) as FoldFn }],
+    };
+    expect(pcanon(matWith(w.relay.c.checkpoint(), abstain))).toBe(
+      pcanon({ z: {} }),
+    ); // vivified
     const g = residualCut(w); // the seed conforms to D-a′; every SELECTING fold (contributing root) is exact
-    expect(g.seed.some((r) => pathKey(r.path) === pathKey(['z', 'x']))).toBe(false);
+    expect(g.seed.some((r) => pathKey(r.path) === pathKey(['z', 'x']))).toBe(
+      false,
+    );
     expect(g.seed.some((r) => !r.path.length)).toBe(true); // the root register is still there ...
     expect(matWith(g.seed, abstain)).toBeUndefined(); // ... but abstains: the vivified `{z:{}}` is gone
     okWorld(w);
@@ -4925,12 +5744,28 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       prev: anc,
     });
     const regs: RegisterCheckpoint[] = [
-      { path: [], siblings: [rootSibling('g0', { p: 1, l: 0 }, { arr: anc })], water: {} },
-      { path: ['arr'], siblings: [arr('A', 5, ['X', 'b']), arr('B', 6, ['a', 'Y'])], water: {} },
+      {
+        path: [],
+        siblings: [rootSibling('g0', { p: 1, l: 0 }, { arr: anc })],
+        water: {},
+      },
+      {
+        path: ['arr'],
+        siblings: [arr('A', 5, ['X', 'b']), arr('B', 6, ['a', 'Y'])],
+        water: {},
+      },
       // an INDEX-MODE register below the array path (never emitted under `arrays: 'unit'`)
       {
         path: ['arr', '1'],
-        siblings: [{ kind: 'clear', origin: 'C', writer: 'C', hlc: { p: 7, l: 0 }, epoch: 0 }],
+        siblings: [
+          {
+            kind: 'clear',
+            origin: 'C',
+            writer: 'C',
+            hlc: { p: 7, l: 0 },
+            epoch: 0,
+          },
+        ],
         water: {},
       },
     ];
@@ -4948,14 +5783,19 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
     expect(pcanon(materializeRegs(seed, 'positional'))).toBe(
       pcanon(materializeRegs(regs, 'positional')),
     );
-    expect(oPositional(regs, 'policy')).toMatchObject({ violations: [], synth: 1 }); // r9: closed
+    expect(oPositional(regs, 'policy')).toMatchObject({
+      violations: [],
+      synth: 1,
+    }); // r9: closed
   });
 
   it('presence: a present-undefined value survives the cut and is distinguished from an absent key (JSON would hide it)', () => {
     const w = W();
     committed(w, 'A', setOp(['k'], { m: undefined }));
     const g = cut(w, 'reaper', 'replay');
-    expect(pcanon(materializeRegs(g.seed))).toBe(pcanon(materializeRegs(g.source)));
+    expect(pcanon(materializeRegs(g.seed))).toBe(
+      pcanon(materializeRegs(g.source)),
+    );
     expect(pcanon({ m: undefined })).not.toBe(pcanon({}));
     expect(JSON.stringify({ m: undefined })).toBe(JSON.stringify({})); // the hidden distinction
     okWorld(w);
@@ -4986,13 +5826,25 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
       writer: 'A',
       version: 1,
       hlc: { p: 10, l: 0 },
-      ops: [path, ...extra].map((p) => ({ kind: 'set', path: p, next: 1, cites: [], epoch: 0 })),
+      ops: [path, ...extra].map((p) => ({
+        kind: 'set',
+        path: p,
+        next: 1,
+        cites: [],
+        epoch: 0,
+      })),
     });
     expect(validateEnvelope(env(['a\u001fb']))).toBe('path-control'); // would collide with ['a', 'b']
     expect(validateEnvelope(env(['b'], [['b']]))).toBe('dup-path');
     expect(validateEnvelope(env(['']))).toBe('path-empty'); // rejected since S2, because ...
     const st = createRegisterStore();
-    st.load([{ path: [], siblings: [rootSibling('g0', { p: 1, l: 0 }, INITIAL)], water: {} }]);
+    st.load([
+      {
+        path: [],
+        siblings: [rootSibling('g0', { p: 1, l: 0 }, INITIAL)],
+        water: {},
+      },
+    ]);
     st.ingest(env(['']));
     expect(st.checkpoint().length).toBe(1); // ... the store would land it IN the root register
     expect(
@@ -5031,7 +5883,9 @@ describe('generation cut: pinned — the seed and T1 (D-a′, F-1, F-6, F-8, F-1
     committed(w, 'A', delOp(['b', 'c']));
     expect(materializeRegs(w.relay.c.checkpoint())).toEqual({ b: {} });
     cut(w, 'reaper', 'replay');
-    expect(w.violations.get('T1-diff')).toMatch(/default fold\): source \{"b":\{\}\} vs seed U/);
+    expect(w.violations.get('T1-diff')).toMatch(
+      /default fold\): source \{"b":\{\}\} vs seed U/,
+    );
   });
 });
 
@@ -5051,7 +5905,8 @@ describe('generation cut: pinned — budget (Q5, F-3)', () => {
     expect(w.n['budgetCuts'] ?? 0).toBeGreaterThanOrEqual(15);
     okWorld(w);
     const doc = W();
-    for (const p of [['a'], ['b', 'c'], ['d', 'e', 'f']] as Key[][]) committed(doc, 'A', delOp(p));
+    for (const p of [['a'], ['b', 'c'], ['d', 'e', 'f']] as Key[][])
+      committed(doc, 'A', delOp(p));
     enforceBudget(doc, 0);
     expect(doc.n['budgetCuts'] ?? 0).toBe(0);
     expect(loneTombstones(doc.relay.c).length).toBe(3);
@@ -5080,13 +5935,18 @@ describe('generation cut: pinned — N8 (r9, charter §22)', () => {
     cut(w, 'migration', 'discard');
     learn(w, R(w, 'A'));
     learn(w, R(w, 'B')); // B installs the minted root before the delete exists
-    expect(lookup(relayValue(w, []), ['d'])).toEqual({ found: true, value: {} });
+    expect(lookup(relayValue(w, []), ['d'])).toEqual({
+      found: true,
+      value: {},
+    });
     committed(w, 'A', delOp(['d', 'e']));
     expect(droppableTombstones(w.relay.c)).toBe(1);
     expect(droppableTombstonesScan(w.relay.c)).toBe(1);
     const t = committed(w, 'B', setOp(['d'], { e: 1 }));
     expect(t.env.ops.map((op) => op.path)).toEqual([['d']]); // no clear of d.e: B never saw it
-    expect(w.relay.c.siblings(['d', 'e']).map((s) => s.kind)).toEqual(['delete']); // still live ...
+    expect(w.relay.c.siblings(['d', 'e']).map((s) => s.kind)).toEqual([
+      'delete',
+    ]); // still live ...
     expect(droppableTombstonesScan(w.relay.c)).toBe(0); // ... and contained by d's live set
     expect(droppableTombstones(w.relay.c)).toBe(0); // the real counter reclassified the descendant
     expect(relayValue(w, ['d'])).toEqual({}); // the kept delete masks e
@@ -5105,7 +5965,9 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
       // R16-6: B's FRESH write citing the seed dot passes the same gate — which, without the extent,
       // refuses it too (premise moved in r6: the supersession is then never admitted)
       const tb = author(w, 'B', setOp(['x'], 'b')) as TailEntry;
-      expect(toRelay(w, tb.env)).toBe(noExtent ? 'unknown-citation' : 'admitted');
+      expect(toRelay(w, tb.env)).toBe(
+        noExtent ? 'unknown-citation' : 'admitted',
+      );
       learn(w, R(w, 'A'));
       committed(w, 'A', setOp(['y'], 1));
       w.relay.c.settle(w.relay.admission.settled);
@@ -5116,7 +5978,10 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
       if (!noExtent) {
         expect(R(w, 'C').unresolved.length).toBe(0);
         expect(Object.fromEntries(w.violations)).toEqual({});
-      } else expect(w.violations.get('T2a-gc')).toMatch(/procedure conflict, oracle apply/);
+      } else
+        expect(w.violations.get('T2a-gc')).toMatch(
+          /procedure conflict, oracle apply/,
+        );
     }
   });
 
@@ -5147,7 +6012,10 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
         if (!recordNoGen || !persistRegisters) {
           expect(R(w, 'C').unresolved).toEqual([]);
           expect(Object.fromEntries(w.violations)).toEqual({});
-        } else expect(w.violations.get('T2a-gc')).toMatch(/procedure conflict, oracle apply/);
+        } else
+          expect(w.violations.get('T2a-gc')).toMatch(
+            /procedure conflict, oracle apply/,
+          );
       }
   });
 
@@ -5189,14 +6057,20 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
   });
 
   it('D-f KILLED boundary (first stamp of the generation) is ORDER-DEPENDENT: a replayed refused hole lowers the first stamp and a dropped dot covered by a newer sibling APPLIES; without the hole it conflicts; the ruled preCutMax conflicts both ways', () => {
-    const schedule = (firstStampBoundary: boolean, withHole: boolean): World => {
-      const w = W({ firstStampBoundary, ignoreDrop: true, citePeer: true }, owner); // a lost refusal reply keeps the hole in C's outbox; r7: C's carry of A's PEER-held bump needs n42
+    const schedule = (
+      firstStampBoundary: boolean,
+      withHole: boolean,
+    ): World => {
+      const w = W(
+        { firstStampBoundary, ignoreDrop: true, citePeer: true },
+        owner,
+      ); // a lost refusal reply keeps the hole in C's outbox; r7: C's carry of A's PEER-held bump needs n42
       const a1 = author(w, 'A', setOp(['x'], 1), { bump: true }) as TailEntry;
       copyTo(w, a1, 'C');
       if (withHole)
-        expect(toRelay(w, (author(w, 'C', setOp(['x'], 'c1')) as TailEntry).env)).toBe(
-          'epoch-bump',
-        ); // C1: the hole
+        expect(
+          toRelay(w, (author(w, 'C', setOp(['x'], 'c1')) as TailEntry).env),
+        ).toBe('epoch-bump'); // C1: the hole
       expect(toRelay(w, a1.env)).toBe('admitted');
       const c2 = committed(w, 'C', setOp(['y'], 'c2'));
       copyTo(w, c2, 'A', 'B');
@@ -5214,7 +6088,9 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
       return w;
     };
     expect(R(schedule(true, true), 'A').unresolved.length).toBe(0); // killed boundary, hole first: applies (unsound)
-    expect(schedule(true, true).violations.get('T2a')).toMatch(/procedure apply, oracle conflict/);
+    expect(schedule(true, true).violations.get('T2a')).toMatch(
+      /procedure apply, oracle conflict/,
+    );
     expect(R(schedule(true, false), 'A').unresolved.length).toBe(1); // killed boundary, no hole: conflicts
     expect(R(schedule(false, true), 'A').unresolved.length).toBe(1); // ruled: conflicts
     expect(R(schedule(false, false), 'A').unresolved.length).toBe(1);
@@ -5239,7 +6115,9 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
     expect(R(w, 'B').unresolved.map((x) => x.cause)).toEqual(['uncovered']); // the residual: a false conflict
     learn(w, R(w, 'A')); // A's welcome holds C1
     author(w, 'A', setOp(['x'], 'a')); // a FRESH write citing C1 (live in A's view)
-    expect(w.violations.get('D6-residual')).toMatch(/fresh .* uncovered cite C@/);
+    expect(w.violations.get('D6-residual')).toMatch(
+      /fresh .* uncovered cite C@/,
+    );
   });
 
   it('F-5: receipts are exact RANGES — a hole whose refusal reply was lost is kept; the by-maximum reading LOSES it', () => {
@@ -5255,7 +6133,10 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
       expect(w.n['holesBelowThrough']).toBe(1);
       if (!trimByMax) expect(outcome(w, c1.intent.id).trimmed).toBe(0);
       else {
-        expect(outcome(w, c1.intent.id)).toMatchObject({ admitted: 0, trimmed: 1 });
+        expect(outcome(w, c1.intent.id)).toMatchObject({
+          admitted: 0,
+          trimmed: 1,
+        });
         expect(w.violations.get('D7-hole')).toMatch(/g0:C#1 .* LOST/);
       }
     }
@@ -5283,12 +6164,19 @@ describe('generation cut: pinned — covers (D-f, F-2, F-5, F-7)', () => {
         expect(R(w, 'C').unresolved.length).toBe(1);
         expect(beyondPeer(w)).toEqual({}); // n42 channel: only the discipline breach itself (`stamp-discipline`)
         expect(w.violations.get('stamp-discipline')).toBeDefined();
-      } else expect(w.violations.get('T2a')).toMatch(/procedure apply, oracle conflict/);
+      } else
+        expect(w.violations.get('T2a')).toMatch(
+          /procedure apply, oracle conflict/,
+        );
     }
   });
 
   it('F-2 obligation (ii): recovery persists the extent and the floors, SEPARATELY observable (n13a, n13b)', () => {
-    for (const v of [{}, { checkpointNoExtent: true }, { checkpointNoFloors: true }] as Variant[]) {
+    for (const v of [
+      {},
+      { checkpointNoExtent: true },
+      { checkpointNoFloors: true },
+    ] as Variant[]) {
       const w = W(v);
       committed(w, 'A', setOp(['x'], 1));
       cut(w, 'reaper', 'replay');
@@ -5340,9 +6228,10 @@ describe('generation cut: pinned — protocol (Q6, D10, kill target, OPEN-1/3/4/
       };
       core.stores[0].load(cp.registers);
       expect(() =>
-        [...w.journal.slice(cp.at), { kind: 'env', env: stale.env } as JournalEntry].forEach((e) =>
-          applyEntry(core, e),
-        ),
+        [
+          ...w.journal.slice(cp.at),
+          { kind: 'env', env: stale.env } as JournalEntry,
+        ].forEach((e) => applyEntry(core, e)),
       ).toThrow(/inconsistent checkpoint/);
     }
   });
@@ -5355,7 +6244,10 @@ describe('generation cut: pinned — protocol (Q6, D10, kill target, OPEN-1/3/4/
       copyTo(w, x, 'C');
       copyTo(w, y, 'C');
       author(w, 'C', setOp(['x'], 'c'), {
-        lower: (op) => ({ ...op, cites: (op.cites ?? []).filter((d) => keep.includes(d.origin)) }),
+        lower: (op) => ({
+          ...op,
+          cites: (op.cites ?? []).filter((d) => keep.includes(d.origin)),
+        }),
       });
       cut(w, 'reaper', 'replay');
       learn(w, R(w, 'C'));
@@ -5379,7 +6271,8 @@ describe('generation cut: pinned — protocol (Q6, D10, kill target, OPEN-1/3/4/
       if (!noReplicaFence) {
         expect(res).toBe('dead');
         expect(Object.fromEntries(w.violations)).toEqual({});
-      } else expect(w.violations.get('converge')).toMatch(/B on g1 materializes/);
+      } else
+        expect(w.violations.get('converge')).toMatch(/B on g1 materializes/);
     }
   });
 
@@ -5413,7 +6306,9 @@ describe('generation cut: pinned — protocol (Q6, D10, kill target, OPEN-1/3/4/
     cut(w, 'reaper', 'replay');
     learn(w, R(w, 'A'));
     replayAll(w, 'A');
-    expect(R(w, 'A').unresolved.map((c) => c.entry.intent.id)).toEqual([t.intent.id]);
+    expect(R(w, 'A').unresolved.map((c) => c.entry.intent.id)).toEqual([
+      t.intent.id,
+    ]);
     resolve(w, R(w, 'A'), true);
     expect(toRelay(w, lastTail(w, 'A').env)).toBe('admitted');
     expect(relayValue(w, ['z'])).toBe('again');
@@ -5443,20 +6338,23 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
       const adm = w.relay.admission;
       const proxy =
         w.relay.c.covers(['x3'], d) ||
-        (compareHlc(d.hlc, adm.settled['A']) <= 0 && compareHlc(d.hlc, adm.first['A']) >= 0);
+        (compareHlc(d.hlc, adm.settled['A']) <= 0 &&
+          compareHlc(d.hlc, adm.first['A']) >= 0);
       expect(proxy).toBe(true); // the killed proxy certifies the op either way
       expect(w.relay.receipts.get('A')?.get('g0')?.versions.has(3)).toBe(true);
       sync(w);
       observe(w);
       if (!omitIngest) expect(Object.fromEntries(w.violations)).toEqual({});
-      else expect(w.violations.get('ledger')).toMatch(/g0:A#3@\["x3"\]: absent/);
+      else
+        expect(w.violations.get('ledger')).toMatch(/g0:A#3@\["x3"\]: absent/);
     }
   });
 
   it("R16-1 (astra audit #3 Q2): A's acked `set x=1` at epoch 5, B's acked epoch-0 `set x=2` citing A ⇒ x=2; n36 loses B's watermark (sibling + accounting kept) ⇒ A is live again and wins (x=1) — the SUPPRESSION check names it, retention alone would pass", () => {
     for (const dropWater of [false, true]) {
       const w = W({ dropWater }, owner);
-      for (let i = 5; i >= 1; i--) committed(w, 'A', setOp(['x'], i), { bump: true }); // x=1 at epoch 5
+      for (let i = 5; i >= 1; i--)
+        committed(w, 'A', setOp(['x'], i), { bump: true }); // x=1 at epoch 5
       expect(w.relay.c.maxEpoch(['x'])).toBe(5);
       committed(w, 'B', setOp(['y'], 1));
       committed(w, 'B', setOp(['z'], 1));
@@ -5473,7 +6371,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
         okWorld(w);
       } else {
         expect(relayValue(w, ['x'])).toBe(1); // the acknowledged supersession is gone
-        expect(w.violations.get('ledger')).toMatch(/acked supersession.*A@\d+\.0 live/);
+        expect(w.violations.get('ledger')).toMatch(
+          /acked supersession.*A@\d+\.0 live/,
+        );
       }
     }
   });
@@ -5487,7 +6387,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
       expect(rec.done).toBeUndefined();
       excessWater([w.relay.u, w.relay.c], ['x'], 'A', a.env.hlc); // 2. the defect, on both twins
       const regs = w.relay.c.checkpoint();
-      expect(regs.find((r) => pathKey(r.path) === pathKey(['x']))?.siblings).toHaveLength(1);
+      expect(
+        regs.find((r) => pathKey(r.path) === pathKey(['x']))?.siblings,
+      ).toHaveLength(1);
       expect(relayValue(w, ['x'])).toBeUndefined(); // 3. the acknowledged value disappears
       expect(lMissing(w.ledger, regs)).toEqual([]); // 4. retention passes ...
       expect(lSuppress(w.ledger.marks, regs)).toEqual([]); // ... and both suppression checks
@@ -5505,7 +6407,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
         );
       const g = cut(w, 'reaper', 'replay'); // 5. D-a′ sees nothing live at x and drops the register
       expect(oKept(g.source).has(oPathKey(['x']))).toBe(false);
-      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(false); // the seed omits x
+      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(
+        false,
+      ); // the seed omits x
       if (r7Ledger) {
         expect(rec.done).toBe('dropped'); // corruption accepted as a structural discharge
         learn(w, R(w, 'A'));
@@ -5516,7 +6420,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
         expect(w.violations.get('ledger-discharge')).toMatch(
           /g1 \(reaper\): not discharged as dropped: g0:A#1@\["x"\]: acked effect hidden/,
         );
-        expect(lMissing(w.ledger, w.relay.c.checkpoint())).toEqual(['g0:A#1@["x"]: absent']); // still named
+        expect(lMissing(w.ledger, w.relay.c.checkpoint())).toEqual([
+          'g0:A#1@["x"]: absent',
+        ]); // still named
       }
     }
   });
@@ -5527,18 +6433,24 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
       const a = committed(w, 'A', setOp(['x'], 1)); // 1. acknowledged, no citations
       expect(a.env.ops[0].cites).toEqual([]);
       const rec = w.ledger.recs.find((r) => r.key === oPathKey(['x'])) as LRec;
-      expect(w.relay.receipts.get('A')?.get('g0')?.versions.has(a.env.version)).toBe(true);
+      expect(
+        w.relay.receipts.get('A')?.get('g0')?.versions.has(a.env.version),
+      ).toBe(true);
       sync(w);
       observe(w);
       expect(Object.fromEntries(w.violations)).toEqual({}); // 2. the last check before the cut passes
       const before = structuredClone(w.ledger);
       const g = cut(w, 'reaper', 'replay'); // 2. ... and inside the cut x is removed from u and c
       expect(w.n['dropAtCut']).toBe(1);
-      expect(g.source.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(false);
+      expect(g.source.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(
+        false,
+      );
       expect(lHidden(before, g.source)).toEqual([]); // 3. the hidden check skips the absent sibling
       expect(oKept(g.source).has(oPathKey(['x']))).toBe(false); // 3. ... and D-a′ has no x
       expect(lMissing(before, g.source)).toEqual(['g0:A#1@["x"]: absent']); // what a source check sees
-      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(false); // the seed omits x
+      expect(g.seed.some((r) => pathKey(r.path) === pathKey(['x']))).toBe(
+        false,
+      ); // the seed omits x
       expect(w.n['dropSeedOmits']).toBe(1);
       if (r7Ledger) {
         expect(rec.done).toBe('dropped'); // 3. the loss accepted as a structural discharge
@@ -5553,7 +6465,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
         expect(w.violations.get('ledger-discharge')).toMatch(
           /^g1 \(reaper\): not discharged as dropped: g0:A#1@\["x"\]: absent$/,
         );
-        expect(lMissing(w.ledger, w.relay.c.checkpoint())).toEqual(['g0:A#1@["x"]: absent']); // still named
+        expect(lMissing(w.ledger, w.relay.c.checkpoint())).toEqual([
+          'g0:A#1@["x"]: absent',
+        ]); // still named
       }
     }
   });
@@ -5572,7 +6486,9 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
       }) as TailEntry;
       const cited = tb.env.ops[0].cites?.some((c) => c.origin === 'A') ?? false;
       expect(cited).toBe(citePeer); // R17-1: B folds A's peer copy (x=1 on screen) but cites only relay-known dots
-      expect(toRelay(w, tb.env)).toBe(citePeer && !ungatedFresh ? 'unknown-citation' : 'admitted');
+      expect(toRelay(w, tb.env)).toBe(
+        citePeer && !ungatedFresh ? 'unknown-citation' : 'admitted',
+      );
       cut(w, 'reaper', 'replay');
       learn(w, R(w, 'A'));
       replayAll(w, 'A');
@@ -5584,8 +6500,12 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
         expect(relayValue(w, ['x'])).toBe(1);
         expect(Object.fromEntries(w.violations)).toEqual({});
       } else if (!ungatedFresh) {
-        expect(R(w, 'B').unresolved.map((c) => c.cause)).toEqual(['refused-cite']);
-        expect(w.violations.get('D6-fresh')).toMatch(/g0:B#1 \(fresh\) refused at the relay/);
+        expect(R(w, 'B').unresolved.map((c) => c.cause)).toEqual([
+          'refused-cite',
+        ]);
+        expect(w.violations.get('D6-fresh')).toMatch(
+          /g0:B#1 \(fresh\) refused at the relay/,
+        );
         expect(beyondPeer(w)).toEqual({});
       } else {
         expect(relayValue(w, ['x'])).toBe(1); // A@epoch 1 is live again and beats B's acked write
@@ -5611,7 +6531,10 @@ describe('generation cut: pinned — the T3 ledger (§14)', () => {
       const open = w.ledger.recs.filter((r) => !r.done).map((r) => r.key);
       expect(open.sort()).toEqual(['["k"]', '["x"]', '["y"]', '["z"]']);
       if (!corruptIngest) expect(Object.fromEntries(w.violations)).toEqual({});
-      else expect(w.violations.get('ledger')).toMatch(/A#3@\["z"\]: holds .*corrupt/);
+      else
+        expect(w.violations.get('ledger')).toMatch(
+          /A#3@\["z"\]: holds .*corrupt/,
+        );
     }
   });
 });
@@ -5728,10 +6651,13 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       sync(w);
       observe(w);
       if (!ignoreDrop) {
-        expect(R(w, 'A').unresolved.map((x) => x.cause)).toEqual(['refused-cite']);
+        expect(R(w, 'A').unresolved.map((x) => x.cause)).toEqual([
+          'refused-cite',
+        ]);
         expect(beyondPeer(w)).toEqual({}); // n42 channel: only the discipline breach itself (`stamp-discipline`)
         expect(w.violations.get('stamp-discipline')).toBeDefined();
-      } else expect(w.violations.get('D6-drop')).toMatch(/A still holds refused/);
+      } else
+        expect(w.violations.get('D6-drop')).toMatch(/A still holds refused/);
     }
   });
 
@@ -5786,7 +6712,9 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       observe(w);
       const shown = lookup(R(w, 'C').u.materialize(), ['x']);
       if (!silentRefusals) {
-        expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual(['refused-epoch']);
+        expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual([
+          'refused-epoch',
+        ]);
         expect(R(w, 'C').tail).toEqual([]);
         // the optimistic local effect is retracted; r9 (premise moved): the NO-PERSIST restart forgot
         // A's unsequenced peer copy (r6–r8.1 kept it visible, x = 1), the relay never admitted it ⇒ absent
@@ -5802,7 +6730,9 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       } else {
         expect(R(w, 'C').tail.map((t) => t.intent.id)).toEqual([c1.intent.id]); // pending forever
         expect(shown).toEqual({ found: true, value: 'c' }); // and visible
-        expect(w.violations.get('D6-drop')).toMatch(/C re-applied refused g0:C#1/);
+        expect(w.violations.get('D6-drop')).toMatch(
+          /C re-applied refused g0:C#1/,
+        );
       }
     }
     // R17-1 honest: the same schedule without n42 — C cites nothing it did not get from the relay
@@ -5827,8 +6757,12 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       sync(w); // 1. C's optimistic x='c' is persisted
       expect(toRelay(w, c1.env)).toBe('epoch-bump'); // 2. the relay refuses ...
       reload(w, R(w, 'C')); // ... C crashes before the Conflict persists; 3. the restart resends ⇒ replied again
-      expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual(['refused-epoch']);
-      expect(R(w, 'C').rehydrateOwed).toBe(noOwed ? undefined : w.journal.length);
+      expect(R(w, 'C').unresolved.map((x) => x.cause)).toEqual([
+        'refused-epoch',
+      ]);
+      expect(R(w, 'C').rehydrateOwed).toBe(
+        noOwed ? undefined : w.journal.length,
+      );
       const b = committed(w, 'B', setOp(['y'], 'b')); // 4. an unrelated write admitted at s+1 ...
       expect(toReplica(w, b.env, R(w, 'C'))).toBe('ok'); // ... reaches C first (relay-sequenced)
       while (R(w, 'C').inbox.length) deliverWelcome(w, R(w, 'C'), 0); // 5. every queued welcome
@@ -5841,7 +6775,9 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
         expect(w.n['rehydrateRetries']).toBeGreaterThanOrEqual(1); // ... and re-requested
         expect(R(w, 'C').rehydrateOwed).toBeUndefined();
         expect(shown).toEqual({ found: true, value: 1 }); // retracted (A's peer-held bump remains)
-        expect(w.violations.get('D6-fresh')).toMatch(/g0:C#1 \(fresh\) refused/);
+        expect(w.violations.get('D6-fresh')).toMatch(
+          /g0:C#1 \(fresh\) refused/,
+        );
         expect(beyondPeer(w)).toEqual({});
       } else {
         expect(R(w, 'C').unresolved.length).toBe(1); // a durable Conflict ...
@@ -5907,14 +6843,22 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
           cut(w, 'reaper', 'replay'); // 2. a cut; B installs g1, its cursor holds g0:B#1
           learn(w, B);
           sync(w);
-          expect(B.rebase?.remaining.map((t) => gkey(t.env))).toEqual(['g0:B#1']);
+          expect(B.rebase?.remaining.map((t) => gkey(t.env))).toEqual([
+            'g0:B#1',
+          ]);
           replayStep(w, B, 2); // 3. the replay g1:B#1 is ON THE WIRE; B crashes before its record holds it
-          expect(B.rebase?.remaining.map((t) => gkey(t.env))).toEqual(['g0:B#1']);
-          const wire = (w.authored.get('B') as OpEnvelope[]).at(-1) as OpEnvelope;
+          expect(B.rebase?.remaining.map((t) => gkey(t.env))).toEqual([
+            'g0:B#1',
+          ]);
+          const wire = (w.authored.get('B') as OpEnvelope[]).at(
+            -1,
+          ) as OpEnvelope;
           expect(gkey(wire)).toBe('g1:B#1');
           expect(toRelay(w, wire)).toBe('admitted'); // 4. admitted, receipt (B, g1, {1})
           expect(receiptsCanon(w.relay.receipts)).toMatch(/B.*g1.*1/);
-          expect(w.relay.receipts.get('B')?.get('g0')?.versions.has(1) ?? false).toBe(false);
+          expect(
+            w.relay.receipts.get('B')?.get('g0')?.versions.has(1) ?? false,
+          ).toBe(false);
           if (supersede) {
             learn(w, R(w, 'C')); // C's welcome holds g1:B#1 (relay-known)
             const c = committed(w, 'C', setOp(['a'], 'c')); // C supersedes it (cites B's dot)
@@ -5936,8 +6880,12 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
             expect(w.n['recrashKept'] ?? 0).toBe(0);
             if (supersede) {
               // the acked supersession holds: B's dot is NOT live in g2, the value is C's
-              expect(w.relay.c.siblings(['a']).map((x) => x.origin)).not.toContain('B');
-              expect(lSuppress(w.ledger.oldMarks, w.relay.c.checkpoint())).toHaveLength(0);
+              expect(
+                w.relay.c.siblings(['a']).map((x) => x.origin),
+              ).not.toContain('B');
+              expect(
+                lSuppress(w.ledger.oldMarks, w.relay.c.checkpoint()),
+              ).toHaveLength(0);
               expect(relayValue(w, ['a'], 'custom')).toBe('c');
             } else expect(relayValue(w, ['a'], 'custom')).toBe('b1');
             expect(Object.fromEntries(w.violations)).toEqual({}); // every class silent
@@ -5961,12 +6909,15 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
                 .map((x) => x.origin)
                 .sort(),
             ).toEqual(['B', 'C']);
-            expect(lSuppress(w.ledger.oldMarks, w.relay.c.checkpoint())).toHaveLength(1);
+            expect(
+              lSuppress(w.ledger.oldMarks, w.relay.c.checkpoint()),
+            ).toHaveLength(1);
             expect(w.violations.get('T3-resurrect')).toMatch(/B@/);
             expect(relayValue(w, ['a'], 'custom')).toBe('b1'); // a selecting fold shows the resurrected value
           }
           const v = Object.fromEntries(w.violations);
-          for (const c of ['T3-recrash', 'T3-double', 'T3-resurrect']) delete v[c];
+          for (const c of ['T3-recrash', 'T3-double', 'T3-resurrect'])
+            delete v[c];
           expect(v).toEqual({}); // every other class silent: the finding is this one path
         }
   });
@@ -5998,11 +6949,16 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       observe(w);
       if (!acceptOlderSnapshot) {
         expect(w.n['welcomeOlderThanTraffic']).toBe(1);
-        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({ found: true, value: 1 });
+        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({
+          found: true,
+          value: 1,
+        });
         expect(Object.fromEntries(w.violations)).toEqual({});
       } else {
         expect(lookup(R(w, 'B').u.materialize(), ['x']).found).toBe(false); // replaced by older state
-        expect(w.violations.get('welcome-order')).toMatch(/B installed g0@0 and lost ingested A#1/);
+        expect(w.violations.get('welcome-order')).toMatch(
+          /B installed g0@0 and lost ingested A#1/,
+        );
       }
     }
   });
@@ -6023,12 +6979,17 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
         expect(R(w, 'B').maxSeq).toBe(w.seqOf.get(gkey(a.env)));
         expect(R(w, 'B').peerHeld.size).toBe(0); // dropped on its echo
         expect(w.n['welcomeOlderThanTraffic']).toBe(1);
-        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({ found: true, value: 1 });
+        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({
+          found: true,
+          value: 1,
+        });
         expect(Object.fromEntries(w.violations)).toEqual({});
       } else {
         expect(R(w, 'B').peerHeld.size).toBe(0); // the echo dropped it (as ruled) but taught no seq
         expect(lookup(R(w, 'B').u.materialize(), ['x']).found).toBe(false); // erased by the older snapshot
-        expect(w.violations.get('welcome-order')).toMatch(/B installed g0@0 and lost ingested A#1/);
+        expect(w.violations.get('welcome-order')).toMatch(
+          /B installed g0@0 and lost ingested A#1/,
+        );
       }
     }
   });
@@ -6043,7 +7004,10 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       sync(w);
       observe(w);
       if (!noPeerRetain) {
-        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({ found: true, value: 1 });
+        expect(lookup(R(w, 'B').u.materialize(), ['x'])).toEqual({
+          found: true,
+          value: 1,
+        });
         expect(toRelay(w, a.env)).toBe('admitted');
         expect(toReplica(w, a.env, R(w, 'B'))).toBe('dup'); // the echo drops it from the held set
         expect(R(w, 'B').peerHeld.size).toBe(0);
@@ -6068,7 +7032,8 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       deliverWelcome(w, R(w, 'C'), R(w, 'C').inbox.length - 1);
       sync(w);
       observe(w);
-      if (!reapplyAdmitted) expect(Object.fromEntries(w.violations)).toEqual({});
+      if (!reapplyAdmitted)
+        expect(Object.fromEntries(w.violations)).toEqual({});
       else expect(w.violations.get('converge')).toMatch(/C on g0 materializes/);
     }
   });
@@ -6125,7 +7090,10 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       copyTo(w, committed(w, 'B', setOp(['x'], 2)), 'C'); // supersedes A's dot at the relay
       for (const id of ['A', 'B', 'C']) press(w, id);
       learn(w, R(w, 'C'));
-      const tc = author(w, 'C', [setOp(['k'], 'c'), setOp(['y'], 'c')]) as TailEntry; // after pressing; never delivered
+      const tc = author(w, 'C', [
+        setOp(['k'], 'c'),
+        setOp(['y'], 'c'),
+      ]) as TailEntry; // after pressing; never delivered
       const g = consensusCheck(w);
       if (!dishonestReady) {
         expect(g).toBeNull(); // C's declaration went false with its write
@@ -6136,7 +7104,9 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
       learn(w, R(w, 'C'));
       replayAll(w, 'C');
       expect(w.leaked.has(tc.intent.id)).toBe(true);
-      expect(w.violations.get('consensus')).toMatch(/C was ready at g1 yet replays C:1/);
+      expect(w.violations.get('consensus')).toMatch(
+        /C was ready at g1 yet replays C:1/,
+      );
       w.violations.delete('consensus'); // n39: counted, not hidden — the rest of the world is intact
       expect(flush(w, 'C')).toEqual(['admitted']); // its pending write simply replays (covered: no cites)
       okWorld(w);
@@ -6159,7 +7129,10 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
     const w = W();
     committed(w, 'B', setOp(['b', 'c'], 1));
     copyTo(w, committed(w, 'C', delOp(['k'])), 'A');
-    const t = author(w, 'A', [setOp(['b'], { c: 9 }), setOp(['k'], 'again')]) as TailEntry; // k cites C's (droppable) tombstone
+    const t = author(w, 'A', [
+      setOp(['b'], { c: 9 }),
+      setOp(['k'], 'again'),
+    ]) as TailEntry; // k cites C's (droppable) tombstone
     expect(t.env.ops.map((op) => [op.kind, op.path.join('.')])).toEqual([
       ['set', 'b'],
       ['set', 'k'],
@@ -6167,11 +7140,17 @@ describe('generation cut: pinned — client boundaries (D-d welcomes + crash poi
     cut(w, 'reaper', 'replay');
     learn(w, R(w, 'A'));
     replayAll(w, 'A');
-    expect(R(w, 'A').unresolved.map((c) => c.entry.intent.id)).toEqual([t.intent.id]); // the whole envelope
+    expect(R(w, 'A').unresolved.map((c) => c.entry.intent.id)).toEqual([
+      t.intent.id,
+    ]); // the whole envelope
     expect(relayValue(w, ['b'])).toEqual({ c: 1 }); // neither op landed
     resolve(w, R(w, 'A'), true);
     const again = lastTail(w, 'A');
-    expect(again.env.ops.map((op) => op.path.join('.')).sort()).toEqual(['b', 'b.c', 'k']); // re-stamped: b's expansion clear of b.c
+    expect(again.env.ops.map((op) => op.path.join('.')).sort()).toEqual([
+      'b',
+      'b.c',
+      'k',
+    ]); // re-stamped: b's expansion clear of b.c
     expect(toRelay(w, again.env)).toBe('admitted');
     okWorld(w);
   });

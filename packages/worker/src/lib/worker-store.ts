@@ -225,6 +225,10 @@ function build<T extends object>(
     if (!('store' in msg) || msg.store !== key) return;
     switch (msg.type) {
       case 'store:checkpoint': {
+        // a local write whose emission is still on the microtask ships now, so the outbox below
+        // holds it: `hydrate` would flush it too, but only after the tail had been collected, and
+        // the owner would then apply a write the replica no longer shows
+        sync.flush();
         // rebase from the full unacked outbox, not opSync's bounded recent-local ring, so a burst
         // of writes larger than that ring is never dropped from the local rebase on re-hydrate
         const replayed = [...unacked.values()].filter(

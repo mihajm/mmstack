@@ -54,6 +54,7 @@ export {
   policyStrategy,
   positional,
   preserve,
+  replace,
   rebaseOps,
   syncedFork,
   undoMerge,

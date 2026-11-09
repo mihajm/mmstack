@@ -749,15 +749,8 @@ describe('relay: the migration cut', () => {
       reason: 'migration',
       policy: 'discard',
     });
-    expect(s.generation.seed).toEqual([
-      {
-        path: [],
-        siblings: [
-          expect.objectContaining({ origin: 'a', hlc: m.hlc, value: { v: 1 } }),
-        ],
-        water: {},
-      },
-    ]);
+    // the state carries no seed: that is the cut row's and the cut welcome's
+    expect('seed' in s.generation).toBe(false);
     expect(s.generation.receipts).toEqual({ a: { [g0]: [[1, 2]] } });
     expect(s.ranges).toEqual({});
     const w = a.welcomes().at(-1) as WelcomeMsg & { seed?: unknown };
@@ -766,7 +759,15 @@ describe('relay: the migration cut', () => {
       reason: 'migration',
       instance: s.instance,
     });
-    expect(w.seed).toEqual(s.generation.seed);
+    expect(w.seed).toEqual([
+      {
+        path: [],
+        siblings: [
+          expect.objectContaining({ origin: 'a', hlc: m.hlc, value: { v: 1 } }),
+        ],
+        water: {},
+      },
+    ]);
   });
 });
 

@@ -381,18 +381,27 @@ export type GenerationFields = {
 };
 
 /**
- * The generation record, minted at a cut and persisted whole before anything is answered under
- * the new instance. `seq` is the cut's own row in the room's logical sequence, which never
+ * The generation as a room carries it between cuts and as a checkpoint persists it: the record
+ * without its seed. `seq` is the cut's own row in the room's logical sequence, which never
  * restarts. `firstStamps` is empty at the cut and grows during the generation; `receipts` are
- * the ones carried across the cut.
+ * the ones carried across the cut. The seed lives in the cut row at `seq` alone: after the cut
+ * nothing reads it (the gate judges by `extent` and `preCutMax`, recovery reloads it from the
+ * row), so a checkpoint that carried it would store every register twice.
  */
-export type GenerationRecord = GenerationFields & {
+export type GenerationState = GenerationFields & {
   readonly instance: string;
   readonly seq: number;
-  /** The live siblings the generation starts from, original dots, no watermarks. */
-  readonly seed: readonly RegisterCheckpoint[];
   readonly firstStamps: Readonly<Record<string, Hlc>>;
   readonly receipts: Receipts;
+};
+
+/**
+ * The generation record, minted at a cut and persisted whole (as the cut row) before anything is
+ * answered under the new instance: the state plus the seed it started from.
+ */
+export type GenerationRecord = GenerationState & {
+  /** The live siblings the generation starts from, original dots, no watermarks. */
+  readonly seed: readonly RegisterCheckpoint[];
 };
 
 /**

@@ -15,6 +15,7 @@ import {
   type DropMsg,
   type GenerationReason,
   type GenerationRecord,
+  type GenerationState,
   type Hlc,
   type IceServer,
   type Key,
@@ -282,10 +283,11 @@ export type RoomState = {
   /** The room's data shape; restored via {@link Relay.hydrate}. */
   readonly schemaVersion: number;
   /**
-   * The current generation record, its `firstStamps` and `receipts` as of this commit. Persist it
-   * with the checkpoint; hand it back through {@link RoomSnapshot.generation}.
+   * The current generation, its `firstStamps` and `receipts` as of this commit, without the seed
+   * (that is the cut row's; see {@link GenerationState}). Persist it with the checkpoint; hand it
+   * back through {@link RoomSnapshot.generation}.
    */
-  readonly generation: GenerationRecord;
+  readonly generation: GenerationState;
   /** Per origin, the highest stamp the room ever held: the next cut's `preCutMax`. */
   readonly everMax: Readonly<Record<string, Hlc>>;
   /** This generation's journaled refusals, by `origin#version`. */
@@ -318,9 +320,10 @@ export type RoomSnapshot = {
    * The generation record captured with the checkpoint (see {@link RoomState.generation}). Its
    * `instance` wins over {@link RoomSnapshot.instance}; journal entries before its `seq` belong to
    * an earlier generation and are not served, and an entry after it from another generation is an
-   * inconsistent checkpoint: hydrate throws.
+   * inconsistent checkpoint: hydrate throws. A checkpoint written when the record still carried
+   * its seed is read the same: the seed is ignored.
    */
-  readonly generation?: GenerationRecord;
+  readonly generation?: GenerationState;
   /** See {@link RoomState.everMax}. */
   readonly everMax?: Readonly<Record<string, Hlc>>;
   /** See {@link RoomState.refused}. */
@@ -487,13 +490,16 @@ type Member = {
   ready: boolean;
 };
 
-/** The immutable part of the current generation (first stamps and receipts live on the room). */
+/**
+ * The immutable part of the current generation (first stamps and receipts live on the room). The
+ * seed is not held: once the registers are loaded from it and `extent` frozen, only the cut row
+ * and the cut's own re-welcome carry it, and both are written at the cut.
+ */
 type Head = {
   readonly seq: number;
   readonly index: number;
   readonly reason: GenerationReason;
   readonly policy: TailPolicy;
-  readonly seed: readonly RegisterCheckpoint[];
   readonly extent: Readonly<Record<string, Readonly<Record<string, Hlc>>>>;
   readonly preCutMax: Readonly<Record<string, Hlc>>;
 };
@@ -502,7 +508,6 @@ const GENESIS: Head = {
   index: 0,
   reason: 'genesis',
   policy: 'discard',
-  seed: [],
   extent: {},
   preCutMax: {},
 };
@@ -737,13 +742,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     firstStamp: (origin) => room.firstStamps.get(origin),
     settled: (origin) => room.settled.get(origin),
   });
-  const generationOf = (room: Room): GenerationRecord => ({
+  const generationOf = (room: Room): GenerationState => ({
     instance: room.instance,
     seq: room.head.seq,
     index: room.head.index,
     reason: room.head.reason,
     policy: room.head.policy,
-    seed: room.head.seed,
     extent: room.head.extent,
     preCutMax: room.head.preCutMax,
     firstStamps: recordOf(room.firstStamps),
@@ -842,7 +846,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       index: room.head.index + 1,
       reason,
       policy: replay ? 'replay' : 'discard',
-      seed,
       extent: extentOf(seed),
       preCutMax: recordOf(preCutMax),
     };
@@ -854,7 +857,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       ...snapshotOf(room),
       seed,
     } as const;
-    return { audience: [...room.members], doc, dropped };
+    return { audience: [...room.members], doc, seed, dropped };
   };
   /** The re-welcome after a cut: the seed and the record to every member present at the cut. */
   const rewelcome =
@@ -882,7 +885,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     const row: CutRow = {
       kind: 'cut',
       seq: room.head.seq,
-      record: generationOf(room),
+      record: { ...generationOf(room), seed: cut.seed },
       dropped: cut.dropped,
     };
     const done = opt.onRow?.(name, row, stateOf(room));
@@ -1011,7 +1014,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           index: g.index,
           reason: g.reason,
           policy: g.policy,
-          seed: g.seed,
           extent: g.extent,
           preCutMax: g.preCutMax,
         };

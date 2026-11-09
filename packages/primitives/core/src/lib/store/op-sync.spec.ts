@@ -13,6 +13,7 @@ import {
   preserve,
   policyStrategy,
   rebaseOps,
+  replace,
   syncedFork,
   validateEnvelope,
   wireValueViolation,
@@ -23,6 +24,7 @@ import {
   type OpSync,
   type SyncOp,
 } from './op-sync';
+import { opaque } from './opaque';
 import { store } from './store';
 
 // NB an op WITHOUT explicit `cites` is a CONCURRENT write here (it observed nothing at its
@@ -1347,13 +1349,17 @@ describe('opSync', () => {
     const cp = syncB.snapshot();
     syncA.hydrate({ ...cp, proto: 4 });
     expect(a().v).toBe('from-b');
-    expect(() => syncA.hydrate({ ...cp, proto: 2 })).toThrow(/loads only protocol 3/);
+    expect(() => syncA.hydrate({ ...cp, proto: 2 })).toThrow(
+      /loads only protocol 3/,
+    );
   });
 
   it('emitOps stamps raw ops with the current cites as ONE envelope, applies them to the store, and hands the intent to subscribers', () => {
     const { a, b, syncA, syncB } = pair();
     const seen: { env: OpEnvelope; raws?: unknown; bump?: boolean }[] = [];
-    syncA.subscribe((env, ctx) => seen.push({ env, raws: ctx?.raws, bump: ctx?.bump }));
+    syncA.subscribe((env, ctx) =>
+      seen.push({ env, raws: ctx?.raws, bump: ctx?.bump }),
+    );
     const toA = pipe(syncB, syncA);
     b.set({ v: 'b', n: { x: 2 } });
     syncB.flush();
@@ -1363,16 +1369,18 @@ describe('opSync', () => {
     expect(a().v).toBe('again');
     expect(seen).toHaveLength(1);
     const [{ env }] = seen;
-    expect(env.ops.map((op) => [op.kind, op.path, op.cites.map((c) => c.origin)])).toEqual([
-      ['set', ['v'], [syncB.origin]],
-    ]);
+    expect(
+      env.ops.map((op) => [op.kind, op.path, op.cites.map((c) => c.origin)]),
+    ).toEqual([['set', ['v'], [syncB.origin]]]);
     expect(env.ops[0].epoch).toBe(1); // the override
     expect(seen[0].raws).toEqual(raws);
     expect(seen[0].bump).toBe(true);
     a.set({ ...a(), n: { x: 5 } });
     syncA.flush();
     expect(seen[1].bump).toBe(false); // an ordinary write's intent
-    expect(seen[1].raws).toEqual([{ kind: 'set', path: ['n', 'x'], next: 5, prev: 2 }]);
+    expect(seen[1].raws).toEqual([
+      { kind: 'set', path: ['n', 'x'], next: 5, prev: 2 },
+    ]);
   });
 
   it('drops foreign-proto envelopes with a dev warning', () => {
@@ -2285,7 +2293,9 @@ describe('createConvergingApply — settle keeps tombstones', () => {
     expect(regs.length).toBe(N + 1);
     for (const reg of regs) {
       if (reg.path.length === 0) continue;
-      expect(reg.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
+      expect(reg.siblings).toEqual([
+        expect.objectContaining({ kind: 'delete' }),
+      ]);
       expect(reg.water).toEqual({});
     }
     expect(conv.materialize()).toEqual({});
@@ -2506,7 +2516,10 @@ describe('createConvergingApply — settle is fold-equivalent + bounds covered s
         const before = conv.materialize();
         conv.settle(settledAt(conv, frac));
         const after = conv.materialize();
-        expect(after, `seed ${seed} vector ${frac}: settle changed the fold`).toEqual(before);
+        expect(
+          after,
+          `seed ${seed} vector ${frac}: settle changed the fold`,
+        ).toEqual(before);
       }
     }
   });
@@ -2537,7 +2550,10 @@ describe('createConvergingApply — settle is fold-equivalent + bounds covered s
       for (const t of tombstonesBefore) {
         expect(paths, `seed ${seed}: tombstone ${t} collected`).toContain(t);
       }
-      expect(conv.materialize(), `seed ${seed}: settle changed the fold`).toEqual(live);
+      expect(
+        conv.materialize(),
+        `seed ${seed}: settle changed the fold`,
+      ).toEqual(live);
     }
   });
 });
@@ -2730,7 +2746,9 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
 
   it('rejects a missing or unclean generation; an EMPTY one (none known yet) is well-formed', () => {
     expect(validateEnvelope(mutate((e) => delete e.instance))).toBe('instance');
-    expect(validateEnvelope(mutate((e) => (e.instance = 'g' + CTRL)))).toBe('instance');
+    expect(validateEnvelope(mutate((e) => (e.instance = 'g' + CTRL)))).toBe(
+      'instance',
+    );
     expect(validateEnvelope(mutate((e) => (e.instance = '')))).toBeNull();
   });
 
@@ -2996,9 +3014,23 @@ describe('release-review fixes', () => {
       const s = signal<Record<string, string>>({ k: 'live' });
       const sync = opSync(s, { writer: 'w', origin: 'o1' });
       sync.settle({ o1: { p: 10, l: 0 } });
-      sync.receive(env([set(['stale'], 'x')], { p: 5, writer: 'wz', origin: 'oz', version: 1 }));
+      sync.receive(
+        env([set(['stale'], 'x')], {
+          p: 5,
+          writer: 'wz',
+          origin: 'oz',
+          version: 1,
+        }),
+      );
       expect(s()['stale']).toBe('x');
-      sync.receive(env([set(['fresh'], 'y')], { p: 20, writer: 'wq', origin: 'oq', version: 1 }));
+      sync.receive(
+        env([set(['fresh'], 'y')], {
+          p: 20,
+          writer: 'wq',
+          origin: 'oq',
+          version: 1,
+        }),
+      );
       expect(s()['fresh']).toBe('y');
       sync.destroy();
     });
@@ -3107,5 +3139,117 @@ describe('the wire-fidelity law (wireValueViolation + the emit-side dev lint)', 
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe('opSync — replace policy (a path written whole keeps no ancestor)', () => {
+  type Doc = {
+    big: { a: number; b: string };
+    other: { a: number };
+    list: number[];
+  };
+  function emitter(policies: Parameters<typeof opSync>[1]['policies']) {
+    return TestBed.runInInjectionContext(() => {
+      const s = signal<Doc>({
+        big: opaque({ a: 1, b: 'x'.repeat(200) }),
+        other: { a: 1 },
+        list: [1, 2],
+      });
+      const sync = opSync(s, { writer: 'w', policies });
+      const out: OpEnvelope[] = [];
+      sync.subscribe((e) => out.push(e));
+      return { s, sync, out };
+    });
+  }
+  const opAt = (out: readonly OpEnvelope[], head: string): SyncOp =>
+    out.flatMap((e) => e.ops).find((op) => op.path[0] === head) as SyncOp;
+
+  it('stamps a set at a replace path without its prev, and keeps prev everywhere else', () => {
+    const { s, sync, out } = emitter([{ path: 'big', merge: replace }]);
+
+    s.update((v) => ({
+      ...v,
+      big: opaque({ a: 2, b: 'y' }),
+      other: { a: 2 },
+      list: [1, 3],
+    }));
+    sync.flush();
+
+    const big = opAt(out, 'big');
+    expect(big).toMatchObject({
+      kind: 'set',
+      path: ['big'],
+      next: { a: 2, b: 'y' },
+    });
+    expect(Object.hasOwn(big, 'prev')).toBe(false);
+    // a plain record still diffs into its leaves, each with what it replaced
+    expect(opAt(out, 'other')).toMatchObject({
+      kind: 'set',
+      path: ['other', 'a'],
+      prev: 1,
+      next: 2,
+    });
+    // an array keeps its ancestor: the positional merge folds against it
+    expect(opAt(out, 'list')).toMatchObject({
+      kind: 'set',
+      path: ['list'],
+      prev: [1, 2],
+      next: [1, 3],
+    });
+  });
+
+  it('ships prev for the same whole write where no replace policy covers the path', () => {
+    const { s, sync, out } = emitter([]);
+
+    s.update((v) => ({ ...v, big: opaque({ a: 2, b: 'y' }) }));
+    sync.flush();
+
+    expect(opAt(out, 'big')).toMatchObject({
+      prev: { a: 1, b: 'x'.repeat(200) },
+      next: { a: 2, b: 'y' },
+    });
+  });
+
+  it('folds as the last writer, whichever order concurrent writes arrive', () => {
+    const mine = env([set(['v'], 'A', 'base')], { p: 5, writer: 'a' });
+    const theirs = env([set(['v'], 'B', 'base')], { p: 4, writer: 'b' });
+    const run = (order: OpEnvelope[]) => {
+      const conv = createConvergingApply({
+        policies: [{ path: 'v', merge: replace }],
+      });
+      let root: unknown = { v: 'base' };
+      for (const e of order) root = applyOps(root, conv.ingest(e));
+      return root;
+    };
+    expect(run([mine, theirs])).toEqual({ v: 'A' });
+    expect(run([theirs, mine])).toEqual({ v: 'A' });
+  });
+
+  it('matches a replace path with a wildcard segment, as every policy does', () => {
+    const { out, s, sync } = TestBed.runInInjectionContext(() => {
+      const s = signal<{ items: Record<string, { body: { a: number } }> }>({
+        items: { k: { body: opaque({ a: 1 }) } },
+      });
+      const sync = opSync(s, {
+        writer: 'w',
+        policies: [{ path: 'items.*.body', merge: replace }],
+      });
+      const out: OpEnvelope[] = [];
+      sync.subscribe((e) => out.push(e));
+      return { out, s, sync };
+    });
+
+    s.update(() => ({ items: { k: { body: opaque({ a: 2 }) } } }));
+    sync.flush();
+
+    const body = out
+      .flatMap((e) => e.ops)
+      .find((op) => op.path.at(-1) === 'body') as SyncOp;
+    expect(body).toMatchObject({
+      kind: 'set',
+      path: ['items', 'k', 'body'],
+      next: { a: 2 },
+    });
+    expect(Object.hasOwn(body, 'prev')).toBe(false);
   });
 });

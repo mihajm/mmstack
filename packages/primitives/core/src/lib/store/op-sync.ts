@@ -165,7 +165,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
   if (!env || typeof env !== 'object') return 'envelope';
   // the generation may be EMPTY (minted before any welcome named one; the relay's fence refuses
   // it, a relay-less topology has no generation at all) but never unclean
-  if (typeof env.instance !== 'string' || hasControlChar(env.instance)) return 'instance';
+  if (typeof env.instance !== 'string' || hasControlChar(env.instance))
+    return 'instance';
   if (!isCleanId(env.origin)) return 'origin';
   if (!isCleanId(env.writer)) return 'writer';
   if (!isFiniteHlc(env.hlc)) return 'hlc';
@@ -321,6 +322,15 @@ export const preserve: MergeFn = (ancestor, mine, theirs) =>
     theirs,
     ancestor,
   }) satisfies Conflicted;
+
+/**
+ * A path that is written whole and never merged: the last writer's value, as `lww`, and no
+ * ancestor kept for it — a `set` here is stamped without its `prev`, so every replica's register
+ * holds the value alone rather than the value beside what it replaced. For records that are
+ * swapped, not reconciled (an archived branch, a frozen snapshot), where the ancestor would only
+ * double what the register holds.
+ */
+export const replace: MergeFn = (_ancestor, mine) => mine;
 
 /**
  * Pairs one side's occurrences of an identity with the ancestor's: an occurrence structurally
@@ -827,7 +837,10 @@ export type ConvergingApply = {
    * concurrent op always folds, and garbage collection (`settle`) only ever removes what such an
    * op cannot observe.
    */
-  ingest(env: OpEnvelope, opt?: { local?: boolean; reconcile?: boolean }): StoreOp[];
+  ingest(
+    env: OpEnvelope,
+    opt?: { local?: boolean; reconcile?: boolean },
+  ): StoreOp[];
   /**
    * Stamp locally-diffed ops for emission: each op cites the live dots at its path and adopts
    * `max(observed epoch, own prior epoch at the path)`, plus 1 per path when `bump` is set (an
@@ -970,7 +983,7 @@ export function createConvergingApply(opt?: {
     }
     const merge = policyFor(policies, path);
     if (merge === undefined) return noPolicyFold;
-    if (merge === lww) return defaultFold;
+    if (merge === lww || merge === replace) return defaultFold;
     if (merge === preserve) return preserveFold;
     return mergeFold(merge);
   };
@@ -1202,7 +1215,6 @@ export function createConvergingApply(opt?: {
       observeApplied(env.origin, env.hlc);
 
       for (const op of env.ops) {
-
         if (!op.path.length && op.kind !== 'set') continue;
         const reg = regAt(op.path);
         const key = keyOf(op.path);
@@ -1263,8 +1275,16 @@ export function createConvergingApply(opt?: {
         const key = keyOf(op.path);
         const reg = registers.get(key);
         const live = reg ? liveObserved(reg, frontier) : [];
+        // a `replace` path keeps no ancestor: the set travels and registers without its `prev`
+        // (the local op log keeps its own for inversion; `raws` carry the authored op whole)
+        const authored =
+          op.kind === 'set' &&
+          Object.hasOwn(op, 'prev') &&
+          policyFor(policies, op.path) === replace
+            ? (({ prev: _dropped, ...kept }) => kept)(op)
+            : op;
         out.push({
-          ...op,
+          ...authored,
           cites: live.map((s) => ({ origin: s.origin, hlc: s.hlc })),
           epoch: epochFor(key, live),
         } as SyncOp);
@@ -1545,7 +1565,10 @@ export type OpSyncCheckpoint<T = unknown> = {
    * This replica's emission epoch floors. Local, not a peer's: a persisted local snapshot must
    * carry them (a floor whose own sibling was collected has no other source on reload).
    */
-  readonly floors?: readonly { readonly path: readonly Key[]; readonly epoch: number }[];
+  readonly floors?: readonly {
+    readonly path: readonly Key[];
+    readonly epoch: number;
+  }[];
 };
 
 /**
@@ -1652,7 +1675,10 @@ export type OpSync<T = unknown> = {
   restore(
     envs: readonly OpEnvelope[],
     highWater?: number,
-    floors?: readonly { readonly path: readonly Key[]; readonly epoch: number }[],
+    floors?: readonly {
+      readonly path: readonly Key[];
+      readonly epoch: number;
+    }[],
     clock?: Hlc,
   ): void;
   /**
@@ -1669,7 +1695,10 @@ export type OpSync<T = unknown> = {
    */
   adopt(instance: string): void;
   /** This replica's emission epoch floors (persist them with the outbox). */
-  floors(): readonly { readonly path: readonly Key[]; readonly epoch: number }[];
+  floors(): readonly {
+    readonly path: readonly Key[];
+    readonly epoch: number;
+  }[];
   /** The stamp of the last envelope this replica minted, for persisting the clock high-water. */
   lastStamp(): Hlc | undefined;
   destroy(): void;
@@ -1887,7 +1916,8 @@ export function opSync<T extends object>(
     watermark: () => Object.fromEntries(versions),
     settle: (settled) => conv.settle(settled),
     adopt: (next) => {
-      if (instance !== undefined && instance !== '' && next !== instance) conv.clearFloors();
+      if (instance !== undefined && instance !== '' && next !== instance)
+        conv.clearFloors();
       instance = next;
     },
     floors: () => conv.emissionFloors(),

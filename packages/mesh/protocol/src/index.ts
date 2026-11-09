@@ -48,6 +48,7 @@ export {
   type GenerationFields,
   type GenerationReason,
   type GenerationRecord,
+  type GenerationState,
   type HelloMsg,
   type Hlc,
   type IceServer,

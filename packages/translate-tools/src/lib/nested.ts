@@ -37,7 +37,10 @@ export function leafMap(nested: NestedTranslation): Map<string, string> {
   return new Map(leafEntries(nested));
 }
 
-function validate(value: Record<string, unknown>, path: string): NestedTranslation {
+function validate(
+  value: Record<string, unknown>,
+  path: string,
+): NestedTranslation {
   for (const [key, child] of Object.entries(value)) {
     const at = path ? `${path}.${key}` : key;
     if (typeof child === 'string') continue;

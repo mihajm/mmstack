@@ -15,9 +15,14 @@ import { TELEMETRY } from './telemetry';
  * `http.get(url, { context: withTelemetryParent(span) })`. Without it, the HTTP
  * span is its own (flat) trace.
  */
-export const TELEMETRY_HTTP_PARENT = new HttpContextToken<SpanHandle | undefined>(() => undefined);
+export const TELEMETRY_HTTP_PARENT = new HttpContextToken<
+  SpanHandle | undefined
+>(() => undefined);
 
-export function withTelemetryParent(parent: SpanHandle, context = new HttpContext()): HttpContext {
+export function withTelemetryParent(
+  parent: SpanHandle,
+  context = new HttpContext(),
+): HttpContext {
   return context.set(TELEMETRY_HTTP_PARENT, parent);
 }
 
@@ -70,7 +75,8 @@ export const telemetryInterceptor: HttpInterceptorFn = (req, next) => {
         }
       },
       error: (err: unknown) => {
-        if (err instanceof HttpErrorResponse) span.setAttrs({ 'http.status_code': err.status });
+        if (err instanceof HttpErrorResponse)
+          span.setAttrs({ 'http.status_code': err.status });
         span.setError(err);
       },
     }),

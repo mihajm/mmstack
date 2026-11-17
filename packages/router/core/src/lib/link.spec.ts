@@ -44,7 +44,9 @@ if (!customElements.get('mm-plain-link'))
   customElements.define('mm-plain-link', MmPlainEl);
 
 @Component({
-  template: `<mm-href-link [mmLink]="'/x'" [beforeNavigate]="bn">h</mm-href-link>`,
+  template: `<mm-href-link [mmLink]="'/x'" [beforeNavigate]="bn"
+    >h</mm-href-link
+  >`,
   imports: [Link],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
@@ -53,7 +55,9 @@ class HrefElHost {
 }
 
 @Component({
-  template: `<mm-plain-link [mmLink]="'/x'" [beforeNavigate]="bn">p</mm-plain-link>`,
+  template: `<mm-plain-link [mmLink]="'/x'" [beforeNavigate]="bn"
+    >p</mm-plain-link
+  >`,
   imports: [Link],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })

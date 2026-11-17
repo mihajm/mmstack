@@ -231,7 +231,6 @@ export function persist<T extends object>(
         } else {
           const migrated = !!(opt.migrate && fromVersion < target);
           let value = deserialize(payload);
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           if (migrated) value = await opt.migrate!(value, fromVersion);
           if (untracked(read) === initialRef) {
             setRoot(value);

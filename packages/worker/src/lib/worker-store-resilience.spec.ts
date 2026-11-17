@@ -3,7 +3,11 @@ import { TestBed } from '@angular/core/testing';
 import { createStoreContext, store } from '@mmstack/primitives/core';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
-import { crashablePort, droppingPort, type CrashablePort } from '../testing/harness';
+import {
+  crashablePort,
+  droppingPort,
+  type CrashablePort,
+} from '../testing/harness';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
 
@@ -16,7 +20,8 @@ const tick = async () => {
 async function waitFor(cond: () => boolean, ms = 1000): Promise<void> {
   const start = Date.now();
   while (!cond()) {
-    if (Date.now() - start > ms) throw new Error('waitFor: condition never met');
+    if (Date.now() - start > ms)
+      throw new Error('waitFor: condition never met');
     await new Promise<void>((r) => setTimeout(r, 1));
   }
 }

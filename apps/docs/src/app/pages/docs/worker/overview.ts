@@ -122,12 +122,12 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           A write applies optimistically on the writer and routes to the owner,
           which folds it in and echoes it to every replica; the echo is also the
-          acknowledgement. The main thread and the worker run the same convergent
-          sync the mesh uses, so interleaved writes from several components land
-          on the same value on every replica. The owner can also correct a value
-          authoritatively, and that correction wins wherever it meets a
-          concurrent write, which is how a single owner keeps the last word over
-          its subtree.
+          acknowledgement. The main thread and the worker run the same
+          convergent sync the mesh uses, so interleaved writes from several
+          components land on the same value on every replica. The owner can also
+          correct a value authoritatively, and that correction wins wherever it
+          meets a concurrent write, which is how a single owner keeps the last
+          word over its subtree.
         </p>
         <p>
           Reads stay synchronous because a replica always holds a value. Only

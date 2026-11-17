@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import { Component, ErrorHandler, type ErrorDetails } from '@angular/core';
 import { TestBed } from '@angular/core/testing';

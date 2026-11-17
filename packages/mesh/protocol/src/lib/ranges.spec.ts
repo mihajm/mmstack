@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { createRanges, recordAdmission, type AdmissionEvidence } from './ranges';
+import {
+  createRanges,
+  recordAdmission,
+  type AdmissionEvidence,
+} from './ranges';
 
 describe('recordAdmission', () => {
-  const fresh = (): AdmissionEvidence => ({ ranges: new Map(), settled: new Map() });
+  const fresh = (): AdmissionEvidence => ({
+    ranges: new Map(),
+    settled: new Map(),
+  });
   const at = (origin: string, version: number, p: number) => ({
     origin,
     version,
@@ -37,7 +44,9 @@ describe('recordAdmission', () => {
     };
     recordAdmission(restored, at('a', 5, 50));
     recordAdmission(restored, at('a', 6, 60));
-    expect(restored.ranges.get('a')?.toJSON()).toEqual(live.ranges.get('a')?.toJSON());
+    expect(restored.ranges.get('a')?.toJSON()).toEqual(
+      live.ranges.get('a')?.toJSON(),
+    );
     expect(restored.settled).toEqual(live.settled);
   });
 });
@@ -59,7 +68,10 @@ describe('createRanges', () => {
     const r = createRanges();
     r.add(1);
     r.add(3);
-    expect(r.toJSON()).toEqual([[1, 1], [3, 3]]);
+    expect(r.toJSON()).toEqual([
+      [1, 1],
+      [3, 3],
+    ]);
     expect(r.prefix()).toBe(1);
     expect(r.max()).toBe(3);
     expect(r.has(2)).toBe(false);
@@ -69,8 +81,14 @@ describe('createRanges', () => {
   });
 
   it('restores from persisted ranges; the prefix is the end of the first run, wherever it starts', () => {
-    const r = createRanges([[4, 6], [2, 2]]);
-    expect(r.toJSON()).toEqual([[2, 2], [4, 6]]);
+    const r = createRanges([
+      [4, 6],
+      [2, 2],
+    ]);
+    expect(r.toJSON()).toEqual([
+      [2, 2],
+      [4, 6],
+    ]);
     // an origin that entered the generation at 2 settles from 2: nothing below an admitted
     // version is admitted later, so where the run starts takes nothing from what it proves
     expect(r.prefix()).toBe(2);

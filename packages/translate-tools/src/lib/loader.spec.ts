@@ -14,12 +14,16 @@ function arrow(expr: string): ArrowFunction {
 describe('parseLoader', () => {
   it('parses import().then((m) => m.a.b) into path + accessor', () => {
     expect(
-      parseLoader(arrow(`() => import('./quote').then((m) => m.quote.translation)`)),
+      parseLoader(
+        arrow(`() => import('./quote').then((m) => m.quote.translation)`),
+      ),
     ).toEqual({ importPath: './quote', accessor: ['quote', 'translation'] });
   });
 
   it('parses a single-level accessor and a paren-less callback param', () => {
-    expect(parseLoader(arrow(`() => import('./x').then(m => m.quoteDe)`))).toEqual({
+    expect(
+      parseLoader(arrow(`() => import('./x').then(m => m.quoteDe)`)),
+    ).toEqual({
       importPath: './x',
       accessor: ['quoteDe'],
     });
@@ -44,7 +48,9 @@ describe('parseLoader', () => {
   });
 
   it('parses `.then((m) => m.default)` to a default accessor', () => {
-    expect(parseLoader(arrow(`() => import('./x').then((m) => m.default)`))).toEqual({
+    expect(
+      parseLoader(arrow(`() => import('./x').then((m) => m.default)`)),
+    ).toEqual({
       importPath: './x',
       accessor: ['default'],
     });
@@ -52,7 +58,9 @@ describe('parseLoader', () => {
 
   it('returns null for an async/await loader (block body)', () => {
     expect(
-      parseLoader(arrow(`async () => { const m = await import('./x'); return m.a; }`)),
+      parseLoader(
+        arrow(`async () => { const m = await import('./x'); return m.a; }`),
+      ),
     ).toBeNull();
   });
 
@@ -61,6 +69,8 @@ describe('parseLoader', () => {
   });
 
   it('returns null when the callback does not return a member access', () => {
-    expect(parseLoader(arrow(`() => import('./x').then((m) => doStuff(m))`))).toBeNull();
+    expect(
+      parseLoader(arrow(`() => import('./x').then((m) => doStuff(m))`)),
+    ).toBeNull();
   });
 });

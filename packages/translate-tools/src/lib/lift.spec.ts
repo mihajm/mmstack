@@ -2,7 +2,10 @@ import { Node, type ObjectLiteralExpression, Project } from 'ts-morph';
 import { liftObjectLiteral } from './lift';
 
 function obj(source: string): ObjectLiteralExpression {
-  const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile('t.ts', source);
+  const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile(
+    't.ts',
+    source,
+  );
   const o = sf.getFirstDescendant(Node.isObjectLiteralExpression);
   if (!o) throw new Error('no object literal');
   return o;
@@ -18,7 +21,9 @@ describe('liftObjectLiteral', () => {
   });
 
   it('reads no-substitution template literals', () => {
-    expect(liftObjectLiteral(obj('const x = { a: `hello` };'))).toEqual({ a: 'hello' });
+    expect(liftObjectLiteral(obj('const x = { a: `hello` };'))).toEqual({
+      a: 'hello',
+    });
   });
 
   it('unwraps withParams() — with and without a type argument', () => {
@@ -33,21 +38,35 @@ describe('liftObjectLiteral', () => {
   });
 
   it('supports identifier and quoted keys', () => {
-    expect(liftObjectLiteral(obj(`const x = { 'foo-bar': 'v', baz: 'w' };`))).toEqual({
+    expect(
+      liftObjectLiteral(obj(`const x = { 'foo-bar': 'v', baz: 'w' };`)),
+    ).toEqual({
       'foo-bar': 'v',
       baz: 'w',
     });
   });
 
   it('throws on non-literal values (numbers, identifiers, concatenation, other calls)', () => {
-    expect(() => liftObjectLiteral(obj(`const x = { a: 1 };`))).toThrow(/Unsupported translation value/);
-    expect(() => liftObjectLiteral(obj(`const x = { a: someVar };`))).toThrow(/Unsupported translation value/);
-    expect(() => liftObjectLiteral(obj("const x = { a: 'a' + 'b' };"))).toThrow(/Unsupported translation value/);
-    expect(() => liftObjectLiteral(obj(`const x = { a: t('k') };`))).toThrow(/Unsupported call/);
+    expect(() => liftObjectLiteral(obj(`const x = { a: 1 };`))).toThrow(
+      /Unsupported translation value/,
+    );
+    expect(() => liftObjectLiteral(obj(`const x = { a: someVar };`))).toThrow(
+      /Unsupported translation value/,
+    );
+    expect(() => liftObjectLiteral(obj("const x = { a: 'a' + 'b' };"))).toThrow(
+      /Unsupported translation value/,
+    );
+    expect(() => liftObjectLiteral(obj(`const x = { a: t('k') };`))).toThrow(
+      /Unsupported call/,
+    );
   });
 
   it('throws on spreads and computed/shorthand entries', () => {
-    expect(() => liftObjectLiteral(obj(`const x = { ...base, a: 'v' };`))).toThrow(/Unsupported entry/);
-    expect(() => liftObjectLiteral(obj(`const a = 'v'; const x = { a };`))).toThrow(/Unsupported entry/);
+    expect(() =>
+      liftObjectLiteral(obj(`const x = { ...base, a: 'v' };`)),
+    ).toThrow(/Unsupported entry/);
+    expect(() =>
+      liftObjectLiteral(obj(`const a = 'v'; const x = { a };`)),
+    ).toThrow(/Unsupported entry/);
   });
 });

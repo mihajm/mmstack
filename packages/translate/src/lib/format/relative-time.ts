@@ -246,10 +246,7 @@ export function injectFormatRelativeTimeToNow() {
 
     const opt =
       typeof unwrapped === 'object'
-        ? mergeDefined(
-            defaults() as FormatRelativeTimeToNowOptions,
-            unwrapped,
-          )
+        ? mergeDefined(defaults() as FormatRelativeTimeToNowOptions, unwrapped)
         : {
             ...defaults(),
             locale: unwrapped,

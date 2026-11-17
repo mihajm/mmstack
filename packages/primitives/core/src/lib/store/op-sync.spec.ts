@@ -1535,7 +1535,7 @@ describe('opSync — override (scoped authority bump)', () => {
 
         // b edits the theme; a observes it (it is now in a's register map)
         sb.update((s) => ({
-          settings: { theme: 'seen', ...(s.settings ?? {}) },
+          settings: { theme: 'seen', ...s.settings },
         }));
         sb.set({ settings: { theme: 'seen' } });
         b.flush();
@@ -3088,7 +3088,7 @@ describe('the wire-fidelity law (wireValueViolation + the emit-side dev lint)', 
     expect(wireValueViolation(Infinity)).toBe('non-finite-number');
     expect(wireValueViolation({ a: undefined })).toBe('undefined-in-container');
     expect(wireValueViolation([1, undefined])).toBe('undefined-in-container');
-    // eslint-disable-next-line no-sparse-arrays
+    // oxlint-disable-next-line no-sparse-arrays
     expect(wireValueViolation([1, , 2])).toBe('sparse-array');
     expect(wireValueViolation(Object.assign([1], { extra: 2 }))).toBe(
       'array-named-property',

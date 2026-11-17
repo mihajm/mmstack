@@ -30,7 +30,7 @@ describe('stored', () => {
   });
 
   it('should store value on set via effect', async () => {
-    TestBed.runInInjectionContext(async () => {
+    await TestBed.runInInjectionContext(async () => {
       const sig = stored('light', { key: 'theme', store: mockStore });
 
       sig.set('dark');

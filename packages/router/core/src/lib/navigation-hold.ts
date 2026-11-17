@@ -91,7 +91,11 @@ export function holdThroughNavigation<T>(
     const router = inject(Router);
     const live = liveSnapshot(resource);
 
-    const initial: NavState<T> = { mode: 'live', seed: untracked(live), nav: 0 };
+    const initial: NavState<T> = {
+      mode: 'live',
+      seed: untracked(live),
+      nav: 0,
+    };
     const navState = toSignal(
       router.events.pipe(
         scan<unknown, NavState<T>>((state, e) => {
@@ -135,7 +139,8 @@ export function holdThroughNavigation<T>(
           prev !== undefined &&
           prev.source.ns.mode === 'settling' &&
           prev.source.ns.nav === ns.nav;
-        if (sameSettle && prev.value.done) return { snap: liveSnap, done: true };
+        if (sameSettle && prev.value.done)
+          return { snap: liveSnap, done: true };
         if (isLoadingStatus(liveSnap.status))
           return { snap: heldSnap, done: false };
         const completed =

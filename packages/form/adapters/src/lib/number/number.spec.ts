@@ -43,10 +43,10 @@ describe('Number Adapter', () => {
         step: () => 5,
         decimalSeparator: () => ',', // keydownHandler is active only if NOT iso or complex
       });
-      
+
       const handler = state.keydownHandler();
       const preventDefault = vi.fn();
-      
+
       // ArrowUp
       handler({ code: 'ArrowUp', preventDefault, isTrusted: true } as any);
       expect(state.value()).toBe(15);
@@ -90,7 +90,7 @@ describe('Number Adapter', () => {
         });
 
         expect(state.error()).toBe('Must be at least 10');
-        
+
         state.value.set(25);
         expect(state.error()).toBe('Must be at most 20');
 

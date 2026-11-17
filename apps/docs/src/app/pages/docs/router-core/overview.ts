@@ -71,11 +71,13 @@ import { DocSection } from '../../../layout/doc-section';
               </tr>
               <tr>
                 <td>
-                  Fetch a route's data at the resolve phase, before the component
+                  Fetch a route's data at the resolve phase, before the
+                  component
                 </td>
                 <td>
                   <a mmLink="/docs/router-core/route-data"
-                    ><code>createRouteData</code>, <code>injectRouteData</code></a
+                    ><code>createRouteData</code>,
+                    <code>injectRouteData</code></a
                   >
                 </td>
               </tr>
@@ -123,7 +125,9 @@ import { DocSection } from '../../../layout/doc-section';
                 </td>
               </tr>
               <tr>
-                <td>Rebuild a lazy subtree or swap a route's definition at runtime</td>
+                <td>
+                  Rebuild a lazy subtree or swap a route's definition at runtime
+                </td>
                 <td>
                   <a mmLink="/docs/router-core/runtime-config"
                     ><code>injectRemountHandle</code>,

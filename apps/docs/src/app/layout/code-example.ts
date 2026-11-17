@@ -225,7 +225,7 @@ export class CodeExample {
     effect(() => {
       const code = this.trimmed();
       const lang = this.lang();
-      highlight(code, lang).then((html) => {
+      void highlight(code, lang).then((html) => {
         // Stale-guard: only apply if inputs haven't changed since kickoff.
         if (untracked(this.trimmed) !== code || untracked(this.lang) !== lang)
           return;
@@ -237,7 +237,7 @@ export class CodeExample {
   }
 
   protected copy(): void {
-    navigator.clipboard.writeText(this.trimmed()).then(() => {
+    void navigator.clipboard.writeText(this.trimmed()).then(() => {
       this.copied.set(true);
       if (this.resetTimer) clearTimeout(this.resetTimer);
       this.resetTimer = setTimeout(() => this.copied.set(false), 1500);

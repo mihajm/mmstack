@@ -29,7 +29,6 @@ function subtreeContains(item: TreeNode, node: TreeNode): boolean {
  * level. Recursion via the standalone component importing itself.
  */
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-tree-node',
   imports: [Reorderable, ReorderableItem, ReorderableHandle, TreeNodeComponent],
   template: `
@@ -92,7 +91,6 @@ export class TreeNodeComponent {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-tree-sortable-example',
   imports: [Reorderable, ReorderableItem, TreeNodeComponent],
   template: `

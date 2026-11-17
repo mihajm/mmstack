@@ -1,4 +1,8 @@
-import { converged, journalFoldMatchesClients, relayRetainsJournal } from './invariants';
+import {
+  converged,
+  journalFoldMatchesClients,
+  relayRetainsJournal,
+} from './invariants';
 import { runEjectionSimulation } from './chaos-harness';
 
 const hasNegative = (root: unknown): boolean =>
@@ -20,11 +24,21 @@ describe('scenario: policy tripwire ejection', () => {
     });
 
     expect(res.rogueStatus).toBe('ejected'); // the tripwire fired
-    expect(res.honestStatuses.every((s) => s === 'live'), 'an honest peer was wrongly affected').toBe(true);
-    expect(converged(res.honestRoots).ok, converged(res.honestRoots).message).toBe(true);
+    expect(
+      res.honestStatuses.every((s) => s === 'live'),
+      'an honest peer was wrongly affected',
+    ).toBe(true);
+    expect(
+      converged(res.honestRoots).ok,
+      converged(res.honestRoots).message,
+    ).toBe(true);
     // the poison never entered the journal, the relay's retained state, or any honest root
-    expect(journalFoldMatchesClients(undefined, res.journal, res.honestRoots).ok).toBe(true);
-    expect(relayRetainsJournal(undefined, res.journal, res.relayRegisters).ok).toBe(true);
+    expect(
+      journalFoldMatchesClients(undefined, res.journal, res.honestRoots).ok,
+    ).toBe(true);
+    expect(
+      relayRetainsJournal(undefined, res.journal, res.relayRegisters).ok,
+    ).toBe(true);
     expect(res.honestRoots.some(hasNegative)).toBe(false);
   });
 
@@ -38,11 +52,19 @@ describe('scenario: policy tripwire ejection', () => {
         faults: { minLatencyMs: 1, maxLatencyMs: 15 },
         violateAtRound: 4,
       });
-      expect(res.rogueStatus, `seed ${seed}: rogue not ejected`).toBe('ejected');
-      expect(res.honestStatuses.every((s) => s === 'live'), `seed ${seed}: honest peer affected`).toBe(true);
+      expect(res.rogueStatus, `seed ${seed}: rogue not ejected`).toBe(
+        'ejected',
+      );
+      expect(
+        res.honestStatuses.every((s) => s === 'live'),
+        `seed ${seed}: honest peer affected`,
+      ).toBe(true);
       const c = converged(res.honestRoots);
       expect(c.ok, `seed ${seed}: ${c.message}`).toBe(true);
-      expect(res.honestRoots.some(hasNegative), `seed ${seed}: poison leaked`).toBe(false);
+      expect(
+        res.honestRoots.some(hasNegative),
+        `seed ${seed}: poison leaked`,
+      ).toBe(false);
     }
   });
 });

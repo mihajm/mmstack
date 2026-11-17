@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createRegisterStore, type OpEnvelope as WireEnvelope } from '@mmstack/mesh-protocol';
+import {
+  createRegisterStore,
+  type OpEnvelope as WireEnvelope,
+} from '@mmstack/mesh-protocol';
 import {
   createConvergingApply,
   OP_PROTO_VERSION,
@@ -10,13 +13,20 @@ import {
 
 /** A settled vector naming every origin the fold has applied at one stamp (a test convenience). */
 const allAt = (
-  conv: { appliedFrontier(): Readonly<Record<string, { p: number; l: number }>> },
+  conv: {
+    appliedFrontier(): Readonly<Record<string, { p: number; l: number }>>;
+  },
   h: { p: number; l: number },
 ): Record<string, { p: number; l: number }> =>
   Object.fromEntries(Object.keys(conv.appliedFrontier()).map((o) => [o, h]));
 
 const hlc = (p: number, l = 0) => ({ p, l });
-const env = (origin: string, version: number, h: any, ops: SyncOp[]): OpEnvelope => ({
+const env = (
+  origin: string,
+  version: number,
+  h: any,
+  ops: SyncOp[],
+): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
   instance: '',
   origin,
@@ -26,8 +36,12 @@ const env = (origin: string, version: number, h: any, ops: SyncOp[]): OpEnvelope
   policyVersion: 0,
   ops,
 });
-const setOp = (path: any[], next: unknown, cites: any[] = [], epoch = 0): SyncOp =>
-  ({ kind: 'set', path, next, cites, epoch }) as any;
+const setOp = (
+  path: any[],
+  next: unknown,
+  cites: any[] = [],
+  epoch = 0,
+): SyncOp => ({ kind: 'set', path, next, cites, epoch }) as any;
 const delOp = (path: any[], cites: any[] = [], epoch = 0): SyncOp =>
   ({ kind: 'delete', path, prev: null, cites, epoch }) as any;
 
@@ -37,7 +51,12 @@ const canon = (regs: readonly RegisterCheckpoint[]) =>
     .map((r) => ({
       path: r.path.map(String),
       siblings: [...r.siblings]
-        .map((s) => ({ kind: s.kind, origin: s.origin, hlc: s.hlc, epoch: s.epoch }))
+        .map((s) => ({
+          kind: s.kind,
+          origin: s.origin,
+          hlc: s.hlc,
+          epoch: s.epoch,
+        }))
         .sort((a, b) => (a.origin < b.origin ? -1 : 1)),
       water: Object.fromEntries(Object.entries(r.water).sort()),
     }))
@@ -75,7 +94,9 @@ describe('ADVERSARIAL PARITY: tombstoneDroppable with ARRAY ancestor value', () 
     const envs: OpEnvelope[] = [
       env('o1', 1, hlc(1), [setOp(['a'], { arr: ['keep'] })]),
       env('o2', 1, hlc(2), [setOp(['a', 'arr', 0], 'x')]),
-      env('o2', 2, hlc(3), [delOp(['a', 'arr', 0], [{ origin: 'o2', hlc: hlc(2) }])]),
+      env('o2', 2, hlc(3), [
+        delOp(['a', 'arr', 0], [{ origin: 'o2', hlc: hlc(2) }]),
+      ]),
     ];
     const conv = createConvergingApply({});
     const twin = createRegisterStore();

@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector, @angular-eslint/directive-selector */
 import { NgTemplateOutlet } from '@angular/common';
 import {
   type AfterViewChecked,

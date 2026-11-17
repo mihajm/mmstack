@@ -181,8 +181,7 @@ export function queryParam<T = string>(
   const destroyRef = inject(DestroyRef);
 
   const parse = opt.parse ?? ((value: string) => value as unknown as T);
-  const serialize =
-    opt.serialize ?? ((value: T) => value as unknown as string);
+  const serialize = opt.serialize ?? ((value: T) => value as unknown as string);
   const replaceUrl = opt.replaceUrl ?? false;
   const debounce = opt.debounce ?? 0;
   const batch = opt.batch ?? false;

@@ -18,23 +18,30 @@ type Widget = { id: string; label: string; hue: number; frame: CanvasFrame };
 type Doc = { widgets: Widget[] };
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-canvas-store-example',
   imports: [Canvas, CanvasItem, CanvasResizeHandle],
   template: `
     <main>
       <h1>Canvas × store — one gesture, one op batch</h1>
       <p class="hint">
-        The document lives in an @mmstack/primitives store. A whole drag
-        commits as ONE batch of per-property ops (watch the trace), so
-        undo/redo and mesh collaboration get gesture-grained history for free.
+        The document lives in an @mmstack/primitives store. A whole drag commits
+        as ONE batch of per-property ops (watch the trace), so undo/redo and
+        mesh collaboration get gesture-grained history for free.
       </p>
 
       <p class="toolbar">
-        <button data-testid="undo" (click)="history.undo()" [disabled]="!history.canUndo()">
+        <button
+          data-testid="undo"
+          (click)="history.undo()"
+          [disabled]="!history.canUndo()"
+        >
           Undo
         </button>
-        <button data-testid="redo" (click)="history.redo()" [disabled]="!history.canRedo()">
+        <button
+          data-testid="redo"
+          (click)="history.redo()"
+          [disabled]="!history.canRedo()"
+        >
           Redo
         </button>
         <span data-testid="batch-count">{{ batches().length }} batches</span>
@@ -88,8 +95,8 @@ type Doc = { widgets: Widget[] };
       border: 1px solid #ddd;
       border-radius: 10px;
       overflow: hidden;
-      background:
-        radial-gradient(circle, #e8e8e8 1px, transparent 1px) 0 0 / 24px 24px;
+      background: radial-gradient(circle, #e8e8e8 1px, transparent 1px) 0 0 /
+        24px 24px;
     }
     .widget {
       border-radius: 10px;
@@ -112,7 +119,11 @@ type Doc = { widgets: Widget[] };
       border: 2px solid #1971ff;
       border-radius: 2px;
     }
-    .handle.se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+    .handle.se {
+      bottom: -6px;
+      right: -6px;
+      cursor: nwse-resize;
+    }
     .trace {
       max-height: 180px;
       overflow: auto;
@@ -129,9 +140,24 @@ type Doc = { widgets: Widget[] };
 export class CanvasStoreExample {
   readonly doc = store<Doc>({
     widgets: [
-      { id: 'a', label: 'Alpha', hue: 210, frame: { x: 40, y: 40, width: 140, height: 90 } },
-      { id: 'b', label: 'Beta', hue: 300, frame: { x: 240, y: 90, width: 120, height: 120 } },
-      { id: 'c', label: 'Gamma', hue: 150, frame: { x: 120, y: 200, width: 130, height: 70 } },
+      {
+        id: 'a',
+        label: 'Alpha',
+        hue: 210,
+        frame: { x: 40, y: 40, width: 140, height: 90 },
+      },
+      {
+        id: 'b',
+        label: 'Beta',
+        hue: 300,
+        frame: { x: 240, y: 90, width: 120, height: 120 },
+      },
+      {
+        id: 'c',
+        label: 'Gamma',
+        hue: 150,
+        frame: { x: 120, y: 200, width: 130, height: 70 },
+      },
     ],
   });
   readonly history = storeHistory(this.doc);

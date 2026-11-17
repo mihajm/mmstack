@@ -122,16 +122,17 @@ import { DocSection } from '../../../layout/doc-section';
               <tr>
                 <td><code>keepPrevious</code></td>
                 <td>
-                  Hold the previous value, status, and headers while a refresh is
-                  in flight, so a reload doesn't flash empty.
+                  Hold the previous value, status, and headers while a refresh
+                  is in flight, so a reload doesn't flash empty.
                 </td>
               </tr>
               <tr>
                 <td><code>refresh</code></td>
                 <td>
                   A number polls every n ms. The object form adds
-                  <code>onFocus</code> (refetch when the tab becomes visible) and
-                  <code>onReconnect</code> (when the browser comes back online).
+                  <code>onFocus</code> (refetch when the tab becomes visible)
+                  and <code>onReconnect</code> (when the browser comes back
+                  online).
                 </td>
               </tr>
               <tr>
@@ -226,8 +227,8 @@ import { DocSection } from '../../../layout/doc-section';
           thread. Parsing a 20MB JSON body blocks the thread that paints.
           Fetching it as text or a buffer keeps your interceptors and auth
           intact while the parse moves to a
-          <a mmLink="/docs/worker">Web Worker</a> that owns the result;
-          an <code>ArrayBuffer</code> even moves zero-copy. If you combine the
+          <a mmLink="/docs/worker">Web Worker</a> that owns the result; an
+          <code>ArrayBuffer</code> even moves zero-copy. If you combine the
           cache with a transfer, copy the buffer first
           (<code>buf.slice(0)</code>), since transferring detaches the cached
           copy. Dev mode warns if a detached buffer is ever served.

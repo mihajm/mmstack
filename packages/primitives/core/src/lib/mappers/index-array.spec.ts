@@ -35,10 +35,7 @@ describe('indexArray', () => {
 
   it('should allow mutating back through mutable source', () => {
     TestBed.runInInjectionContext(() => {
-      const source = mutable([
-        { name: 'Alice' },
-        { name: 'Bob' },
-      ]);
+      const source = mutable([{ name: 'Alice' }, { name: 'Bob' }]);
       const mapped = indexArray(source, (itemSig) => itemSig);
 
       const result = mapped();
@@ -51,7 +48,10 @@ describe('indexArray', () => {
   it('should reuse mapped results when length stays the same', () => {
     TestBed.runInInjectionContext(() => {
       const source = signal([1, 2, 3]);
-      const mapFn = vi.fn((itemSig, index: number) => ({ sig: itemSig, index }));
+      const mapFn = vi.fn((itemSig, index: number) => ({
+        sig: itemSig,
+        index,
+      }));
       const mapped = indexArray(source, mapFn);
 
       const first = mapped();
@@ -69,7 +69,10 @@ describe('indexArray', () => {
   it('should grow the mapped array when items are added', () => {
     TestBed.runInInjectionContext(() => {
       const source = signal([1, 2]);
-      const mapFn = vi.fn((itemSig, index: number) => ({ sig: itemSig, index }));
+      const mapFn = vi.fn((itemSig, index: number) => ({
+        sig: itemSig,
+        index,
+      }));
       const mapped = indexArray(source, mapFn);
 
       mapped();

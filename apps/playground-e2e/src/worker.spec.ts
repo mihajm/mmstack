@@ -26,7 +26,9 @@ test.describe('@mmstack/worker — split-graph demo', () => {
     await expect(counter).toHaveText('2');
   });
 
-  test('mirrors the worker-side published derivation (rung 3)', async ({ page }) => {
+  test('mirrors the worker-side published derivation (rung 3)', async ({
+    page,
+  }) => {
     const stats = page.getByTestId('stats');
     await page.getByTestId('inc').click(); // history: [1]
     await page.getByTestId('inc').click(); // history: [2]
@@ -35,7 +37,9 @@ test.describe('@mmstack/worker — split-graph demo', () => {
     await expect(stats.locator('div', { hasText: 'sum' })).toContainText('3');
   });
 
-  test('runs a heavy task off-main and shows its result (rung 1)', async ({ page }) => {
+  test('runs a heavy task off-main and shows its result (rung 1)', async ({
+    page,
+  }) => {
     const fib = page.getByTestId('fib');
     // default n = 35 → fib(35) = 9227465
     await expect(fib).toHaveText('9227465', { timeout: 10_000 });

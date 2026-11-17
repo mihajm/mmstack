@@ -41,7 +41,10 @@ function equalParamArray(
 }
 
 function headersToObject(headerClass: HttpHeaders) {
-  const headers: Exclude<Required<HttpResourceRequest['headers']>, HttpHeaders | undefined> = {};
+  const headers: Exclude<
+    Required<HttpResourceRequest['headers']>,
+    HttpHeaders | undefined
+  > = {};
 
   headerClass.keys().forEach((key) => {
     const value = headerClass.getAll(key);
@@ -57,7 +60,10 @@ function headersToObject(headerClass: HttpHeaders) {
 }
 
 function paramToObject(paramsClass: HttpParams) {
-  const params: Exclude<Required<HttpResourceRequest['params']>, HttpParams | undefined> = {};
+  const params: Exclude<
+    Required<HttpResourceRequest['params']>,
+    HttpParams | undefined
+  > = {};
 
   paramsClass.keys().forEach((key) => {
     const value = paramsClass.getAll(key);
@@ -72,7 +78,10 @@ function paramToObject(paramsClass: HttpParams) {
   return params;
 }
 
-function equalParams(a: HttpResourceRequest['params'], b: HttpResourceRequest['params']): boolean {
+function equalParams(
+  a: HttpResourceRequest['params'],
+  b: HttpResourceRequest['params'],
+): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
 
@@ -95,7 +104,10 @@ function equalParams(a: HttpResourceRequest['params'], b: HttpResourceRequest['p
   });
 }
 
-function equalBody(a: HttpResourceRequest['body'], b: HttpResourceRequest['body']): boolean {
+function equalBody(
+  a: HttpResourceRequest['body'],
+  b: HttpResourceRequest['body'],
+): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
   return hash(a) === hash(b);
@@ -156,7 +168,9 @@ function equalContext(
   return aEntries.every(([key, value]) => value === bMap.get(key));
 }
 
-export function createEqualRequest<TResult>(equalResult?: ValueEqualityFn<TResult>) {
+export function createEqualRequest<TResult>(
+  equalResult?: ValueEqualityFn<TResult>,
+) {
   const eqb = equalResult ?? equalBody;
 
   return (

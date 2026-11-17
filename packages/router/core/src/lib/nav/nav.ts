@@ -99,7 +99,7 @@ function wrap<T>(
 ): Signal<T>;
 
 function wrap<T>(
-  value?: T | (() => T) | undefined,
+  value?: T | (() => T),
   fallback?: Signal<T>,
 ): Signal<T | undefined> {
   if (value === undefined)

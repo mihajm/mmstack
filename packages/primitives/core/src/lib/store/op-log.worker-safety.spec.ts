@@ -50,7 +50,9 @@ describe('opLog worker-safety (no injector / no TestBed)', () => {
       {
         origin: 'worker',
         version: 1,
-        ops: [{ kind: 'set', path: ['user', 'name'], next: 'grace', prev: 'ada' }],
+        ops: [
+          { kind: 'set', path: ['user', 'name'], next: 'grace', prev: 'ada' },
+        ],
       },
     ]);
   });
@@ -71,7 +73,9 @@ describe('opLog worker-safety (no injector / no TestBed)', () => {
       return s.user.name();
     });
     expect(view()).toBe('ada'); // recomputes = 1
-    log.apply([{ kind: 'set', path: ['user', 'name'], next: 'lin', prev: 'ada' }]);
+    log.apply([
+      { kind: 'set', path: ['user', 'name'], next: 'lin', prev: 'ada' },
+    ]);
     expect(view()).toBe('lin'); // one recompute for the one applied wave
     expect(recomputes).toBe(2);
   });

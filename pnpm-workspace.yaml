@@ -17,3 +17,6 @@ minimumReleaseAgeExclude:
   - '@schematics/angular@22.0.3'
   - '@types/node@26.0.0'
   - '@formatjs/icu-messageformat-parser@3.5.12'
+# no dependency may link agent skills into the workspace
+skills:
+  dirs: []

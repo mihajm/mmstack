@@ -1,4 +1,10 @@
-import { fromJson, leafEntries, leafMap, type NestedTranslation, toJson } from './nested';
+import {
+  fromJson,
+  leafEntries,
+  leafMap,
+  type NestedTranslation,
+  toJson,
+} from './nested';
 
 describe('nested', () => {
   const tree: NestedTranslation = {
@@ -39,7 +45,10 @@ describe('nested', () => {
       expect(leafEntries(tree)).toEqual([
         ['greeting', 'Hi {name}'],
         ['detail.authorLabel', 'Author'],
-        ['detail.stats', '{count, plural, one {1 from {name}} other {# from {name}}}'],
+        [
+          'detail.stats',
+          '{count, plural, one {1 from {name}} other {# from {name}}}',
+        ],
       ]);
     });
 

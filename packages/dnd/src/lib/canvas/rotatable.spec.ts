@@ -5,7 +5,8 @@ import { rotatable } from './rotatable';
 import type { Point } from './geometry';
 
 function pe(type: string, x: number, y: number, shiftKey = false): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = 1;
   e['clientX'] = x;
   e['clientY'] = y;
@@ -78,7 +79,10 @@ describe('rotatable', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         { provide: PLATFORM_ID, useValue: 'server' },
       ],
     });

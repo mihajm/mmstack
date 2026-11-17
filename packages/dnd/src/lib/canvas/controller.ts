@@ -148,7 +148,8 @@ export type CanvasOptions<T, K> = {
   readonly onReparent?: (event: CanvasReparentEvent<T, K>) => void;
   /** Screen-reader message after a keyboard transform, `false` to disable. */
   readonly announceTransform?:
-    false | ((event: { item: T; frame: CanvasFrame; count: number }) => string);
+    | false
+    | ((event: { item: T; frame: CanvasFrame; count: number }) => string);
 };
 
 export type CanvasItemState<K = unknown> = {
@@ -451,10 +452,8 @@ export function canvas<T, K>(
                 const pi = map.get(pk);
                 return (
                   pi !== undefined &&
-                  untracked(() =>
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    options.containers!.canContain!(it, pi),
-                  ) !== false
+                  untracked(() => options.containers!.canContain!(it, pi)) !==
+                    false
                 );
               })
             : true;

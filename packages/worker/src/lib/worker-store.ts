@@ -192,7 +192,10 @@ function build<T extends object>(
   let hasSnapshot = false;
   let lastEmitted = 0; // highest own-origin version emitted; the write() ack key
   // own writes awaiting the owner's echo (resolve), plus the raw envelopes to resend after a resync
-  const writePending = new Map<number, { resolve: () => void; reject: (e: unknown) => void }>();
+  const writePending = new Map<
+    number,
+    { resolve: () => void; reject: (e: unknown) => void }
+  >();
   const unacked = new Map<number, OpEnvelope>();
 
   const hasValue = () => hasSnapshot;
@@ -231,10 +234,9 @@ function build<T extends object>(
         const replayed = [...unacked.values()].filter(
           (e) => e.version > (msg.checkpoint.wm?.[sync.origin] ?? 0),
         );
-        sync.hydrate(
-          msg.checkpoint as Parameters<typeof sync.hydrate>[0],
-          [...unacked.values()],
-        );
+        sync.hydrate(msg.checkpoint as Parameters<typeof sync.hydrate>[0], [
+          ...unacked.values(),
+        ]);
         // a new owner generation REPLACES the frontier; the same one merges (a resync)
         const instance = msg.instance ?? '';
         const prev = untracked(applied);
@@ -257,7 +259,9 @@ function build<T extends object>(
         // then resend any still-unacked tail so a write made before the (re)hydrate is never lost
         ackUpTo(msg.checkpoint.wm?.[sync.origin] ?? 0);
         if (isOwned() && untracked(worker.connected)) {
-          for (const env of [...unacked.values()].sort((a, b) => a.version - b.version)) {
+          for (const env of [...unacked.values()].sort(
+            (a, b) => a.version - b.version,
+          )) {
             worker._send({ type: 'store:sync', store: key, env });
           }
         }
@@ -282,7 +286,11 @@ function build<T extends object>(
       case 'store:status': {
         switch (msg.status) {
           case 'error':
-            error.set(msg.error ? deserializeError(msg.error) : new Error('remote computation error'));
+            error.set(
+              msg.error
+                ? deserializeError(msg.error)
+                : new Error('remote computation error'),
+            );
             status.set('error');
             return;
           case 'loading':
@@ -303,12 +311,20 @@ function build<T extends object>(
 
   const subscribe = (): void => {
     if (hasSnapshot) status.set('reloading');
-    worker._send({ type: 'store:subscribe', store: key, clientId: worker.clientId });
+    worker._send({
+      type: 'store:subscribe',
+      store: key,
+      clientId: worker.clientId,
+    });
   };
 
   const resync = (): void => {
     status.set('reloading');
-    worker._send({ type: 'store:subscribe', store: key, clientId: worker.clientId });
+    worker._send({
+      type: 'store:subscribe',
+      store: key,
+      clientId: worker.clientId,
+    });
   };
 
   const unsub = worker._subscribe(onStoreMessage);
@@ -336,10 +352,14 @@ function build<T extends object>(
       const base = untracked(root);
       if (base === undefined)
         return Promise.reject(
-          new Error('[@mmstack/worker] cannot write before the replica has hydrated'),
+          new Error(
+            '[@mmstack/worker] cannot write before the replica has hydrated',
+          ),
         );
       if (!untracked(worker.connected))
-        return Promise.reject(new WorkerCrashedError('worker is not connected'));
+        return Promise.reject(
+          new WorkerCrashedError('worker is not connected'),
+        );
       if (!isOwned())
         return Promise.reject(
           new Error(`[@mmstack/worker] store is read-only (published): ${key}`),
@@ -363,7 +383,11 @@ function build<T extends object>(
         p.reject(new WorkerAbortError('worker store destroyed'));
       writePending.clear();
       unacked.clear();
-      worker._send({ type: 'store:unsubscribe', store: key, clientId: worker.clientId });
+      worker._send({
+        type: 'store:unsubscribe',
+        store: key,
+        clientId: worker.clientId,
+      });
     },
   };
 

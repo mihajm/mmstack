@@ -17,9 +17,9 @@ import { DocSection } from '../../../layout/doc-section';
           <code>provideMockQueryCache()</code> is a real in-memory cache built
           for specs. It never touches IndexedDB or <code>BroadcastChannel</code>
           and disables the cleanup sweep, so it is safe under fake timers and
-          leaves nothing pinned between tests. Because it is a real cache and not
-          a stub, cache hits behave as they do in production and you can assert
-          against them.
+          leaves nothing pinned between tests. Because it is a real cache and
+          not a stub, cache hits behave as they do in production and you can
+          assert against them.
         </p>
         <docs-code [code]="mockCache" lang="ts" />
         <p>
@@ -36,9 +36,9 @@ import { DocSection } from '../../../layout/doc-section';
           Resources pause when the network drops or the page hides. To drive
           that in a test, <code>provideMockResourceSensors()</code> swaps the
           real <code>navigator.onLine</code> and
-          <code>document.visibilityState</code> for writable signals you control.
-          Pass your own to toggle state mid-test, or omit them for a static
-          online and visible environment.
+          <code>document.visibilityState</code> for writable signals you
+          control. Pass your own to toggle state mid-test, or omit them for a
+          static online and visible environment.
         </p>
         <docs-code [code]="mockSensors" lang="ts" />
       </docs-section>

@@ -847,9 +847,11 @@ function createQueryResource<TResult, TRaw = TResult>(
             ...prefetchRequest,
             responseType,
             referrerPolicy: prefetchRequest.referrerPolicy as
-              ReferrerPolicy | undefined,
+              | ReferrerPolicy
+              | undefined,
             credentials: prefetchRequest.credentials as
-              RequestCredentials | undefined,
+              | RequestCredentials
+              | undefined,
             priority: prefetchRequest.priority as RequestPriority | undefined,
             cache: prefetchRequest.cache as RequestCache | undefined,
             mode: prefetchRequest.mode as RequestMode | undefined,

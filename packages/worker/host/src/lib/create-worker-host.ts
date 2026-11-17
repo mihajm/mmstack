@@ -55,7 +55,8 @@ export type PublishedHost<K extends PropertyKey = string> = {
  * derives from and carry it in its value.
  */
 export type PublishedEntry<T, K extends PropertyKey = string> =
-  PublishedSource<T> | ((host: PublishedHost<K>) => PublishedSource<T>);
+  | PublishedSource<T>
+  | ((host: PublishedHost<K>) => PublishedSource<T>);
 
 /** The value type a `published` entry mirrors: the signal's, or the factory's returned signal's. */
 export type PublishedValueOf<E> =
@@ -199,7 +200,8 @@ export function createWorkerHost<
   readonly stores?: S;
   // the NoInfer arm types a factory's `frontiers` from S while P is still being inferred
   readonly published?:
-    P | NoInfer<Record<string, PublishedEntry<any, keyof S>>>;
+    | P
+    | NoInfer<Record<string, PublishedEntry<any, keyof S>>>;
   readonly tasks?: T;
   readonly port?: WorkerPortLike;
   readonly emit?: DiffOpsOptions;
@@ -438,7 +440,11 @@ export function createWorkerHost<
         if (!sub || !sub.writable) return;
         sub.sync.receive(msg.env);
         sub.syncFrontier(); // same synchronous step as the store's fold
-        fanout(msg.store, { type: 'store:sync', store: msg.store, env: msg.env });
+        fanout(msg.store, {
+          type: 'store:sync',
+          store: msg.store,
+          env: msg.env,
+        });
         return;
       }
     }

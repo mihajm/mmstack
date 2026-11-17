@@ -3,7 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { driveGesture, type GestureAdapter } from './gesture';
 
 function pe(type: string, x: number, y: number, button = 0): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = 1;
   e['clientX'] = x;
   e['clientY'] = y;

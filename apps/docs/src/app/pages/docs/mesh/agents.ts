@@ -15,12 +15,12 @@ import { DocSection } from '../../../layout/doc-section';
     >
       <docs-section title="A seat at the table" id="seat">
         <p>
-          <code>agentSeat</code> is a headless room peer: no Angular injector, no
-          browser APIs, so it runs in the Node service that hosts your model
+          <code>agentSeat</code> is a headless room peer: no Angular injector,
+          no browser APIs, so it runs in the Node service that hosts your model
           loop. It holds a live replica of the room document as a normal signal
-          store, writes with the same attribution as any peer, and reconnects and
-          rebases exactly like the browser client, because both are shells over
-          one session implementation.
+          store, writes with the same attribution as any peer, and reconnects
+          and rebases exactly like the browser client, because both are shells
+          over one session implementation.
         </p>
         <docs-code [code]="seat" lang="ts" />
         <p>
@@ -44,9 +44,10 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="branch" lang="ts" />
         <p>
-          The commit cites what the fork observed when it forked, so an edit that
-          lands on the room while a person reviews stays a concurrent value the
-          merge policy decides, never silently overwritten by the approval. Call
+          The commit cites what the fork observed when it forked, so an edit
+          that lands on the room while a person reviews stays a concurrent value
+          the merge policy decides, never silently overwritten by the approval.
+          Call
           <code>rebase()</code> to re-observe the room first when you want the
           proposal to apply on top of the latest instead. The reviewer reads and
           writes normal store values, and the agent never touches the room
@@ -91,22 +92,22 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="peer" lang="ts" />
         <p>
-          A live agent inherits the same conflict rules as everyone else. An agent
-          writes faster than a person, so on a shared field it can win a
-          last-writer-wins race often. The relay rate-limits throughput, which is
-          not the same as fairness on a contested value. Reach for the branch when
-          a field carries real weight.
+          A live agent inherits the same conflict rules as everyone else. An
+          agent writes faster than a person, so on a shared field it can win a
+          last-writer-wins race often. The relay rate-limits throughput, which
+          is not the same as fairness on a contested value. Reach for the branch
+          when a field carries real weight.
         </p>
       </docs-section>
 
       <docs-section title="Attribution and identity" id="attribution">
         <p>
-          An agent's <code>writer</code> is an opaque id, the same shape a person
-          gets. Natural identity never enters the envelope. Keep the mapping from
-          id to identity in your own table. For an agent you keep that mapping for
-          accountability. For a person you can sever it to satisfy an erasure
-          request, and the journal stays intact and anonymous because the write
-          history never held the identity.
+          An agent's <code>writer</code> is an opaque id, the same shape a
+          person gets. Natural identity never enters the envelope. Keep the
+          mapping from id to identity in your own table. For an agent you keep
+          that mapping for accountability. For a person you can sever it to
+          satisfy an erasure request, and the journal stays intact and anonymous
+          because the write history never held the identity.
         </p>
       </docs-section>
     </docs-page>

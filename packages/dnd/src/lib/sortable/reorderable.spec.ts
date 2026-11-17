@@ -207,7 +207,11 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
     });
     const gi = getGroupInternals(group);
 
-    ctrlA.begin(1, { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' }, 0);
+    ctrlA.begin(
+      1,
+      { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' },
+      0,
+    );
     gi.setActive({
       source: ctrlA,
       target: ctrlB,
@@ -234,7 +238,11 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
     reorderable(b, { key: (t) => t.id, group });
 
     // drag within A: source 0 → insert 2 (target stays self → same-list path)
-    ctrlA.begin(1, { source: 0, centers: [10, 30, 50], footprint: 20, axis: 'y' }, 10);
+    ctrlA.begin(
+      1,
+      { source: 0, centers: [10, 30, 50], footprint: 20, axis: 'y' },
+      10,
+    );
     ctrlA.move({ x: 0, y: 55 });
     ctrlA.end();
 
@@ -256,7 +264,11 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
     const gi = getGroupInternals(group);
 
     // drag within A far enough that a same-list commit WOULD move it...
-    ctrlA.begin(1, { source: 0, centers: [10, 30, 50], footprint: 20, axis: 'y' }, 10);
+    ctrlA.begin(
+      1,
+      { source: 0, centers: [10, 30, 50], footprint: 20, axis: 'y' },
+      10,
+    );
     ctrlA.move({ x: 0, y: 55 });
     // ...but the drag ends over B with an unresolvable insert
     gi.setActive({
@@ -281,7 +293,11 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
     const ctrlB = reorderable(b, { key: (t) => t.id, group });
     const gi = getGroupInternals(group);
 
-    ctrlA.begin(1, { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' }, 0);
+    ctrlA.begin(
+      1,
+      { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' },
+      0,
+    );
     gi.setActive({
       source: ctrlA,
       target: ctrlB,
@@ -306,7 +322,11 @@ describe('reorderable controller — cross-list (group, no DOM/render)', () => {
     const gi = getGroupInternals(group);
 
     // A's item 0 is being dragged toward B when A's view is destroyed
-    ctrlA.begin(1, { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' }, 0);
+    ctrlA.begin(
+      1,
+      { source: 0, centers: [0, 30, 60], footprint: 30, axis: 'y' },
+      0,
+    );
     gi.setActive({
       source: ctrlA,
       target: ctrlB,

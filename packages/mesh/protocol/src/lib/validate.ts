@@ -24,7 +24,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
   if (!env || typeof env !== 'object') return 'envelope';
   // the generation may be EMPTY (minted before any welcome named one; the relay's fence refuses
   // it, a relay-less topology has no generation at all) but never unclean
-  if (typeof env.instance !== 'string' || hasControlChar(env.instance)) return 'instance';
+  if (typeof env.instance !== 'string' || hasControlChar(env.instance))
+    return 'instance';
   if (!isCleanId(env.origin)) return 'origin';
   if (!isCleanId(env.writer)) return 'writer';
   if (!isFiniteHlc(env.hlc)) return 'hlc';
@@ -33,7 +34,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
   const seenPaths = new Set<string>();
   for (const op of env.ops) {
     if (!op || typeof op !== 'object') return 'op';
-    if (op.kind !== 'set' && op.kind !== 'delete' && op.kind !== 'clear') return 'kind';
+    if (op.kind !== 'set' && op.kind !== 'delete' && op.kind !== 'clear')
+      return 'kind';
     if (!Array.isArray(op.path)) return 'path';
     for (const seg of op.path) {
       // the register store keys a path by its segments joined with a control character, so an
@@ -44,11 +46,17 @@ export function validateEnvelope(env: OpEnvelope): string | null {
     }
     if (op.path.length === 0 && op.kind !== 'set') return 'root-op';
     const epoch = (op as SyncOp).epoch;
-    if (typeof epoch !== 'number' || !Number.isFinite(epoch) || epoch < 0) return 'epoch';
+    if (typeof epoch !== 'number' || !Number.isFinite(epoch) || epoch < 0)
+      return 'epoch';
     const cites = (op as SyncOp).cites;
     if (!Array.isArray(cites)) return 'cites';
     for (const c of cites) {
-      if (!c || typeof c !== 'object' || !isCleanId((c as Dot).origin) || !isFiniteHlc((c as Dot).hlc)) {
+      if (
+        !c ||
+        typeof c !== 'object' ||
+        !isCleanId((c as Dot).origin) ||
+        !isFiniteHlc((c as Dot).hlc)
+      ) {
         return 'cites';
       }
     }

@@ -17,8 +17,7 @@ import { DocSection } from '../../../layout/doc-section';
           <code>injectable&lt;T&gt;(name)</code> returns a
           <code>[inject, provide, token]</code> tuple. Name the first two at the
           call site, provide the value where you want it, and inject it anywhere
-          below. Without a provider the injector returns
-          <code>null</code>.
+          below. Without a provider the injector returns <code>null</code>.
         </p>
         <docs-code [code]="basic" lang="ts" />
       </docs-section>
@@ -36,11 +35,12 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Fallbacks and required values" id="fallbacks">
         <p>
           The options object changes what a missing provider does. Give a
-          <code>fallback</code> for a default value, <code>lazyFallback</code>
-          when the default needs <code>inject()</code> or is expensive, or
-          <code>errorMessage</code> to make the value required. The reader's
-          return type follows: <code>T</code> with a fallback, never
-          <code>null</code> with an error message.
+          <code>fallback</code> for a default value,
+          <code>lazyFallback</code> when the default needs
+          <code>inject()</code> or is expensive, or <code>errorMessage</code> to
+          make the value required. The reader's return type follows:
+          <code>T</code> with a fallback, never <code>null</code> with an error
+          message.
         </p>
         <docs-code [code]="fallbacks" lang="ts" />
       </docs-section>

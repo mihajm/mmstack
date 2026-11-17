@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import {
   Component,
@@ -1350,7 +1349,9 @@ describe('mmRouterViewTransitions (coordinator side)', () => {
     const coordinator = TestBed.inject(RouterViewTransitions);
 
     const userCb = vi.fn();
-    const options = mmRouterViewTransitions({ onViewTransitionCreated: userCb });
+    const options = mmRouterViewTransitions({
+      onViewTransitionCreated: userCb,
+    });
     const t = deferredTransition();
 
     TestBed.runInInjectionContext(() =>

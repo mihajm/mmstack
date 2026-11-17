@@ -6,7 +6,10 @@ import {
   HttpResponse,
 } from '@angular/common/http';
 import { Observable, of, Subject } from 'rxjs';
-import { createDedupeRequestsInterceptor, noDedupe } from './dedupe-interceptor';
+import {
+  createDedupeRequestsInterceptor,
+  noDedupe,
+} from './dedupe-interceptor';
 
 describe('dedupe-interceptor', () => {
   describe('noDedupe', () => {

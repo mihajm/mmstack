@@ -60,11 +60,11 @@ import { DocSection } from '../../../layout/doc-section';
           lists, including nested and cross-list cases.
         </p>
         <p>
-          On top of those sit two preview layers: grids (a wrapping 2D
-          sortable and a spanning dashboard grid) and a free-form canvas with
-          move, resize, rotate, marquee and snaplines. Both write your state
-          signal once per gesture, which is what op-log stores, undo history
-          and realtime sync want.
+          On top of those sit two preview layers: grids (a wrapping 2D sortable
+          and a spanning dashboard grid) and a free-form canvas with move,
+          resize, rotate, marquee and snaplines. Both write your state signal
+          once per gesture, which is what op-log stores, undo history and
+          realtime sync want.
         </p>
         <ul class="link-list">
           <li>

@@ -4,18 +4,5 @@
   "sourceRoot": "libs/demos/src",
   "prefix": "demo",
   "projectType": "library",
-  "tags": ["scope:docs"],
-  "targets": {
-    "lint": {
-      "inputs": [
-        "default",
-        "{workspaceRoot}/.eslintrc.json",
-        "{workspaceRoot}/.eslintignore",
-        "{workspaceRoot}/eslint.config.mjs",
-        {
-          "externalDependencies": ["eslint"]
-        }
-      ]
-    }
-  }
+  "tags": ["scope:docs"]
 }

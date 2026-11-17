@@ -20,7 +20,11 @@ describe('closestEdge (first-party hitbox plugin)', () => {
       closestEdge.extractClosestEdge(
         closestEdge.attachClosestEdge(
           {},
-          { element: el, input: { clientX: x, clientY: y }, allowedEdges: edges },
+          {
+            element: el,
+            input: { clientX: x, clientY: y },
+            allowedEdges: edges,
+          },
         ),
       );
 
@@ -35,7 +39,11 @@ describe('closestEdge (first-party hitbox plugin)', () => {
     const edge = closestEdge.extractClosestEdge(
       closestEdge.attachClosestEdge(
         {},
-        { element: el, input: { clientX: 50, clientY: 1 }, allowedEdges: ['bottom'] },
+        {
+          element: el,
+          input: { clientX: 50, clientY: 1 },
+          allowedEdges: ['bottom'],
+        },
       ),
     );
     expect(edge).toBe('bottom');
@@ -73,11 +81,19 @@ describe('edgeAutoScroll (first-party auto-scroll plugin)', () => {
     let top = scrollTop;
     Object.defineProperty(el, 'scrollTop', {
       get: () => top,
-      set: (v: number) => (top = v),
+      set: (v: number) => {
+        top = v;
+      },
       configurable: true,
     });
-    Object.defineProperty(el, 'scrollHeight', { value: 1000, configurable: true });
-    Object.defineProperty(el, 'clientHeight', { value: viewport, configurable: true });
+    Object.defineProperty(el, 'scrollHeight', {
+      value: 1000,
+      configurable: true,
+    });
+    Object.defineProperty(el, 'clientHeight', {
+      value: viewport,
+      configurable: true,
+    });
     el.getBoundingClientRect = () =>
       ({ top: 0, bottom: viewport, left: 0, right: 100 }) as DOMRect;
     return el;

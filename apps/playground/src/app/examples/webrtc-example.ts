@@ -35,7 +35,9 @@ type Doc = { text: string };
       <p data-testid="peers">{{ m.peers().length }}</p>
     }
     <input data-testid="text-input" value="" #input />
-    <button data-testid="save" (click)="store.text.set(input.value)">save</button>
+    <button data-testid="save" (click)="store.text.set(input.value)">
+      save
+    </button>
     <p data-testid="text">{{ store.text() }}</p>
   `,
 })

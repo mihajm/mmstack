@@ -6,7 +6,6 @@ import { PreloadRequester } from '../preloading/preload-requester';
 import { createRouteData, provideRouteData, routeDataKey } from './route-data';
 import { RouteDataPrefetcher, withRouteData } from './with-route-data';
 
-// eslint-disable-next-line @angular-eslint/component-selector
 @Component({ selector: 'blank-cmp', template: `` })
 class Blank {}
 

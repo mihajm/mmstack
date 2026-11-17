@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { Node, Project, type SourceFile } from 'ts-morph';
 import { addLocaleLoader, findRegisterNamespaceCalls } from './registry';
 

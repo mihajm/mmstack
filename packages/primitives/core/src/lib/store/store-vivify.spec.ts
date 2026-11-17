@@ -251,13 +251,13 @@ describe('store vivification (deep / e2e)', () => {
     it('unregisters the stale finalizer when rebuilding over a dead WeakRef', () => {
       const sig = signal({ a: { b: 1 } });
       const s = toStore(sig, { injector });
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      // oxlint-disable-next-line no-unused-expressions
       s.a; // build + register the finalizer
       const deadRef = { deref: () => undefined } as WeakRef<never>;
       TestBed.inject(PROXY_CACHE_TOKEN).get(sig)?.set('a', deadRef);
 
       const spy = vi.spyOn(TestBed.inject(PROXY_CLEANUP_TOKEN), 'unregister');
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      // oxlint-disable-next-line no-unused-expressions
       s.a; // rebuild path must unregister the stale token
       expect(spy).toHaveBeenCalledWith(deadRef);
       spy.mockRestore();

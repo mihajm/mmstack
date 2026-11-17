@@ -67,11 +67,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Capability sinks" id="sinks">
         <p>
           A sink implements only what it supports:
-          <code>SpanSink</code>, <code>EventSink</code>,
-          <code>ErrorSink</code>, <code>MetricSink</code>,
-          <code>LogSink</code>, <code>IdentitySink</code>. The facade routes each emit to the sinks that
-          can handle it and shares one trace context across all of them, so a
-          PostHog event and a Sentry error both correlate to the same OTLP
+          <code>SpanSink</code>, <code>EventSink</code>, <code>ErrorSink</code>,
+          <code>MetricSink</code>, <code>LogSink</code>,
+          <code>IdentitySink</code>. The facade routes each emit to the sinks
+          that can handle it and shares one trace context across all of them, so
+          a PostHog event and a Sentry error both correlate to the same OTLP
           trace. A sink declares readiness as a signal, so while it initializes
           the facade buffers, then flushes in order once it is ready, or drops
           the buffer after a timeout so a broken sink cannot grow memory.
@@ -106,10 +106,10 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="HTTP spans" id="http">
         <p>
           <code>telemetryInterceptor</code> records a span per request: method,
-          host and path, status, and duration. It never records the query
-          string or the body. By default each request span is its own flat
-          trace. To nest a request under a caller span, stamp the active span
-          onto the request with <code>withTelemetryParent</code>.
+          host and path, status, and duration. It never records the query string
+          or the body. By default each request span is its own flat trace. To
+          nest a request under a caller span, stamp the active span onto the
+          request with <code>withTelemetryParent</code>.
         </p>
         <docs-code [code]="http" lang="ts" />
       </docs-section>

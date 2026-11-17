@@ -1,5 +1,17 @@
-import { createRegisterStore, MESH_PROTO_VERSION, type SeqEnvelope, type SyncOp } from '@mmstack/mesh-protocol';
-import { commitOrdered, converged, deepEqual, journalFoldMatchesClients, relayRetainsJournal, seqDense } from './invariants';
+import {
+  createRegisterStore,
+  MESH_PROTO_VERSION,
+  type SeqEnvelope,
+  type SyncOp,
+} from '@mmstack/mesh-protocol';
+import {
+  commitOrdered,
+  converged,
+  deepEqual,
+  journalFoldMatchesClients,
+  relayRetainsJournal,
+  seqDense,
+} from './invariants';
 
 const env = (seq: number, ops: SyncOp[]): SeqEnvelope => ({
   proto: MESH_PROTO_VERSION,
@@ -13,7 +25,13 @@ const env = (seq: number, ops: SyncOp[]): SeqEnvelope => ({
   seq,
 });
 // uncited fixture ops are CONCURRENT writes; the default fold picks the max-stamp winner
-const set = (path: (string | number)[], next: unknown): SyncOp => ({ kind: 'set', path, next, cites: [], epoch: 0 });
+const set = (path: (string | number)[], next: unknown): SyncOp => ({
+  kind: 'set',
+  path,
+  next,
+  cites: [],
+  epoch: 0,
+});
 
 describe('deepEqual', () => {
   it('holds for equal primitives and nested structures', () => {
@@ -48,19 +66,32 @@ describe('converged (invariant 1) — must reject divergence, not just pass', ()
   });
 
   it('a subtle nested divergence is still caught', () => {
-    expect(converged([{ n: { x: 1 } }, { n: { x: 1 } }, { n: { x: 9 } }]).ok).toBe(false);
+    expect(
+      converged([{ n: { x: 1 } }, { n: { x: 1 } }, { n: { x: 9 } }]).ok,
+    ).toBe(false);
   });
 });
 
 describe('journalFoldMatchesClients (invariant 2a) — must reject a wrong client root', () => {
   it('ok when the client-side register fold of the journal matches every root', () => {
-    const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)]), env(3, [set(['b'], 2)])];
-    const v = journalFoldMatchesClients(undefined, journal, [{ a: 1, b: 2 }, { a: 1, b: 2 }]);
+    const journal = [
+      env(1, [set([], {})]),
+      env(2, [set(['a'], 1)]),
+      env(3, [set(['b'], 2)]),
+    ];
+    const v = journalFoldMatchesClients(undefined, journal, [
+      { a: 1, b: 2 },
+      { a: 1, b: 2 },
+    ]);
     expect(v.ok, v.message).toBe(true);
   });
 
   it('is order-independent: a scrambled journal folds to the same state', () => {
-    const journal = [env(3, [set(['a'], 3)]), env(1, [set([], {})]), env(2, [set(['a'], 1)])];
+    const journal = [
+      env(3, [set(['a'], 3)]),
+      env(1, [set([], {})]),
+      env(2, [set(['a'], 1)]),
+    ];
     // the register resolves the concurrent a-writes by stamp, regardless of arrival order
     const v = journalFoldMatchesClients(undefined, journal, [{ a: 3 }]);
     expect(v.ok, v.message).toBe(true);
@@ -68,7 +99,10 @@ describe('journalFoldMatchesClients (invariant 2a) — must reject a wrong clien
 
   it('fails when a claimed client root is wrong, and names the peer', () => {
     const journal = [env(1, [set([], {})]), env(2, [set(['a'], 1)])];
-    const v = journalFoldMatchesClients(undefined, journal, [{ a: 1 }, { a: 999 }]);
+    const v = journalFoldMatchesClients(undefined, journal, [
+      { a: 1 },
+      { a: 999 },
+    ]);
     expect(v.ok).toBe(false);
     expect(v.message).toContain('peer 1');
   });

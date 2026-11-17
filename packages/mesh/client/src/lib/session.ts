@@ -79,7 +79,10 @@ export type CompactionState = {
 };
 
 /** The room generation the client installed, as its snapshot welcome named it. */
-export type GenerationState = Pick<InstalledGeneration, 'instance' | 'index' | 'reason' | 'policy'>;
+export type GenerationState = Pick<
+  InstalledGeneration,
+  'instance' | 'index' | 'reason' | 'policy'
+>;
 
 /**
  * The session's durable half, persisted as one unit with the outbox: the fields of the generation
@@ -207,7 +210,10 @@ export type MeshSessionHooks = {
    * values, so the application can offer to write them again. Any `whenAcked` waiter rejects.
    * A write a compaction cut replays is never refused here: it is resent, or it is a conflict.
    */
-  onRefused?(env: OpEnvelope, reason: 'generation' | 'schema' | 'order' | 'compacting'): void;
+  onRefused?(
+    env: OpEnvelope,
+    reason: 'generation' | 'schema' | 'order' | 'compacting',
+  ): void;
   /** The unresolved conflicts changed (a write classified, discarded or re-authored). */
   onConflicts?(conflicts: readonly MeshConflict[]): void;
   /** The relay announced the room's compaction state (count, budget, ready members). */
@@ -446,7 +452,8 @@ export function meshSession<T extends object>(
       replaying: false, // a replay runs whole inside one welcome
       outstanding: unacked.size,
     });
-    if (declared && declared.ready === ready && declared.instance === instance) return;
+    if (declared && declared.ready === ready && declared.instance === instance)
+      return;
     declared = { ready, instance };
     transport.send({ t: 'compact', room: opt.room, instance, ready });
   };
@@ -476,7 +483,8 @@ export function meshSession<T extends object>(
   /** A pending write will never be admitted as it stands: out of the outbox, into the conflicts. */
   const classify = (env: OpEnvelope, cause: ConflictCause): void => {
     const key = unackedKey(env);
-    const intent = intents.get(key) ?? intentOf(env, () => Number.POSITIVE_INFINITY);
+    const intent =
+      intents.get(key) ?? intentOf(env, () => Number.POSITIVE_INFINITY);
     unacked.delete(key);
     intents.delete(key);
     held = [...held, { env, intent, cause }];
@@ -546,7 +554,8 @@ export function meshSession<T extends object>(
     conv.load(registers);
     // own origins are left out of the watermark: exactly `pending` is re-applied, nothing else
     const theirs: Record<string, number> = {};
-    for (const [o, v] of Object.entries(wm)) if (!ownOrigins.has(o)) theirs[o] = v;
+    for (const [o, v] of Object.entries(wm))
+      if (!ownOrigins.has(o)) theirs[o] = v;
     sync.hydrate(
       { root: conv.materialize() as T, registers: [...registers], wm: theirs },
       pending,
@@ -582,8 +591,16 @@ export function meshSession<T extends object>(
     const notAdmitted = (env: OpEnvelope): boolean =>
       !admitted.ranges.get(env.origin)?.has(env.version);
     const own = [...unacked.values()]
-      .filter((env) => (env.instance === '' || env.instance === msg.instance) && notAdmitted(env))
-      .map((env) => (env.instance === msg.instance ? env : { ...env, instance: msg.instance }));
+      .filter(
+        (env) =>
+          (env.instance === '' || env.instance === msg.instance) &&
+          notAdmitted(env),
+      )
+      .map((env) =>
+        env.instance === msg.instance
+          ? env
+          : { ...env, instance: msg.instance },
+      );
     let keep: OpEnvelope[] = [];
     if (newer) {
       const pending = [...unacked.values()]
@@ -596,7 +613,8 @@ export function meshSession<T extends object>(
         intents.delete(unackedKey(env));
       }
       if (unacked.size === 0) releaseAckWaiters();
-      if (msg.policy === 'discard') for (const { env } of tail.keep) refuse(env, 'generation');
+      if (msg.policy === 'discard')
+        for (const { env } of tail.keep) refuse(env, 'generation');
       else keep = tail.keep.map((t) => t.env);
       pressed = false; // a new generation starts with nobody pressed
     }
@@ -617,7 +635,8 @@ export function meshSession<T extends object>(
     for (const env of own) {
       admitLocal(admission, env);
       cover.ingest(env);
-      if (env !== unacked.get(unackedKey(env))) unacked.set(unackedKey(env), env);
+      if (env !== unacked.get(unackedKey(env)))
+        unacked.set(unackedKey(env), env);
     }
     const replayed: OpEnvelope[] = [];
     const ctx = coverContext(gen, admission);
@@ -670,7 +689,11 @@ export function meshSession<T extends object>(
           let verdict = welcomeVerdict(fence, msg);
           // the answer to this connection's hello is the relay's current state: another instance at
           // an index not above the installed one is a room recreated without its record
-          if (verdict === 'stale' && !welcomedHere && msg.instance !== instance) {
+          if (
+            verdict === 'stale' &&
+            !welcomedHere &&
+            msg.instance !== instance
+          ) {
             forgetGeneration();
             verdict = 'newer';
           }
@@ -762,7 +785,11 @@ export function meshSession<T extends object>(
         cover.settle(msg.settled);
         return;
       case 'compaction':
-        hooks.onCompaction?.({ count: msg.count, budget: msg.budget, ready: msg.ready });
+        hooks.onCompaction?.({
+          count: msg.count,
+          budget: msg.budget,
+          ready: msg.ready,
+        });
         return;
       case 'drop': {
         const env = unacked.get(unackedKey(msg));
@@ -831,7 +858,9 @@ export function meshSession<T extends object>(
     // any snapshot of that generation (or a newer one) installs
     if (!rec.generation || rec.generation.instance !== instance) return;
     gen = { ...rec.generation, seq: 0 };
-    admission = admissionOf(rec.admission ?? { ranges: {}, settled: {}, firstStamps: {} });
+    admission = admissionOf(
+      rec.admission ?? { ranges: {}, settled: {}, firstStamps: {} },
+    );
   };
 
   const connect = (): void => {
@@ -980,9 +1009,15 @@ export function meshSession<T extends object>(
       intents: [...unacked.values()].map((env) => ({
         origin: env.origin,
         version: env.version,
-        intent: intents.get(unackedKey(env)) ?? intentOf(env, () => Number.POSITIVE_INFINITY),
+        intent:
+          intents.get(unackedKey(env)) ??
+          intentOf(env, () => Number.POSITIVE_INFINITY),
       })),
-      conflicts: held.map((h) => ({ env: h.env, intent: h.intent, cause: h.cause })),
+      conflicts: held.map((h) => ({
+        env: h.env,
+        intent: h.intent,
+        cause: h.cause,
+      })),
       ...(owed !== undefined ? { rehydrateOwed: owed } : {}),
     }),
     close: () => terminal('closed'),

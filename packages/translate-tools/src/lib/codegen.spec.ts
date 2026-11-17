@@ -4,7 +4,10 @@ import { liftObjectLiteral } from './lift';
 import { type NestedTranslation } from './nested';
 
 function liftBack(source: string): NestedTranslation {
-  const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile('gen.ts', source);
+  const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile(
+    'gen.ts',
+    source,
+  );
   const call = sf.getFirstDescendant(Node.isCallExpression);
   const arg = call?.getArguments()[1];
   if (!arg || !Node.isObjectLiteralExpression(arg))
@@ -64,6 +67,10 @@ describe('codegenTranslationFile', () => {
 
   it('objectLiteralText is parseable and lifts back to the input', () => {
     const t = { a: 'x', nested: { b: 'y' } };
-    expect(liftBack(`const v = ns.createTranslation('de', ${objectLiteralText(t)});`)).toEqual(t);
+    expect(
+      liftBack(
+        `const v = ns.createTranslation('de', ${objectLiteralText(t)});`,
+      ),
+    ).toEqual(t);
   });
 });

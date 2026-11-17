@@ -33,7 +33,10 @@ const TRANSFERABLES = new WeakMap<object, Transferable[]>();
  * workerResource(() => transfer({ buf }, [buf.buffer]), { worker, task: 'process' });
  * ```
  */
-export function transfer<T extends object>(value: T, transferables: Transferable[]): T {
+export function transfer<T extends object>(
+  value: T,
+  transferables: Transferable[],
+): T {
   TRANSFERABLES.set(value, transferables);
   return value;
 }

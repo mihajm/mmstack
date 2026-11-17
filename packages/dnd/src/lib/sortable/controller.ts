@@ -90,7 +90,9 @@ export function reorderable<T, K>(
   const engine: DragEngine = options.engine ?? 'native';
   const activationThreshold = options.activationThreshold ?? 5;
   const touchActivation =
-    engine === 'pointer' ? resolveTouchActivation(options.touchActivation) : null;
+    engine === 'pointer'
+      ? resolveTouchActivation(options.touchActivation)
+      : null;
   // The per-call union forbids these, but a DI default can flip the engine under an engine-specific option.
   if (isDevMode()) {
     if (engine === 'pointer' && (options.insert || options.onItemInserted)) {
@@ -291,7 +293,8 @@ export function reorderable<T, K>(
     const rowDeltas: number[] = [];
     for (let i = 1; i < centers.length; i++) {
       const dy = centers[i].y - centers[i - 1].y;
-      if (Math.abs(dy) < rowTol) colDeltas.push(centers[i].x - centers[i - 1].x);
+      if (Math.abs(dy) < rowTol)
+        colDeltas.push(centers[i].x - centers[i - 1].x);
       else rowDeltas.push(dy);
     }
     return {
@@ -328,11 +331,7 @@ export function reorderable<T, K>(
       if (!m || sourceIdx < 0) return;
       startCross.set(projCross(start));
       pointerCross.set(projCross(start));
-      begin(
-        k,
-        { kind: 'wrap', source: sourceIdx, ...m },
-        projMain(start),
-      );
+      begin(k, { kind: 'wrap', source: sourceIdx, ...m }, projMain(start));
       if (group) {
         measureCache = new Map();
         for (const gm of group.members()) gm.refreshBounds();
@@ -646,8 +645,7 @@ export function reorderable<T, K>(
         const tgt = groupApi.activeTarget();
         if (src && src !== tgt) {
           if (tgt === self) return openSlotOf(i, groupApi.activeInsertIndex());
-          if (src === self)
-            return closeSlotOf(i, groupApi.activeSourceIndex());
+          if (src === self) return closeSlotOf(i, groupApi.activeSourceIndex());
           return -1;
         }
       }
@@ -659,9 +657,11 @@ export function reorderable<T, K>(
     });
 
     /** The wrap centers this item displaces within (own drag or incoming-target). */
-    const wrapCenters = ():
-      | { centers: readonly Point[]; colPitch: number; rowPitch: number }
-      | null => {
+    const wrapCenters = (): {
+      centers: readonly Point[];
+      colPitch: number;
+      rowPitch: number;
+    } | null => {
       const geom = geometry();
       if (geom?.kind === 'wrap') return geom;
       const tm = groupApi?.activeTargetMeasure();
@@ -863,8 +863,7 @@ export function reorderable<T, K>(
     },
     // untracked: a consumer predicate may read tree signals — don't subscribe move()'s effect to them.
     canReceive: options.canReceive
-      ? // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
-        (item) => untracked(() => options.canReceive!(item))
+      ? (item) => untracked(() => options.canReceive!(item))
       : undefined,
   };
 

@@ -31,7 +31,11 @@ export type LintReport = {
 // scanner, so a marker inside a translation string can't suppress anything.
 
 export type SuppressionIndex = {
-  isSuppressed(file: string, line: number | undefined, rule: LintRuleName): boolean;
+  isSuppressed(
+    file: string,
+    line: number | undefined,
+    rule: LintRuleName,
+  ): boolean;
   warnings: string[];
 };
 
@@ -59,9 +63,15 @@ export function buildSuppressions(files: SourceFile[]): SuppressionIndex {
   for (const sf of files) {
     const filePath = sf.getFilePath();
     const text = sf.getFullText();
-    const firstStatementStart = sf.getStatements()[0]?.getStart() ?? text.length;
+    const firstStatementStart =
+      sf.getStatements()[0]?.getStart() ?? text.length;
 
-    const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, undefined, text);
+    const scanner = ts.createScanner(
+      ts.ScriptTarget.Latest,
+      false,
+      undefined,
+      text,
+    );
     let token = scanner.scan();
     while (token !== ts.SyntaxKind.EndOfFileToken) {
       if (
@@ -78,7 +88,9 @@ export function buildSuppressions(files: SourceFile[]): SuppressionIndex {
           if (match[1]) {
             let perLine = nextLine.get(filePath);
             if (!perLine) nextLine.set(filePath, (perLine = new Map()));
-            const endLine = sf.getLineAndColumnAtPos(start + comment.length).line;
+            const endLine = sf.getLineAndColumnAtPos(
+              start + comment.length,
+            ).line;
             const target = endLine + 1;
             const set = perLine.get(target) ?? new Set<string>();
             for (const r of rules) set.add(r);
@@ -198,7 +210,8 @@ export function findDuplicates(
 ): LintFinding[] {
   const groups = new Map<string, SourceEntry[]>();
   for (const entry of entries) {
-    if (suppressions.isSuppressed(entry.file, entry.line, 'duplicate')) continue;
+    if (suppressions.isSuppressed(entry.file, entry.line, 'duplicate'))
+      continue;
     const norm = normalizeValue(entry.value, ignoreCase);
     if (!norm) continue;
     const group = groups.get(norm) ?? [];
@@ -358,7 +371,8 @@ export function formatLintReport(report: LintReport): string {
   }
   for (const members of byGroup.values()) {
     lines.push(`✗ duplicate (${members.length}): ${members[0].message}`);
-    for (const m of members) lines.push(`   ${m.namespace}:${m.key} (${loc(m)})`);
+    for (const m of members)
+      lines.push(`   ${m.namespace}:${m.key} (${loc(m)})`);
   }
 
   for (const f of report.findings.filter((f) => f.rule === 'unused'))

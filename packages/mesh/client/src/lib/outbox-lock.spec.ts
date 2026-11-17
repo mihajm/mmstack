@@ -84,7 +84,9 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     a.mesh.close();
     await settle();
     expect(b.mesh.status()).toBe('live');
-    expect((backing.get('shared') as { origin: string }).origin).not.toBe(ownedOrigin); // fresh mint
+    expect((backing.get('shared') as { origin: string }).origin).not.toBe(
+      ownedOrigin,
+    ); // fresh mint
 
     b.mesh.close();
   });
@@ -112,8 +114,12 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
     const relay = createRelay();
     const { store: disk } = memStore();
 
-    const a = peer(relay, 'wa', { outbox: { key: 'k', store: disk, crossTab: 'off' } });
-    const b = peer(relay, 'wb', { outbox: { key: 'k', store: disk, crossTab: 'off' } });
+    const a = peer(relay, 'wa', {
+      outbox: { key: 'k', store: disk, crossTab: 'off' },
+    });
+    const b = peer(relay, 'wb', {
+      outbox: { key: 'k', store: disk, crossTab: 'off' },
+    });
     await settle();
 
     expect(a.mesh.status()).toBe('live');
@@ -156,9 +162,7 @@ describe('meshSync durable outbox — cross-tab single-writer lock', () => {
       await settle();
 
       expect(a.mesh.status()).toBe('live'); // degrades gracefully to no-lock
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('Web Locks'),
-      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Web Locks'));
       a.mesh.close();
     } finally {
       warn.mockRestore();

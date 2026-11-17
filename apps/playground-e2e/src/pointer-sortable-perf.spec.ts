@@ -9,9 +9,10 @@ import { resolvePoint } from './support/pointer';
  */
 const rows = (page: Page) => page.locator('ul[data-list="pointer"] li');
 
-type Cdp = Awaited<ReturnType<Page['context']>['newCDPSession']> extends never
-  ? never
-  : Awaited<ReturnType<ReturnType<Page['context']>['newCDPSession']>>;
+type Cdp =
+  Awaited<ReturnType<Page['context']>['newCDPSession']> extends never
+    ? never
+    : Awaited<ReturnType<ReturnType<Page['context']>['newCDPSession']>>;
 
 async function counts(client: Cdp) {
   const { metrics } = (await client.send('Performance.getMetrics')) as {
@@ -21,7 +22,9 @@ async function counts(client: Cdp) {
   return { layout: get('LayoutCount'), recalc: get('RecalcStyleCount') };
 }
 
-test('a drag is transform-only — no per-move layout thrash', async ({ page }) => {
+test('a drag is transform-only — no per-move layout thrash', async ({
+  page,
+}) => {
   await page.goto('/sortable-pointer');
   await expect(page.getByText('Auth flow')).toBeVisible();
 
@@ -44,7 +47,9 @@ test('a drag is transform-only — no per-move layout thrash', async ({ page }) 
 
   const layoutDelta = after.layout - before.layout;
   const recalcDelta = after.recalc - before.recalc;
-  console.log(`[perf] ${MOVES} moves → layoutΔ=${layoutDelta} recalcΔ=${recalcDelta}`);
+  console.log(
+    `[perf] ${MOVES} moves → layoutΔ=${layoutDelta} recalcΔ=${recalcDelta}`,
+  );
 
   // layout must not scale with move count (transforms don't lay out)
   expect(layoutDelta).toBeLessThan(10);

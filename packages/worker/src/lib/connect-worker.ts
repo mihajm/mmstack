@@ -105,12 +105,16 @@ function build(
   const connected = signal(false);
   const manifest = signal<WorkerManifest | null>(null);
 
-  const taskPending = new Map<number, { resolve: (v: any) => void; reject: (e: unknown) => void }>();
+  const taskPending = new Map<
+    number,
+    { resolve: (v: any) => void; reject: (e: unknown) => void }
+  >();
   const storeHandlers = new Set<(msg: WorkerEnvelope) => void>();
   const readyHooks = new Set<() => void>();
   const disconnectHooks = new Set<() => void>();
   const restart = opt?.restart ?? 'auto';
-  const restartDelay = opt?.restartDelay ?? ((n: number) => Math.min(30_000, 1000 * 2 ** n));
+  const restartDelay =
+    opt?.restartDelay ?? ((n: number) => Math.min(30_000, 1000 * 2 ** n));
   let attempt = 0;
   let runIdSeq = 0;
   let destroyed = false;
@@ -194,7 +198,8 @@ function build(
   const teardown = (): void => {
     destroyed = true;
     connected.set(false);
-    for (const [, p] of taskPending) p.reject(new WorkerAbortError('worker connection destroyed'));
+    for (const [, p] of taskPending)
+      p.reject(new WorkerAbortError('worker connection destroyed'));
     taskPending.clear();
     for (const fn of disconnectHooks) fn();
     if (port) closePort(port);
@@ -209,9 +214,16 @@ function build(
       input: unknown,
       o?: { signal?: AbortSignal; transfer?: Transferable[] },
     ): Promise<unknown> {
-      if (isServer) return Promise.reject(new WorkerCrashedError('no worker on the server'));
-      if (destroyed) return Promise.reject(new WorkerAbortError('worker connection destroyed'));
-      if (crashed) return Promise.reject(new WorkerCrashedError('worker is restarting'));
+      if (isServer)
+        return Promise.reject(
+          new WorkerCrashedError('no worker on the server'),
+        );
+      if (destroyed)
+        return Promise.reject(
+          new WorkerAbortError('worker connection destroyed'),
+        );
+      if (crashed)
+        return Promise.reject(new WorkerCrashedError('worker is restarting'));
       if (o?.signal?.aborted) return Promise.reject(new WorkerAbortError());
       const runId = ++runIdSeq;
       return new Promise<unknown>((resolve, reject) => {

@@ -7,6 +7,7 @@
 // command builds mesh-protocol first.
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
+// oxlint-disable-next-line @nx/enforce-module-boundaries -- Node runs the built output
 import {
   createRelay,
   pathPrefixAcl,

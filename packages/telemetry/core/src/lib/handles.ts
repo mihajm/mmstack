@@ -12,7 +12,10 @@ export class TelemetryHandles {
   private readonly registry = signal<Record<string, Signal<unknown>>>({});
 
   publish<T>(key: string, value: Signal<T>): void {
-    this.registry.update((current) => ({ ...current, [key]: value as Signal<unknown> }));
+    this.registry.update((current) => ({
+      ...current,
+      [key]: value as Signal<unknown>,
+    }));
   }
 
   /** Reactive read — `undefined` until the key is published, then tracks its signal. */

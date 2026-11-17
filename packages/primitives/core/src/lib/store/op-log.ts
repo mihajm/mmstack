@@ -88,7 +88,7 @@ export type CreateOpLogOptions = {
   readonly emit?: DiffOpsOptions;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// oxlint-disable-next-line no-unused-vars
 export type OpLog<T extends object> = {
   /**
    * Ordered, lossless delivery of every emitted batch. Synchronous — don't write back into

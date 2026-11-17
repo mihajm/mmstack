@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
   STORE_SHARED_GLOBALS,
   type ProxyCache,

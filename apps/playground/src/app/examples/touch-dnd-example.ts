@@ -11,7 +11,6 @@ const rows = (prefix: string): Row[] =>
 
 /** Touch behaviour of pointer lists: axis-aware touch-action and long-press activation. */
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-touch-dnd-example',
   imports: [Reorderable, ReorderableItem],
   template: `

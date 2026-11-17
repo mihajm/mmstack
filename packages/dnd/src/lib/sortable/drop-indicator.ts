@@ -47,16 +47,28 @@ import type { Edge } from '../internal/types';
       border-radius: 1px;
     }
     .line[data-edge='top'] {
-      top: var(--mm-dnd-offset); left: 0; right: 0; height: var(--mm-dnd-thickness);
+      top: var(--mm-dnd-offset);
+      left: 0;
+      right: 0;
+      height: var(--mm-dnd-thickness);
     }
     .line[data-edge='bottom'] {
-      bottom: var(--mm-dnd-offset); left: 0; right: 0; height: var(--mm-dnd-thickness);
+      bottom: var(--mm-dnd-offset);
+      left: 0;
+      right: 0;
+      height: var(--mm-dnd-thickness);
     }
     .line[data-edge='left'] {
-      left: var(--mm-dnd-offset); top: 0; bottom: 0; width: var(--mm-dnd-thickness);
+      left: var(--mm-dnd-offset);
+      top: 0;
+      bottom: 0;
+      width: var(--mm-dnd-thickness);
     }
     .line[data-edge='right'] {
-      right: var(--mm-dnd-offset); top: 0; bottom: 0; width: var(--mm-dnd-thickness);
+      right: var(--mm-dnd-offset);
+      top: 0;
+      bottom: 0;
+      width: var(--mm-dnd-thickness);
     }
   `,
 })

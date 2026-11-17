@@ -184,8 +184,7 @@ describe('formGroup', () => {
           age: formControl(derived(src, 'age')),
         },
         {
-          validator: () => (v) =>
-            v.age >= 18 ? '' : 'must be at least 18',
+          validator: () => (v) => (v.age >= 18 ? '' : 'must be at least 18'),
         },
       );
 
@@ -206,8 +205,7 @@ describe('formGroup', () => {
           age: formControl(derived(src, 'age')),
         },
         {
-          validator: () => (v) =>
-            v.age >= 18 ? '' : 'must be at least 18',
+          validator: () => (v) => (v.age >= 18 ? '' : 'must be at least 18'),
         },
       );
 

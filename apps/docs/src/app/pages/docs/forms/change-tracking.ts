@@ -24,19 +24,19 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="track" lang="ts" />
         <p>
           Leaves compare against their own baseline and containers aggregate,
-          with an <code>Object.is</code> short-circuit so a change only walks its
-          own branch of the tree.
+          with an <code>Object.is</code> short-circuit so a change only walks
+          its own branch of the tree.
         </p>
       </docs-section>
 
       <docs-section title="Async initial data" id="async">
         <p>
           When the initial data arrives asynchronously, pass
-          <code>{{ '{' }} manualCommit: true {{ '}' }}</code>. That skips the
-          automatic baseline and every field reads as changed until you call
-          <code>commitChanges</code> once the data lands. Call
-          <code>commitChanges(f)</code> at any time to re-baseline to the current
-          values, for example in the success path of a save.
+          <code>{{ '{' }} manualCommit: true {{ '}' }}</code
+          >. That skips the automatic baseline and every field reads as changed
+          until you call <code>commitChanges</code> once the data lands. Call
+          <code>commitChanges(f)</code> at any time to re-baseline to the
+          current values, for example in the success path of a save.
         </p>
         <docs-code [code]="commit" lang="ts" />
       </docs-section>
@@ -77,8 +77,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Reach for <code>changedCount</code> when you need a plain "3 unsaved
           changes" count. It reads the same tracking machinery as
-          <code>injectChanged()</code>, so a guard that asks "does this form have
-          unsaved edits" can gate on <code>changedCount(f)() &gt; 0</code>
+          <code>injectChanged()</code>, so a guard that asks "does this form
+          have unsaved edits" can gate on <code>changedCount(f)() &gt; 0</code>
           without touching any internal metadata key.
         </p>
       </docs-section>
@@ -86,11 +86,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Server reconciliation" id="reconcile">
         <p>
           When a save returns the stored entity, or another client's edit
-          arrives, <code>reconcile(f, incoming)</code> merges that data back into
-          the form without clobbering edits still in flight. Unchanged fields
-          adopt the incoming value, changed fields keep their edit, and every
-          field's baseline becomes the incoming value, so a kept edit reads as
-          changed against the new server state.
+          arrives, <code>reconcile(f, incoming)</code> merges that data back
+          into the form without clobbering edits still in flight. Unchanged
+          fields adopt the incoming value, changed fields keep their edit, and
+          every field's baseline becomes the incoming value, so a kept edit
+          reads as changed against the new server state.
         </p>
         <p>
           The default merge walks objects per property and treats arrays and
@@ -112,10 +112,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Submitting the diff" id="submit">
         <p>
           <code>submitChanges(f, target)</code> is the whole save recipe as one
-          call. It runs Angular's <code>submit()</code> first, so validators run,
-          fields touch, and an invalid form blocks with no request. Then it sends
-          the diff through the target and re-baselines what was sent on success,
-          leaving dirty state alone on failure so a retry keeps the edits.
+          call. It runs Angular's <code>submit()</code> first, so validators
+          run, fields touch, and an invalid form blocks with no request. Then it
+          sends the diff through the target and re-baselines what was sent on
+          success, leaving dirty state alone on failure so a retry keeps the
+          edits.
         </p>
         <p>
           The target is any object with a <code>mutateAsync</code> method, typed
@@ -123,9 +124,9 @@ import { DocSection } from '../../../layout/doc-section';
           <a mmLink="/docs/resource">&#64;mmstack/resource</a>
           <code>mutationResource</code> fits that shape, and brings its own
           queue and supersede semantics along. By default the payload is the
-          changed subset from <code>changedValues</code>, and a form with nothing
-          changed resolves <code>true</code> without a request. The returned
-          function is a <code>() =&gt; Promise&lt;boolean&gt;</code>:
+          changed subset from <code>changedValues</code>, and a form with
+          nothing changed resolves <code>true</code> without a request. The
+          returned function is a <code>() =&gt; Promise&lt;boolean&gt;</code>:
           <code>true</code> when the form was valid and the save landed,
           <code>false</code> when validation blocked it or the error mapper
           attached field errors.
@@ -134,12 +135,13 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>SubmitChangesOptions</code> tunes the rest. Set
           <code>payload: 'full'</code> to always send the whole value instead of
-          the diff. On success the submitted units re-baseline to the values that
-          were actually sent, so an edit that landed mid-request stays dirty
-          rather than being absorbed silently. That re-baseline is the
-          <code>'commit'</code> default. Choose <code>onSuccess: 'reconcile'</code>
-          to additionally merge the mutation's result back into the form, offered
-          only when the result is assignable to the form model. An
+          the diff. On success the submitted units re-baseline to the values
+          that were actually sent, so an edit that landed mid-request stays
+          dirty rather than being absorbed silently. That re-baseline is the
+          <code>'commit'</code> default. Choose
+          <code>onSuccess: 'reconcile'</code>
+          to additionally merge the mutation's result back into the form,
+          offered only when the result is assignable to the form model. An
           <code>errors</code> mapper turns a failure into Angular's server-error
           channel instead of rethrowing, and <code>ignoreValidators</code> is
           forwarded to <code>submit()</code>.

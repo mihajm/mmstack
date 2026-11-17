@@ -50,10 +50,11 @@ import { DocSection } from '../../../layout/doc-section';
           <code>isDragOver()</code> is true while an accepted source hovers the
           target at any depth. For nested targets, <code>isInnermost()</code> is
           true only on the deepest one under the pointer, so an outer region can
-          stay quiet while its child lights up. <code>dragOverData()</code> gives
-          you the hovering payload, already narrowed by <code>accepts</code>, so
-          you can preview the drop before it happens. All three are derived from
-          the same session, so reading them costs nothing until it changes.
+          stay quiet while its child lights up.
+          <code>dragOverData()</code> gives you the hovering payload, already
+          narrowed by <code>accepts</code>, so you can preview the drop before
+          it happens. All three are derived from the same session, so reading
+          them costs nothing until it changes.
         </p>
         <docs-code [code]="stateEx" lang="ts" />
         <p>
@@ -69,8 +70,8 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Metadata channel" id="meta">
         <p>
-          Alongside <code>data</code>, both a draggable and a drop target carry a
-          typed <code>meta</code> payload. It is keyed by symbols, so it never
+          Alongside <code>data</code>, both a draggable and a drop target carry
+          a typed <code>meta</code> payload. It is keyed by symbols, so it never
           collides with your own data or with tokens a plugin attaches, and it
           rides the drag separately from the payload. This is the seam the
           higher-level patterns build on: tag a source with the list it came

@@ -388,7 +388,7 @@ export class TranslationStore {
     const merged = { ...base };
     for (const [locale, namespaces] of Object.entries(overrides)) {
       if (!namespaces) continue;
-      const localeTranslation = { ...(merged[locale] ?? {}) };
+      const localeTranslation = { ...merged[locale] };
       for (const [namespace, translation] of Object.entries(namespaces)) {
         const flat = compileTranslation(translation, namespace).flat;
         for (const [key, value] of Object.entries(flat)) {

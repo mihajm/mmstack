@@ -363,7 +363,7 @@ describe('draggable — reactive drag handle (re-registration)', () => {
     TestBed.tick(); // flush the afterRenderEffect
     expect(draggableMock).toHaveBeenCalledTimes(1);
     expect(
-      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+      (draggableMock.mock.calls.at(-1)![0] as DraggableConfig).dragHandle,
     ).toBe(h1);
 
     handle.set(h2);
@@ -371,7 +371,7 @@ describe('draggable — reactive drag handle (re-registration)', () => {
     expect(cleanupMock).toHaveBeenCalledTimes(1); // old registration torn down
     expect(draggableMock).toHaveBeenCalledTimes(2);
     expect(
-      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+      (draggableMock.mock.calls.at(-1)![0] as DraggableConfig).dragHandle,
     ).toBe(h2);
 
     // re-setting the same element must NOT churn a re-register
@@ -397,7 +397,7 @@ describe('draggable — reactive drag handle (re-registration)', () => {
     TestBed.tick();
     expect(draggableMock).toHaveBeenCalledTimes(2);
     expect(
-      (draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig).dragHandle,
+      (draggableMock.mock.calls.at(-1)![0] as DraggableConfig).dragHandle,
     ).toBeUndefined();
   });
 });
@@ -458,9 +458,12 @@ describe('draggable — pointer engine', () => {
     const target = document.createElement('div');
     const accepted = vi.fn();
     const engine = TestBed.inject(DndPointerEngine);
-    vi.spyOn(engine as unknown as { elementsAt(x: number, y: number): readonly Element[] }, 'elementsAt').mockImplementation((x) =>
-      x >= 100 ? [target] : [],
-    );
+    vi.spyOn(
+      engine as unknown as {
+        elementsAt(x: number, y: number): readonly Element[];
+      },
+      'elementsAt',
+    ).mockImplementation((x) => (x >= 100 ? [target] : []));
     engine.registerDropTarget(target, {
       accepts: () => true,
       onDrop: accepted,
@@ -487,7 +490,12 @@ describe('draggable — pointer engine', () => {
     const target = document.createElement('div');
     const accepted = vi.fn();
     const engine = TestBed.inject(DndPointerEngine);
-    vi.spyOn(engine as unknown as { elementsAt(x: number, y: number): readonly Element[] }, 'elementsAt').mockReturnValue([target]);
+    vi.spyOn(
+      engine as unknown as {
+        elementsAt(x: number, y: number): readonly Element[];
+      },
+      'elementsAt',
+    ).mockReturnValue([target]);
     engine.registerDropTarget(target, {
       accepts: () => true,
       onDrop: accepted,

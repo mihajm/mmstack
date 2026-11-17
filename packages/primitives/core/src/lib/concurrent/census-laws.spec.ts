@@ -2,7 +2,9 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 type Outcome =
-  { kind: 'ok' } | { kind: 'error'; error: string } | { kind: 'skipped' };
+  | { kind: 'ok' }
+  | { kind: 'error'; error: string }
+  | { kind: 'skipped' };
 type Facade =
   | { kind: 'idle' }
   | { kind: 'running'; gen: number; prior?: string }
@@ -10,7 +12,8 @@ type Facade =
   | { kind: 'ok'; gen: number }
   | { kind: 'skipped'; gen: number };
 type FacadeEvent =
-  { t: 'start'; gen: number } | { t: 'settle'; gen: number; outcome: Outcome };
+  | { t: 'start'; gen: number }
+  | { t: 'settle'; gen: number; outcome: Outcome };
 
 const priorFailure = (s: Facade): string | undefined =>
   s.kind === 'error' ? s.error : s.kind === 'running' ? s.prior : undefined;
@@ -94,7 +97,6 @@ describe('[PROVEN] story facade reducer — skip-precedence + generation (pure m
       { t: 'settle', gen: 1, outcome: { kind: 'error', error: 'boom' } },
       hi,
     );
-    // eslint-disable-next-line no-useless-assignment
     [state, hi] = reduce(state, { t: 'start', gen: 2 }, hi);
     expect(state.kind).toBe('running');
     expect(storyFailure(state)).toBe('boom');

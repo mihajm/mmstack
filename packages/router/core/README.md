@@ -604,9 +604,7 @@ When the directive isn't a fit — preloading from a signal effect, on a keyboar
 import { Component, effect, signal } from '@angular/core';
 import { injectTriggerPreload } from '@mmstack/router-core';
 
-@Component({
-  /* ... */
-})
+@Component({/* ... */})
 export class CommandPaletteComponent {
   private readonly triggerPreload = injectTriggerPreload();
   protected readonly highlighted = signal<string | null>(null);
@@ -679,12 +677,12 @@ An output that fires once per swap this outlet performs, saying how it ended.
 <mm-transition-outlet (swapCommit)="onSwap($event)" />
 ```
 
-| `outcome`          | Meaning                                                                                                                            |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `committed`        | a held view was swapped out and the incoming view is on screen                                                                     |
+| `outcome`          | Meaning                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `committed`        | a held view was swapped out and the incoming view is on screen                                                                      |
 | `immediate`        | the outlet activated without holding (nothing to hold, `immediateTransition`, or a `RouteReuseStrategy` re-attach) and has rendered |
 | `superseded`       | an armed hold was dropped or re-targeted before it could commit; the outlet re-arms under the interrupting navigation               |
-| `outlet-destroyed` | the outlet was destroyed while still holding a view                                                                                |
+| `outlet-destroyed` | the outlet was destroyed while still holding a view                                                                                 |
 
 `committed` and `immediate` fire after the view is actually on screen, which under a hold is well after `NavigationEnd`. For the navigation-wide answer across several (or nested) outlets, read [`injectVisualCommit`](#visual-commit) instead.
 
@@ -871,7 +869,7 @@ createRouteData(USER, factory, {
 
 Without `onError` the default stands: the outlet swaps on settle-by-error and the component renders the slot's `error()` — the in-view error-boundary pattern (`@if (user.error(); as e) { ... }`). Use the boundary for recoverable in-place errors, `onError` for route-level policy.
 
-**Guards reading warm data** — share the cache key, not the slot: a functional guard runs *before* resolvers (so the slot for the navigation being guarded isn't populated yet — which is why there's deliberately no `guardFromRouteData` helper), but guards run in an injection context, so a guard that fetches through the same cached query the factory uses leaves the cache warm and the factory's resource resolves from it without a second request:
+**Guards reading warm data** — share the cache key, not the slot: a functional guard runs _before_ resolvers (so the slot for the navigation being guarded isn't populated yet — which is why there's deliberately no `guardFromRouteData` helper), but guards run in an injection context, so a guard that fetches through the same cached query the factory uses leaves the cache warm and the factory's resource resolves from it without a second request:
 
 ```typescript
 const canSeeUser: CanActivateFn = async (snapshot) => {
@@ -913,7 +911,6 @@ Notes:
 
 **Any resolver can join the pipeline.** `createRouteData` resolvers are tagged automatically; `withPrefetch(resolver, { description, prefetch })` tags arbitrary ones — navigation runs the wrapped resolver unchanged, hover runs your `prefetch(ctx)` speculatively (params extracted from the link URL, `ctx.isPrefetch: true`, deduped per link + description). The canonical consumer is `@mmstack/translate`: warming a route's locale chunk on hover (see its README's ecosystem recipes).
 
-
 ## Navigation hold
 
 The [transition outlet](#transition-outlet) holds the previous _view_ when navigating between **different** routes. But a resource that **persists** across a navigation — an app-shell/layout resource, or a route reused on a param change — has no view swap to hold; it just refetches in place and flashes to loading. `holdThroughNavigation` is the signal-level answer to that.
@@ -946,11 +943,11 @@ The return value is a read-only `Resource` (`value()`, `status()`, `error()`, `i
 
 Three tools, three layers — reach for the one that matches:
 
-| Tool | Holds | Trigger |
-| --- | --- | --- |
-| [`TransitionRouterOutlet`](#transition-outlet) | the outgoing **view** | cross-route navigation |
-| `holdThroughNavigation` | a persisted **resource**'s state | navigation lifecycle (with rollback) |
-| [`<mm-suspense>` / transition scope](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) `commit` | a value while **registered resources** load | scope `pending` |
+| Tool                                                                                                                      | Holds                                       | Trigger                              |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------ |
+| [`TransitionRouterOutlet`](#transition-outlet)                                                                            | the outgoing **view**                       | cross-route navigation               |
+| `holdThroughNavigation`                                                                                                   | a persisted **resource**'s state            | navigation lifecycle (with rollback) |
+| [`<mm-suspense>` / transition scope](https://www.npmjs.com/package/@mmstack/primitives#concurrency--transitions) `commit` | a value while **registered resources** load | scope `pending`                      |
 
 ---
 
@@ -979,9 +976,7 @@ export const appRoutes: Routes = [
 import { Component } from '@angular/core';
 import { injectRemountHandle } from '@mmstack/router-core';
 
-@Component({
-  /* ... */
-})
+@Component({/* ... */})
 export class ReportDesigner {
   private readonly reports = injectRemountHandle('reports');
 
@@ -1025,9 +1020,7 @@ export const appRoutes: Routes = [
 ```
 
 ```typescript
-@Component({
-  /* ... */
-})
+@Component({/* ... */})
 export class PreviewToolbar {
   private readonly preview = injectMountController('preview');
 

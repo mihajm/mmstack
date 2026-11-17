@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { Project } from 'ts-morph';
 import {
   applyImport,
@@ -109,7 +108,11 @@ describe('validateImport', () => {
 
   it('flags a key absent from the source (createTranslation is typed to the source shape)', () => {
     const issues = validateImport(
-      { greeting: 'Hallo {name}', detail: { authorLabel: 'Autor' }, extra: 'Hi {x}' },
+      {
+        greeting: 'Hallo {name}',
+        detail: { authorLabel: 'Autor' },
+        extra: 'Hi {x}',
+      },
       source,
     );
     expect(issues).toEqual([
@@ -126,7 +129,10 @@ describe('validateImport', () => {
 
   it('reports a clean issue (not a throw) when the SOURCE message is invalid ICU', () => {
     expect(() =>
-      validateImport({ greeting: 'Hallo {name}' }, { greeting: '{n, plural, one {x}' }),
+      validateImport(
+        { greeting: 'Hallo {name}' },
+        { greeting: '{n, plural, one {x}' },
+      ),
     ).not.toThrow();
     const issues = validateImport(
       { greeting: 'Hallo {name}' },
@@ -175,14 +181,20 @@ describe('applyImport', () => {
   it('throws when a locale collides with an existing one on the same identifier', () => {
     const p = project();
     expect(() =>
-      applyImport(p, quoteNs(p), 'sl_SI', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
+      applyImport(p, quoteNs(p), 'sl_SI', {
+        greeting: 'x {name}',
+        detail: { authorLabel: 'A' },
+      }),
     ).toThrow(/collides/);
   });
 
   it('throws when a locale has no characters to form an identifier', () => {
     const p = project();
     expect(() =>
-      applyImport(p, quoteNs(p), '--', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
+      applyImport(p, quoteNs(p), '--', {
+        greeting: 'x {name}',
+        detail: { authorLabel: 'A' },
+      }),
     ).toThrow(/identifier/);
   });
 
@@ -190,7 +202,10 @@ describe('applyImport', () => {
     const p = project();
     const ns = { ...quoteNs(p), registryCallIndex: 99 };
     expect(() =>
-      applyImport(p, ns, 'de', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
+      applyImport(p, ns, 'de', {
+        greeting: 'x {name}',
+        detail: { authorLabel: 'A' },
+      }),
     ).toThrow(/Could not locate the registerNamespace call/);
   });
 
@@ -199,7 +214,10 @@ describe('applyImport', () => {
     const before = p.getSourceFiles().length;
     const ns = { ...quoteNs(p), registryCallIndex: 99 };
     expect(() =>
-      applyImport(p, ns, 'de', { greeting: 'x {name}', detail: { authorLabel: 'A' } }),
+      applyImport(p, ns, 'de', {
+        greeting: 'x {name}',
+        detail: { authorLabel: 'A' },
+      }),
     ).toThrow();
     expect(p.getSourceFiles().length).toBe(before);
   });

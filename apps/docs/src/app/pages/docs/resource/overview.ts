@@ -90,7 +90,9 @@ import { DocSection } from '../../../layout/doc-section';
               <tr>
                 <td>Read data, cached and refreshable</td>
                 <td>
-                  <a mmLink="/docs/resource/query"><code>queryResource</code></a>
+                  <a mmLink="/docs/resource/query"
+                    ><code>queryResource</code></a
+                  >
                 </td>
                 <td>Its request function returning a new value</td>
               </tr>

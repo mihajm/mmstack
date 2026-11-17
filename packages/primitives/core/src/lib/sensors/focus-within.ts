@@ -12,7 +12,9 @@ import {
 import { runInSensorContext, type SensorRunOptions } from './sensor-options';
 
 type FocusWithinTarget =
-  ElementRef<Element> | Element | Signal<ElementRef<Element> | Element | null>;
+  | ElementRef<Element>
+  | Element
+  | Signal<ElementRef<Element> | Element | null>;
 
 function unwrap(target: ElementRef<Element> | Element | null): Element | null {
   if (!target) return null;

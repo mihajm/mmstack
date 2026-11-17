@@ -44,7 +44,8 @@ export function chaosLink(
   let silenced = false;
   const live = new Set<() => void>();
 
-  const latency = (): number => (maxL === minL ? minL : minL + r.int(maxL - minL + 1));
+  const latency = (): number =>
+    maxL === minL ? minL : minL + r.int(maxL - minL + 1);
   const drop = (): boolean => dropRate > 0 && r.float() < dropRate;
 
   const transport: MeshTransportFactory = () => {

@@ -237,8 +237,7 @@ export function connectNativeContainer<T, K = unknown>(
   const activeInsert = computed<number | null>(() => {
     if (!isOwner()) return null;
     const p = pointer();
-    const main =
-      (controller().axis === 'x' ? p.x : p.y) + scrollDelta();
+    const main = (controller().axis === 'x' ? p.x : p.y) + scrollDelta();
     return insertIndexFromCenters(centers(), main);
   });
   controller().setNativeInsert(activeInsert);
@@ -268,7 +267,7 @@ export function connectNativeContainer<T, K = unknown>(
   });
 
   dropTarget<T, { listId: symbol }>({
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accept-all guard; the real gate is canDrop (own-list / same-group meta)
+    // oxlint-disable-next-line no-unused-vars -- accept-all guard; the real gate is canDrop (own-list / same-group meta)
     accepts: (d): d is T => true,
     data: () => ({ listId: controller().listId }),
     canDrop: ({ source }) => canDropOnList(controller(), source),
@@ -279,7 +278,8 @@ export function connectNativeContainer<T, K = unknown>(
       if (to == null) return;
       const tags = meta as Record<symbol, unknown>;
       const src = tags[NATIVE_SOURCE] as
-        ReorderableController<T, K> | undefined;
+        | ReorderableController<T, K>
+        | undefined;
       const handle = tags[NATIVE_HANDLE] as Handle<K> | undefined;
       commitNativeDrop(
         c,
@@ -339,7 +339,7 @@ export function connectNativeItem<T, K = unknown>(
 
   // Item is ALSO a drop target: onDropTargetChange advances the session pointer (vs. continuous onDrag). No onDrop.
   dropTarget<T, { listId: symbol; index: number }>({
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accept-all guard; the real gate is canDrop
+    // oxlint-disable-next-line no-unused-vars -- accept-all guard; the real gate is canDrop
     accepts: (d): d is T => true,
     data: () => ({ listId: controller().listId, index: index() }),
     canDrop: ({ source }) => canDropOnList(controller(), source),

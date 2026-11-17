@@ -8,10 +8,9 @@ import { readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const OUT_DIR = 'dist/apps/docs/browser';
-const BASE = (process.env.DOCS_SITE_URL ?? 'https://mihajm.github.io/mmstack').replace(
-  /\/$/,
-  '',
-);
+const BASE = (
+  process.env.DOCS_SITE_URL ?? 'https://mihajm.github.io/mmstack'
+).replace(/\/$/, '');
 
 /** Collect the route path of every prerendered index.html (skipping the SPA 404). */
 function collectRoutes(dir, root = dir, routes = []) {

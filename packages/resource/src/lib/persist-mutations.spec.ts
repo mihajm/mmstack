@@ -86,7 +86,9 @@ const stashed = (mutation: unknown, ictx?: unknown) => ({
 describe('mutation persistence', () => {
   let online: WritableSignal<boolean>;
 
-  function configure(seed?: Parameters<typeof provideMockMutationPersistence>[0]) {
+  function configure(
+    seed?: Parameters<typeof provideMockMutationPersistence>[0],
+  ) {
     online = signal(true);
     TestBed.configureTestingModule({
       providers: [
@@ -398,7 +400,9 @@ describe('mutation persistence', () => {
 
       await hydrate();
       expect(bodies).toEqual([]);
-      expect(TestBed.inject(MutationPersistence).rowsFor('update').length).toBe(1);
+      expect(TestBed.inject(MutationPersistence).rowsFor('update').length).toBe(
+        1,
+      );
 
       online.set(true);
       TestBed.tick();
@@ -482,7 +486,12 @@ describe('mutation persistence', () => {
             url: 'https://x.test/m',
             method: 'POST',
             body,
-            context: ctx((req) => bodies.push(req.body), { ok: true }, false, 20),
+            context: ctx(
+              (req) => bodies.push(req.body),
+              { ok: true },
+              false,
+              20,
+            ),
           }),
           {
             persist: { key: 'update' },
@@ -501,7 +510,9 @@ describe('mutation persistence', () => {
 
     it('a second resource on the same key warns and does not double-replay', async () => {
       configure({ rows: [{ key: 'update', raw: stashed({ n: 7 }) }] });
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       const settled = Promise.withResolvers<void>();
       const bodies: unknown[] = [];
 
@@ -591,7 +602,9 @@ describe('mutation persistence', () => {
     it('an onMutate throw during replay drops the stash instead of boot-looping', async () => {
       configure({ rows: [{ key: 'update', raw: stashed({ n: 7 }) }] });
       const persistence = TestBed.inject(MutationPersistence);
-      const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const err = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
 
       TestBed.runInInjectionContext(() =>
         mutationResource(
@@ -960,8 +973,16 @@ describe('mutation persistence', () => {
       const shared = configureShared(
         {
           rows: [
-            { key: 'update', raw: stashed({ n: 1 }), created: Date.now() - 2000 },
-            { key: 'update', raw: stashed({ n: 2 }), created: Date.now() - 1000 },
+            {
+              key: 'update',
+              raw: stashed({ n: 1 }),
+              created: Date.now() - 2000,
+            },
+            {
+              key: 'update',
+              raw: stashed({ n: 2 }),
+              created: Date.now() - 1000,
+            },
           ],
         },
         { sync: false },

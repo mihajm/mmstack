@@ -15,7 +15,12 @@ import { Meta } from '@angular/platform-browser';
       <header>
         <h1>
           <!-- one line: whitespace between the parts would show as gaps -->
-          @for (part of titleParts(); track $index) {@if (!$first) {<wbr />}{{ part }}}
+          @for (part of titleParts(); track $index) {
+            @if (!$first) {
+              <wbr />
+            }
+            {{ part }}
+          }
           @if (experimental()) {
             <span class="badge">Experimental</span>
           }
@@ -33,8 +38,8 @@ import { Meta } from '@angular/platform-browser';
         }
         @if (experimental()) {
           <p class="experimental-note">
-            This API surface is experimental: it may still change and is not
-            yet battle-tested in production. Pin a version and expect some churn.
+            This API surface is experimental: it may still change and is not yet
+            battle-tested in production. Pin a version and expect some churn.
           </p>
         }
       </header>
@@ -121,7 +126,10 @@ export class DocPage {
     effect(() => {
       const title = this.title();
       const lead = this.lead();
-      this.meta.updateTag({ property: 'og:title', content: `${title} • mmstack` });
+      this.meta.updateTag({
+        property: 'og:title',
+        content: `${title} • mmstack`,
+      });
       this.meta.updateTag({ property: 'og:type', content: 'article' });
       if (lead) {
         this.meta.updateTag({ name: 'description', content: lead });
@@ -130,4 +138,3 @@ export class DocPage {
     });
   }
 }
-

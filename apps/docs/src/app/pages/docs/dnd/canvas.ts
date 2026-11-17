@@ -21,10 +21,10 @@ import { DocSection } from '../../../layout/doc-section';
           <code>frame</code> reads an item's position and size (a
           <code>CanvasFrame</code>: <code>x</code>, <code>y</code>,
           <code>width</code>, <code>height</code>, optional
-          <code>rotation</code>), <code>patch</code> writes one back
-          immutably. One delegated gesture on the surface decides what a press
-          means by the element it lands on: an item moves, a handle resizes or
-          rotates, empty space starts a marquee.
+          <code>rotation</code>), <code>patch</code> writes one back immutably.
+          One delegated gesture on the surface decides what a press means by the
+          element it lands on: an item moves, a handle resizes or rotates, empty
+          space starts a marquee.
         </p>
         <docs-demo
           title="Drag, marquee across, click to select, resize by the corners"
@@ -60,15 +60,15 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Chrome from signals" id="chrome">
         <p>
-          The canvas is headless: selection outlines, handles, snaplines and
-          the marquee rectangle are yours to render.
+          The canvas is headless: selection outlines, handles, snaplines and the
+          marquee rectangle are yours to render.
           <code>ctrl.session</code> exposes the derivation core
           (<code>guides</code>, <code>marqueeRect</code>,
-          <code>hoverContainer</code>, the live deltas), the item directive
-          sets <code>mm-canvas-selected</code> and
+          <code>hoverContainer</code>, the live deltas), the item directive sets
+          <code>mm-canvas-selected</code> and
           <code>mm-canvas-dragging</code> classes, and the handle directives
-          just mark elements with data attributes the gesture arbitration
-          reads. The demo's snaplines are one SVG with a loop over
+          just mark elements with data attributes the gesture arbitration reads.
+          The demo's snaplines are one SVG with a loop over
           <code>guides()</code>.
         </p>
         <docs-code [code]="chromeEx" label="template" lang="ts" />
@@ -93,9 +93,9 @@ import { DocSection } from '../../../layout/doc-section';
           innermost accepting container under the pointer while you drag and
           reports it on the commit. With <code>containerOf</code> a drop over a
           different container becomes a reparent: the controller hands you
-          frames already rebased into the target's coordinate space and does
-          not write, so your tree restructuring and the frame updates land in
-          a single update.
+          frames already rebased into the target's coordinate space and does not
+          write, so your tree restructuring and the frame updates land in a
+          single update.
         </p>
         <docs-code [code]="containersEx" lang="ts" />
         <p>

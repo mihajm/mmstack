@@ -26,7 +26,6 @@ type FlowDoc = {
 };
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-vflow-store-example',
   imports: [VflowComponent, ConnectionControllerDirective],
   template: `
@@ -39,7 +38,11 @@ type FlowDoc = {
       </p>
 
       <p class="toolbar">
-        <button data-testid="undo" (click)="undo()" [disabled]="!history.canUndo()">
+        <button
+          data-testid="undo"
+          (click)="undo()"
+          [disabled]="!history.canUndo()"
+        >
           Undo
         </button>
         <span data-testid="batch-count">{{ batches().length }} batches</span>

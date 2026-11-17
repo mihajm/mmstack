@@ -46,7 +46,6 @@ export function autoScroll(opts: AutoScrollOptions = {}): void {
     if (!plugin) return;
 
     const host = inject<ElementRef<HTMLElement>>(ElementRef);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { element, autoScroll: _ignored, injector: _inj, ...rest } = opts;
     const el =
       element instanceof ElementRef

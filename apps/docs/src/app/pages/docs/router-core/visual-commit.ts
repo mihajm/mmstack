@@ -16,20 +16,20 @@ import { DocSection } from '../../../layout/doc-section';
       <p>
         Under a
         <a mmLink="/docs/router-core/transition-outlet">held transition</a> the
-        incoming view is still hidden when <code>NavigationEnd</code> fires,
-        and with several or nested outlets there is no single moment
-        <code>NavigationEnd</code> could stand in for. The visual commit is
-        that moment: every outlet that armed for the navigation has finished
-        its swap, so the user is finally looking at the new route. Anything
-        that has to line up with what they see belongs there rather than on a
-        router event.
+        incoming view is still hidden when <code>NavigationEnd</code> fires, and
+        with several or nested outlets there is no single moment
+        <code>NavigationEnd</code> could stand in for. The visual commit is that
+        moment: every outlet that armed for the navigation has finished its
+        swap, so the user is finally looking at the new route. Anything that has
+        to line up with what they see belongs there rather than on a router
+        event.
       </p>
 
       <docs-section title="injectVisualCommit" id="inject-visual-commit">
         <p>
           A read-only signal of
-          <code>{{ '{' }} status, navigationId {{ '}' }}</code>.
-          <code>navigationId</code> is the router's own
+          <code>{{ '{' }} status, navigationId {{ '}' }}</code
+          >. <code>navigationId</code> is the router's own
           <code>NavigationStart.id</code>, so it correlates with router events
           if you need to line the two up.
         </p>
@@ -82,17 +82,17 @@ import { DocSection } from '../../../layout/doc-section';
           <code>provideTransitionScrollRestoration()</code> restores scroll on
           the visual commit. Angular's own restoration scrolls when the router
           activates the route, which under a hold is while the
-          <em>previous</em> view is still on screen: the old page jumps, and
-          the new one arrives already scrolled to the wrong place. This
-          restores after the swap, when the content the position refers to
-          actually exists.
+          <em>previous</em> view is still on screen: the old page jumps, and the
+          new one arrives already scrolled to the wrong place. This restores
+          after the swap, when the content the position refers to actually
+          exists.
         </p>
         <docs-code [code]="scroll" lang="ts" />
         <ul>
           <li>Back and forward restore the position that page was left at.</li>
           <li>
-            A forward navigation goes to the top, or to the element named by
-            the URL fragment.
+            A forward navigation goes to the top, or to the element named by the
+            URL fragment.
           </li>
           <li>
             It switches the browser's own restoration to <code>manual</code>,
@@ -101,9 +101,11 @@ import { DocSection } from '../../../layout/doc-section';
         </ul>
         <p>
           It replaces
-          <code>withInMemoryScrolling(&#123; scrollPositionRestoration:
-          'enabled' &#125;)</code>. Enable one or the other, not both, or the
-          two fight over the same scroll.
+          <code
+            >withInMemoryScrolling(&#123; scrollPositionRestoration: 'enabled'
+            &#125;)</code
+          >. Enable one or the other, not both, or the two fight over the same
+          scroll.
         </p>
       </docs-section>
 
@@ -113,17 +115,17 @@ import { DocSection } from '../../../layout/doc-section';
           assistive technology. A client-side navigation replaces the page
           without any of the signals a document load gives a screen reader:
           focus stays wherever it was, and nothing is announced. On the commit
-          it moves focus to the root element of the view that swapped in
-          (given a transient <code>tabindex="-1"</code> if it does not already
-          have one, and focused with <code>preventScroll</code> so it cannot
-          fight scroll restoration), and announces the new document title in a
-          polite live region.
+          it moves focus to the root element of the view that swapped in (given
+          a transient <code>tabindex="-1"</code> if it does not already have
+          one, and focused with <code>preventScroll</code> so it cannot fight
+          scroll restoration), and announces the new document title in a polite
+          live region.
         </p>
         <docs-code [code]="a11y" lang="ts" />
         <p>
           The title is read after the hold-aware
-          <a mmLink="/docs/router-core/route-ui">title store</a> has applied,
-          so what is announced is what the page is actually called. With nested
+          <a mmLink="/docs/router-core/route-ui">title store</a> has applied, so
+          what is announced is what the page is actually called. With nested
           outlets the focus target is the outermost view that swapped in; two
           sibling outlets swapping in one navigation have no containment
           relation, so the first to settle is the one focused.

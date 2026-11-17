@@ -30,7 +30,10 @@ import type {
  * `manipulation`, since the page may scroll until the press activates.
  */
 export function reorderableItemTouchAction(
-  controller: Pick<ReorderableController<unknown, unknown>, 'axis' | 'group' | 'touchActivation'>,
+  controller: Pick<
+    ReorderableController<unknown, unknown>,
+    'axis' | 'group' | 'touchActivation'
+  >,
 ): string {
   const linear =
     !controller.group && controller.axis !== 'wrap'

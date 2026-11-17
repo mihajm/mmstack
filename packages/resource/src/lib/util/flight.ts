@@ -11,7 +11,11 @@ import {
 
 /** One step of a query fetch's lifecycle. */
 export type FlightPhase =
-  'start' | 'landed' | 'failed' | 'superseded' | 'aborted';
+  | 'start'
+  | 'landed'
+  | 'failed'
+  | 'superseded'
+  | 'aborted';
 
 /**
  * A fetch lifecycle edge. Every generation gets exactly one `start` and exactly one terminal

@@ -512,15 +512,12 @@ describe('createNavItems / injectNavItems', () => {
 
   describe('config defaults (fallback nav items)', () => {
     it('renders config defaults when no active route registers items', async () => {
-      const { router } = setup(
-        [{ path: 'home', component: DummyComponent }],
-        {
-          defaults: [
-            { label: 'Home', link: '/' },
-            { label: 'Docs', link: '/docs' },
-          ],
-        },
-      );
+      const { router } = setup([{ path: 'home', component: DummyComponent }], {
+        defaults: [
+          { label: 'Home', link: '/' },
+          { label: 'Docs', link: '/docs' },
+        ],
+      });
 
       await router.navigateByUrl('/home');
       TestBed.tick();

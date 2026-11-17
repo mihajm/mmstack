@@ -33,12 +33,12 @@ describe('createScope', () => {
 
   it('should run the factory in the injection context so it can use inject()', () => {
     const [registerScope, provideScope] = createScope('myScope');
-    
+
     TestBed.configureTestingModule({
       providers: [
         provideScope(),
-        { provide: 'TEST_DEP', useValue: 'dependency_value' }
-      ]
+        { provide: 'TEST_DEP', useValue: 'dependency_value' },
+      ],
     });
 
     const useScopedItem = registerScope(() => {
@@ -58,7 +58,7 @@ describe('createScope', () => {
 
     TestBed.runInInjectionContext(() => {
       expect(() => useScopedItem()).toThrowError(
-        '[mmstack/di]: Scope customScopeName not found. Please make sure you provide it'
+        '[mmstack/di]: Scope customScopeName not found. Please make sure you provide it',
       );
     });
   });
@@ -70,7 +70,7 @@ describe('createScope', () => {
 
     TestBed.runInInjectionContext(() => {
       expect(() => useScopedItem()).toThrowError(
-        '[mmstack/di]: Scope unknown not found. Please make sure you provide it'
+        '[mmstack/di]: Scope unknown not found. Please make sure you provide it',
       );
     });
   });
@@ -85,7 +85,7 @@ describe('createScope', () => {
 
     TestBed.runInInjectionContext(() => {
       expect(() => useA()).toThrowError(
-        '[mmstack/di]: Circular dependency detected in scope "myScope"'
+        '[mmstack/di]: Circular dependency detected in scope "myScope"',
       );
     });
   });
@@ -100,7 +100,7 @@ describe('createScope', () => {
 
     TestBed.runInInjectionContext(() => {
       expect(() => useA()).toThrowError(
-        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "A"'
+        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "A"',
       );
     });
   });
@@ -118,7 +118,7 @@ describe('createScope', () => {
 
     TestBed.runInInjectionContext(() => {
       expect(() => useA()).toThrowError(
-        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "namedFactory"'
+        '[mmstack/di]: Circular dependency detected in scope "myScope" while resolving "namedFactory"',
       );
     });
   });

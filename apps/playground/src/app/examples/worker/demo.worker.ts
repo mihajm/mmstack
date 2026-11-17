@@ -13,7 +13,10 @@ import { createWorkerHost, workerStoreContext } from '@mmstack/worker/host';
 export type CounterState = { value: number; history: number[] };
 export type Stats = { count: number; sum: number; avg: number; max: number };
 
-const counter = store<CounterState>({ value: 0, history: [] }, workerStoreContext());
+const counter = store<CounterState>(
+  { value: 0, history: [] },
+  workerStoreContext(),
+);
 
 const stats = computed<Stats>(() => {
   const h = counter().history;

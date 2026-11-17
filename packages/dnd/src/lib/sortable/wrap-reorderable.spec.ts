@@ -143,8 +143,7 @@ describe('reorderable — axis: wrap (pointer engine)', () => {
       items[0].dispatchEvent(pe('pointermove', 60, 60)); // insert = 4
       TestBed.tick();
 
-      const state = (i: number) =>
-        host.list.itemState(() => host.data()[i]);
+      const state = (i: number) => host.list.itemState(() => host.data()[i]);
       // B (idx 1, center 60,20) closes into A's slot (20,20): (-40, 0)
       expect(state(1).transformX()).toBe(-40);
       expect(state(1).transformY()).toBe(0);
@@ -265,15 +264,27 @@ describe('reorderable — list ↔ wrap grid in one group', () => {
         const kind = this.getAttribute('data-container');
         if (kind === 'grid') {
           return {
-            top: 0, left: 0, right: 120, bottom: 120,
-            width: 120, height: 120, x: 0, y: 0,
+            top: 0,
+            left: 0,
+            right: 120,
+            bottom: 120,
+            width: 120,
+            height: 120,
+            x: 0,
+            y: 0,
             toJSON: () => ({}),
           } as DOMRect;
         }
         if (kind === 'list') {
           return {
-            top: 0, left: 200, right: 300, bottom: 200,
-            width: 100, height: 200, x: 200, y: 0,
+            top: 0,
+            left: 200,
+            right: 300,
+            bottom: 200,
+            width: 100,
+            height: 200,
+            x: 200,
+            y: 0,
             toJSON: () => ({}),
           } as DOMRect;
         }
@@ -281,17 +292,28 @@ describe('reorderable — list ↔ wrap grid in one group', () => {
         const idx = parent ? Array.from(parent.children).indexOf(this) : 0;
         if (parent?.getAttribute('data-container') === 'list') {
           return {
-            top: idx * 40, bottom: idx * 40 + 40, left: 200, right: 300,
-            width: 100, height: 40, x: 200, y: idx * 40,
+            top: idx * 40,
+            bottom: idx * 40 + 40,
+            left: 200,
+            right: 300,
+            width: 100,
+            height: 40,
+            x: 200,
+            y: idx * 40,
             toJSON: () => ({}),
           } as DOMRect;
         }
         const col = idx % 3;
         const row = Math.floor(idx / 3);
         return {
-          top: row * 40, bottom: row * 40 + 40,
-          left: col * 40, right: col * 40 + 40,
-          width: 40, height: 40, x: col * 40, y: row * 40,
+          top: row * 40,
+          bottom: row * 40 + 40,
+          left: col * 40,
+          right: col * 40 + 40,
+          width: 40,
+          height: 40,
+          x: col * 40,
+          y: row * 40,
           toJSON: () => ({}),
         } as DOMRect;
       });

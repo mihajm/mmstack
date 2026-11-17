@@ -10,7 +10,8 @@ function pe(
   y: number,
   mods: { ctrlKey?: boolean; shiftKey?: boolean } = {},
 ): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = 1;
   e['clientX'] = x;
   e['clientY'] = y;
@@ -55,7 +56,10 @@ describe('movable', () => {
   });
 
   it('adds the delta to the captured base position', () => {
-    const { el, position } = setup({ activationThreshold: 3 }, { x: 100, y: 50 });
+    const { el, position } = setup(
+      { activationThreshold: 3 },
+      { x: 100, y: 50 },
+    );
     el.dispatchEvent(pe('pointerdown', 10, 10));
     tick();
     el.dispatchEvent(pe('pointermove', 30, 10));
@@ -64,7 +68,10 @@ describe('movable', () => {
   });
 
   it('snaps to the grid (and Ctrl bypasses it)', () => {
-    const { el, position } = setup({ grid: { size: 10 }, activationThreshold: 3 });
+    const { el, position } = setup({
+      grid: { size: 10 },
+      activationThreshold: 3,
+    });
     el.dispatchEvent(pe('pointerdown', 0, 0));
     tick();
     el.dispatchEvent(pe('pointermove', 12, 8));
@@ -148,7 +155,10 @@ describe('movable — Figma-grade behaviours', () => {
 
   it('moves a group by the same delta', () => {
     const other = signal<Point>({ x: 100, y: 100 });
-    const { el, position } = setup({ group: () => [other], activationThreshold: 3 });
+    const { el, position } = setup({
+      group: () => [other],
+      activationThreshold: 3,
+    });
     el.dispatchEvent(pe('pointerdown', 0, 0));
     tick();
     el.dispatchEvent(pe('pointermove', 20, 5));
@@ -165,7 +175,9 @@ describe('movable — Figma-grade behaviours', () => {
       activationThreshold: 3,
       size: () => ({ width: 20, height: 20 }),
       group: () => [other],
-      snapTargets: () => [{ x: other().x, y: other().y, width: 20, height: 20 }],
+      snapTargets: () => [
+        { x: other().x, y: other().y, width: 20, height: 20 },
+      ],
     });
     el.dispatchEvent(pe('pointerdown', 0, 0));
     tick();
@@ -194,7 +206,9 @@ describe('movable — Figma-grade behaviours', () => {
     const { el, position } = setup({ keyboard: true, grid: { size: 10 } });
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
     expect(position()).toEqual({ x: 10, y: 0 });
-    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', ctrlKey: true }));
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', ctrlKey: true }),
+    );
     expect(position()).toEqual({ x: 10, y: 100 }); // large = step * 10
   });
 

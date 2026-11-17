@@ -17,13 +17,13 @@ describe('Time Adapter', () => {
 
       expect(state.value()).toEqual(now);
       expect(state.type).toBe('time');
-      
+
       // Expected: min time should be same as 'min' BUT on the 'now' day
       expect(state.min()?.getFullYear()).toBe(now.getFullYear());
       expect(state.min()?.getMonth()).toBe(now.getMonth());
       expect(state.min()?.getDate()).toBe(now.getDate());
       expect(state.min()?.getHours()).toBe(min.getHours());
-      
+
       // Expected: max time should be same as 'max' BUT on the 'now' day
       expect(state.max()?.getHours()).toBe(max.getHours());
     });
@@ -46,7 +46,7 @@ describe('Time Adapter', () => {
         });
 
         expect(state.error()).toBe('Start Time is required');
-        
+
         const okVal = new Date('2024-03-20T10:00:00Z');
         state.value.set(okVal);
         expect(state.error()).toBe('');

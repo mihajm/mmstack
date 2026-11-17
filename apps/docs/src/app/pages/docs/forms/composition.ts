@@ -17,14 +17,15 @@ import { DocSection } from '../../../layout/doc-section';
           Most controls read the same handful of things off their field: the
           label, the first error, whether it is invalid, whether it is required.
           Writing those reads out by hand in every control is repetitive, and
-          each one injects the field again. Composition lets you declare that set
-          once and reuse it.
+          each one injects the field again. Composition lets you declare that
+          set once and reuse it.
         </p>
         <p>
           A projector is a pure function from the field handle to a value.
           <code>compose</code> injects the field once and turns a record of
-          projectors into one object of signals. A <code>fieldMetadata</code>
-          rule carries its own projector, and a bare <code>MetadataKey</code>
+          projectors into one object of signals. A
+          <code>fieldMetadata</code> rule carries its own projector, and a bare
+          <code>MetadataKey</code>
           composes directly.
         </p>
         <docs-code [code]="compose" lang="ts" />
@@ -40,10 +41,10 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Naming a field type" id="composition">
         <p>
-          <code>composition</code> returns a <code>[fragment, inject]</code>
-          tuple, mirroring <code>fieldMetadata</code>. The fragment is a plain
-          record of projectors, so you extend one field type into another by
-          spreading it.
+          <code>composition</code> returns a
+          <code>[fragment, inject]</code> tuple, mirroring
+          <code>fieldMetadata</code>. The fragment is a plain record of
+          projectors, so you extend one field type into another by spreading it.
         </p>
         <docs-code [code]="composition" lang="ts" />
       </docs-section>

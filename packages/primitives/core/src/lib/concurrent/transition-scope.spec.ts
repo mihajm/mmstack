@@ -17,7 +17,10 @@ import {
 } from './transition-scope';
 
 // Minimal fake matching the bits the scope reads: status(), isLoading(), hasValue().
-function fakeResource(status: ResourceStatus, value: unknown): ResourceRef<unknown> {
+function fakeResource(
+  status: ResourceStatus,
+  value: unknown,
+): ResourceRef<unknown> {
   const status$ = signal<ResourceStatus>(status);
   const value$ = signal<unknown>(value);
   return {

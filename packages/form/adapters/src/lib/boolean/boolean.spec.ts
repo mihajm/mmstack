@@ -35,36 +35,36 @@ describe('Boolean Adapter', () => {
         });
 
         expect(state.error()).toBe('Must be true');
-        
+
         state.value.set(true);
         expect(state.error()).toBe('');
       });
     });
 
     it('should be valid by default (no validation)', () => {
-        TestBed.runInInjectionContext(() => {
-          const createBoolean = injectCreateBooleanState();
-          const state = createBoolean(false);
-          expect(state.error()).toBe('');
-        });
+      TestBed.runInInjectionContext(() => {
+        const createBoolean = injectCreateBooleanState();
+        const state = createBoolean(false);
+        expect(state.error()).toBe('');
+      });
     });
   });
 
   describe('Toggle Adapter', () => {
-      it('should initialize with toggle type', () => {
-          const state = createToggleState(true);
-          expect(state.type).toBe('toggle');
-      });
+    it('should initialize with toggle type', () => {
+      const state = createToggleState(true);
+      expect(state.type).toBe('toggle');
+    });
 
-      it('should integrate validation via injected factory', () => {
-        TestBed.runInInjectionContext(() => {
-            const createToggle = injectCreateToggleState();
-            const state = createToggle(false, {
-                validation: () => ({ requireTrue: true })
-            });
-            expect(state.error()).toBe('Must be true');
-            expect(state.type).toBe('toggle');
+    it('should integrate validation via injected factory', () => {
+      TestBed.runInInjectionContext(() => {
+        const createToggle = injectCreateToggleState();
+        const state = createToggle(false, {
+          validation: () => ({ requireTrue: true }),
         });
+        expect(state.error()).toBe('Must be true');
+        expect(state.type).toBe('toggle');
       });
+    });
   });
 });

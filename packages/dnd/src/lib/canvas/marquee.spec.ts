@@ -4,7 +4,8 @@ import { TestBed } from '@angular/core/testing';
 import { marquee, type MarqueeItem } from './marquee';
 
 function pe(type: string, x: number, y: number): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = 1;
   e['clientX'] = x;
   e['clientY'] = y;
@@ -17,7 +18,17 @@ function pe(type: string, x: number, y: number): Event {
 
 function stubRect(el: HTMLElement, left: number, top: number) {
   el.getBoundingClientRect = () =>
-    ({ left, top, x: left, y: top, right: left, bottom: top, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+    ({
+      left,
+      top,
+      x: left,
+      y: top,
+      right: left,
+      bottom: top,
+      width: 0,
+      height: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
 }
 
 function setup(items: MarqueeItem<string>[], origin = { left: 0, top: 0 }) {
@@ -86,7 +97,10 @@ describe('marquee (pure derivation)', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         { provide: PLATFORM_ID, useValue: 'server' },
       ],
     });

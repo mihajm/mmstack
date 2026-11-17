@@ -1,4 +1,10 @@
-import { Component, computed, signal, viewChild, type ElementRef } from '@angular/core';
+import {
+  Component,
+  computed,
+  signal,
+  viewChild,
+  type ElementRef,
+} from '@angular/core';
 import {
   Canvas,
   CanvasItem,
@@ -52,7 +58,6 @@ function seedWidgets(): Widget[] {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-canvas-controller-example',
   imports: [Canvas, CanvasItem, CanvasResizeHandle, CanvasRotateHandle],
   template: `
@@ -119,8 +124,8 @@ function seedWidgets(): Widget[] {
         </div>
       </div>
       <p class="hint">
-        Selected: <span data-testid="selected">{{ selectedLabel() }}</span>
-        · zoom {{ zoomLabel() }}
+        Selected: <span data-testid="selected">{{ selectedLabel() }}</span> ·
+        zoom {{ zoomLabel() }}
       </p>
     </main>
   `,
@@ -139,8 +144,8 @@ function seedWidgets(): Widget[] {
       border: 1px solid #ddd;
       border-radius: 10px;
       overflow: hidden;
-      background:
-        radial-gradient(circle, #e8e8e8 1px, transparent 1px) 0 0 / 24px 24px;
+      background: radial-gradient(circle, #e8e8e8 1px, transparent 1px) 0 0 /
+        24px 24px;
     }
     .space {
       position: absolute;
@@ -172,10 +177,26 @@ function seedWidgets(): Widget[] {
       border: 2px solid #1971ff;
       border-radius: 2px;
     }
-    .handle.nw { top: -6px; left: -6px; cursor: nwse-resize; }
-    .handle.ne { top: -6px; right: -6px; cursor: nesw-resize; }
-    .handle.sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
-    .handle.se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+    .handle.nw {
+      top: -6px;
+      left: -6px;
+      cursor: nwse-resize;
+    }
+    .handle.ne {
+      top: -6px;
+      right: -6px;
+      cursor: nesw-resize;
+    }
+    .handle.sw {
+      bottom: -6px;
+      left: -6px;
+      cursor: nesw-resize;
+    }
+    .handle.se {
+      bottom: -6px;
+      right: -6px;
+      cursor: nwse-resize;
+    }
     .rotate {
       position: absolute;
       top: -26px;
@@ -209,8 +230,7 @@ function seedWidgets(): Widget[] {
 export class CanvasControllerExample {
   private readonly widgets = signal<readonly Widget[]>(seedWidgets());
 
-  private readonly viewport =
-    viewChild<ElementRef<HTMLElement>>('viewport');
+  private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
   readonly zoom = panZoom(this.viewport);
   readonly ctrl = injectCanvas<Widget, string>(this.widgets, {
     key: (w) => w.id,

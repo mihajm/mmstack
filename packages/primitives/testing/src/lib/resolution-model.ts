@@ -78,7 +78,13 @@ function operation<T>(
 
 export type UnaryOp = 'negate' | 'not' | 'plus';
 export type BinOp =
-  'add' | 'sub' | 'mul' | 'pow' | 'lt' | 'looseEq' | 'strictEq';
+  | 'add'
+  | 'sub'
+  | 'mul'
+  | 'pow'
+  | 'lt'
+  | 'looseEq'
+  | 'strictEq';
 export type LogicOp = 'and' | 'or' | 'coalesce';
 export type FnName = 'double' | 'pick';
 export type GlobalFnName = 'len' | 'concat';
@@ -691,7 +697,9 @@ export function agrees(
 }
 
 export type Outcome =
-  { kind: 'value'; value: unknown } | { kind: 'throw' } | { kind: 'leak' };
+  | { kind: 'value'; value: unknown }
+  | { kind: 'throw' }
+  | { kind: 'leak' };
 
 export function runOutcome(evaluate: () => unknown): Outcome {
   try {

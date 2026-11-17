@@ -8,7 +8,9 @@ import { type NestedTranslation } from './nested';
  * irrelevant to the round-trip). Anything dynamic (a variable, a concatenation, a spread) throws —
  * the author must inline a literal for the tool to round-trip it.
  */
-export function liftObjectLiteral(obj: ObjectLiteralExpression): NestedTranslation {
+export function liftObjectLiteral(
+  obj: ObjectLiteralExpression,
+): NestedTranslation {
   const out: NestedTranslation = {};
 
   for (const prop of obj.getProperties()) {

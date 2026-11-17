@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
 import { flag, multiFlag } from './lib/args';
-import {
-  runExport,
-  runGenerateManifest,
-  runImport,
-} from './lib/commands';
-import {
-  formatLintReport,
-  runLint,
-  type LintRuleName,
-} from './lib/lint';
+import { runExport, runGenerateManifest, runImport } from './lib/commands';
+import { formatLintReport, runLint, type LintRuleName } from './lib/lint';
 
 const USAGE = `Usage: mmtranslate <command> [options]
 
@@ -64,7 +56,8 @@ function main(): void {
       console.warn(`⚠ skipped ${file}: ${reason}`);
     for (const { file, issues } of report.rejected) {
       console.error(`✗ ${file}`);
-      for (const issue of issues) console.error(`   ${issue.key}: ${issue.message}`);
+      for (const issue of issues)
+        console.error(`   ${issue.key}: ${issue.message}`);
     }
     console.log(`Imported ${report.applied} locale file(s).`);
     if (report.rejected.length) process.exitCode = 1;
@@ -72,7 +65,10 @@ function main(): void {
   }
 
   if (command === 'generate-manifest') {
-    const outFile = path.resolve(cwd, flag(rest, 'out') ?? 'mmtranslate.config.ts');
+    const outFile = path.resolve(
+      cwd,
+      flag(rest, 'out') ?? 'mmtranslate.config.ts',
+    );
     runGenerateManifest({ cwd, srcGlobs, outFile, sourceLocale });
     console.log(`Wrote manifest to ${outFile}`);
     return;

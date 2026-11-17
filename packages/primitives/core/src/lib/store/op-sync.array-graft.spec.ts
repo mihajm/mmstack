@@ -113,9 +113,16 @@ describe('createConvergingApply — grafting through an array', () => {
       root = applyOps(root, conv.ingest(e));
     };
 
-    feed(env([set(['routes'], [{ id: 'r1' }, { id: 'r2' }])], { p: 1, origin: 'A' }));
+    feed(
+      env([set(['routes'], [{ id: 'r1' }, { id: 'r2' }])], {
+        p: 1,
+        origin: 'A',
+      }),
+    );
     feed(env([set(['routes', 0, 'id'], 'r1-edited')], { p: 2, origin: 'B' }));
-    feed(env([set(['routes', 1], { id: 'r2-replaced' })], { p: 3, origin: 'C' }));
+    feed(
+      env([set(['routes', 1], { id: 'r2-replaced' })], { p: 3, origin: 'C' }),
+    );
 
     expect(root).toEqual(conv.materialize());
     expect(root).toEqual({
@@ -229,7 +236,14 @@ describe('createConvergingApply — array op sets are order-insensitive and appl
       const base = env(
         [
           set(['recs'], { k0: 0, k1: 1, k2: 2 }),
-          set(['routes'], [{ id: 'a', path: '/a' }, { id: 'b', path: '/b' }, { id: 'c', path: '/c' }]),
+          set(
+            ['routes'],
+            [
+              { id: 'a', path: '/a' },
+              { id: 'b', path: '/b' },
+              { id: 'c', path: '/c' },
+            ],
+          ),
           set(['deep'], [{ items: ['x', 'y'] }]),
         ],
         { p: 1, origin: 'BASE' },
@@ -254,10 +268,19 @@ describe('createConvergingApply — array op sets are order-insensitive and appl
       });
 
       for (const { state, folded } of results) {
-        expect(folded, `seed ${seed}: incremental fold diverged from materialize`).toEqual(state);
+        expect(
+          folded,
+          `seed ${seed}: incremental fold diverged from materialize`,
+        ).toEqual(state);
       }
-      expect(results[1].state, `seed ${seed}: shuffle changed the state`).toEqual(results[0].state);
-      expect(results[2].state, `seed ${seed}: duplication changed the state`).toEqual(results[0].state);
+      expect(
+        results[1].state,
+        `seed ${seed}: shuffle changed the state`,
+      ).toEqual(results[0].state);
+      expect(
+        results[2].state,
+        `seed ${seed}: duplication changed the state`,
+      ).toEqual(results[0].state);
     }
   });
 });

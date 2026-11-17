@@ -32,7 +32,9 @@ test('reorders within a list (same-list, via per-item drop targets)', async ({
 test('moves a row across lists (shared group)', async ({ page }) => {
   const todo = page.locator('ul[data-list="ind-todo"]');
   const doing = page.locator('ul[data-list="ind-doing"]');
-  await todo.getByText('Build').dragTo(doing, { targetPosition: { x: 12, y: 12 } });
+  await todo
+    .getByText('Build')
+    .dragTo(doing, { targetPosition: { x: 12, y: 12 } });
 
   await expect(doing.getByText('Build')).toBeVisible();
   await expect(todo.getByText('Build')).toHaveCount(0);

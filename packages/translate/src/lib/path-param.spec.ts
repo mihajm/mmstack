@@ -10,12 +10,12 @@ describe('pathParam', () => {
       paramMap: of(convertToParamMap({ id: '123' })),
       parent: null,
     };
-    
+
     TestBed.configureTestingModule({
       providers: [
         { provide: ActivatedRoute, useValue: routeMock },
-        { provide: Router, useValue: { options: {} } }
-      ]
+        { provide: Router, useValue: { options: {} } },
+      ],
     });
 
     TestBed.runInInjectionContext(() => {
@@ -35,12 +35,12 @@ describe('pathParam', () => {
       paramMap: of(convertToParamMap({ id: '123' })),
       parent: parentRouteMock,
     };
-    
+
     TestBed.configureTestingModule({
       providers: [
         { provide: ActivatedRoute, useValue: routeMock },
-        { provide: Router, useValue: { options: {} } }
-      ]
+        { provide: Router, useValue: { options: {} } },
+      ],
     });
 
     TestBed.runInInjectionContext(() => {
@@ -55,12 +55,12 @@ describe('pathParam', () => {
       paramMap: of(convertToParamMap({ id: '123' })),
       parent: null,
     };
-    
+
     TestBed.configureTestingModule({
       providers: [
         { provide: ActivatedRoute, useValue: routeMock },
-        { provide: Router, useValue: { options: {} } }
-      ]
+        { provide: Router, useValue: { options: {} } },
+      ],
     });
 
     TestBed.runInInjectionContext(() => {
@@ -75,12 +75,15 @@ describe('pathParam', () => {
       paramMap: of(convertToParamMap({ id: 'inherit' })),
       parent: null,
     };
-    
+
     TestBed.configureTestingModule({
       providers: [
         { provide: ActivatedRoute, useValue: routeMock },
-        { provide: Router, useValue: { options: { paramsInheritanceStrategy: 'always' } } }
-      ]
+        {
+          provide: Router,
+          useValue: { options: { paramsInheritanceStrategy: 'always' } },
+        },
+      ],
     });
 
     TestBed.runInInjectionContext(() => {

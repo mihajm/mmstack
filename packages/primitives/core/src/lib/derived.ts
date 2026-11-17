@@ -6,10 +6,7 @@ import {
   type ValueEqualityFn,
   type WritableSignal,
 } from '@angular/core';
-import {
-  recordsElsewhere,
-  recordWrite,
-} from './concurrent/active-transaction';
+import { recordsElsewhere, recordWrite } from './concurrent/active-transaction';
 import { isMutable, type MutableSignal } from './mutable';
 import { toWritable } from './to-writable';
 import {
@@ -165,12 +162,7 @@ function createUpdater<T, U>(
 ): (next: U) => void {
   let update: ((next: U) => void) | undefined;
   return (next) => {
-    update ??= createUpdaterFromSample(
-      source,
-      key,
-      vivify,
-      untracked(source),
-    );
+    update ??= createUpdaterFromSample(source, key, vivify, untracked(source));
     update(next);
   };
 }

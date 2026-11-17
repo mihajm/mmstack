@@ -29,7 +29,8 @@ export function mergeRetryOptions(
   query?: RetryOptions | number,
   local?: RetryOptions | number,
 ): RetryOptions | number | undefined {
-  if (global === undefined && query === undefined && local === undefined) return undefined;
+  if (global === undefined && query === undefined && local === undefined)
+    return undefined;
   return {
     ...(typeof global === 'number' ? { max: global } : global),
     ...(typeof query === 'number' ? { max: query } : query),
@@ -43,7 +44,7 @@ export function mergeRetryOptions(
  */
 export function mergeCacheOptions(
   query?: ResourceCacheOptions,
-  local?: ResourceCacheOptions
+  local?: ResourceCacheOptions,
 ): ResourceCacheOptions | undefined {
   if (query === undefined && local === undefined) return undefined;
   return {
@@ -58,7 +59,7 @@ export function mergeCacheOptions(
  */
 export function mergeRefreshOptions(
   query?: RefreshOptions | number,
-  local?: RefreshOptions | number
+  local?: RefreshOptions | number,
 ): RefreshOptions | number | undefined {
   if (query === undefined && local === undefined) return undefined;
   return {

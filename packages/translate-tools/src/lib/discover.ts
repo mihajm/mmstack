@@ -78,7 +78,9 @@ function discoverCall(
 ): DiscoveredNamespace | null {
   const defaultArg = call.getArguments()[0];
   if (!defaultArg || !Node.isArrowFunction(defaultArg)) {
-    warn(`registerNamespace default loader is not an arrow function in ${registryFile.getFilePath()}`);
+    warn(
+      `registerNamespace default loader is not an arrow function in ${registryFile.getFilePath()}`,
+    );
     return null;
   }
   const parsedDefault = parseLoader(defaultArg);
@@ -86,9 +88,20 @@ function discoverCall(
     warn(`Unsupported default loader shape in ${registryFile.getFilePath()}`);
     return null;
   }
-  const resolvedDefault = resolveExport(project, registryFile, parsedDefault, warn);
-  if (!resolvedDefault || resolvedDefault.kind !== 'namespace' || !resolvedDefault.namespace) {
-    warn(`Could not resolve namespace from default loader in ${registryFile.getFilePath()}`);
+  const resolvedDefault = resolveExport(
+    project,
+    registryFile,
+    parsedDefault,
+    warn,
+  );
+  if (
+    !resolvedDefault ||
+    resolvedDefault.kind !== 'namespace' ||
+    !resolvedDefault.namespace
+  ) {
+    warn(
+      `Could not resolve namespace from default loader in ${registryFile.getFilePath()}`,
+    );
     return null;
   }
 
@@ -141,15 +154,23 @@ function resolveExport(
   parsed: { importPath: string; accessor: string[] },
   warn: (m: string) => void,
 ): Resolved | null {
-  const moduleFile = resolveModule(project, fromFile.getFilePath(), parsed.importPath);
+  const moduleFile = resolveModule(
+    project,
+    fromFile.getFilePath(),
+    parsed.importPath,
+  );
   if (!moduleFile) {
-    warn(`Cannot resolve module "${parsed.importPath}" from ${fromFile.getFilePath()}`);
+    warn(
+      `Cannot resolve module "${parsed.importPath}" from ${fromFile.getFilePath()}`,
+    );
     return null;
   }
 
   const target = resolveLoaderTarget(moduleFile, parsed.accessor);
   if (!target) {
-    const what = parsed.accessor[0] ? `export "${parsed.accessor[0]}"` : 'default/translation export';
+    const what = parsed.accessor[0]
+      ? `export "${parsed.accessor[0]}"`
+      : 'default/translation export';
     warn(`Could not resolve a ${what} in ${moduleFile.getFilePath()}`);
     return null;
   }
@@ -181,7 +202,10 @@ function resolveExport(
     };
   }
 
-  if (Node.isPropertyAccessExpression(callee) && callee.getName() === 'createTranslation') {
+  if (
+    Node.isPropertyAccessExpression(callee) &&
+    callee.getName() === 'createTranslation'
+  ) {
     const lit = objArg(init, 1);
     if (!lit) return null;
     return {
@@ -192,7 +216,9 @@ function resolveExport(
     };
   }
 
-  warn(`Export in ${moduleFile.getFilePath()} is not a createNamespace/createMergedNamespace/createTranslation call`);
+  warn(
+    `Export in ${moduleFile.getFilePath()} is not a createNamespace/createMergedNamespace/createTranslation call`,
+  );
   return null;
 }
 
@@ -211,7 +237,9 @@ function resolveLoaderTarget(
 ): LoaderTarget | null {
   if (accessor.length > 0 && accessor[0] !== 'default') {
     const call = variableCall(moduleFile, accessor[0]);
-    return call ? { call, bindingName: accessor[0], isDefaultExport: false } : null;
+    return call
+      ? { call, bindingName: accessor[0], isDefaultExport: false }
+      : null;
   }
 
   // Shorthand/`.default`: resolve the default export, falling back to a named `translation`.
@@ -219,12 +247,16 @@ function resolveLoaderTarget(
   if (fromDefault) return fromDefault;
   if (accessor.length === 0) {
     const call = variableCall(moduleFile, 'translation');
-    if (call) return { call, bindingName: 'translation', isDefaultExport: false };
+    if (call)
+      return { call, bindingName: 'translation', isDefaultExport: false };
   }
   return null;
 }
 
-function variableCall(moduleFile: SourceFile, name: string): CallExpression | null {
+function variableCall(
+  moduleFile: SourceFile,
+  name: string,
+): CallExpression | null {
   const init = moduleFile.getVariableDeclaration(name)?.getInitializer();
   return init && Node.isCallExpression(init) ? init : null;
 }
@@ -235,7 +267,9 @@ function defaultExportCall(moduleFile: SourceFile): LoaderTarget | null {
   const expr = assignment.getExpression();
   if (Node.isIdentifier(expr)) {
     const call = variableCall(moduleFile, expr.getText());
-    return call ? { call, bindingName: expr.getText(), isDefaultExport: true } : null;
+    return call
+      ? { call, bindingName: expr.getText(), isDefaultExport: true }
+      : null;
   }
   if (Node.isCallExpression(expr))
     return { call: expr, bindingName: '', isDefaultExport: true };
@@ -257,12 +291,16 @@ function resolveModule(
 
 function stringArg(call: CallExpression, index: number): string | null {
   const arg = call.getArguments()[index];
-  return arg && (Node.isStringLiteral(arg) || Node.isNoSubstitutionTemplateLiteral(arg))
+  return arg &&
+    (Node.isStringLiteral(arg) || Node.isNoSubstitutionTemplateLiteral(arg))
     ? arg.getLiteralText()
     : null;
 }
 
-function objArg(call: CallExpression, index: number): ObjectLiteralExpression | undefined {
+function objArg(
+  call: CallExpression,
+  index: number,
+): ObjectLiteralExpression | undefined {
   const arg = call.getArguments()[index];
   return arg && Node.isObjectLiteralExpression(arg) ? arg : undefined;
 }

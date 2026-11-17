@@ -52,9 +52,10 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Persistence" id="persistence">
         <p>
           <code>localStorageConsentStore()</code> persists decisions in the
-          browser and is a noop on the server. The <code>ConsentStore</code>
-          interface allows an async <code>get</code>/<code>set</code>, so a
-          server-side store works the same way.
+          browser and is a noop on the server. The
+          <code>ConsentStore</code> interface allows an async
+          <code>get</code>/<code>set</code>, so a server-side store works the
+          same way.
         </p>
         <docs-code [code]="store" lang="ts" />
       </docs-section>

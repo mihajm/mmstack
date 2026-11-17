@@ -1,9 +1,5 @@
 import { Component, signal } from '@angular/core';
-import {
-  Reorderable,
-  ReorderableItem,
-  reorderable,
-} from '@mmstack/dnd';
+import { Reorderable, ReorderableItem, reorderable } from '@mmstack/dnd';
 import { DemoReset } from './demo-reset';
 
 type Tile = { id: number; label: string; hue: number };

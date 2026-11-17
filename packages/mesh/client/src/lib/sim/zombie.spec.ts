@@ -40,11 +40,20 @@ describe('scenario: zombie writer (silent-drop, socket stays open)', () => {
           silenceForRounds,
         });
         const tag = `seed ${seed} silence ${silenceForRounds}`;
-        expect(res.zombieCommitsWhileSilent, `${tag}: zombie corrupted the room`).toBe(0);
-        expect(res.statuses.every((s) => s === 'live'), `${tag}: not all live`).toBe(true);
+        expect(
+          res.zombieCommitsWhileSilent,
+          `${tag}: zombie corrupted the room`,
+        ).toBe(0);
+        expect(
+          res.statuses.every((s) => s === 'live'),
+          `${tag}: not all live`,
+        ).toBe(true);
         // honest (non-zombie) peers ALWAYS converge — the zombie can't drag them off
         const honestRoots = res.roots.slice(1); // zombieIndex is 0
-        expect(converged(honestRoots).ok, `${tag}: honest peers diverged — ${converged(honestRoots).message}`).toBe(true);
+        expect(
+          converged(honestRoots).ok,
+          `${tag}: honest peers diverged — ${converged(honestRoots).message}`,
+        ).toBe(true);
       }
     }
   });

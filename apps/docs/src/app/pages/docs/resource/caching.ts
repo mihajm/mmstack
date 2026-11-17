@@ -63,7 +63,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>stale-while-revalidate=300</code> extends the stale window on
           its own. To ignore server directives and use only your
           <code>staleTime</code> and <code>ttl</code>, pass
-          <code>cache: {{ '{' }} ignoreCacheControl: true {{ '}' }}</code>.
+          <code>cache: {{ '{' }} ignoreCacheControl: true {{ '}' }}</code
+          >.
         </p>
       </docs-section>
 
@@ -94,26 +95,30 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="hash" lang="ts" />
       </docs-section>
 
-      <docs-section title="Recipe: scope the cache to a user or tenant" id="namespace">
+      <docs-section
+        title="Recipe: scope the cache to a user or tenant"
+        id="namespace"
+      >
         <p>
           In a multi-tenant or multi-user app, one cache shared across
           identities is a data-leak waiting to happen, and a persisted cache
           makes it outlive the session. The fix is to fold the current identity
           into every key. Build your key from the exported
-          <code>hashRequest</code> and prepend the Keycloak <code>sub</code> (and
-          a tenant id if you have one). This is the pattern the library nudges
-          you toward instead of putting <code>Authorization</code> in
-          <code>varyHeaders</code>, since a rotating token would churn the cache
-          on every refresh while a stable <code>sub</code> does not.
+          <code>hashRequest</code> and prepend the Keycloak
+          <code>sub</code> (and a tenant id if you have one). This is the
+          pattern the library nudges you toward instead of putting
+          <code>Authorization</code> in <code>varyHeaders</code>, since a
+          rotating token would churn the cache on every refresh while a stable
+          <code>sub</code> does not.
         </p>
         <docs-code [code]="nsHash" lang="ts" />
         <p>
           Prepending with ordinary characters is safe: the key still carries its
-          URL structure, so <code>invalidateUrlPrefix</code> keeps working.
-          When the identity changes, drop the old entries. On logout
+          URL structure, so <code>invalidateUrlPrefix</code> keeps working. When
+          the identity changes, drop the old entries. On logout
           <code>clear()</code> everything; on a tenant switch, invalidate just
-          the previous prefix so the incoming tenant starts clean without
-          nuking anything already loaded for it.
+          the previous prefix so the incoming tenant starts clean without nuking
+          anything already loaded for it.
         </p>
         <docs-code [code]="nsClear" lang="ts" />
       </docs-section>
@@ -149,14 +154,14 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>invalidateUrlPrefix()</code> is the common move: it recovers the
           URL field from the key structurally, so it matches any HTTP method.
-          <code>invalidatePrefix()</code> is the lower-level cousin, matching the
-          raw key string from its start (useful when your custom
-          <code>hash</code> prepends a stable namespace and you want to drop just
-          that segment). <code>invalidate(key)</code> drops a single entry by its
-          exact key, <code>invalidateWhere()</code> takes an arbitrary predicate,
-          and <code>clear()</code> drops everything (memory, persisted rows,
-          other tabs), which is what you want on logout. Treat keys as opaque;
-          don't hand-build them.
+          <code>invalidatePrefix()</code> is the lower-level cousin, matching
+          the raw key string from its start (useful when your custom
+          <code>hash</code> prepends a stable namespace and you want to drop
+          just that segment). <code>invalidate(key)</code> drops a single entry
+          by its exact key, <code>invalidateWhere()</code> takes an arbitrary
+          predicate, and <code>clear()</code> drops everything (memory,
+          persisted rows, other tabs), which is what you want on logout. Treat
+          keys as opaque; don't hand-build them.
         </p>
       </docs-section>
 
@@ -180,18 +185,18 @@ import { DocSection } from '../../../layout/doc-section';
                 <td><code>skipTabSync</code></td>
                 <td>
                   Don't broadcast this resource's writes to other tabs even when
-                  <code>syncTabs</code> is on globally. Lets you opt into cross-tab
-                  sync app-wide and opt one resource out. Pair with
+                  <code>syncTabs</code> is on globally. Lets you opt into
+                  cross-tab sync app-wide and opt one resource out. Pair with
                   <code>persist: true</code> for "persist but don't sync".
                 </td>
               </tr>
               <tr>
                 <td><code>bustBrowserCache</code></td>
                 <td>
-                  Append a unique query parameter so the browser's own HTTP cache
-                  is bypassed and the request always reaches the server. The
-                  parameter is stripped before the cache key is computed, so it
-                  doesn't fragment your entries.
+                  Append a unique query parameter so the browser's own HTTP
+                  cache is bypassed and the request always reaches the server.
+                  The parameter is stripped before the cache key is computed, so
+                  it doesn't fragment your entries.
                 </td>
               </tr>
             </tbody>
@@ -239,8 +244,8 @@ import { DocSection } from '../../../layout/doc-section';
         </div>
         <docs-code [code]="cb" lang="ts" />
         <p>
-          Share one breaker across every resource hitting the same service and
-          a single trip protects all of them. Pass
+          Share one breaker across every resource hitting the same service and a
+          single trip protects all of them. Pass
           <code>circuitBreaker: true</code> (or an options object) instead for a
           breaker private to that one resource.
         </p>
@@ -249,10 +254,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Errors that won't fix themselves" id="fail-forever">
         <p>
           Some failures aren't transient. A 401 with a bad token or a 403 from a
-          permission boundary won't succeed on a probe, so retrying is pointless.
-          <code>shouldFailForever</code> opens the breaker permanently for those:
-          no timeout, no probe. The resource stays disabled until you explicitly
-          recover.
+          permission boundary won't succeed on a probe, so retrying is
+          pointless.
+          <code>shouldFailForever</code> opens the breaker permanently for
+          those: no timeout, no probe. The resource stays disabled until you
+          explicitly recover.
         </p>
         <docs-code [code]="forever" lang="ts" />
         <p>

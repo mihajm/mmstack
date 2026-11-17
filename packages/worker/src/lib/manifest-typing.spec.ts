@@ -36,7 +36,7 @@ describe('manifest typing (compile-time)', () => {
       const cv: { value: number; history: number[] } | undefined =
         counter.value();
       void cv;
-      counter.write((d) => d.value.set(1));
+      void counter.write((d) => d.value.set(1));
 
       const stats = workerStore(worker, 'stats');
       const sv: { sum: number; count: number } | undefined = stats.value();
@@ -70,7 +70,7 @@ describe('manifest typing (compile-time)', () => {
       const r: Promise<number> = worker.runTask('fib', 21);
       void r;
       // @ts-expect-error 'unknown' is not a task
-      worker.runTask('unknown', 1);
+      void worker.runTask('unknown', 1);
     }
     expect(true).toBe(true);
   });

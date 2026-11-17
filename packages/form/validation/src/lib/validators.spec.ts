@@ -9,7 +9,7 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
       // TestBed is necessary for inject() calls
       TestBed.runInInjectionContext(() => {
         const validators: Validators = injectValidators();
-        
+
         expect(validators).toBeDefined();
         expect(validators.general).toBeDefined();
         expect(validators.string).toBeDefined();
@@ -39,12 +39,14 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
           provideValidatorConfig((locale) => {
             if (locale === 'de-DE') {
               return {
-                general: { required: (label = 'Feld') => `${label} ist erforderlich.` }
+                general: {
+                  required: (label = 'Feld') => `${label} ist erforderlich.`,
+                },
               };
             }
             return undefined;
-          })
-        ]
+          }),
+        ],
       });
 
       TestBed.runInInjectionContext(() => {
@@ -58,8 +60,8 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
       TestBed.configureTestingModule({
         providers: [
           { provide: LOCALE_ID, useValue: 'en-US' },
-          provideValidatorConfig(() => undefined) // empty custom factories
-        ]
+          provideValidatorConfig(() => undefined), // empty custom factories
+        ],
       });
 
       TestBed.runInInjectionContext(() => {
@@ -77,12 +79,18 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
         const validatorFn = v.string.all({
           required: true,
           minLength: 5,
-          pattern: 'email'
+          pattern: 'email',
         });
 
         // Test combined results
         const empty = validatorFn('');
-        expect(empty).toContain('Field is required' + '::INTERNAL_MMSTACK_MERGE_DELIM::' + 'Min 5 characters' + '::INTERNAL_MMSTACK_MERGE_DELIM::' + 'Must be a valid email');
+        expect(empty).toContain(
+          'Field is required' +
+            '::INTERNAL_MMSTACK_MERGE_DELIM::' +
+            'Min 5 characters' +
+            '::INTERNAL_MMSTACK_MERGE_DELIM::' +
+            'Must be a valid email',
+        );
 
         const resolved = validatorFn.resolve(empty);
         expect(resolved.error).toBe('Field is required, +2 issues');
@@ -90,16 +98,18 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
     });
 
     it('should handle non-required string values', () => {
-        TestBed.runInInjectionContext(() => {
-          const v = injectValidators();
-          const validatorFn = v.string.all({
-            required: false,
-            trimmed: true
-          });
-          
-          expect(validatorFn(null)).toBe(''); // not required
-          expect(validatorFn(' ')).toContain('Cannot contain leading or trailing whitespace');
+      TestBed.runInInjectionContext(() => {
+        const v = injectValidators();
+        const validatorFn = v.string.all({
+          required: false,
+          trimmed: true,
         });
+
+        expect(validatorFn(null)).toBe(''); // not required
+        expect(validatorFn(' ')).toContain(
+          'Cannot contain leading or trailing whitespace',
+        );
+      });
     });
   });
 
@@ -110,7 +120,7 @@ describe('Validators Integration (@mmstack/form-validation)', () => {
         const validatorFn = v.number.all({
           required: true,
           min: 10,
-          max: 20
+          max: 20,
         });
 
         expect(validatorFn(null)).toContain('Field is required');

@@ -157,8 +157,8 @@ import { DocSection } from '../../../layout/doc-section';
                 <td><code>'fine'</code></td>
                 <td>
                   Per-path 3-way merge. Keep the paths the fork edited, take the
-                  base's live values for the rest. Default for an immutable base.
-                  Unsupported on a mutable base (it falls back to
+                  base's live values for the rest. Default for an immutable
+                  base. Unsupported on a mutable base (it falls back to
                   <code>'coarse'</code>).
                 </td>
               </tr>
@@ -204,10 +204,9 @@ import { DocSection } from '../../../layout/doc-section';
           value, <code>projection</code> derives a whole store subtree: the
           function receives a mutable draft seeded with the current value,
           mutates it in place or returns new data, and the result is reconciled
-          against the previous value by identity. Unchanged object subtrees
-          keep their reference, and array items matched by
-          <code>key</code> keep their identity across a reorder, insert, or
-          remove.
+          against the previous value by identity. Unchanged object subtrees keep
+          their reference, and array items matched by <code>key</code> keep
+          their identity across a reorder, insert, or remove.
         </p>
         <docs-code [code]="projectionEx" lang="ts" />
         <p>
@@ -219,8 +218,7 @@ import { DocSection } from '../../../layout/doc-section';
           field actually changed, because everything else kept its reference.
           The function must be pure, it runs inside the reactive computation.
           Prefer <code>computed</code> for a plain value; reach for
-          <code>projection</code> when a derivation should be read like a
-          store.
+          <code>projection</code> when a derivation should be read like a store.
         </p>
         <p>
           The reconciler is exported standalone as

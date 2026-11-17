@@ -59,7 +59,6 @@ function deferred(): Deferred {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'atx-host',
   template: ``,
   providers: [provideTransitionScope()],

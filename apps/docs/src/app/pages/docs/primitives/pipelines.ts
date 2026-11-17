@@ -23,10 +23,10 @@ import { DocSection } from '../../../layout/doc-section';
           If you come from RxJS the instinct is to reach for a pipe of
           operators. Pipelines give you that shape without leaving signals: no
           subscription to manage, no <code>effect()</code> bridging a stream
-          back into a signal. Each operator is a small
-          <code>Signal</code> to <code>Signal</code> function, and
-          <code>.pipe(...)</code> threads them together into one derived signal
-          that stays synchronous and glitch-free.
+          back into a signal. Each operator is a small <code>Signal</code> to
+          <code>Signal</code> function, and <code>.pipe(...)</code> threads them
+          together into one derived signal that stays synchronous and
+          glitch-free.
         </p>
         <p>
           Reach for a pipeline when a derivation is more than a one-liner and
@@ -48,9 +48,11 @@ import { DocSection } from '../../../layout/doc-section';
           <code>.map(...)</code> is the quick path: pass one or more inline
           value-to-value functions and they run left to right.
           <code>.pipe(...)</code> is the same idea with the named operators
-          below, where each one is a reusable
-          <code>Signal</code>-to-<code>Signal</code> transform. The result of
-          both is itself pipeable, so you can keep chaining.
+          below, where each one is a reusable <code>Signal</code>-to-<code
+            >Signal</code
+          >
+          transform. The result of both is itself pipeable, so you can keep
+          chaining.
         </p>
       </docs-section>
 
@@ -76,9 +78,9 @@ import { DocSection } from '../../../layout/doc-section';
           <code>select(fn, opt?)</code> is the same with a
           <code>CreateSignalOptions</code> bag so you can pass a custom
           <code>equal</code> or <code>debugName</code> through to the underlying
-          <code>computed</code>. <code>combineWith(other, fn)</code> projects the
-          piped signal together with a second signal and recomputes when either
-          changes.
+          <code>computed</code>. <code>combineWith(other, fn)</code> projects
+          the piped signal together with a second signal and recomputes when
+          either changes.
         </p>
         <docs-code [code]="projectionEx" lang="ts" />
         <p>
@@ -86,7 +88,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>distinct(equal?)</code> suppresses an emission when
           <code>equal(prev, next)</code> is true (defaults to
           <code>Object.is</code>), which is how you compare by
-          <code>id</code> and ignore noisy fields. <code>filter(predicate)</code>
+          <code>id</code> and ignore noisy fields.
+          <code>filter(predicate)</code>
           keeps only passing values, holding the last one and returning
           <code>undefined</code> until the first match;
           <code>filterWith(predicate, initial)</code> is the same but seeds an
@@ -97,8 +100,10 @@ import { DocSection } from '../../../layout/doc-section';
           <strong>Stateful</strong> operators remember across emissions.
           <code>scan(reducer, seed)</code> folds each value into a running
           accumulator, like <code>Array.prototype.reduce</code> over time.
-          <code>pairwise()</code> emits <code>[prev, curr]</code> tuples
-          (<code>prev</code> is <code>undefined</code> on the first).
+          <code>pairwise()</code> emits <code>[prev, curr]</code> tuples (<code
+            >prev</code
+          >
+          is <code>undefined</code> on the first).
           <code>startWith(initial)</code> emits a seed first, then mirrors the
           source, handy for a loading value before real data arrives.
         </p>
@@ -125,23 +130,37 @@ import { DocSection } from '../../../layout/doc-section';
               </tr>
               <tr>
                 <td><code>select(fn, opt?)</code></td>
-                <td>Projection with <code>CreateSignalOptions</code> passed through.</td>
+                <td>
+                  Projection with <code>CreateSignalOptions</code> passed
+                  through.
+                </td>
               </tr>
               <tr>
                 <td><code>combineWith(other, fn)</code></td>
-                <td>Project two signals together; recomputes on either change.</td>
+                <td>
+                  Project two signals together; recomputes on either change.
+                </td>
               </tr>
               <tr>
                 <td><code>distinct(equal?)</code></td>
-                <td>Suppress an emission when <code>equal(prev, next)</code> is true.</td>
+                <td>
+                  Suppress an emission when <code>equal(prev, next)</code> is
+                  true.
+                </td>
               </tr>
               <tr>
                 <td><code>filter(predicate)</code></td>
-                <td>Keep passing values; <code>undefined</code> until the first match.</td>
+                <td>
+                  Keep passing values; <code>undefined</code> until the first
+                  match.
+                </td>
               </tr>
               <tr>
                 <td><code>filterWith(predicate, initial)</code></td>
-                <td><code>filter</code> with a seed instead of <code>undefined</code>.</td>
+                <td>
+                  <code>filter</code> with a seed instead of
+                  <code>undefined</code>.
+                </td>
               </tr>
               <tr>
                 <td><code>scan(reducer, seed)</code></td>
@@ -157,7 +176,10 @@ import { DocSection } from '../../../layout/doc-section';
               </tr>
               <tr>
                 <td><code>tap(fn, injector?)</code></td>
-                <td>Run a side effect via <code>effect()</code>; value passes through.</td>
+                <td>
+                  Run a side effect via <code>effect()</code>; value passes
+                  through.
+                </td>
               </tr>
             </tbody>
           </table>

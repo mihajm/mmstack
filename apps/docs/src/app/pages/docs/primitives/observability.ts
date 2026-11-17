@@ -14,17 +14,18 @@ import { DocSection } from '../../../layout/doc-section';
       lead="An optional listener seam on the concurrency layer. Install a listener and you receive events as transition scopes coordinate pending, suspense, and transaction windows. Install nothing and the taps compile to no-ops, so there is no cost when it is off."
     >
       <p>
-        Component devtools tell you what re-rendered. They cannot easily tell you
-        why a boundary was pending or how long a transaction held. A
-        <a mmLink="/docs/primitives/transitions">transition scope</a> knows both,
-        because it is the thing coordinating the async state, so it is the right
-        place to observe from.
+        Component devtools tell you what re-rendered. They cannot easily tell
+        you why a boundary was pending or how long a transaction held. A
+        <a mmLink="/docs/primitives/transitions">transition scope</a> knows
+        both, because it is the thing coordinating the async state, so it is the
+        right place to observe from.
       </p>
 
       <docs-section title="The listener" id="listener">
         <p>
           <code>ConcurrencyInstrumentation</code> is a set of optional hooks.
-          The window-shaped ones (<code>pendingStart</code>/<code>pendingEnd</code>,
+          The window-shaped ones
+          (<code>pendingStart</code>/<code>pendingEnd</code>,
           <code>transactionStart</code>/<code>transactionEnd</code>) return a
           handle passed back to their end, and carry a timestamp. That shape is
           deliberately the same as a telemetry span, so forwarding to
@@ -38,8 +39,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>perfCustomTracks()</code> is a ready listener that writes a
           <code>performance.measure</code> for each pending and transaction
-          window onto a custom track in the Chrome DevTools Performance panel. It
-          has no dependencies and no backend, so it is a dev-only way to see
+          window onto a custom track in the Chrome DevTools Performance panel.
+          It has no dependencies and no backend, so it is a dev-only way to see
           reactive coordination on the same timeline as everything else the
           browser records.
         </p>
@@ -48,10 +49,10 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Forwarding to telemetry" id="telemetry">
         <p>
-          Because the window hooks are span-shaped, a listener that binds them to
-          an injected <code>TELEMETRY</code> facade is a few lines. Every event
-          can carry a category, so consent gates the whole subsystem with one
-          requirement.
+          Because the window hooks are span-shaped, a listener that binds them
+          to an injected <code>TELEMETRY</code> facade is a few lines. Every
+          event can carry a category, so consent gates the whole subsystem with
+          one requirement.
         </p>
         <docs-code [code]="forward" lang="ts" />
       </docs-section>

@@ -61,7 +61,10 @@ export type ParityResult =
  * way a translation silently breaks (a dropped `{name}`, or a renamed one). `missing` are present in
  * the source but not the target; `extra` are in the target but not the source.
  */
-export function placeholderParity(source: string, target: string): ParityResult {
+export function placeholderParity(
+  source: string,
+  target: string,
+): ParityResult {
   const s = extractPlaceholders(source);
   const t = extractPlaceholders(target);
   const missing = [...s].filter((name) => !t.has(name));

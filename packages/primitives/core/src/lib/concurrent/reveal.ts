@@ -361,7 +361,8 @@ export function injectRevealSlot(
   const coordinator = inject(REVEAL, { optional: true, skipSelf: true });
   if (!coordinator) return null;
   const host = inject(ElementRef, { optional: true })?.nativeElement as
-    RevealHost | undefined;
+    | RevealHost
+    | undefined;
   const slot = coordinator.register(state, host ?? null, opts?.item ?? null);
   inject(DestroyRef).onDestroy(() => slot.unregister());
   return slot;

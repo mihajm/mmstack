@@ -212,6 +212,7 @@ describe('grid layout — canPlaceAt & validTargets (no-reflow validity)', () =>
         );
       }
     }
+    // oxlint-disable-next-line erasing-op -- row * cols + col, kept for readability
     expect(mask[0 * 4 + 2]).toBe(1); // the free corner
     expect(mask[1 * 4 + 1]).toBe(0); // overlaps b
   });

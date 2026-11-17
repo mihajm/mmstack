@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import {
   httpResource,
@@ -30,7 +29,10 @@ const USER = routeDataKey<HttpResourceRef<User | undefined>>('user');
 @Component({ selector: 'route-home', template: `home` })
 class HomeCmp {}
 
-@Component({ selector: 'route-user', template: `user:{{ data.value()?.name }}` })
+@Component({
+  selector: 'route-user',
+  template: `user:{{ data.value()?.name }}`,
+})
 class UserCmp {
   readonly data = injectRouteData(USER);
 }
@@ -145,7 +147,8 @@ describe('route-data integration (lazy routes + httpResource + transition outlet
 type Org = { name: string };
 type Settings = { theme: string };
 const ORG = routeDataKey<HttpResourceRef<Org | undefined>>('org');
-const SETTINGS = routeDataKey<HttpResourceRef<Settings | undefined>>('settings');
+const SETTINGS =
+  routeDataKey<HttpResourceRef<Settings | undefined>>('settings');
 
 @Component({
   selector: 'org-layout',
@@ -156,7 +159,10 @@ class OrgLayout {
   readonly org = injectRouteData(ORG);
 }
 
-@Component({ selector: 'route-settings', template: `settings:{{ data.value()?.theme }}` })
+@Component({
+  selector: 'route-settings',
+  template: `settings:{{ data.value()?.theme }}`,
+})
 class SettingsCmp {
   readonly data = injectRouteData(SETTINGS);
 }
@@ -170,7 +176,9 @@ function nestedRoutes() {
       providers: [provideRouteData(ORG)],
       resolve: {
         org: createRouteData(ORG, (ctx) => {
-          const res = httpResource<Org>(() => `/api/orgs/${ctx.params()['orgId']}`);
+          const res = httpResource<Org>(
+            () => `/api/orgs/${ctx.params()['orgId']}`,
+          );
           registerResource(res, { suspends: true });
           return res;
         }),
@@ -182,7 +190,9 @@ function nestedRoutes() {
           providers: [provideRouteData(USER)],
           resolve: {
             user: createRouteData(USER, (ctx) => {
-              const res = httpResource<User>(() => `/api/users/${ctx.params()['id']}`);
+              const res = httpResource<User>(
+                () => `/api/users/${ctx.params()['id']}`,
+              );
               registerResource(res, { suspends: true });
               return res;
             }),
@@ -249,9 +259,13 @@ describe('route-data integration — nested resolvers', () => {
   });
 
   it('a CHILD factory sees the PARENT route param (activation matches the prefetch extraction)', async () => {
-    const AUDIT = routeDataKey<HttpResourceRef<{ ok: boolean } | undefined>>('audit');
+    const AUDIT =
+      routeDataKey<HttpResourceRef<{ ok: boolean } | undefined>>('audit');
 
-    @Component({ selector: 'route-audit', template: `audit:{{ data.value()?.ok }}` })
+    @Component({
+      selector: 'route-audit',
+      template: `audit:{{ data.value()?.ok }}`,
+    })
     class AuditCmp {
       readonly data = injectRouteData(AUDIT);
     }
@@ -265,7 +279,9 @@ describe('route-data integration — nested resolvers', () => {
             providers: [provideRouteData(ORG)],
             resolve: {
               org: createRouteData(ORG, (ctx) => {
-                const res = httpResource<Org>(() => `/api/orgs/${ctx.params()['orgId']}`);
+                const res = httpResource<Org>(
+                  () => `/api/orgs/${ctx.params()['orgId']}`,
+                );
                 registerResource(res, { suspends: true });
                 return res;
               }),
@@ -339,7 +355,10 @@ describe('route-data integration — nested resolvers', () => {
     }>('p-posts');
     let parentInstance: unknown = null;
 
-    @Component({ selector: 'cd-child', template: `posts:{{ data.posts.value()?.length ?? 0 }}` })
+    @Component({
+      selector: 'cd-child',
+      template: `posts:{{ data.posts.value()?.length ?? 0 }}`,
+    })
     class ChildCmp {
       readonly data = injectRouteData(CHILD);
     }

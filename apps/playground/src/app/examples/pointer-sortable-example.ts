@@ -10,7 +10,6 @@ import {
 type Task = { id: number; label: string };
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-pointer-sortable-example',
   imports: [Reorderable, ReorderableItem, ReorderableHandle],
   template: `

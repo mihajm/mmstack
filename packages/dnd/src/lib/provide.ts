@@ -229,7 +229,8 @@ export function withDefaults<T extends object>(
   const out: T = { ...opts };
   for (const key in defaults) {
     const value = defaults[key];
-    if (out[key] === undefined && value !== undefined) out[key] = value as T[Extract<keyof T, string>];
+    if (out[key] === undefined && value !== undefined)
+      out[key] = value as T[Extract<keyof T, string>];
   }
   return out;
 }

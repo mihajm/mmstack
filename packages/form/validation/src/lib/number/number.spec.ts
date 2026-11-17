@@ -1,12 +1,23 @@
-import { defaultIntegerMessageFactory, createIntegerValidator } from './integer';
-import { defaultIsNumberMessageFactory, createIsNumberValidator } from './is-number';
+import {
+  defaultIntegerMessageFactory,
+  createIntegerValidator,
+} from './integer';
+import {
+  defaultIsNumberMessageFactory,
+  createIsNumberValidator,
+} from './is-number';
 import { defaultMaxMessageFactory, createMaxValidator } from './max';
 import { defaultMinMessageFactory, createMinValidator } from './min';
-import { defaultMultipleOfMessageFactory, createMultipleOfValidator } from './multiple-of';
+import {
+  defaultMultipleOfMessageFactory,
+  createMultipleOfValidator,
+} from './multiple-of';
 
 describe('Number Validators', () => {
   describe('integer', () => {
-    const validatorFactory = createIntegerValidator(defaultIntegerMessageFactory);
+    const validatorFactory = createIntegerValidator(
+      defaultIntegerMessageFactory,
+    );
 
     it('should return error if not an integer', () => {
       const validate = validatorFactory();
@@ -28,7 +39,9 @@ describe('Number Validators', () => {
   });
 
   describe('isNumber', () => {
-    const validatorFactory = createIsNumberValidator(defaultIsNumberMessageFactory);
+    const validatorFactory = createIsNumberValidator(
+      defaultIsNumberMessageFactory,
+    );
 
     it('should return error if not a number', () => {
       const validate = validatorFactory();
@@ -94,7 +107,9 @@ describe('Number Validators', () => {
   });
 
   describe('multipleOf', () => {
-    const validatorFactory = createMultipleOfValidator(defaultMultipleOfMessageFactory);
+    const validatorFactory = createMultipleOfValidator(
+      defaultMultipleOfMessageFactory,
+    );
 
     it('should return error if value is not a multiple', () => {
       const validate = validatorFactory(5);

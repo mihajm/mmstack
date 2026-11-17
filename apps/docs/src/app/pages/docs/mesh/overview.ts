@@ -19,10 +19,10 @@ import { DocSection } from '../../../layout/doc-section';
         <a mmLink="/docs/primitives/sync">the op protocol</a> from
         <code>&#64;mmstack/primitives</code>, put on a wire. A client emits one
         small operation per change; the relay assigns each a sequence number and
-        fans it out. The relay understands nothing about your data, so it stays a
-        dumb pipe while the clients stay smart. Conflict resolution happens per
-        path on the client, so two people editing different fields of one record
-        never collide.
+        fans it out. The relay understands nothing about your data, so it stays
+        a dumb pipe while the clients stay smart. Conflict resolution happens
+        per path on the client, so two people editing different fields of one
+        record never collide.
       </p>
 
       <docs-code [code]="install" lang="bash" />

@@ -2,7 +2,10 @@ import { TestBed } from '@angular/core/testing';
 import { provideTelemetry, TELEMETRY } from '@mmstack/telemetry-core';
 import { otelSink } from './otel-sink';
 import { SeverityNumber } from '@opentelemetry/api-logs';
-import { InMemoryLogRecordExporter, SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
+import {
+  InMemoryLogRecordExporter,
+  SimpleLogRecordProcessor,
+} from '@opentelemetry/sdk-logs';
 import {
   AggregationTemporality,
   InMemoryMetricExporter,
@@ -18,13 +21,17 @@ describe('@mmstack/telemetry-otel', () => {
   function setup() {
     const exporter = new InMemorySpanExporter();
     const sink = otelSink({ processor: new SimpleSpanProcessor({ exporter }) });
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
     return { exporter, telemetry: TestBed.inject(TELEMETRY) };
   }
 
   it('maps a facade span to an OTel span with name + attrs', () => {
     const { exporter, telemetry } = setup();
-    telemetry.span('work', (s) => s.setAttrs({ step: 1 }), { attrs: { a: 'x' } });
+    telemetry.span('work', (s) => s.setAttrs({ step: 1 }), {
+      attrs: { a: 'x' },
+    });
 
     const spans = exporter.getFinishedSpans();
     expect(spans.length).toBe(1);
@@ -68,7 +75,9 @@ describe('@mmstack/telemetry-otel', () => {
       exportIntervalMillis: 100_000, // long, so it never auto-flushes mid-test
     });
     const sink = otelSink({ metricReader: reader });
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
     const telemetry = TestBed.inject(TELEMETRY);
 
     telemetry.metric('signups', 2, undefined, { kind: 'counter' });
@@ -79,13 +88,19 @@ describe('@mmstack/telemetry-otel', () => {
     const byName = new Map(metrics.map((m) => [m.descriptor.name, m]));
 
     expect(byName.get('signups')?.dataPoints[0].value).toBe(2);
-    expect(byName.get('latency_ms')?.dataPoints[0].value).toMatchObject({ count: 1 });
+    expect(byName.get('latency_ms')?.dataPoints[0].value).toMatchObject({
+      count: 1,
+    });
   });
 
   it('emits a log record with mapped severity, body, and attributes', () => {
     const exporter = new InMemoryLogRecordExporter();
-    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor({ exporter }) });
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
+    const sink = otelSink({
+      logProcessor: new SimpleLogRecordProcessor({ exporter }),
+    });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
     TestBed.inject(TELEMETRY).log('error', 'disk full', { device: 'sda1' });
 
     const records = exporter.getFinishedLogRecords();
@@ -150,10 +165,16 @@ describe('@mmstack/telemetry-otel', () => {
       const spans = exporter.getFinishedSpans();
       const parentSpan = spans.find((s) => s.name === 'parent')!;
       const child = spans.find((s) => s.name === 'late-child')!;
-      expect(child.spanContext().traceId).toBe(parentSpan.spanContext().traceId); // ONE OTel trace
-      expect(child.parentSpanContext?.spanId).toBe(parentSpan.spanContext().spanId);
+      expect(child.spanContext().traceId).toBe(
+        parentSpan.spanContext().traceId,
+      ); // ONE OTel trace
+      expect(child.parentSpanContext?.spanId).toBe(
+        parentSpan.spanContext().spanId,
+      );
       // facade-level correlation rides along too
-      expect(child.attributes['mmstack.trace_id']).toBe(parentSpan.attributes['mmstack.trace_id']);
+      expect(child.attributes['mmstack.trace_id']).toBe(
+        parentSpan.attributes['mmstack.trace_id'],
+      );
     });
 
     it('bounds the parent-context map: the oldest entry is evicted past the 2000 cap', () => {
@@ -175,8 +196,12 @@ describe('@mmstack/telemetry-otel', () => {
 
   it('maps every LogSeverity tier to the matching SeverityNumber', () => {
     const exporter = new InMemoryLogRecordExporter();
-    const sink = otelSink({ logProcessor: new SimpleLogRecordProcessor({ exporter }) });
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
+    const sink = otelSink({
+      logProcessor: new SimpleLogRecordProcessor({ exporter }),
+    });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [sink] })],
+    });
     const telemetry = TestBed.inject(TELEMETRY);
 
     const tiers = [
@@ -203,7 +228,9 @@ describe('@mmstack/telemetry-otel', () => {
         exportIntervalMillis: 100_000,
       });
       const sink = otelSink({ metricReader: reader });
-      TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
+      TestBed.configureTestingModule({
+        providers: [provideTelemetry({ sinks: [sink] })],
+      });
       const telemetry = TestBed.inject(TELEMETRY);
 
       telemetry.metric('latency_ms', 40); // no kind → histogram
@@ -214,7 +241,10 @@ describe('@mmstack/telemetry-otel', () => {
       const metrics = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
       const byName = new Map(metrics.map((m) => [m.descriptor.name, m]));
 
-      expect(byName.get('latency_ms')?.dataPoints[0].value).toMatchObject({ count: 1, sum: 40 });
+      expect(byName.get('latency_ms')?.dataPoints[0].value).toMatchObject({
+        count: 1,
+        sum: 40,
+      });
       expect(byName.get('fps')?.dataPoints[0].value).toBe(60); // still the gauge, counter add skipped
       expect(byName.size).toBe(2); // no duplicate conflicting stream
       expect(warn).toHaveBeenCalledTimes(1);

@@ -54,7 +54,9 @@ describe('DropIndicator', () => {
   });
 
   it('supports horizontal edges', () => {
-    expect(line(setup({ edge: 'left' }))?.getAttribute('data-edge')).toBe('left');
+    expect(line(setup({ edge: 'left' }))?.getAttribute('data-edge')).toBe(
+      'left',
+    );
     expect(line(setup({ edge: 'right' }))?.getAttribute('data-edge')).toBe(
       'right',
     );

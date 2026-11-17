@@ -31,7 +31,6 @@ function createTransformFn<
     key: TKey,
     variablesOrLocale?: string | AnyStringRecord,
     // locale arg is unused at runtime; exists to bust pure-pipe memoization
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _?: string,
   ): string => {
     const vars =

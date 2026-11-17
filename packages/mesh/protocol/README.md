@@ -327,11 +327,11 @@ with a `drop` message naming the origin, version and reason — never broadcast,
 durability — and reports the same through `onDrop(room, env, reason)`. A client resends its whole
 unacknowledged tail after every welcome, so every entry is classified one round trip later:
 
-| reason         | what happened                                                                                                                                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| reason         | what happened                                                                                                                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `'duplicate'`  | the room already holds this (origin, version): a resend after a lost echo. This IS the acknowledgement; the write is never sequenced a second time                                                                                              |
-| `'generation'` | written in another room generation (the `instance` on the envelope differs). Refused before any other evidence can answer, so an old generation's version numbers mean nothing in the new one                                                     |
-| `'schema'`     | a straggler stamped with a data shape older than the room's, arriving after a migration — its sender is outdated, not malicious                                                                                                                |
+| `'generation'` | written in another room generation (the `instance` on the envelope differs). Refused before any other evidence can answer, so an old generation's version numbers mean nothing in the new one                                                   |
+| `'schema'`     | a straggler stamped with a data shape older than the room's, arriving after a migration — its sender is outdated, not malicious                                                                                                                 |
 | `'order'`      | a version below the origin's admitted maximum that was never admitted. On one FIFO connection with in-order resend that cannot be a loss in transit, so it is a configuration violating that assumption (two tabs on one origin without a lock) |
 
 A refused write is not in the room. The writer drops it locally, hands it to the application

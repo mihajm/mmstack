@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { Component, input, resource, signal } from '@angular/core';
 import { render } from '@testing-library/angular';
 import { vi } from 'vitest';

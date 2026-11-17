@@ -9,9 +9,12 @@ function makeProject(body: string): Project {
 }
 
 function secondArg(p: Project): ObjectLiteralExpression {
-  const call = p.getSourceFileOrThrow('/q.de.ts').getFirstDescendant(Node.isCallExpression);
+  const call = p
+    .getSourceFileOrThrow('/q.de.ts')
+    .getFirstDescendant(Node.isCallExpression);
   const arg = call?.getArguments()[1];
-  if (!arg || !Node.isObjectLiteralExpression(arg)) throw new Error('no object arg');
+  if (!arg || !Node.isObjectLiteralExpression(arg))
+    throw new Error('no object arg');
   return arg;
 }
 
@@ -23,7 +26,9 @@ describe('replaceTranslationLiteral', () => {
     );
     const next = { greeting: 'neu', detail: { x: 'y' } };
 
-    expect(replaceTranslationLiteral(p, '/q.de.ts', 'quoteDe', next)).toBe(true);
+    expect(replaceTranslationLiteral(p, '/q.de.ts', 'quoteDe', next)).toBe(
+      true,
+    );
 
     const text = p.getSourceFileOrThrow('/q.de.ts').getFullText();
     expect(text).toContain("import { quote } from './quote'");
@@ -32,9 +37,14 @@ describe('replaceTranslationLiteral', () => {
 
   it('returns false when the export is missing or not a call', () => {
     expect(
-      replaceTranslationLiteral(makeProject(`export const other = 1;`), '/q.de.ts', 'quoteDe', {
-        a: 'b',
-      }),
+      replaceTranslationLiteral(
+        makeProject(`export const other = 1;`),
+        '/q.de.ts',
+        'quoteDe',
+        {
+          a: 'b',
+        },
+      ),
     ).toBe(false);
   });
 });

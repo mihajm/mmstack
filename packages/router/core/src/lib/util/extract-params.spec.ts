@@ -16,7 +16,9 @@ describe('extractRouteParams', () => {
   });
 
   it('extracts multiple params', () => {
-    expect(extractRouteParams('/org/:org/repo/:repo', '/org/mm/repo/stack')).toEqual({
+    expect(
+      extractRouteParams('/org/:org/repo/:repo', '/org/mm/repo/stack'),
+    ).toEqual({
       params: { org: 'mm', repo: 'stack' },
       query: {},
     });

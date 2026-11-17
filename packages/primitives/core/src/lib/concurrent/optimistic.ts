@@ -97,11 +97,7 @@ export function guessable<T>(sig: WritableSignal<T>): Guessable<T> {
   });
 
   /** Whether the wrapped signal moved since the ledger acknowledged it: an upstream change. */
-  const moved = (
-    l: Ledger,
-    value: unknown,
-    ver: number | undefined,
-  ): boolean =>
+  const moved = (l: Ledger, value: unknown, ver: number | undefined): boolean =>
     ver === undefined ? !Object.is(value, l.cur.value) : ver !== l.known;
 
   /** Acknowledges an upstream change (it is authoritative) and returns the current truth cell. */

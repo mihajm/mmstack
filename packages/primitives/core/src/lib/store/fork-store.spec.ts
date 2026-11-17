@@ -83,13 +83,19 @@ describe('merge3', () => {
     });
 
     it('both sides delete the same key → it stays absent (converges, not resurrected)', () => {
-      const out = merge3<{ a: number; b?: number }>({ a: 1, b: 2 }, { a: 1 }, { a: 1 });
+      const out = merge3<{ a: number; b?: number }>(
+        { a: 1, b: 2 },
+        { a: 1 },
+        { a: 1 },
+      );
       expect('b' in out).toBe(false);
       expect(out).toEqual({ a: 1 });
     });
 
     it('a concurrent add of the SAME key on both sides resolves to the fork (conflict → mine)', () => {
-      expect(merge3<Record<string, string>>({}, { k: 'A' }, { k: 'B' })).toEqual({ k: 'A' });
+      expect(
+        merge3<Record<string, string>>({}, { k: 'A' }, { k: 'B' }),
+      ).toEqual({ k: 'A' });
     });
   });
 
@@ -455,7 +461,9 @@ describe('fork', () => {
       const { store: f } = inInjectionContext(() => forkStore(base));
       const b = (base as any)[STORE_SHARED_OPTIONS];
       const ff = (f as any)[STORE_SHARED_OPTIONS];
-      expect(ff[STORE_SHARED_GLOBALS].cache).toBe(b[STORE_SHARED_GLOBALS].cache);
+      expect(ff[STORE_SHARED_GLOBALS].cache).toBe(
+        b[STORE_SHARED_GLOBALS].cache,
+      );
       expect(ff[STORE_SHARED_GLOBALS].registry).toBe(
         b[STORE_SHARED_GLOBALS].registry,
       );
@@ -504,7 +512,12 @@ describe('fork', () => {
 });
 
 // ───────────────────── fork ↔ op-protocol bridges (branching rungs) ─────────────────────
-import { isConflicted, policyStrategy, preserve, type Conflicted } from './op-sync';
+import {
+  isConflicted,
+  policyStrategy,
+  preserve,
+  type Conflicted,
+} from './op-sync';
 
 describe('fork ops() + policyStrategy', () => {
   it('ops() exposes the staged delta vs the current base as structural ops', () => {

@@ -173,9 +173,7 @@ describe('deferredValue', () => {
       providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
     });
     const source = signal('a');
-    const deferred = TestBed.runInInjectionContext(() =>
-      deferredValue(source),
-    );
+    const deferred = TestBed.runInInjectionContext(() => deferredValue(source));
     source.set('b');
     expect(deferred()).toBe('b'); // no deferral
     expect(deferred.pending()).toBe(false);

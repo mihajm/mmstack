@@ -26,10 +26,15 @@ test('moves a leaf DOWN into a deeper node', async ({ page }) => {
   // Photos (root level) -> into mmstack (node 21)
   const photos = grip(page, 'Photos');
   const target = (await page.locator('ul[data-node="21"]').boundingBox())!;
-  await drag(page, photos, { x: target.x + target.width / 2, y: target.y + target.height / 2 }, {
-    steps: 24,
-    settle: 80,
-  });
+  await drag(
+    page,
+    photos,
+    { x: target.x + target.width / 2, y: target.y + target.height / 2 },
+    {
+      steps: 24,
+      settle: 80,
+    },
+  );
   await expect.poll(childrenOf(page, '21')).toContain('Photos');
 });
 
@@ -38,21 +43,33 @@ test('moves a deep node UP to the root', async ({ page }) => {
   // drop onto the "Documents" label — that point is in the root list (above
   // Documents' own child-zone), so the node lands at the root level.
   const docs = (await grip(page, 'Documents').boundingBox())!;
-  await drag(page, dnd, { x: docs.x + docs.width / 2, y: docs.y + docs.height / 2 }, {
-    steps: 24,
-    settle: 80,
-  });
+  await drag(
+    page,
+    dnd,
+    { x: docs.x + docs.width / 2, y: docs.y + docs.height / 2 },
+    {
+      steps: 24,
+      settle: 80,
+    },
+  );
   await expect.poll(childrenOf(page, 'root')).toContain('dnd');
 });
 
-test('CYCLE GUARD: a node cannot be dropped into its own subtree', async ({ page }) => {
+test('CYCLE GUARD: a node cannot be dropped into its own subtree', async ({
+  page,
+}) => {
   // drag "Projects" (node 2) onto its descendant "mmstack" (node 21) list
   const projects = grip(page, 'Projects');
   const target = (await page.locator('ul[data-node="21"]').boundingBox())!;
-  await drag(page, projects, { x: target.x + target.width / 2, y: target.y + target.height / 2 }, {
-    steps: 24,
-    settle: 80,
-  });
+  await drag(
+    page,
+    projects,
+    { x: target.x + target.width / 2, y: target.y + target.height / 2 },
+    {
+      steps: 24,
+      settle: 80,
+    },
+  );
   // mmstack must NOT contain Projects (would be a cycle)
   await expect.poll(childrenOf(page, '21')).not.toContain('Projects');
   // and Projects' own children are intact

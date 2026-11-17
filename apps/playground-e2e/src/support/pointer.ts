@@ -27,14 +27,21 @@ const isPoint = (w: Waypoint): w is Point =>
 export async function resolvePoint(w: Waypoint): Promise<Point> {
   if (isPoint(w)) return w;
   const box = await w.boundingBox();
-  if (!box) throw new Error('pointer harness: waypoint locator has no bounding box (not visible / detached)');
+  if (!box)
+    throw new Error(
+      'pointer harness: waypoint locator has no bounding box (not visible / detached)',
+    );
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
 /** Offset a waypoint by a fraction of the element box, e.g. top edge: `at(item, { fy: 0.05 })`. */
-export async function at(loc: Locator, frac: { fx?: number; fy?: number }): Promise<Point> {
+export async function at(
+  loc: Locator,
+  frac: { fx?: number; fy?: number },
+): Promise<Point> {
   const box = await loc.boundingBox();
-  if (!box) throw new Error('pointer harness: at() locator has no bounding box');
+  if (!box)
+    throw new Error('pointer harness: at() locator has no bounding box');
   return {
     x: box.x + box.width * (frac.fx ?? 0.5),
     y: box.y + box.height * (frac.fy ?? 0.5),
@@ -119,7 +126,10 @@ export async function filmstrip(
  * Until the engine writes it, this returns []. Shape is engine-defined.
  */
 export async function readTrace<T = unknown>(page: Page): Promise<T[]> {
-  return page.evaluate(() => (window as unknown as { __mmDndTrace?: unknown[] }).__mmDndTrace ?? []) as Promise<T[]>;
+  return page.evaluate(
+    () =>
+      (window as unknown as { __mmDndTrace?: unknown[] }).__mmDndTrace ?? [],
+  ) as Promise<T[]>;
 }
 
 export async function clearTrace(page: Page): Promise<void> {

@@ -9,12 +9,12 @@ import {
   type CanvasSpaceTransform,
 } from './session';
 
-const frame = (
-  x: number,
-  y: number,
-  width = 40,
-  height = 40,
-): CanvasFrame => ({ x, y, width, height });
+const frame = (x: number, y: number, width = 40, height = 40): CanvasFrame => ({
+  x,
+  y,
+  width,
+  height,
+});
 
 function setup(injector: Injector, cfg: Partial<CanvasSessionConfig> = {}) {
   const gesture = signal<CanvasGesture<string> | null>(null);

@@ -25,7 +25,10 @@ export class SensitiveLeakError extends TypeError {
 }
 
 type LeakBoundary =
-  'primitive-coercion' | 'string-coercion' | 'serialization' | 'inspection';
+  | 'primitive-coercion'
+  | 'string-coercion'
+  | 'serialization'
+  | 'inspection';
 
 const leakReported = new WeakSet<object>();
 

@@ -331,7 +331,9 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     );
     fs.writeFileSync(
       path.join(out, 'settings.de.json'),
-      JSON.stringify({ theme: { label: 'Thema', dark: 'Dunkel', light: 'Hell' } }),
+      JSON.stringify({
+        theme: { label: 'Thema', dark: 'Dunkel', light: 'Hell' },
+      }),
     );
     // A stale, unregistered module already sits at quote's target path.
     fs.writeFileSync(
@@ -350,13 +352,16 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       {
         file: 'quote.de.json',
         issues: [
-          { key: '(apply)', message: expect.stringContaining('already exists') },
+          {
+            key: '(apply)',
+            message: expect.stringContaining('already exists'),
+          },
         ],
       },
     ]);
-    expect(fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8')).toContain(
-      'do not lose me',
-    );
+    expect(
+      fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8'),
+    ).toContain('do not lose me');
 
     const forced = runImport({
       cwd: dir,
@@ -366,16 +371,22 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
       force: true,
     });
     expect(forced.rejected).toEqual([]);
-    expect(fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8')).toContain(
-      'createTranslation',
-    );
+    expect(
+      fs.readFileSync(path.join(dir, 'src/quote.de.ts'), 'utf8'),
+    ).toContain('createTranslation');
   });
 
   it('reports unknown-namespace and stray-dot json files as skipped (typo guard)', () => {
     const out = path.join(dir, 'i18n');
     runExport({ cwd: dir, srcGlobs: globs, outDir: out, sourceLocale: 'en' });
-    fs.writeFileSync(path.join(out, 'qoute.de.json'), JSON.stringify({ title: 'x' }));
-    fs.writeFileSync(path.join(out, 'quote.sl.si.json'), JSON.stringify({ title: 'x' }));
+    fs.writeFileSync(
+      path.join(out, 'qoute.de.json'),
+      JSON.stringify({ title: 'x' }),
+    );
+    fs.writeFileSync(
+      path.join(out, 'quote.sl.si.json'),
+      JSON.stringify({ title: 'x' }),
+    );
 
     const report = runImport({
       cwd: dir,
@@ -386,11 +397,19 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
     expect(report.applied).toBe(0);
     expect(report.skipped).toEqual(
       expect.arrayContaining([
-        { file: 'qoute.de.json', reason: expect.stringContaining('no namespace "qoute"') },
-        { file: 'quote.sl.si.json', reason: expect.stringContaining('<namespace>.<locale>.json') },
+        {
+          file: 'qoute.de.json',
+          reason: expect.stringContaining('no namespace "qoute"'),
+        },
+        {
+          file: 'quote.sl.si.json',
+          reason: expect.stringContaining('<namespace>.<locale>.json'),
+        },
       ]),
     );
-    expect(report.skipped.some((s) => s.file.includes('mmtranslate-meta'))).toBe(false);
+    expect(
+      report.skipped.some((s) => s.file.includes('mmtranslate-meta')),
+    ).toBe(false);
   });
 
   it('rejects a translation with a key the source does not have (would not compile)', () => {

@@ -56,7 +56,9 @@ export const appConfig: ApplicationConfig = {
         // German example
         return {
           // Override general 'required' message factory
-          general: { required: (label) => `${label || 'Feld'} ist erforderlich.` },
+          general: {
+            required: (label) => `${label || 'Feld'} ist erforderlich.`,
+          },
           // Override string 'minLength' message factory
           string: { minLength: (min) => `Mindestens ${min} Zeichen.` },
           // Only provide overrides needed; others use defaults
@@ -73,7 +75,8 @@ export const appConfig: ApplicationConfig = {
       // Custom toDate: Convert Luxon DateTime (or string) to JS Date for internal comparison
       (d) => (d instanceof DateTime ? d.toJSDate() : defaultToDate(d)),
       // Custom formatDate: Format JS Date back to string using Luxon for error messages
-      (d, l) => DateTime.fromJSDate(d).setLocale(l).toLocaleString(DateTime.DATE_MED),
+      (d, l) =>
+        DateTime.fromJSDate(d).setLocale(l).toLocaleString(DateTime.DATE_MED),
     ),
   ],
 };
@@ -90,7 +93,12 @@ The returned object (`Validators<TDate>`) groups validator generators by type (`
 ```typescript
 // Example: my-form.component.ts
 import { Component } from '@angular/core';
-import { injectValidators, StringValidatorOptions, NumberValidatorOptions, DateValidatorOptions } from '@mmstack/form-validation';
+import {
+  injectValidators,
+  StringValidatorOptions,
+  NumberValidatorOptions,
+  DateValidatorOptions,
+} from '@mmstack/form-validation';
 import { formControl } from '@mmstack/form-core';
 // Assuming native Date objects are used (default)
 
@@ -132,7 +140,8 @@ export class MyFormComponent {
   expiryDate = formControl<Date | null>(null, {
     label: () => 'Expiry Date',
     // Example combining general and date-specific rules
-    validator: () => this.validators.date.all({ required: false, min: new Date() }),
+    validator: () =>
+      this.validators.date.all({ required: false, min: new Date() }),
   });
 
   // You can also access individual validator generators if needed:

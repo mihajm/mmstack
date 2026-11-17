@@ -20,26 +20,29 @@ export type EmptyWorkerSchema = {
 declare const WORKER_SCHEMA: unique symbol;
 
 /** Phantom-tags a type with its {@link WorkerSchema} `M` so `SchemaOf` can recover it. */
-export type HasSchema<M extends WorkerSchema> = { readonly [WORKER_SCHEMA]?: M };
+export type HasSchema<M extends WorkerSchema> = {
+  readonly [WORKER_SCHEMA]?: M;
+};
 
 /**
  * Recovers the {@link WorkerSchema} carried by a `WorkerHost`/`WorkerRef` (via {@link HasSchema}),
  * or passes a raw schema through — so `connectWorker<typeof host>()` and `connectWorker<MySchema>()`
  * both work. Falls back to the loose schema otherwise.
  */
-export type SchemaOf<H> = H extends HasSchema<infer M>
-  ? M
-  : H extends WorkerSchema
-    ? H
-    : WorkerSchema;
+export type SchemaOf<H> =
+  H extends HasSchema<infer M> ? M : H extends WorkerSchema ? H : WorkerSchema;
 
 /** The input type of a schema's task `K`. */
-export type TaskInput<M extends WorkerSchema, K extends keyof M['tasks']> =
-  Parameters<M['tasks'][K]>[0];
+export type TaskInput<
+  M extends WorkerSchema,
+  K extends keyof M['tasks'],
+> = Parameters<M['tasks'][K]>[0];
 
 /** The resolved output type of a schema's task `K`. */
-export type TaskOutput<M extends WorkerSchema, K extends keyof M['tasks']> =
-  Awaited<ReturnType<M['tasks'][K]>>;
+export type TaskOutput<
+  M extends WorkerSchema,
+  K extends keyof M['tasks'],
+> = Awaited<ReturnType<M['tasks'][K]>>;
 
 /** Keys addressable by `workerStore` — owned OR published. */
 export type StoreKeys<M extends WorkerSchema> =
@@ -47,16 +50,20 @@ export type StoreKeys<M extends WorkerSchema> =
   | (keyof M['published'] & string);
 
 /** The value type behind a store/published key. */
-export type StoreValueOf<M extends WorkerSchema, K extends string> =
-  K extends keyof M['stores']
-    ? M['stores'][K]
-    : K extends keyof M['published']
-      ? M['published'][K]
-      : unknown;
+export type StoreValueOf<
+  M extends WorkerSchema,
+  K extends string,
+> = K extends keyof M['stores']
+  ? M['stores'][K]
+  : K extends keyof M['published']
+    ? M['published'][K]
+    : unknown;
 
 /** True when a key is an OWNED (writable) subtree — used to gate `write()`. */
-export type IsWritableKey<M extends WorkerSchema, K extends string> =
-  K extends keyof M['stores'] ? true : false;
+export type IsWritableKey<
+  M extends WorkerSchema,
+  K extends string,
+> = K extends keyof M['stores'] ? true : false;
 
 /** Extracts the value type a signal/store holds (for building a schema from host options). */
 export type SignalValueOf<S> = S extends {

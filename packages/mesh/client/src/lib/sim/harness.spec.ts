@@ -1,9 +1,21 @@
-import { commitOrdered, converged, journalFoldMatchesClients, relayRetainsJournal, seqDense, versionsMonotone } from './invariants';
+import {
+  commitOrdered,
+  converged,
+  journalFoldMatchesClients,
+  relayRetainsJournal,
+  seqDense,
+  versionsMonotone,
+} from './invariants';
 import { runSimulation } from './harness';
 
 describe('mesh simulation harness — baseline convergence (no faults)', () => {
   it('3 peers, concurrent writes over many rounds: all converge; journal audits', () => {
-    const res = runSimulation({ seed: 1, peers: 3, rounds: 20, opsPerRound: 3 });
+    const res = runSimulation({
+      seed: 1,
+      peers: 3,
+      rounds: 20,
+      opsPerRound: 3,
+    });
 
     expect(res.statuses.every((s) => s === 'live')).toBe(true); // no faults → all connected, none ejected
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
@@ -13,10 +25,19 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
     // audit 2b: the relay retained exactly what re-ingesting the journal through the twin yields
     const r = relayRetainsJournal(undefined, res.journal, res.relayRegisters);
     expect(r.ok, r.message).toBe(true);
-    expect(seqDense(res.journal, res.seq).ok, seqDense(res.journal, res.seq).message).toBe(true);
-    expect(versionsMonotone(res.journal).ok, versionsMonotone(res.journal).message).toBe(true);
+    expect(
+      seqDense(res.journal, res.seq).ok,
+      seqDense(res.journal, res.seq).message,
+    ).toBe(true);
+    expect(
+      versionsMonotone(res.journal).ok,
+      versionsMonotone(res.journal).message,
+    ).toBe(true);
     // post local-pending-as-branch: no re-entrant flush, so onCommit fires in seq order
-    expect(commitOrdered(res.journal).ok, commitOrdered(res.journal).message).toBe(true);
+    expect(
+      commitOrdered(res.journal).ok,
+      commitOrdered(res.journal).message,
+    ).toBe(true);
   });
 
   it('property mode: convergence + audit + watermark monotonicity across 100 seeds', () => {
@@ -39,7 +60,12 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
   });
 
   it('scales to more peers', () => {
-    const res = runSimulation({ seed: 42, peers: 6, rounds: 10, opsPerRound: 2 });
+    const res = runSimulation({
+      seed: 42,
+      peers: 6,
+      rounds: 10,
+      opsPerRound: 2,
+    });
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
     const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
     expect(j.ok, j.message).toBe(true);
@@ -54,7 +80,9 @@ describe('mesh simulation harness — baseline convergence (no faults)', () => {
     // full journal equality (incl. origins/hlc) proves the RNG + clock are fully controlled; the
     // room generation nonce is minted from a process-wide counter and is not part of the run
     const sansInstance = (j: typeof a.journal) =>
-      j.map((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')));
+      j.map((e) =>
+        Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')),
+      );
     expect(sansInstance(a.journal)).toEqual(sansInstance(b.journal));
   });
 

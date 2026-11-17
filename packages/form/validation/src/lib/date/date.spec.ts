@@ -1,7 +1,13 @@
 import { createDateRangeValidators } from './date-range';
 import { defaultIsDateMessageFactory, createIsDateValidator } from './is-date';
-import { defaultMaxDateMessageFactory, createMaxDateValidator } from './max-date';
-import { defaultMinDateMessageFactory, createMinDateValidator } from './min-date';
+import {
+  defaultMaxDateMessageFactory,
+  createMaxDateValidator,
+} from './max-date';
+import {
+  defaultMinDateMessageFactory,
+  createMinDateValidator,
+} from './min-date';
 import { defaultToDate } from './util';
 
 describe('Date Validators', () => {
@@ -31,7 +37,10 @@ describe('Date Validators', () => {
   });
 
   describe('isDate', () => {
-    const validatorFactory = createIsDateValidator(defaultIsDateMessageFactory, toDate);
+    const validatorFactory = createIsDateValidator(
+      defaultIsDateMessageFactory,
+      toDate,
+    );
 
     it('should return error if invalid date string', () => {
       const validate = validatorFactory();
@@ -51,7 +60,12 @@ describe('Date Validators', () => {
   });
 
   describe('maxDate', () => {
-    const validatorFactory = createMaxDateValidator(defaultMaxDateMessageFactory, toDate, formatDate, locale);
+    const validatorFactory = createMaxDateValidator(
+      defaultMaxDateMessageFactory,
+      toDate,
+      formatDate,
+      locale,
+    );
 
     it('should return error if value is after max date', () => {
       const max = '2023-01-01';
@@ -73,7 +87,12 @@ describe('Date Validators', () => {
   });
 
   describe('minDate', () => {
-    const validatorFactory = createMinDateValidator(defaultMinDateMessageFactory, toDate, formatDate, locale);
+    const validatorFactory = createMinDateValidator(
+      defaultMinDateMessageFactory,
+      toDate,
+      formatDate,
+      locale,
+    );
 
     it('should return error if value is before min date', () => {
       const min = '2023-01-01';
@@ -95,11 +114,17 @@ describe('Date Validators', () => {
   });
 
   describe('createDateRangeValidators', () => {
-    const rangeValidators = createDateRangeValidators(undefined, toDate, formatDate);
+    const rangeValidators = createDateRangeValidators(
+      undefined,
+      toDate,
+      formatDate,
+    );
 
     it('should validate start and end dates', () => {
       const validate = rangeValidators.all({ required: true });
-      expect(validate({ start: null, end: null })).toContain('Field is required');
+      expect(validate({ start: null, end: null })).toContain(
+        'Field is required',
+      );
       expect(validate({ start: new Date(), end: new Date() })).toBe('');
     });
 
@@ -108,13 +133,26 @@ describe('Date Validators', () => {
       const max = new Date('2023-12-31');
       const validate = rangeValidators.all({ min, max });
 
-      expect(validate({ start: new Date('2022-01-01'), end: new Date('2023-06-01') })).toContain('Must be after 2023-01-01');
-      expect(validate({ start: new Date('2023-06-01'), end: new Date('2024-01-01') })).toContain('Must be before 2023-12-31');
+      expect(
+        validate({
+          start: new Date('2022-01-01'),
+          end: new Date('2023-06-01'),
+        }),
+      ).toContain('Must be after 2023-01-01');
+      expect(
+        validate({
+          start: new Date('2023-06-01'),
+          end: new Date('2024-01-01'),
+        }),
+      ).toContain('Must be before 2023-12-31');
     });
 
     it('should ensure start is before or equal to end', () => {
       const validate = rangeValidators.all({});
-      const invalidRange = { start: new Date('2023-02-01'), end: new Date('2023-01-01') };
+      const invalidRange = {
+        start: new Date('2023-02-01'),
+        end: new Date('2023-01-01'),
+      };
       expect(validate(invalidRange)).toBeTruthy();
     });
   });

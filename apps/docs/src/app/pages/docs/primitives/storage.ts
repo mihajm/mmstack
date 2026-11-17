@@ -69,26 +69,27 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="storeHistory" id="store-history">
         <p>
-          <code>withHistory</code> snapshots a value. <code>storeHistory</code>
-          does undo and redo for a <a mmLink="/docs/primitives/store">store</a>
-          over its op-log instead, so each entry costs only the diff, not a full
-          copy of the state. <code>undo()</code> applies one inverse batch, and a
-          new edit after an undo forks the timeline, the same as any editor.
+          <code>withHistory</code> snapshots a value.
+          <code>storeHistory</code> does undo and redo for a
+          <a mmLink="/docs/primitives/store">store</a> over its op-log instead,
+          so each entry costs only the diff, not a full copy of the state.
+          <code>undo()</code> applies one inverse batch, and a new edit after an
+          undo forks the timeline, the same as any editor.
         </p>
         <docs-code [code]="storeHistory" lang="ts" />
         <p>
           It composes with sync. Pass a sync client's local stream as
           <code>track</code>, and only your own writes are undoable while a
-          remote peer's change never lands on your stack. Your undo still emits a
-          normal operation, so it propagates to the others.
+          remote peer's change never lands on your stack. Your undo still emits
+          a normal operation, so it propagates to the others.
         </p>
       </docs-section>
 
       <docs-section title="persistedStore" id="persisted-store">
         <p>
           <code>stored</code> persists a single value to synchronous
-          <code>localStorage</code>. <code>persistedStore</code> persists a whole
-          <a mmLink="/docs/primitives/store">store</a> to an async backend
+          <code>localStorage</code>. <code>persistedStore</code> persists a
+          whole <a mmLink="/docs/primitives/store">store</a> to an async backend
           (IndexedDB) and restores it on boot. It ships no IndexedDB code: you
           pass an <code>AsyncStore</code> adapter, which
           <code>idb-keyval</code> satisfies directly and a Dexie table satisfies
@@ -117,12 +118,12 @@ import { DocSection } from '../../../layout/doc-section';
           left untouched.
         </p>
         <p>
-          <code>persistedStore</code> is <code>persist</code> plus a fresh store:
-          reach for <code>persist(store, opt)</code> directly to add durability to
-          a <a mmLink="/docs/primitives/store">store</a> you already have, for
-          instance one you also <code>meshSync</code>, or a worker-owned store's
-          replica. Persistence is a reader over the op-log, so it composes with
-          the other readers on the same store.
+          <code>persistedStore</code> is <code>persist</code> plus a fresh
+          store: reach for <code>persist(store, opt)</code> directly to add
+          durability to a <a mmLink="/docs/primitives/store">store</a> you
+          already have, for instance one you also <code>meshSync</code>, or a
+          worker-owned store's replica. Persistence is a reader over the op-log,
+          so it composes with the other readers on the same store.
         </p>
         <docs-code [code]="persist" lang="ts" />
       </docs-section>

@@ -54,20 +54,31 @@ export function validateImport(
     }
     const sourceMessage = src.get(key);
     if (sourceMessage === undefined) {
-      issues.push({ key, message: 'unknown key (not in the source) — remove it' });
+      issues.push({
+        key,
+        message: 'unknown key (not in the source) — remove it',
+      });
       continue;
     }
     const sourceValid = validateMessage(sourceMessage);
     if (!sourceValid.ok) {
-      issues.push({ key, message: `source message is invalid ICU — ${sourceValid.error}` });
+      issues.push({
+        key,
+        message: `source message is invalid ICU — ${sourceValid.error}`,
+      });
       continue;
     }
     const parity = placeholderParity(sourceMessage, message);
     if (!parity.ok) {
       const parts: string[] = [];
-      if (parity.missing.length) parts.push(`missing ${parity.missing.join(', ')}`);
-      if (parity.extra.length) parts.push(`unexpected ${parity.extra.join(', ')}`);
-      issues.push({ key, message: `placeholder mismatch (${parts.join('; ')})` });
+      if (parity.missing.length)
+        parts.push(`missing ${parity.missing.join(', ')}`);
+      if (parity.extra.length)
+        parts.push(`unexpected ${parity.extra.join(', ')}`);
+      issues.push({
+        key,
+        message: `placeholder mismatch (${parts.join('; ')})`,
+      });
     }
   }
 
@@ -265,7 +276,11 @@ export type ImportReport = {
 };
 
 export function runImport(
-  opts: ProjectOptions & { inDir: string; sourceLocale?: string; force?: boolean },
+  opts: ProjectOptions & {
+    inDir: string;
+    sourceLocale?: string;
+    force?: boolean;
+  },
 ): ImportReport {
   // Prefer the explicit flag, then the export sidecar, then the `en` default.
   const sourceLocale = opts.sourceLocale ?? readMetaSourceLocale(opts.inDir);
@@ -288,7 +303,8 @@ export function runImport(
       if (fileName.endsWith('.json'))
         skipped.push({
           file: fileName,
-          reason: 'not a <namespace>.<locale>.json name (neither segment may contain a dot)',
+          reason:
+            'not a <namespace>.<locale>.json name (neither segment may contain a dot)',
         });
       continue;
     }
@@ -310,7 +326,12 @@ export function runImport(
     } catch (e) {
       rejected.push({
         file: fileName,
-        issues: [{ key: '(parse)', message: e instanceof Error ? e.message : String(e) }],
+        issues: [
+          {
+            key: '(parse)',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        ],
       });
       continue;
     }
@@ -326,7 +347,12 @@ export function runImport(
     } catch (e) {
       rejected.push({
         file: fileName,
-        issues: [{ key: '(apply)', message: e instanceof Error ? e.message : String(e) }],
+        issues: [
+          {
+            key: '(apply)',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        ],
       });
     }
   }

@@ -437,7 +437,12 @@ const rootSibling = (
 // ─── fold configurations (§14 T1 SCOPE: selecting = theorem, synthesizing = declared residual) ─
 
 type FoldCfg =
-  'default' | 'custom' | 'preserve' | 'synth' | 'positional' | 'ancestor';
+  | 'default'
+  | 'custom'
+  | 'preserve'
+  | 'synth'
+  | 'positional'
+  | 'ancestor';
 /** SELECTING folds: the output at a path is one live sibling's kind + value, or abstention. */
 const SELECTING_CFGS: readonly FoldCfg[] = ['default', 'custom'];
 /** SYNTHESIZING folds (the declared T1 residual): `preserve` markers; a clear turned into a delete. */
@@ -1903,7 +1908,10 @@ type TailEntry = {
   readonly env: OpEnvelope;
 };
 type ConflictCause =
-  'uncovered' | 'unauthorized' | 'refused-cite' | 'refused-epoch';
+  | 'uncovered'
+  | 'unauthorized'
+  | 'refused-cite'
+  | 'refused-epoch';
 type Conflict = { readonly entry: TailEntry; readonly cause: ConflictCause };
 /**
  * D-d: a welcome is a MESSAGE — queued, reorderable, duplicable. It carries the generation record

@@ -1,89 +1,89 @@
 export {
-    allowOnly,
-    compose,
-    deny,
-    hashKeys,
-    identityPolicy,
-    redactKeys,
-    type AttributePolicy,
-    type AttrMeta,
-    type Attrs,
-    type AttrValue
+  allowOnly,
+  compose,
+  deny,
+  hashKeys,
+  identityPolicy,
+  redactKeys,
+  type AttributePolicy,
+  type AttrMeta,
+  type Attrs,
+  type AttrValue,
 } from './lib/attrs';
 
 export {
-    fingerprintOf,
-    type Finding,
-    type FindingSeverity,
-    type FindingSpec
+  fingerprintOf,
+  type Finding,
+  type FindingSeverity,
+  type FindingSpec,
 } from './lib/finding';
 
 export { formatOrigin, type Origin, type OriginKind } from './lib/origin';
 
 export {
-    assertBudget,
-    BudgetError,
-    expectFinding,
-    expectNoFindings,
-    parseBudgetFile,
-    type Budget,
-    type BudgetFile
+  assertBudget,
+  BudgetError,
+  expectFinding,
+  expectNoFindings,
+  parseBudgetFile,
+  type Budget,
+  type BudgetFile,
 } from './lib/budget';
 
 export {
-    localStorageConsentStore,
-    type ConsentConfig,
-    type ConsentDecision,
-    type ConsentStore,
-    type TrackingRequirement
+  localStorageConsentStore,
+  type ConsentConfig,
+  type ConsentDecision,
+  type ConsentStore,
+  type TrackingRequirement,
 } from './lib/consent';
 
 export {
-    type ErrorSink,
-    type EventSink,
-    type FindingSink,
-    type GlobalAttrsSink,
-    type IdentitySink,
-    type LogRecord,
-    type LogSeverity,
-    type LogSink,
-    type MetricKind,
-    type MetricSink,
-    type Sink,
-    type SinkInput,
-    type SinkSpan,
-    type SpanContext,
-    type SpanHandle,
-    type SpanSink
+  type ErrorSink,
+  type EventSink,
+  type FindingSink,
+  type GlobalAttrsSink,
+  type IdentitySink,
+  type LogRecord,
+  type LogSeverity,
+  type LogSink,
+  type MetricKind,
+  type MetricSink,
+  type Sink,
+  type SinkInput,
+  type SinkSpan,
+  type SpanContext,
+  type SpanHandle,
+  type SpanSink,
 } from './lib/sink';
 
 export {
-    DEFAULT_READY_TIMEOUT_MS,
-    injectTelemetry,
-    readSpan,
-    TELEMETRY,
-    type EmitOptions,
-    type MetricOptions,
-    type SpanCallOptions,
-    type Telemetry,
-    type TelemetryConfig
+  DEFAULT_READY_TIMEOUT_MS,
+  injectTelemetry,
+  readSpan,
+  TELEMETRY,
+  type EmitOptions,
+  type MetricOptions,
+  type SpanCallOptions,
+  type Telemetry,
+  type TelemetryConfig,
 } from './lib/telemetry';
 
 export { provideTelemetry } from './lib/provide';
 export {
-    provideSentinelTelemetry,
-    SENTINEL_ERROR_FINDING
+  provideSentinelTelemetry,
+  SENTINEL_ERROR_FINDING,
 } from './lib/sentinel-telemetry';
 export {
-    provideViewErrorTelemetry,
-    VIEW_ERROR_FINDING,
-    type ViewErrorTelemetryOptions
+  provideViewErrorTelemetry,
+  VIEW_ERROR_FINDING,
+  type ViewErrorTelemetryOptions,
 } from './lib/view-error-telemetry';
 
 export {
-    TELEMETRY_HTTP_PARENT,
-    telemetryInterceptor,
-    withTelemetryParent
+  TELEMETRY_HTTP_PARENT,
+  telemetryInterceptor,
+  withTelemetryParent,
 } from './lib/http-interceptor';
 
 export { TelemetryHandles } from './lib/handles';
@@ -92,12 +92,12 @@ export { TelemetryScope } from './lib/scope.directive';
 export { tracedBy, tracedSignal, type CausalSignal } from './lib/traced-signal';
 
 export {
-    memorySink,
-    type MemorySink,
-    type RecordedError,
-    type RecordedEvent,
-    type RecordedFinding,
-    type RecordedLog,
-    type RecordedMetric,
-    type RecordedSpan
+  memorySink,
+  type MemorySink,
+  type RecordedError,
+  type RecordedEvent,
+  type RecordedFinding,
+  type RecordedLog,
+  type RecordedMetric,
+  type RecordedSpan,
 } from './lib/memory-sink';

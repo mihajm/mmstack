@@ -9,7 +9,9 @@ test.describe('features — drag handle, conditional drop', () => {
   test('drag handle: the grip drags, the body does not', async ({ page }) => {
     const grip = page.locator('.grip');
     const body = page.locator('.box .body');
-    const target = page.locator('section', { hasText: 'Drag handle' }).locator('.zone');
+    const target = page
+      .locator('section', { hasText: 'Drag handle' })
+      .locator('.zone');
 
     // dragging by the body should NOT start a drag (handle-only)
     await body.dragTo(target);
@@ -20,8 +22,12 @@ test.describe('features — drag handle, conditional drop', () => {
     await expect(target).toHaveText(/dropped/);
   });
 
-  test('canDrop: accepts the allowed chip, rejects the blocked one', async ({ page }) => {
-    const zone = page.locator('section', { hasText: 'Conditional drop' }).locator('.zone');
+  test('canDrop: accepts the allowed chip, rejects the blocked one', async ({
+    page,
+  }) => {
+    const zone = page
+      .locator('section', { hasText: 'Conditional drop' })
+      .locator('.zone');
 
     // allowed first: a rejected native drop wedges webkit's drag driver for the
     // NEXT dragTo, and asserting the text survives the blocked drag is the

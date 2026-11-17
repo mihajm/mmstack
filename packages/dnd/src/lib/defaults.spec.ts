@@ -62,7 +62,10 @@ describe('option defaults — DI token mechanics', () => {
         expect(injectDraggableDefaults()).toEqual({ engine: 'pointer' });
         expect(injectDropTargetDefaults()).toEqual({ engine: 'pointer' });
         // reorderable overrides engine and adds its own key
-        expect(injectReorderableDefaults()).toEqual({ engine: 'native', axis: 'x' });
+        expect(injectReorderableDefaults()).toEqual({
+          engine: 'native',
+          axis: 'x',
+        });
       },
     );
   });
@@ -144,15 +147,29 @@ describe('option defaults — reorderable consumption', () => {
     expect(builtin.activationThreshold).toBe(5);
 
     const viaDi = inCtx(
-      [provideReorderableDefaults({ engine: 'pointer', activationThreshold: 12 })],
+      [
+        provideReorderableDefaults({
+          engine: 'pointer',
+          activationThreshold: 12,
+        }),
+      ],
       () => injectReorderable(list(), { key }),
     );
     expect(viaDi.activationThreshold).toBe(12);
 
     const perCall = inCtx(
-      [provideReorderableDefaults({ engine: 'pointer', activationThreshold: 12 })],
+      [
+        provideReorderableDefaults({
+          engine: 'pointer',
+          activationThreshold: 12,
+        }),
+      ],
       () =>
-        injectReorderable(list(), { key, engine: 'pointer', activationThreshold: 3 }),
+        injectReorderable(list(), {
+          key,
+          engine: 'pointer',
+          activationThreshold: 3,
+        }),
     );
     expect(perCall.activationThreshold).toBe(3);
   });

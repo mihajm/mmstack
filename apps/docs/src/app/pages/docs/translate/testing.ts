@@ -16,9 +16,9 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           With no configuration, <code>provideMockTranslations()</code> makes
           every <code>t()</code> call return its key in dot notation. That is
-          usually what you want in a unit test: you assert that the right key was
-          rendered, not that a particular English string came back, so a copy
-          change never breaks the spec.
+          usually what you want in a unit test: you assert that the right key
+          was rendered, not that a particular English string came back, so a
+          copy change never breaks the spec.
         </p>
         <docs-code [code]="echo" lang="ts" />
       </docs-section>

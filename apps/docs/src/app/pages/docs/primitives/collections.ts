@@ -20,27 +20,30 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <p>
           That works, but it throws everything away and rebuilds it on every
-          change. Change one item's name and the whole mapped array is recreated,
-          which means fresh object references for every row. Anything downstream
-          keyed on those references, a heavy component in a
+          change. Change one item's name and the whole mapped array is
+          recreated, which means fresh object references for every row. Anything
+          downstream keyed on those references, a heavy component in a
           <code>&#64;for</code>, a chart, a drag handle, sees every row as new
-          and re-renders the lot. There is also no stable per-item signal to hand
-          to a child, since each pass produces new objects.
+          and re-renders the lot. There is also no stable per-item signal to
+          hand to a child, since each pass produces new objects.
         </p>
         <p>
           These three helpers fix that. Each one maps a source array or record
-          into a set of derived values that are <strong>created once per item
-          and reused</strong> as the source changes. Change one item and only
-          that item's derivation updates; the rest keep their identity. That
-          gives you a stable per-item signal to pass down, and it lets change
-          detection skip the rows that did not move.
+          into a set of derived values that are
+          <strong>created once per item and reused</strong> as the source
+          changes. Change one item and only that item's derivation updates; the
+          rest keep their identity. That gives you a stable per-item signal to
+          pass down, and it lets change detection skip the rows that did not
+          move.
         </p>
         <ul>
           <li>
-            <code>indexArray</code> stabilizes an array <strong>by position</strong>.
+            <code>indexArray</code> stabilizes an array
+            <strong>by position</strong>.
           </li>
           <li>
-            <code>mapArray</code> stabilizes an array <strong>by identity</strong>.
+            <code>mapArray</code> stabilizes an array
+            <strong>by identity</strong>.
           </li>
           <li>
             <code>mapObject</code> is the record equivalent, stable
@@ -159,9 +162,9 @@ import { DocSection } from '../../../layout/doc-section';
           The mapping function receives the entry's raw key as its third
           argument and the entry's lifetime handle as its fourth: the raw key
           while that key never had duplicates, an opaque
-          <code>&#123; key, n &#125;</code> object once it did. The
-          handle stays the same for the life of the entry, even after the key
-          becomes unique again, so it is a safe name for the entry.
+          <code>&#123; key, n &#125;</code> object once it did. The handle stays
+          the same for the life of the entry, even after the key becomes unique
+          again, so it is a safe name for the entry.
           <code>isKeyHandle(value)</code> tells the two apart, and
           <code>handle.key</code> is the raw key.
         </p>
@@ -187,12 +190,11 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Relative order" id="reorders">
         <p>
           The result always has <code>reorders</code>, a read-only signal that
-          says whether the
-          entries changed their order relative to each other. It holds the
-          permutation among the entries present both at its last evaluation and
-          now, named by handle: <code>before</code> lists them in the old order,
-          <code>after</code> the same handles in the new order. When they kept
-          their relative order it is <code>null</code>.
+          says whether the entries changed their order relative to each other.
+          It holds the permutation among the entries present both at its last
+          evaluation and now, named by handle: <code>before</code> lists them in
+          the old order, <code>after</code> the same handles in the new order.
+          When they kept their relative order it is <code>null</code>.
         </p>
         <docs-code [code]="orderEx" lang="ts" />
         <p>
@@ -233,8 +235,8 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="mapObject for records" id="map-object">
         <p>
           <code>mapObject</code> is the record counterpart of
-          <code>mapArray</code>. It maps a <code>Record&lt;K, V&gt;</code> into a
-          <code>Record&lt;K, U&gt;</code> with referential stability for
+          <code>mapArray</code>. It maps a <code>Record&lt;K, V&gt;</code> into
+          a <code>Record&lt;K, U&gt;</code> with referential stability for
           unchanged keys, and when the source is writable it hands the mapping a
           writable signal slice for each value, so each entry can both read and
           write its own value.

@@ -74,8 +74,12 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
   it('[CONTROL] concurrent field edits at different slots both survive: per-index descent is right when every slot still holds its element', () => {
     const A = replica('A', 10);
     const B = replica('B', 20);
-    const envA = A.emit(diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }));
-    const envB = B.emit(diffOps({ todos: base }, { todos: [a, { ...b, t: 'B2' }, c] }));
+    const envA = A.emit(
+      diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }),
+    );
+    const envB = B.emit(
+      diffOps({ todos: base }, { todos: [a, { ...b, t: 'B2' }, c] }),
+    );
     A.receive(envB);
     B.receive(envA);
     expect(A.state()).toEqual(B.state());
@@ -94,13 +98,19 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
           : wholeArraySet(reordered),
       );
       // B edits the element it sees at slot 0, which is `a`
-      const envB = B.emit(diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }));
+      const envB = B.emit(
+        diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }),
+      );
       A.receive(envB);
       B.receive(envA);
       expect(A.state(), emission).toEqual(B.state());
       expect(A.folded(), emission).toEqual(A.state());
       // converged, on the wrong element: the edit meant for `a` sits on `b`
-      expect(textById(A.state().todos), emission).toEqual({ a: 'A', b: 'A2', c: 'C' });
+      expect(textById(A.state().todos), emission).toEqual({
+        a: 'A',
+        b: 'A2',
+        c: 'C',
+      });
     }
   });
 
@@ -117,7 +127,10 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
     })();
     expect(ids(perSlot)).toEqual(['b', 'b', 'c']); // `b` twice, `a` gone
 
-    for (const policies of [undefined, [{ path: 'todos', merge: keyedArray((t) => (t as Todo).id) }]]) {
+    for (const policies of [
+      undefined,
+      [{ path: 'todos', merge: keyedArray((t) => (t as Todo).id) }],
+    ]) {
       const A = replica('A', 10, policies);
       const B = replica('B', 20, policies);
       const envA = A.emit(wholeArraySet([b, a, c]));
@@ -140,17 +153,28 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
           ? diffOps({ todos: base }, { todos: replaced })
           : wholeArraySet(replaced),
       );
-      const envB = B.emit(diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }));
+      const envB = B.emit(
+        diffOps({ todos: base }, { todos: [{ ...a, t: 'A2' }, b, c] }),
+      );
       A.receive(envB);
       B.receive(envA);
       expect(A.state(), emission).toEqual(B.state());
-      expect(textById(A.state().todos), emission).toEqual({ z: 'A2', b: 'B', c: 'C' });
+      expect(textById(A.state().todos), emission).toEqual({
+        z: 'A2',
+        b: 'B',
+        c: 'C',
+      });
     }
   });
 
   it('[PREMISE-4] the same edit-vs-reorder race, arrays as UNITS under a keyedArray policy: the edit lands on the right element; order follows the total-order winner', () => {
-    const policies = [{ path: 'todos', merge: keyedArray((t) => (t as Todo).id) }];
-    for (const [pA, pB] of [[10, 20], [20, 10]]) {
+    const policies = [
+      { path: 'todos', merge: keyedArray((t) => (t as Todo).id) },
+    ];
+    for (const [pA, pB] of [
+      [10, 20],
+      [20, 10],
+    ]) {
       const A = replica('A', pA, policies);
       const B = replica('B', pB, policies);
       const envA = A.emit(wholeArraySet([b, a, c]));
@@ -159,15 +183,22 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
       B.receive(envA);
       expect(A.state(), `${pA}/${pB}`).toEqual(B.state());
       expect(A.folded(), `${pA}/${pB}`).toEqual(A.state());
-      expect(textById(A.state().todos), `${pA}/${pB}`).toEqual({ a: 'A2', b: 'B', c: 'C' });
-      expect(A.state().todos.map((t) => t.id), `${pA}/${pB}`).toEqual(
-        pB > pA ? ['a', 'b', 'c'] : ['b', 'a', 'c'],
-      );
+      expect(textById(A.state().todos), `${pA}/${pB}`).toEqual({
+        a: 'A2',
+        b: 'B',
+        c: 'C',
+      });
+      expect(
+        A.state().todos.map((t) => t.id),
+        `${pA}/${pB}`,
+      ).toEqual(pB > pA ? ['a', 'b', 'c'] : ['b', 'a', 'c']);
     }
   });
 
   it('[PREMISE-5] replacement-vs-edit as UNITS under keyedArray: the edited element survives beside the replacement (edit beats removal), never under it', () => {
-    const policies = [{ path: 'todos', merge: keyedArray((t) => (t as Todo).id) }];
+    const policies = [
+      { path: 'todos', merge: keyedArray((t) => (t as Todo).id) },
+    ];
     const A = replica('A', 10, policies);
     const B = replica('B', 20, policies);
     const envA = A.emit(wholeArraySet([{ id: 'z', t: 'Z' }, b, c]));
@@ -175,6 +206,11 @@ describe('K-diff premise: what array emission can and cannot fix', () => {
     A.receive(envB);
     B.receive(envA);
     expect(A.state()).toEqual(B.state());
-    expect(textById(A.state().todos)).toEqual({ a: 'A2', b: 'B', c: 'C', z: 'Z' });
+    expect(textById(A.state().todos)).toEqual({
+      a: 'A2',
+      b: 'B',
+      c: 'C',
+      z: 'Z',
+    });
   });
 });

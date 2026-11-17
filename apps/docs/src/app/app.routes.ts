@@ -27,7 +27,10 @@ export const appRoutes: Route[] = [
               { label: 'Sensors', link: 'primitives/sensors' },
               { label: 'Pipelines', link: 'primitives/pipelines' },
               { label: 'Performance', link: 'primitives/performance' },
-              { label: 'Transitions & suspense', link: 'primitives/transitions' },
+              {
+                label: 'Transitions & suspense',
+                link: 'primitives/transitions',
+              },
               { label: 'Observability', link: 'primitives/observability' },
               { label: 'Keep-alive & pausing', link: 'primitives/pausing' },
             ],
@@ -37,10 +40,16 @@ export const appRoutes: Route[] = [
             children: [
               { label: 'Overview', link: 'resource' },
               { label: 'queryResource', link: 'resource/query' },
-              { label: 'infiniteQueryResource', link: 'resource/infinite-query' },
+              {
+                label: 'infiniteQueryResource',
+                link: 'resource/infinite-query',
+              },
               { label: 'mutationResource', link: 'resource/mutation' },
               { label: 'Optimistic updates', link: 'resource/optimistic' },
-              { label: 'Streaming (SSE / WebSocket)', link: 'resource/streaming' },
+              {
+                label: 'Streaming (SSE / WebSocket)',
+                link: 'resource/streaming',
+              },
               { label: 'Caching & circuit breakers', link: 'resource/caching' },
               { label: 'Offline & reconnection', link: 'resource/offline' },
               { label: 'Testing', link: 'resource/testing' },
@@ -53,10 +62,19 @@ export const appRoutes: Route[] = [
               { label: 'Reactive state', link: 'router-core/state' },
               { label: 'Preloading', link: 'router-core/preloading' },
               { label: 'Route data', link: 'router-core/route-data' },
-              { label: 'Transition outlet', link: 'router-core/transition-outlet' },
+              {
+                label: 'Transition outlet',
+                link: 'router-core/transition-outlet',
+              },
               { label: 'Visual commit', link: 'router-core/visual-commit' },
-              { label: 'Runtime route config', link: 'router-core/runtime-config' },
-              { label: 'Titles, breadcrumbs & nav', link: 'router-core/route-ui' },
+              {
+                label: 'Runtime route config',
+                link: 'router-core/runtime-config',
+              },
+              {
+                label: 'Titles, breadcrumbs & nav',
+                link: 'router-core/route-ui',
+              },
             ],
           },
           {
@@ -354,9 +372,7 @@ export const appRoutes: Route[] = [
         path: 'router-core/route-ui',
         title: createTitle('Titles, breadcrumbs and nav'),
         loadComponent: () =>
-          import('./pages/docs/router-core/route-ui').then(
-            (m) => m.RouteUiDoc,
-          ),
+          import('./pages/docs/router-core/route-ui').then((m) => m.RouteUiDoc),
       },
 
       // translate
@@ -520,7 +536,9 @@ export const appRoutes: Route[] = [
         path: 'worker/resource',
         title: createTitle('workerResource'),
         loadComponent: () =>
-          import('./pages/docs/worker/resource').then((m) => m.WorkerResourceDoc),
+          import('./pages/docs/worker/resource').then(
+            (m) => m.WorkerResourceDoc,
+          ),
       },
       {
         path: 'worker/store',

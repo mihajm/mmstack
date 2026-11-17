@@ -15,11 +15,12 @@ import { DocSection } from '../../../layout/doc-section';
     >
       <p>
         A <a mmLink="/docs/primitives/store">store</a> updates copy-on-write, so
-        every change keeps the references it did not touch. <code>opLog</code>
-        diffs that into a minimal batch of <code>set</code> and
-        <code>delete</code> operations, each along a path. Ship the batch and
-        apply it elsewhere and you have replicated the change without sending the
-        whole object. Everything on this page builds on that.
+        every change keeps the references it did not touch.
+        <code>opLog</code> diffs that into a minimal batch of
+        <code>set</code> and <code>delete</code> operations, each along a path.
+        Ship the batch and apply it elsewhere and you have replicated the change
+        without sending the whole object. Everything on this page builds on
+        that.
       </p>
 
       <docs-section title="Syncing a store across tabs" id="tab-sync">
@@ -123,8 +124,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>settings</code> while someone changes
           <code>settings.theme</code> and the result is the new settings with
           their theme kept, the merge people usually expect, rather than the
-          replace erasing the concurrent edit. The edit was never observed by the
-          replace, so it stays a live concurrent value.
+          replace erasing the concurrent edit. The edit was never observed by
+          the replace, so it stays a live concurrent value.
         </p>
         <p>
           A privileged writer that needs the replace to win outright, an owner

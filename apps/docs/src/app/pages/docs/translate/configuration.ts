@@ -75,9 +75,9 @@ import { DocSection } from '../../../layout/doc-section';
               <tr>
                 <td><code>localeStorage</code></td>
                 <td>
-                  Persists a user-picked locale across reloads. Mutually exclusive
-                  with <code>localeParamName</code>, since the URL would only
-                  fight it.
+                  Persists a user-picked locale across reloads. Mutually
+                  exclusive with <code>localeParamName</code>, since the URL
+                  would only fight it.
                 </td>
               </tr>
               <tr>
@@ -90,11 +90,11 @@ import { DocSection } from '../../../layout/doc-section';
               <tr>
                 <td><code>releaseCachedSignals</code></td>
                 <td>
-                  Holds cached translation signals weakly so they can be collected
-                  once the component that read them is destroyed. Off by default,
-                  since translation keys are a bounded set for most apps. Turn it
-                  on only for large apps under measured memory pressure, or ones
-                  that build keys dynamically.
+                  Holds cached translation signals weakly so they can be
+                  collected once the component that read them is destroyed. Off
+                  by default, since translation keys are a bounded set for most
+                  apps. Turn it on only for large apps under measured memory
+                  pressure, or ones that build keys dynamically.
                 </td>
               </tr>
             </tbody>

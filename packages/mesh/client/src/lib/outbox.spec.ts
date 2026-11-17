@@ -548,7 +548,9 @@ describe('meshSync durable outbox — the generation rides with the tail', () =>
     };
     expect(kept.instance).toBe(relay.room('m')?.instance);
     expect(Array.isArray(kept.floors)).toBe(true);
-    expect(kept.clock).toEqual(expect.objectContaining({ p: expect.any(Number) }));
+    expect(kept.clock).toEqual(
+      expect.objectContaining({ p: expect.any(Number) }),
+    );
     expect(kept.version).toBeGreaterThan(0);
   });
 

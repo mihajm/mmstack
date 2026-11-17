@@ -80,7 +80,12 @@ describe('compose: tabSync + meshSync on one store', () => {
   });
 
   // a tab: one store, shared across tabs by tabSync, synced to the room by meshSync (lock leader)
-  function tab(net: FakeBusNet, relay: Relay, disk: AsyncStore, writer: string) {
+  function tab(
+    net: FakeBusNet,
+    relay: Relay,
+    disk: AsyncStore,
+    writer: string,
+  ) {
     return TestBed.runInInjectionContext(() => {
       const s = store<State>(initial());
       tabSync(s, { id: 'doc', bus: new FakeBus(net) });

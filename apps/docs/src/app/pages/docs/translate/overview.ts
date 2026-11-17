@@ -101,7 +101,9 @@ import { DocSection } from '../../../layout/doc-section';
             </thead>
             <tbody>
               <tr>
-                <td>Wire up locales (one build for all, or one per language)</td>
+                <td>
+                  Wire up locales (one build for all, or one per language)
+                </td>
                 <td>
                   <a mmLink="/docs/translate/configuration">Configuration</a>
                 </td>

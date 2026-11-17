@@ -99,10 +99,9 @@ function resetGlobalLocale() {
 describe('Integration: registerNamespace through the resolver', () => {
   it('makes default-locale translations available after navigation', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -135,10 +134,9 @@ describe('Integration: registerNamespace through the resolver', () => {
     const moduleEN = { default: quote.enUS, [Symbol.toStringTag]: 'Module' };
     const moduleSL = { default: quote.slSI, [Symbol.toStringTag]: 'Module' };
 
-    const r = registerNamespace(
-      () => Promise.resolve(moduleEN as never),
-      { 'sl-SI': () => Promise.resolve(moduleSL as never) },
-    );
+    const r = registerNamespace(() => Promise.resolve(moduleEN as never), {
+      'sl-SI': () => Promise.resolve(moduleSL as never),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -168,10 +166,7 @@ describe('Integration: registerNamespace through the resolver', () => {
     const quote = buildQuoteNamespace();
     const moduleEN = { translation: quote.enUS };
 
-    const r = registerNamespace(
-      () => Promise.resolve(moduleEN as never),
-      {},
-    );
+    const r = registerNamespace(() => Promise.resolve(moduleEN as never), {});
 
     TestBed.configureTestingModule({
       providers: [
@@ -199,10 +194,9 @@ describe('Integration: registerNamespace through the resolver', () => {
 
   it('picks up the active locale from a route parameter', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -232,10 +226,9 @@ describe('Integration: registerNamespace through the resolver', () => {
 
   it('resolves a custom localeParamName from a nested parent route', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -279,10 +272,9 @@ describe('Integration: registerNamespace through the resolver', () => {
     });
     delete (slPartial.flat as Record<string, string>)['onlyInDefault'];
 
-    const r = registerNamespace(
-      () => Promise.resolve(ns.translation),
-      { 'sl-SI': () => Promise.resolve(slPartial) },
-    );
+    const r = registerNamespace(() => Promise.resolve(ns.translation), {
+      'sl-SI': () => Promise.resolve(slPartial),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -317,10 +309,9 @@ describe('Integration: registerNamespace through the resolver', () => {
 describe('Integration: dynamic locale switching', () => {
   it('switches a typed namespace via injectDynamicLocale().set()', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -401,14 +392,12 @@ describe('Integration: dynamic locale switching', () => {
     const quote = buildQuoteNamespace();
     const common = buildCommonNamespace();
 
-    const rQ = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
-    const rC = registerNamespace(
-      () => Promise.resolve(common.enUS),
-      { 'sl-SI': () => Promise.resolve(common.slSI) },
-    );
+    const rQ = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
+    const rC = registerNamespace(() => Promise.resolve(common.enUS), {
+      'sl-SI': () => Promise.resolve(common.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -448,15 +437,10 @@ describe('Integration: dynamic locale switching', () => {
 
   it('reports isLoading() true while a locale switch is in flight and false once settled', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      {
-        'sl-SI': () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve(quote.slSI), 30),
-          ),
-      },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () =>
+        new Promise((resolve) => setTimeout(() => resolve(quote.slSI), 30)),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -489,10 +473,9 @@ describe('Integration: dynamic locale switching', () => {
 
   it('refuses to switch to a locale outside supportedLocales (no-op + dev warning)', async () => {
     const quote = buildQuoteNamespace();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -516,7 +499,9 @@ describe('Integration: dynamic locale switching', () => {
     const store = TestBed.inject(TranslationStore);
     const locale = runInjected(() => injectDynamicLocale());
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     locale.set('fr-FR');
     TestBed.tick();
     expect(store.locale()).toBe('en-US');
@@ -544,10 +529,9 @@ describe('Integration: localeStorage persistence', () => {
   it('restores the previously-stored locale on init', async () => {
     const quote = buildQuoteNamespace();
     const storage = makeMemoryStorage('sl-SI');
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -574,10 +558,9 @@ describe('Integration: localeStorage persistence', () => {
   it('writes on each successful locale change', async () => {
     const quote = buildQuoteNamespace();
     const storage = makeMemoryStorage();
-    const r = registerNamespace(
-      () => Promise.resolve(quote.enUS),
-      { 'sl-SI': () => Promise.resolve(quote.slSI) },
-    );
+    const r = registerNamespace(() => Promise.resolve(quote.enUS), {
+      'sl-SI': () => Promise.resolve(quote.slSI),
+    });
 
     TestBed.configureTestingModule({
       providers: [
@@ -683,7 +666,9 @@ describe('Integration: injectAddTranslations + injectUnsafeT', () => {
   });
 
   it('rejects translations for unsupported locales (with a dev warning)', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     TestBed.configureTestingModule({
       providers: [

@@ -27,7 +27,6 @@ const w_ = (
 type CellRect = { x: number; y: number; w: number; h: number };
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-placement-grid-example',
   imports: [
     PlacementGrid,
@@ -42,8 +41,8 @@ type CellRect = { x: number; y: number; w: number; h: number };
       <p class="hint">
         Drag widgets between cells (neighbours push aside, gravity compacts).
         Resize by the corner grip. Keyboard: arrows move a cell, Shift+arrows
-        resize. Drag cards between the tray and the grid — a widget dragged
-        over the tray previews as the row it will become.
+        resize. Drag cards between the tray and the grid — a widget dragged over
+        the tray previews as the row it will become.
       </p>
 
       <div class="split">
@@ -62,7 +61,14 @@ type CellRect = { x: number; y: number; w: number; h: number };
           @if (targetCell(dashboard); as cell) {
             <i
               class="target-cell"
-              [style.transform]="cellTransform(cell, dashGrid.units.unitX(), dashGrid.units.unitY(), 8)"
+              [style.transform]="
+                cellTransform(
+                  cell,
+                  dashGrid.units.unitX(),
+                  dashGrid.units.unitY(),
+                  8
+                )
+              "
               [style.width.px]="cellSpanPx(cell.w, dashGrid.units.unitX(), 8)"
               [style.height.px]="cellSpanPx(cell.h, dashGrid.units.unitY(), 8)"
             ></i>
@@ -111,7 +117,14 @@ type CellRect = { x: number; y: number; w: number; h: number };
         @if (targetCell(masked); as cell) {
           <i
             class="target-cell"
-            [style.transform]="cellTransform(cell, maskedGrid.units.unitX(), maskedGrid.units.unitY(), 8)"
+            [style.transform]="
+              cellTransform(
+                cell,
+                maskedGrid.units.unitX(),
+                maskedGrid.units.unitY(),
+                8
+              )
+            "
             [style.width.px]="cellSpanPx(cell.w, maskedGrid.units.unitX(), 8)"
             [style.height.px]="cellSpanPx(cell.h, maskedGrid.units.unitY(), 8)"
           ></i>
@@ -172,14 +185,13 @@ type CellRect = { x: number; y: number; w: number; h: number };
     .grid {
       border: 1px solid #ddd;
       border-radius: 10px;
-      background:
-        repeating-linear-gradient(
-          to right,
-          transparent 0,
-          transparent calc(100% / 12 - 1px),
-          #f0f0f0 calc(100% / 12 - 1px),
-          #f0f0f0 calc(100% / 12)
-        );
+      background: repeating-linear-gradient(
+        to right,
+        transparent 0,
+        transparent calc(100% / 12 - 1px),
+        #f0f0f0 calc(100% / 12 - 1px),
+        #f0f0f0 calc(100% / 12)
+      );
       min-height: 240px;
     }
     .widget {

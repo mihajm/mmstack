@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 // End-to-end outlet coverage with real httpResource + HttpTestingController.
 import { provideLocationMocks } from '@angular/common/testing';
 import { httpResource, provideHttpClient } from '@angular/common/http';
@@ -111,7 +110,9 @@ const flush = async (fixture: { detectChanges: () => void }) => {
 };
 
 describe('transition outlet integration (real httpResource)', () => {
-  afterEach(() => TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true }));
+  afterEach(() =>
+    TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true }),
+  );
 
   it('holds the current view until the incoming request settles, then swaps', async () => {
     const { fixture, container, router, http } = await setup();

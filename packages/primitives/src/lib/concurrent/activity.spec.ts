@@ -1,5 +1,10 @@
-/* eslint-disable @angular-eslint/component-selector   */
-import { Component, computed, inject, PLATFORM_ID, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  inject,
+  PLATFORM_ID,
+  signal,
+} from '@angular/core';
 import { render } from '@testing-library/angular';
 import { PAUSED_CONTEXT } from '../../../core/src/lib/concurrent/paused';
 import { MmActivity } from './activity';
@@ -54,7 +59,6 @@ describe('MmActivity (keep-alive)', () => {
     await flush(() => fixture.detectChanges());
 
     expect(Child.created).toBe(1);
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const child = Child.last!;
     child.src.set(7);
     await flush(() => fixture.detectChanges());
@@ -79,7 +83,6 @@ describe('MmActivity (keep-alive)', () => {
   it('pauses change detection while hidden (pull-based work suspends)', async () => {
     const { fixture } = await render(Host);
     await flush(() => fixture.detectChanges());
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const child = Child.last!;
 
     fixture.componentInstance.show.set(false);
@@ -118,7 +121,6 @@ describe('MmActivity (keep-alive)', () => {
     fixture.componentInstance.show.set(false);
     await flush(() => fixture.detectChanges());
     // CD is paused while hidden, so the rendered text is stale — read the signal directly.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(Child.last!.paused()).toBe(true);
 
     fixture.componentInstance.show.set(true);

@@ -427,7 +427,7 @@ describe('meshSync durable outbox — slot hand-off and isolation (W2)', () => {
           finish = () => {
             if (outcome === 'reject') reject(new Error('save failed'));
             else {
-              originalSet(key, value);
+              void originalSet(key, value);
               resolve();
             }
           };

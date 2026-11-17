@@ -28,29 +28,30 @@ import { DocSection } from '../../../layout/doc-section';
         <a mmLink="/docs/resource/query">&#64;mmstack/resource</a> query, it
         composes with <code>latest()</code> and <code>use()</code> and registers
         into transition scopes. Add <code>register: 'indicator'</code> and a
-        boundary above shows a busy state while the run is in flight, holding the
-        previous value.
+        boundary above shows a busy state while the run is in flight, holding
+        the previous value.
       </p>
 
       <docs-section title="The task" id="task">
         <p>
-          The task named in <code>&#123; worker, task &#125;</code> is a function
-          you exposed on the host with
-          <code>createWorkerHost(&#123; tasks &#125;)</code>. It runs on the same
-          worker that owns your stores, so a whole subsystem lives on one thread.
-          There is no <code>eval</code>, so nothing changes under a strict CSP.
+          The task named in <code>&#123; worker, task &#125;</code> is a
+          function you exposed on the host with
+          <code>createWorkerHost(&#123; tasks &#125;)</code>. It runs on the
+          same worker that owns your stores, so a whole subsystem lives on one
+          thread. There is no <code>eval</code>, so nothing changes under a
+          strict CSP.
         </p>
         <docs-code [code]="named" lang="ts" />
       </docs-section>
 
       <docs-section title="Latest wins, and holding the value" id="latest">
         <p>
-          When the input changes mid-run, the in-flight run is superseded and its
-          result discarded, so the value never regresses. By default the previous
-          value is held through the next run (<code>status</code> reports
-          <code>'reloading'</code>) rather than flashing empty, because a
-          <code>workerResource</code> is a derivation, not a one-shot fetch. Set
-          <code>keepPrevious: false</code> to clear instead.
+          When the input changes mid-run, the in-flight run is superseded and
+          its result discarded, so the value never regresses. By default the
+          previous value is held through the next run (<code>status</code>
+          reports <code>'reloading'</code>) rather than flashing empty, because
+          a <code>workerResource</code> is a derivation, not a one-shot fetch.
+          Set <code>keepPrevious: false</code> to clear instead.
         </p>
         <docs-code [code]="control" lang="ts" />
         <p>
@@ -73,8 +74,8 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Transferables" id="transfer">
         <p>
           For large binary payloads, <code>transfer</code> moves an
-          <code>ArrayBuffer</code> into the worker instead of cloning it, detached
-          at the sender. It applies to a task's input.
+          <code>ArrayBuffer</code> into the worker instead of cloning it,
+          detached at the sender. It applies to a task's input.
         </p>
         <docs-code [code]="transferCode" lang="ts" />
       </docs-section>

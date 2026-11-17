@@ -22,7 +22,9 @@ function localeProperty(obj: ObjectLiteralExpression, locale: string) {
   return obj.getProperties().find((p) => {
     if (!Node.isPropertyAssignment(p)) return false;
     const name = p.getNameNode();
-    const text = Node.isStringLiteral(name) ? name.getLiteralText() : name.getText();
+    const text = Node.isStringLiteral(name)
+      ? name.getLiteralText()
+      : name.getText();
     return text === locale;
   });
 }

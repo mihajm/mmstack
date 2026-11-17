@@ -70,13 +70,18 @@ class DotRegister {
     for (const [w, op] of this.best) {
       if (op.hlc > (this.water.get(w) ?? 0)) out.push(op);
     }
-    return out.sort((a, b) => (a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0));
+    return out.sort((a, b) =>
+      a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0,
+    );
   }
   /** the seed contract: ship register STATE (siblings + watermarks), not just the materialized value. */
   seedState(): { best: Map<string, Op>; water: Map<string, number> } {
     return { best: new Map(this.best), water: new Map(this.water) };
   }
-  static fromState(s: { best: Map<string, Op>; water: Map<string, number> }): DotRegister {
+  static fromState(s: {
+    best: Map<string, Op>;
+    water: Map<string, number>;
+  }): DotRegister {
     const r = new DotRegister();
     for (const [k, v] of s.best) r.best.set(k, v);
     for (const [k, v] of s.water) r.water.set(k, v);
@@ -85,7 +90,8 @@ class DotRegister {
   /** GC: drop superseded siblings + watermarks at/below the frontier (state bounding). */
   prune(frontier: number): void {
     for (const [w, op] of [...this.best]) {
-      if (op.hlc <= frontier && op.hlc <= (this.water.get(w) ?? 0)) this.best.delete(w);
+      if (op.hlc <= frontier && op.hlc <= (this.water.get(w) ?? 0))
+        this.best.delete(w);
     }
     for (const [w, h] of [...this.water]) {
       if (h <= frontier) this.water.delete(w); // the frontier globally subsumes anything below it
@@ -104,9 +110,13 @@ const byLWW = (a: Op, b: Op): number =>
 const byRank = (a: Op, b: Op): number =>
   (a.rank ?? 0) !== (b.rank ?? 0) ? (a.rank ?? 0) - (b.rank ?? 0) : byLWW(a, b);
 const byEpoch = (a: Op, b: Op): number =>
-  (a.epoch ?? 0) !== (b.epoch ?? 0) ? (a.epoch ?? 0) - (b.epoch ?? 0) : byLWW(a, b);
+  (a.epoch ?? 0) !== (b.epoch ?? 0)
+    ? (a.epoch ?? 0) - (b.epoch ?? 0)
+    : byLWW(a, b);
 const fold = (live: Op[], cmp: (a: Op, b: Op) => number): unknown =>
-  live.length ? live.reduce((a, b) => (cmp(a, b) >= 0 ? a : b)).value : undefined;
+  live.length
+    ? live.reduce((a, b) => (cmp(a, b) >= 0 ? a : b)).value
+    : undefined;
 
 // a generator: N writers each emit M ops with increasing hlc; each op cites a random subset of
 // previously-emitted dots → a random causal DAG (mix of causal successions and concurrency).
@@ -164,7 +174,8 @@ function genWellFormed(seed: number, writers: number, per: number): Op[] {
   return ops;
 }
 
-const sig = (ops: Op[]): string => JSON.stringify(ops.map((o) => [o.writer, o.hlc, o.value]));
+const sig = (ops: Op[]): string =>
+  JSON.stringify(ops.map((o) => [o.writer, o.hlc, o.value]));
 
 describe('PROOF: dot-citation register converges (live set = pure function of the op SET)', () => {
   it('any arrival order of the same op set yields the identical live-sibling set (50 seeds × many orders)', () => {
@@ -180,7 +191,12 @@ describe('PROOF: dot-citation register converges (live set = pure function of th
   it('is delivery-order-robust: a cite arriving BEFORE the op it kills still converges', () => {
     // op B cites A; deliver B (the cite) before A ever arrives → A must be born-dead.
     const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
-    const B: Op = { writer: 'b', hlc: 7, value: 'B', cites: [{ writer: 'a', hlc: 5 }] };
+    const B: Op = {
+      writer: 'b',
+      hlc: 7,
+      value: 'B',
+      cites: [{ writer: 'a', hlc: 5 }],
+    };
     expect(sig(liveFrom([A, B], 1))).toBe(sig(liveFrom([B, A], 1)));
     // and A is superseded either way → only B live
     const live = liveFrom([B, A], 3);
@@ -206,7 +222,9 @@ describe('PROOF: any fold over the live set is order-independent → materialize
         const ops = genOps(seed * 31, 3, 5);
         const base = JSON.stringify(fold(liveFrom(ops, 1), cmp));
         for (let order = 2; order <= 12; order++) {
-          expect(JSON.stringify(fold(liveFrom(ops, order + seed * 7), cmp))).toBe(base);
+          expect(
+            JSON.stringify(fold(liveFrom(ops, order + seed * 7), cmp)),
+          ).toBe(base);
         }
       }
     });
@@ -217,7 +235,12 @@ describe('PROOF (impossibility): HLC + prev-value CANNOT identify siblings; cite
   it('identical (writer, hlc, value) stamps + different cites → different TRUTH', () => {
     const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
     // Scenario 1: B observed A and overwrote it (cites A) → B supersedes A → only B live.
-    const bCausal: Op = { writer: 'b', hlc: 7, value: 'B', cites: [{ writer: 'a', hlc: 5 }] };
+    const bCausal: Op = {
+      writer: 'b',
+      hlc: 7,
+      value: 'B',
+      cites: [{ writer: 'a', hlc: 5 }],
+    };
     // Scenario 2: identical B stamp, but B never saw A (concurrent) → both live.
     const bConcurrent: Op = { writer: 'b', hlc: 7, value: 'B', cites: [] };
 
@@ -228,7 +251,10 @@ describe('PROOF (impossibility): HLC + prev-value CANNOT identify siblings; cite
     expect(concurrent).toEqual(['a', 'b']); // both live
     // The (writer, hlc) stamps are byte-identical across the two scenarios:
     expect([A.writer, A.hlc, bCausal.writer, bCausal.hlc]).toEqual([
-      A.writer, A.hlc, bConcurrent.writer, bConcurrent.hlc,
+      A.writer,
+      A.hlc,
+      bConcurrent.writer,
+      bConcurrent.hlc,
     ]);
     // Yet the truth differs → no function of the stamps alone can be correct. QED.
     expect(causal).not.toEqual(concurrent);
@@ -246,7 +272,9 @@ describe('PROOF (trap): naive "rank only in the concurrent branch" single-winner
         this.winner = op;
         return;
       }
-      const succeeds = op.cites.some((c) => c.writer === cur.writer && c.hlc === cur.hlc);
+      const succeeds = op.cites.some(
+        (c) => c.writer === cur.writer && c.hlc === cur.hlc,
+      );
       this.winner = succeeds ? op : byRank(op, cur) >= 0 ? op : cur;
     }
     value(): unknown {
@@ -261,7 +289,13 @@ describe('PROOF (trap): naive "rank only in the concurrent branch" single-winner
 
   it('the A≻C≻B≻A cycle: the SAME op set converges to different values by arrival order', () => {
     const A: Op = { writer: 'A', hlc: 1, value: 'a', cites: [], rank: 10 }; // high rank
-    const B: Op = { writer: 'B', hlc: 2, value: 'b', cites: [{ writer: 'A', hlc: 1 }], rank: 1 }; // built on A
+    const B: Op = {
+      writer: 'B',
+      hlc: 2,
+      value: 'b',
+      cites: [{ writer: 'A', hlc: 1 }],
+      rank: 1,
+    }; // built on A
     const C: Op = { writer: 'C', hlc: 3, value: 'c', cites: [], rank: 1 }; // concurrent, low rank
 
     expect(run([A, B, C])).toBe('c'); // A→B(succession)→C(concurrent, hlc)
@@ -273,11 +307,25 @@ describe('PROOF (trap): naive "rank only in the concurrent branch" single-winner
 
 describe('PROOF: static rank tier vs dynamic epoch — precise behavior (refines "bricks forever")', () => {
   const base: Dot = { writer: 'root', hlc: 0 };
-  const A: Op = { writer: 'admin', hlc: 5, value: 'A', cites: [base], rank: 10, epoch: 1 };
+  const A: Op = {
+    writer: 'admin',
+    hlc: 5,
+    value: 'A',
+    cites: [base],
+    rank: 10,
+    epoch: 1,
+  };
 
   it('dot-citation: a CAUSAL low-rank write beats a high-rank value it superseded (NOT bricked)', () => {
     // a user observes A and overwrites → cites A → A superseded → user wins regardless of rank.
-    const user: Op = { writer: 'u', hlc: 8, value: 'U', cites: [{ writer: 'admin', hlc: 5 }], rank: 1, epoch: 1 };
+    const user: Op = {
+      writer: 'u',
+      hlc: 8,
+      value: 'U',
+      cites: [{ writer: 'admin', hlc: 5 }],
+      rank: 1,
+      epoch: 1,
+    };
     const live = liveFrom([A, user], 1);
     expect(live.map((o) => o.writer)).toEqual(['u']); // A gone
     expect(fold(live, byRank)).toBe('U'); // low-rank causal write wins → the field IS editable
@@ -285,42 +333,123 @@ describe('PROOF: static rank tier vs dynamic epoch — precise behavior (refines
 
   it('static rank CANNOT de-escalate: a low-rank "release" loses to a CONCURRENT higher-rank op', () => {
     // admin releases with a low rank (cites A), but a concurrent stale mid-rank op resurrects over it.
-    const release: Op = { writer: 'admin', hlc: 10, value: 'RELEASED', cites: [{ writer: 'admin', hlc: 5 }], rank: 1, epoch: 1 };
-    const stale: Op = { writer: 's', hlc: 6, value: 'STALE', cites: [base], rank: 5, epoch: 1 };
+    const release: Op = {
+      writer: 'admin',
+      hlc: 10,
+      value: 'RELEASED',
+      cites: [{ writer: 'admin', hlc: 5 }],
+      rank: 1,
+      epoch: 1,
+    };
+    const stale: Op = {
+      writer: 's',
+      hlc: 6,
+      value: 'STALE',
+      cites: [base],
+      rank: 5,
+      epoch: 1,
+    };
     const live = liveFrom([A, release, stale], 1);
     // release (rank 1) and stale (rank 5) are concurrent; static rank → stale wins. Release failed.
     expect(fold(live, byRank)).toBe('STALE');
   });
 
   it('dynamic epoch DE-ESCALATES cleanly: the release bumps epoch and wins the same conflict', () => {
-    const release: Op = { writer: 'admin', hlc: 10, value: 'RELEASED', cites: [{ writer: 'admin', hlc: 5 }], rank: 1, epoch: 2 };
-    const stale: Op = { writer: 's', hlc: 6, value: 'STALE', cites: [base], rank: 5, epoch: 1 };
+    const release: Op = {
+      writer: 'admin',
+      hlc: 10,
+      value: 'RELEASED',
+      cites: [{ writer: 'admin', hlc: 5 }],
+      rank: 1,
+      epoch: 2,
+    };
+    const stale: Op = {
+      writer: 's',
+      hlc: 6,
+      value: 'STALE',
+      cites: [base],
+      rank: 5,
+      epoch: 1,
+    };
     const live = liveFrom([A, release, stale], 1);
     expect(fold(live, byEpoch)).toBe('RELEASED'); // epoch 2 > epoch 1 → release wins
     // and a later normal write that adopts the new epoch competes normally (owner NOT permanently privileged)
-    const normal: Op = { writer: 'u', hlc: 12, value: 'NORMAL', cites: [{ writer: 'admin', hlc: 10 }], rank: 0, epoch: 2 };
-    expect(fold(liveFrom([A, release, stale, normal], 1), byEpoch)).toBe('NORMAL');
+    const normal: Op = {
+      writer: 'u',
+      hlc: 12,
+      value: 'NORMAL',
+      cites: [{ writer: 'admin', hlc: 10 }],
+      rank: 0,
+      epoch: 2,
+    };
+    expect(fold(liveFrom([A, release, stale, normal], 1), byEpoch)).toBe(
+      'NORMAL',
+    );
   });
 
   it('epoch: an owner "veto" is just the fold — writing at epoch+1 deterministically wins the conflict', () => {
     // user writes concurrently (epoch 1); owner vetoes by writing at epoch 2 → wins the fold, no special case.
-    const userWrite: Op = { writer: 'u', hlc: 6, value: 'BAD', cites: [base], rank: 0, epoch: 1 };
-    const veto: Op = { writer: 'admin', hlc: 7, value: 'CORRECTED', cites: [base], rank: 0, epoch: 2 };
+    const userWrite: Op = {
+      writer: 'u',
+      hlc: 6,
+      value: 'BAD',
+      cites: [base],
+      rank: 0,
+      epoch: 1,
+    };
+    const veto: Op = {
+      writer: 'admin',
+      hlc: 7,
+      value: 'CORRECTED',
+      cites: [base],
+      rank: 0,
+      epoch: 2,
+    };
     expect(fold(liveFrom([userWrite, veto], 1), byEpoch)).toBe('CORRECTED');
   });
 
   it('HOLE 3 (Fable 2026-07-07): a stale OLD-HLC uncited high-rank op resurrects and wins the rank fold → value jumps BACKWARD', () => {
     // the field moved on (current value, high hlc, low rank); a partitioned high-rank device resurfaces an
     // OLD op — cites nothing recent, nothing cites it → live sibling → wins by rank. Not just concurrent-in-time.
-    const current: Op = { writer: 'u', hlc: 100, value: 'CURRENT', cites: [{ writer: 'admin', hlc: 5 }], rank: 0, epoch: 1 };
-    const staleHighRank: Op = { writer: 'x', hlc: 6, value: 'OLD', cites: [base], rank: 10, epoch: 1 };
+    const current: Op = {
+      writer: 'u',
+      hlc: 100,
+      value: 'CURRENT',
+      cites: [{ writer: 'admin', hlc: 5 }],
+      rank: 0,
+      epoch: 1,
+    };
+    const staleHighRank: Op = {
+      writer: 'x',
+      hlc: 6,
+      value: 'OLD',
+      cites: [base],
+      rank: 10,
+      epoch: 1,
+    };
     expect(fold(liveFrom([A, current, staleHighRank], 1), byRank)).toBe('OLD'); // jumped backward — the hazard
   });
 
   it('epoch CLOSES hole 3: a bump above the stale op keeps the current value regardless of the stale rank', () => {
-    const current: Op = { writer: 'u', hlc: 100, value: 'CURRENT', cites: [{ writer: 'admin', hlc: 5 }], rank: 0, epoch: 2 };
-    const staleHighRank: Op = { writer: 'x', hlc: 6, value: 'OLD', cites: [base], rank: 10, epoch: 1 };
-    expect(fold(liveFrom([A, current, staleHighRank], 1), byEpoch)).toBe('CURRENT'); // epoch 2 > epoch 1
+    const current: Op = {
+      writer: 'u',
+      hlc: 100,
+      value: 'CURRENT',
+      cites: [{ writer: 'admin', hlc: 5 }],
+      rank: 0,
+      epoch: 2,
+    };
+    const staleHighRank: Op = {
+      writer: 'x',
+      hlc: 6,
+      value: 'OLD',
+      cites: [base],
+      rank: 10,
+      epoch: 1,
+    };
+    expect(fold(liveFrom([A, current, staleHighRank], 1), byEpoch)).toBe(
+      'CURRENT',
+    ); // epoch 2 > epoch 1
   });
 });
 
@@ -341,7 +470,12 @@ describe('PROOF: seed contract — STATE seed converges; VALUE-only seed diverge
 
   it('VALUE-only seed (watermarks dropped) diverges: a late below-seed op resurrects on the joiner', () => {
     const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
-    const B: Op = { writer: 'b', hlc: 7, value: 'B', cites: [{ writer: 'a', hlc: 5 }] }; // supersedes A
+    const B: Op = {
+      writer: 'b',
+      hlc: 7,
+      value: 'B',
+      cites: [{ writer: 'a', hlc: 5 }],
+    }; // supersedes A
     const peer = liveFrom([A, B], 1).map((o) => o.writer);
     expect(peer).toEqual(['b']); // established: A superseded
 
@@ -349,7 +483,10 @@ describe('PROOF: seed contract — STATE seed converges; VALUE-only seed diverge
     const joiner = new DotRegister();
     joiner.ingest({ writer: 'b', hlc: 7, value: 'B', cites: [] }); // the folded value, as a synthetic op
     joiner.ingest(A); // a late straggler of the already-superseded A
-    const j = joiner.live().map((o) => o.writer).sort();
+    const j = joiner
+      .live()
+      .map((o) => o.writer)
+      .sort();
     expect(j).toEqual(['a', 'b']); // A RESURRECTED → diverges from the peer's ['b']. QED: ship STATE, not value.
     expect(j).not.toEqual(peer);
   });
@@ -369,7 +506,12 @@ describe('PROOF: GC/prune — fold-equivalence + below-frontier admission preven
 
   it('admission REJECTS below-frontier stragglers → no post-prune resurrection (T1(7) via GC)', () => {
     const A: Op = { writer: 'a', hlc: 5, value: 'A', cites: [] };
-    const B: Op = { writer: 'b', hlc: 20, value: 'B', cites: [{ writer: 'a', hlc: 5 }] };
+    const B: Op = {
+      writer: 'b',
+      hlc: 20,
+      value: 'B',
+      cites: [{ writer: 'a', hlc: 5 }],
+    };
     const r = new DotRegister();
     r.ingest(A);
     r.ingest(B);
@@ -377,7 +519,12 @@ describe('PROOF: GC/prune — fold-equivalence + below-frontier admission preven
 
     const naive = DotRegister.fromState(r.seedState());
     naive.ingest(A); // no admission gate → below-frontier straggler resurrects
-    expect(naive.live().map((o) => o.writer).sort()).toEqual(['a', 'b']); // the hazard
+    expect(
+      naive
+        .live()
+        .map((o) => o.writer)
+        .sort(),
+    ).toEqual(['a', 'b']); // the hazard
 
     const guarded = DotRegister.fromState(r.seedState());
     expect(guarded.admit(A, 10)).toBe(false); // admission rejects hlc 5 ≤ frontier 10
@@ -399,7 +546,9 @@ describe('PROOF: epoch monotone-at-read + concurrent-bump convergence (register 
         for (const op of shuffle(ops, order + seed * 5)) {
           r.ingest(op);
           deliveredMax = Math.max(deliveredMax, op.epoch ?? 0);
-          const winner = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y));
+          const winner = r
+            .live()
+            .reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y));
           expect(winner.epoch ?? 0).toBe(deliveredMax); // exposed == running max → monotone by construction
         }
       }
@@ -409,21 +558,43 @@ describe('PROOF: epoch monotone-at-read + concurrent-bump convergence (register 
   it('ILL-FORMED emission BREAKS monotone → the adopt-highest emission rule is LOAD-BEARING (not optional)', () => {
     // a causal successor that CITES a high-epoch op but carries a LOWER epoch supersedes it → exposed drops.
     const B: Op = { writer: 'b', hlc: 5, value: 'B', cites: [], epoch: 3 };
-    const C: Op = { writer: 'c', hlc: 6, value: 'C', cites: [{ writer: 'b', hlc: 5 }], epoch: 2 }; // ill-formed
+    const C: Op = {
+      writer: 'c',
+      hlc: 6,
+      value: 'C',
+      cites: [{ writer: 'b', hlc: 5 }],
+      epoch: 2,
+    }; // ill-formed
     const r = new DotRegister();
     r.ingest(B);
-    const before = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
+    const before =
+      r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
     r.ingest(C); // supersedes B → live {C}
-    const after = r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
+    const after =
+      r.live().reduce((x, y) => (byEpoch(x, y) >= 0 ? x : y)).epoch ?? 0;
     expect(before).toBe(3);
     expect(after).toBe(2);
     expect(after).toBeLessThan(before); // monotone violated → emission MUST adopt the highest observed epoch
   });
 
   it('two concurrent AUTHORIZED bumps to the same epoch N converge deterministically', () => {
-    const b1: Op = { writer: 'admin1', hlc: 5, value: 'X', cites: [], epoch: 2 };
-    const b2: Op = { writer: 'admin2', hlc: 6, value: 'Y', cites: [], epoch: 2 };
-    expect(fold(liveFrom([b1, b2], 1), byEpoch)).toBe(fold(liveFrom([b1, b2], 2), byEpoch));
+    const b1: Op = {
+      writer: 'admin1',
+      hlc: 5,
+      value: 'X',
+      cites: [],
+      epoch: 2,
+    };
+    const b2: Op = {
+      writer: 'admin2',
+      hlc: 6,
+      value: 'Y',
+      cites: [],
+      epoch: 2,
+    };
+    expect(fold(liveFrom([b1, b2], 1), byEpoch)).toBe(
+      fold(liveFrom([b1, b2], 2), byEpoch),
+    );
   });
 });
 
@@ -495,7 +666,8 @@ const byTree = (a: PathOp, b: PathOp): number =>
 // container is DROPPED (the register stays intact and resurfaces if the shape is restored).
 const graft = (tree: unknown, path: readonly string[], v: unknown): unknown => {
   if (path.length === 0) return v === ABSENT ? undefined : v;
-  if (typeof tree !== 'object' || tree === null || Array.isArray(tree)) return tree; // drop-graft
+  if (typeof tree !== 'object' || tree === null || Array.isArray(tree))
+    return tree; // drop-graft
   const obj = tree as Record<string, unknown>;
   const head = path[0];
   if (path.length === 1) {
@@ -528,7 +700,9 @@ class TreeReplica {
   }
   winnerAt(path: readonly string[]): PathOp | undefined {
     const live = this.liveAt(path);
-    return live.length ? live.reduce((x, y) => (byTree(x, y) >= 0 ? x : y)) : undefined;
+    return live.length
+      ? live.reduce((x, y) => (byTree(x, y) >= 0 ? x : y))
+      : undefined;
   }
   /** deepest-live-wins: apply winners shallow→deep; delete grafts key-absent; clear ABSTAINS. */
   materialize(base: unknown = {}): unknown {
@@ -539,16 +713,21 @@ class TreeReplica {
       if (w && w.kind !== 'clear') entries.push({ path, key, w });
     }
     entries.sort(
-      (a, b) => a.path.length - b.path.length || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+      (a, b) =>
+        a.path.length - b.path.length ||
+        (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
     );
     let tree = base;
-    for (const e of entries) tree = graft(tree, e.path, e.w.kind === 'delete' ? ABSENT : e.w.value);
+    for (const e of entries)
+      tree = graft(tree, e.path, e.w.kind === 'delete' ? ABSENT : e.w.value);
     return tree;
   }
 }
-const matSig = (r: TreeReplica): string => JSON.stringify({ root: r.materialize() });
+const matSig = (r: TreeReplica): string =>
+  JSON.stringify({ root: r.materialize() });
 
-const dotsOf = (ops: readonly PathOp[]): Dot[] => ops.map((o) => ({ writer: o.writer, hlc: o.hlc }));
+const dotsOf = (ops: readonly PathOp[]): Dot[] =>
+  ops.map((o) => ({ writer: o.writer, hlc: o.hlc }));
 // max observed epoch at a path (the emitting replica has applied its own writes, so
 // own-prior-at-path is included in "observed" — the #20 emission floor holds by construction here)
 const epochAt = (rep: TreeReplica, path: readonly string[]): number =>
@@ -577,7 +756,8 @@ function subtreeGroup(
       epoch: epochAt(rep, path) + (bump ? 1 : 0),
     },
   ];
-  const isDesc = (rk: string): boolean => (k === '' ? rk !== '' : rk.startsWith(k + PSEP));
+  const isDesc = (rk: string): boolean =>
+    k === '' ? rk !== '' : rk.startsWith(k + PSEP);
   for (const rk of [...rep.regs.keys()].sort()) {
     if (!isDesc(rk)) continue;
     const dpath = rk.split(PSEP);
@@ -621,13 +801,37 @@ function genTreeOps(seed: number, rounds: number): PathOp[] {
     const roll = r();
     let group: PathOp[];
     if (roll < 0.18) {
-      group = subtreeGroup(world, 'set', path, writer, hlc, { v: `${writer}:${hlc}` }, r() < 0.3);
+      group = subtreeGroup(
+        world,
+        'set',
+        path,
+        writer,
+        hlc,
+        { v: `${writer}:${hlc}` },
+        r() < 0.3,
+      );
     } else if (roll < 0.28) {
-      group = subtreeGroup(world, 'delete', path, writer, hlc, undefined, r() < 0.3);
+      group = subtreeGroup(
+        world,
+        'delete',
+        path,
+        writer,
+        hlc,
+        undefined,
+        r() < 0.3,
+      );
     } else {
       const cites = r() < 0.7 ? dotsOf(world.liveAt(path)) : []; // 30%: never saw the path → concurrent
       group = [
-        { writer, hlc, path, kind: 'set', value: `${writer}:${hlc}`, cites, epoch: epochAt(world, path) },
+        {
+          writer,
+          hlc,
+          path,
+          kind: 'set',
+          value: `${writer}:${hlc}`,
+          cites,
+          epoch: epochAt(world, path),
+        },
       ];
     }
     world.ingestAll(group);
@@ -666,12 +870,22 @@ describe('PROOF §5(a): TREE materialization = pure function of the delivered op
 describe('PROOF §5(b)+(d): subtree replace vs CONCURRENT descendant edit', () => {
   // world: settings seeded, theme edited (observed), theme edited AGAIN + subtree replaced (concurrent)
   const seed1: PathOp = {
-    writer: 'w0', hlc: 1, path: ['settings'], kind: 'set',
-    value: { theme: 'old', lang: 'en' }, cites: [], epoch: 1,
+    writer: 'w0',
+    hlc: 1,
+    path: ['settings'],
+    kind: 'set',
+    value: { theme: 'old', lang: 'en' },
+    cites: [],
+    epoch: 1,
   };
   const editOld: PathOp = {
-    writer: 'w1', hlc: 2, path: ['settings', 'theme'], kind: 'set',
-    value: 'w1-old', cites: [], epoch: 1,
+    writer: 'w1',
+    hlc: 2,
+    path: ['settings', 'theme'],
+    kind: 'set',
+    value: 'w1-old',
+    cites: [],
+    epoch: 1,
   };
   const observedView = (): TreeReplica => {
     const v = new TreeReplica();
@@ -680,36 +894,62 @@ describe('PROOF §5(b)+(d): subtree replace vs CONCURRENT descendant edit', () =
   };
   // w1's SECOND edit — concurrent with the replace (the replace never observed it)
   const editNew: PathOp = {
-    writer: 'w1', hlc: 7, path: ['settings', 'theme'], kind: 'set',
-    value: 'w1-new', cites: [{ writer: 'w1', hlc: 2 }], epoch: 1,
+    writer: 'w1',
+    hlc: 7,
+    path: ['settings', 'theme'],
+    kind: 'set',
+    value: 'w1-new',
+    cites: [{ writer: 'w1', hlc: 2 }],
+    epoch: 1,
   };
   // w3's LOW-hlc concurrent edit (hlc 4 < the replace's 6) — proves survival is CATEGORICAL, not an hlc race
   const editLow: PathOp = {
-    writer: 'w3', hlc: 4, path: ['settings', 'theme'], kind: 'set',
-    value: 'w3-low', cites: [{ writer: 'w1', hlc: 2 }], epoch: 1,
+    writer: 'w3',
+    hlc: 4,
+    path: ['settings', 'theme'],
+    kind: 'set',
+    value: 'w3-low',
+    cites: [{ writer: 'w1', hlc: 2 }],
+    epoch: 1,
   };
 
   it('UN-BUMPED replace: the concurrent edit survives — "new settings, your theme" (both orders)', () => {
-    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, { theme: 'new', extra: 1 });
+    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, {
+      theme: 'new',
+      extra: 1,
+    });
     expect(group.some((o) => o.kind === 'clear')).toBe(true); // the observed theme register IS cleared
     const forward = new TreeReplica();
     forward.ingestAll([seed1, editOld, ...group, editNew]); // replace lands, edit arrives LATE (§5(d))
     const reverse = new TreeReplica();
     reverse.ingestAll([editNew, ...group, editOld, seed1]);
     expect(matSig(forward)).toBe(matSig(reverse));
-    expect(forward.materialize()).toEqual({ settings: { theme: 'w1-new', extra: 1 } });
+    expect(forward.materialize()).toEqual({
+      settings: { theme: 'w1-new', extra: 1 },
+    });
   });
 
   it('survival is CATEGORICAL (kind-class), not an hlc race: a LOWER-hlc concurrent edit also survives', () => {
-    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, { theme: 'new', extra: 1 });
+    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, {
+      theme: 'new',
+      extra: 1,
+    });
     const rep = new TreeReplica();
     rep.ingestAll([seed1, editOld, ...group, editLow]);
-    expect(rep.materialize()).toEqual({ settings: { theme: 'w3-low', extra: 1 } });
+    expect(rep.materialize()).toEqual({
+      settings: { theme: 'w3-low', extra: 1 },
+    });
   });
 
   it('EPOCH-BUMPED replace CLEARS the concurrent edit — the owner subtree veto, same mechanic', () => {
     const group = subtreeGroup(
-      observedView(), 'set', ['settings'], 'w2', 6, { theme: 'new', extra: 1 }, true,
+      observedView(),
+      'set',
+      ['settings'],
+      'w2',
+      6,
+      { theme: 'new', extra: 1 },
+      true,
     );
     const rep = new TreeReplica();
     rep.ingestAll(shuffle([seed1, editOld, ...group, editNew], 3));
@@ -717,7 +957,10 @@ describe('PROOF §5(b)+(d): subtree replace vs CONCURRENT descendant edit', () =
   });
 
   it('an UNCONTENDED replace keeps its own fields intact (clear abstains; nothing erased)', () => {
-    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, { theme: 'new', extra: 1 });
+    const group = subtreeGroup(observedView(), 'set', ['settings'], 'w2', 6, {
+      theme: 'new',
+      extra: 1,
+    });
     const rep = new TreeReplica();
     rep.ingestAll([seed1, editOld, ...group]);
     expect(rep.materialize()).toEqual({ settings: { theme: 'new', extra: 1 } });
@@ -726,30 +969,61 @@ describe('PROOF §5(b)+(d): subtree replace vs CONCURRENT descendant edit', () =
 
 describe('PROOF §5 (pinned counterexamples): why the group must emit CLEAR, not DELETE', () => {
   const seed1: PathOp = {
-    writer: 'w0', hlc: 1, path: ['settings'], kind: 'set',
-    value: { theme: 'old' }, cites: [], epoch: 1,
+    writer: 'w0',
+    hlc: 1,
+    path: ['settings'],
+    kind: 'set',
+    value: { theme: 'old' },
+    cites: [],
+    epoch: 1,
   };
   const editOld: PathOp = {
-    writer: 'w1', hlc: 2, path: ['settings', 'theme'], kind: 'set',
-    value: 'w1-old', cites: [], epoch: 1,
+    writer: 'w1',
+    hlc: 2,
+    path: ['settings', 'theme'],
+    kind: 'set',
+    value: 'w1-old',
+    cites: [],
+    epoch: 1,
   };
-  const deleteGroup = (writer: string, hlc: number, value: unknown): PathOp[] => [
+  const deleteGroup = (
+    writer: string,
+    hlc: number,
+    value: unknown,
+  ): PathOp[] => [
     // the WRONG first-draft emission: per-path DELETES of observed descendant registers
-    { writer, hlc, path: ['settings'], kind: 'set', value, cites: [{ writer: 'w0', hlc: 1 }], epoch: 1 },
-    { writer, hlc, path: ['settings', 'theme'], kind: 'delete', value: undefined, cites: [{ writer: 'w1', hlc: 2 }], epoch: 1 },
+    {
+      writer,
+      hlc,
+      path: ['settings'],
+      kind: 'set',
+      value,
+      cites: [{ writer: 'w0', hlc: 1 }],
+      epoch: 1,
+    },
+    {
+      writer,
+      hlc,
+      path: ['settings', 'theme'],
+      kind: 'delete',
+      value: undefined,
+      cites: [{ writer: 'w1', hlc: 2 }],
+      epoch: 1,
+    },
   ];
 
-  it('DELETE-draft erases the replace\'s OWN fresh key even uncontended (the flaw that forced clear)', () => {
+  it("DELETE-draft erases the replace's OWN fresh key even uncontended (the flaw that forced clear)", () => {
     const rep = new TreeReplica();
     rep.ingestAll([seed1, editOld, ...deleteGroup('w2', 6, { theme: 'new' })]);
     // the winning tombstone at ['settings','theme'] grafts "key absent" ON TOP of the fresh value:
     expect(rep.materialize()).toEqual({ settings: {} }); // theme GONE — the replace deleted its own field
   });
 
-  it('DELETE-draft under TWO concurrent replaces erases the fold-winner\'s key (dot-matching cannot fix it)', () => {
+  it("DELETE-draft under TWO concurrent replaces erases the fold-winner's key (dot-matching cannot fix it)", () => {
     const rep = new TreeReplica();
     rep.ingestAll([
-      seed1, editOld,
+      seed1,
+      editOld,
       ...deleteGroup('w2', 6, { theme: 'from-w2' }),
       ...deleteGroup('w3', 8, { theme: 'from-w3' }), // w3 wins ['settings'] by hlc
     ]);
@@ -760,8 +1034,12 @@ describe('PROOF §5 (pinned counterexamples): why the group must emit CLEAR, not
   it('CLEAR-group handles the same two-concurrent-replaces case correctly', () => {
     const view = new TreeReplica();
     view.ingestAll([seed1, editOld]);
-    const g2 = subtreeGroup(view, 'set', ['settings'], 'w2', 6, { theme: 'from-w2' });
-    const g3 = subtreeGroup(view, 'set', ['settings'], 'w3', 8, { theme: 'from-w3' });
+    const g2 = subtreeGroup(view, 'set', ['settings'], 'w2', 6, {
+      theme: 'from-w2',
+    });
+    const g3 = subtreeGroup(view, 'set', ['settings'], 'w3', 8, {
+      theme: 'from-w3',
+    });
     for (let order = 1; order <= 6; order++) {
       const rep = new TreeReplica();
       rep.ingestAll(shuffle([seed1, editOld, ...g2, ...g3], order));
@@ -772,9 +1050,33 @@ describe('PROOF §5 (pinned counterexamples): why the group must emit CLEAR, not
 
 describe('PROOF §6: deletes — register semantics, subtree delete, epoch floor across revival', () => {
   it('3 concurrent set/delete/set to one path converge under every order (the Tier-3 divergence class)', () => {
-    const s1: PathOp = { writer: 'a', hlc: 5, path: ['k'], kind: 'set', value: 'A', cites: [], epoch: 1 };
-    const del: PathOp = { writer: 'b', hlc: 6, path: ['k'], kind: 'delete', value: undefined, cites: [], epoch: 1 };
-    const s2: PathOp = { writer: 'c', hlc: 7, path: ['k'], kind: 'set', value: 'C', cites: [], epoch: 1 };
+    const s1: PathOp = {
+      writer: 'a',
+      hlc: 5,
+      path: ['k'],
+      kind: 'set',
+      value: 'A',
+      cites: [],
+      epoch: 1,
+    };
+    const del: PathOp = {
+      writer: 'b',
+      hlc: 6,
+      path: ['k'],
+      kind: 'delete',
+      value: undefined,
+      cites: [],
+      epoch: 1,
+    };
+    const s2: PathOp = {
+      writer: 'c',
+      hlc: 7,
+      path: ['k'],
+      kind: 'set',
+      value: 'C',
+      cites: [],
+      epoch: 1,
+    };
     const first = new TreeReplica();
     first.ingestAll([s1, del, s2]);
     for (let order = 2; order <= 6; order++) {
@@ -787,26 +1089,62 @@ describe('PROOF §6: deletes — register semantics, subtree delete, epoch floor
 
   it('subtree DELETE: concurrent edit under the deleted parent DROPS at materialization, REVIVES on re-create', () => {
     const world = new TreeReplica();
-    const seedA: PathOp = { writer: 'w0', hlc: 1, path: ['a'], kind: 'set', value: { x: 1 }, cites: [], epoch: 1 };
+    const seedA: PathOp = {
+      writer: 'w0',
+      hlc: 1,
+      path: ['a'],
+      kind: 'set',
+      value: { x: 1 },
+      cites: [],
+      epoch: 1,
+    };
     world.ingest(seedA);
     const group = subtreeGroup(world, 'delete', ['a'], 'w1', 5, undefined);
     const editUnder: PathOp = {
-      writer: 'w2', hlc: 6, path: ['a', 'x'], kind: 'set', value: 'survivor', cites: [], epoch: 1,
+      writer: 'w2',
+      hlc: 6,
+      path: ['a', 'x'],
+      kind: 'set',
+      value: 'survivor',
+      cites: [],
+      epoch: 1,
     };
     const rep = new TreeReplica();
     rep.ingestAll([seedA, ...group, editUnder]);
     expect(rep.materialize()).toEqual({}); // 'a' deleted; the edit's graft has no container → dropped
     // re-create 'a' as a container (citing the tombstone) → the live edit RESURFACES:
     const recreate: PathOp = {
-      writer: 'w3', hlc: 9, path: ['a'], kind: 'set', value: {}, cites: [{ writer: 'w1', hlc: 5 }], epoch: 1,
+      writer: 'w3',
+      hlc: 9,
+      path: ['a'],
+      kind: 'set',
+      value: {},
+      cites: [{ writer: 'w1', hlc: 5 }],
+      epoch: 1,
     };
     rep.ingest(recreate);
     expect(rep.materialize()).toEqual({ a: { x: 'survivor' } });
   });
 
   it('type-change graft determinism: an edit under a SCALAR parent drops the same way in every order', () => {
-    const scalar: PathOp = { writer: 'w0', hlc: 5, path: ['a'], kind: 'set', value: 42, cites: [], epoch: 1 };
-    const under: PathOp = { writer: 'w1', hlc: 6, path: ['a', 'x'], kind: 'set', value: 'lost', cites: [], epoch: 1 };
+    const scalar: PathOp = {
+      writer: 'w0',
+      hlc: 5,
+      path: ['a'],
+      kind: 'set',
+      value: 42,
+      cites: [],
+      epoch: 1,
+    };
+    const under: PathOp = {
+      writer: 'w1',
+      hlc: 6,
+      path: ['a', 'x'],
+      kind: 'set',
+      value: 'lost',
+      cites: [],
+      epoch: 1,
+    };
     const fwd = new TreeReplica();
     fwd.ingestAll([scalar, under]);
     const rev = new TreeReplica();
@@ -818,24 +1156,48 @@ describe('PROOF §6: deletes — register semantics, subtree delete, epoch floor
   it('the per-path epoch floor SURVIVES tombstone → re-create (discharges the §1 corollary)', () => {
     const rep = new TreeReplica();
     const authoritative: PathOp = {
-      writer: 'owner', hlc: 5, path: ['k'], kind: 'set', value: 'SETTLED', cites: [], epoch: 3,
+      writer: 'owner',
+      hlc: 5,
+      path: ['k'],
+      kind: 'set',
+      value: 'SETTLED',
+      cites: [],
+      epoch: 3,
     };
     rep.ingest(authoritative);
     // the delete CITES the epoch-3 op → emission adopts max(cited, own-prior) = 3:
     const del: PathOp = {
-      writer: 'u', hlc: 8, path: ['k'], kind: 'delete', value: undefined,
-      cites: [{ writer: 'owner', hlc: 5 }], epoch: epochAt(rep, ['k']),
+      writer: 'u',
+      hlc: 8,
+      path: ['k'],
+      kind: 'delete',
+      value: undefined,
+      cites: [{ writer: 'owner', hlc: 5 }],
+      epoch: epochAt(rep, ['k']),
     };
     rep.ingest(del);
     expect(rep.winnerAt(['k'])?.epoch).toBe(3); // the tombstone carries the floor
     // re-create cites the tombstone → adopts 3 → a stale prior-epoch straggler can NEVER outrank it:
     const recreate: PathOp = {
-      writer: 'v', hlc: 10, path: ['k'], kind: 'set', value: 'REBORN',
-      cites: [{ writer: 'u', hlc: 8 }], epoch: epochAt(rep, ['k']),
+      writer: 'v',
+      hlc: 10,
+      path: ['k'],
+      kind: 'set',
+      value: 'REBORN',
+      cites: [{ writer: 'u', hlc: 8 }],
+      epoch: epochAt(rep, ['k']),
     };
     rep.ingest(recreate);
     expect(rep.winnerAt(['k'])?.epoch).toBe(3); // floor preserved across revival
-    const stale: PathOp = { writer: 's', hlc: 2, path: ['k'], kind: 'set', value: 'OLD', cites: [], epoch: 2 };
+    const stale: PathOp = {
+      writer: 's',
+      hlc: 2,
+      path: ['k'],
+      kind: 'set',
+      value: 'OLD',
+      cites: [],
+      epoch: 2,
+    };
     rep.ingest(stale);
     expect(rep.winnerAt(['k'])?.value).toBe('REBORN'); // epoch 3 > 2 — no resurrection
   });
@@ -897,9 +1259,15 @@ const byDot = (a: Dot, b: Dot): number =>
  *  [C,k,POS] > [C,k] > [C]. The deepest level only counts when its graft actually
  *  lands (the materialized element is a container); shallower levels supply the pos
  *  through their own set value, so their dot stands in. Pure function of registers. */
-function posDot(rep: TreeReplica, C: readonly string[], k: string, container: Record<string, unknown>): Dot {
+function posDot(
+  rep: TreeReplica,
+  C: readonly string[],
+  k: string,
+  container: Record<string, unknown>,
+): Dot {
   const deep = rep.winnerAt([...C, k, POS]);
-  if (deep && deep.kind === 'set' && isObj(container[k])) return { writer: deep.writer, hlc: deep.hlc };
+  if (deep && deep.kind === 'set' && isObj(container[k]))
+    return { writer: deep.writer, hlc: deep.hlc };
   const el = rep.winnerAt([...C, k]);
   if (el && el.kind === 'set') return { writer: el.writer, hlc: el.hlc };
   const c = rep.winnerAt(C);
@@ -912,7 +1280,10 @@ type ListEntry = { key: string; pos: number; by: Dot; value: unknown };
 /** ordered materialization: keys present in the materialized container at C, sorted by
  *  (pos, pos-winner dot, key). Total and deterministic: pos + dot come from register
  *  winners (pure functions of the op set) and key breaks the final tie. */
-function orderedMaterialize(rep: TreeReplica, C: readonly string[]): ListEntry[] {
+function orderedMaterialize(
+  rep: TreeReplica,
+  C: readonly string[],
+): ListEntry[] {
   let node: unknown = rep.materialize();
   for (const seg of C) node = isObj(node) ? node[seg] : undefined;
   if (!isObj(node)) return [];
@@ -939,10 +1310,13 @@ function orderedMaterialize(rep: TreeReplica, C: readonly string[]): ListEntry[]
 
 const listSig = (rep: TreeReplica): string =>
   JSON.stringify(orderedMaterialize(rep, LIST).map((e) => [e.key, e.value]));
-const listKeys = (rep: TreeReplica): string[] => orderedMaterialize(rep, LIST).map((e) => e.key);
+const listKeys = (rep: TreeReplica): string[] =>
+  orderedMaterialize(rep, LIST).map((e) => e.key);
 
 /** genesis container + seed elements, emitted sequentially by w0 (hlc 1..n). */
-function baseListOps(elements: ReadonlyArray<readonly [string, number, string]>): PathOp[] {
+function baseListOps(
+  elements: ReadonlyArray<readonly [string, number, string]>,
+): PathOp[] {
   const world = new TreeReplica();
   const out: PathOp[] = [];
   let hlc = 0;
@@ -950,7 +1324,10 @@ function baseListOps(elements: ReadonlyArray<readonly [string, number, string]>)
   world.ingestAll(genesis);
   out.push(...genesis);
   for (const [k, pos, title] of elements) {
-    const group = subtreeGroup(world, 'set', [...LIST, k], 'w0', ++hlc, { [POS]: pos, title });
+    const group = subtreeGroup(world, 'set', [...LIST, k], 'w0', ++hlc, {
+      [POS]: pos,
+      title,
+    });
     world.ingestAll(group);
     out.push(...group);
   }
@@ -970,17 +1347,33 @@ const deliver = (ops: readonly PathOp[], seed: number): TreeReplica => {
 function convergedList(ops: readonly PathOp[], orders = 6): TreeReplica {
   const base = deliver(ops, 1);
   const expected = listSig(base);
-  for (let o = 2; o <= orders; o++) expect(listSig(deliver(ops, o * 7 + 3))).toBe(expected);
+  for (let o = 2; o <= orders; o++)
+    expect(listSig(deliver(ops, o * 7 + 3))).toBe(expected);
   return base;
 }
 
 /** rebalance emission: an epoch-BUMPED sweep rewriting ONLY the [C, k, POS] registers,
  *  one bumped set per present element, all in one envelope (one writer, one hlc). */
-function rebalanceGroup(view: TreeReplica, writer: string, hlc: number, step = 100): PathOp[] {
+function rebalanceGroup(
+  view: TreeReplica,
+  writer: string,
+  hlc: number,
+  step = 100,
+): PathOp[] {
   const out: PathOp[] = [];
   let p = 0;
   for (const e of orderedMaterialize(view, LIST)) {
-    out.push(...subtreeGroup(view, 'set', [...LIST, e.key, POS], writer, hlc, (p += step), true));
+    out.push(
+      ...subtreeGroup(
+        view,
+        'set',
+        [...LIST, e.key, POS],
+        writer,
+        hlc,
+        (p += step),
+        true,
+      ),
+    );
   }
   return out;
 }
@@ -1017,21 +1410,43 @@ function genListOps(seed: number, rounds: number): PathOp[] {
     } else if (roll < 0.5) {
       // move
       const k = live[Math.floor(r() * live.length)];
-      group = subtreeGroup(world, 'set', [...LIST, k, POS], writer, hlc, posPick());
+      group = subtreeGroup(
+        world,
+        'set',
+        [...LIST, k, POS],
+        writer,
+        hlc,
+        posPick(),
+      );
     } else if (roll < 0.68) {
       // data edit
       const k = live[Math.floor(r() * live.length)];
-      group = subtreeGroup(world, 'set', [...LIST, k, 'title'], writer, hlc, `edit:${writer}:${hlc}`);
+      group = subtreeGroup(
+        world,
+        'set',
+        [...LIST, k, 'title'],
+        writer,
+        hlc,
+        `edit:${writer}:${hlc}`,
+      );
     } else if (roll < 0.82) {
       // element delete
       const k = live[Math.floor(r() * live.length)];
-      group = subtreeGroup(world, 'delete', [...LIST, k], writer, hlc, undefined);
+      group = subtreeGroup(
+        world,
+        'delete',
+        [...LIST, k],
+        writer,
+        hlc,
+        undefined,
+      );
     } else if (roll < 0.92) {
       // whole-list rewrite: keep a subset (fresh pos), add one fresh element
       const value: Record<string, unknown> = {};
       let p = 0;
       for (const k of live) {
-        if (r() < 0.7) value[k] = { [POS]: (p += 10), title: `rw:${writer}:${hlc}:${k}` };
+        if (r() < 0.7)
+          value[k] = { [POS]: (p += 10), title: `rw:${writer}:${hlc}:${k}` };
       }
       const fresh = LIST_KEYS_POOL[Math.floor(r() * LIST_KEYS_POOL.length)];
       value[fresh] = { [POS]: p + 10, title: `rw-new:${writer}:${hlc}` };
@@ -1063,7 +1478,13 @@ describe('PROOF LIST(1): ordered materialization = pure function of the delivere
   it('vacuity guard: the workload exercises every operation class and non-degenerate lists', () => {
     // convergence over a degenerate stream proves nothing; pin that the generator emits all
     // six operation classes, that groups actually carry clears, and that lists stay populated.
-    let inserts = 0, moves = 0, edits = 0, deletes = 0, rewrites = 0, rebalances = 0, clears = 0;
+    let inserts = 0,
+      moves = 0,
+      edits = 0,
+      deletes = 0,
+      rewrites = 0,
+      rebalances = 0,
+      clears = 0;
     let populated = 0;
     for (let seed = 1; seed <= 25; seed++) {
       const ops = genListOps(seed * 47, 22);
@@ -1078,13 +1499,22 @@ describe('PROOF LIST(1): ordered materialization = pure function of the delivere
           moves++;
           const k = op.writer + ':' + op.hlc;
           posSets.set(k, (posSets.get(k) ?? 0) + 1);
-        } else if (op.kind === 'set' && depth === 3 && last === 'title') edits++;
+        } else if (op.kind === 'set' && depth === 3 && last === 'title')
+          edits++;
         else if (op.kind === 'set' && depth === 1 && op.hlc > 1) rewrites++;
       }
       rebalances += [...posSets.values()].filter((n) => n >= 2).length;
       if (listKeys(deliver(ops, 1)).length >= 2) populated++;
     }
-    for (const n of [inserts, moves, edits, deletes, rewrites, rebalances, clears]) {
+    for (const n of [
+      inserts,
+      moves,
+      edits,
+      deletes,
+      rewrites,
+      rebalances,
+      clears,
+    ]) {
       expect(n).toBeGreaterThan(0);
     }
     expect(populated).toBeGreaterThanOrEqual(13); // most seeds end with a real (2+ element) list
@@ -1093,10 +1523,19 @@ describe('PROOF LIST(1): ordered materialization = pure function of the delivere
 
 describe('PROOF LIST(2): concurrent inserts of DIFFERENT keys into the same gap', () => {
   it('both survive; equal pos broken by the pos-winner dot; no duplicate keys; both orders agree', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
-    const insX = subtreeGroup(view, 'set', [...LIST, 'x'], 'w1', 10, { [POS]: 1.5, title: 'X' });
-    const insY = subtreeGroup(view, 'set', [...LIST, 'y'], 'w2', 11, { [POS]: 1.5, title: 'Y' });
+    const insX = subtreeGroup(view, 'set', [...LIST, 'x'], 'w1', 10, {
+      [POS]: 1.5,
+      title: 'X',
+    });
+    const insY = subtreeGroup(view, 'set', [...LIST, 'y'], 'w2', 11, {
+      [POS]: 1.5,
+      title: 'Y',
+    });
     // a fresh insert observed nothing at its path: a single op, no cites, no clears
     expect(insX).toHaveLength(1);
     expect(insX[0].cites).toEqual([]);
@@ -1113,10 +1552,19 @@ describe('PROOF LIST(2): concurrent inserts of DIFFERENT keys into the same gap'
 
 describe('PROOF LIST(3): concurrent insert of the SAME key by two writers', () => {
   it('converges to ONE element resolved by the ordinary register fold at [C,k]; both orders agree', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
-    const ins1 = subtreeGroup(view, 'set', [...LIST, 'x'], 'w1', 10, { [POS]: 1.5, title: 'from-w1' });
-    const ins2 = subtreeGroup(view, 'set', [...LIST, 'x'], 'w2', 11, { [POS]: 1.6, title: 'from-w2' });
+    const ins1 = subtreeGroup(view, 'set', [...LIST, 'x'], 'w1', 10, {
+      [POS]: 1.5,
+      title: 'from-w1',
+    });
+    const ins2 = subtreeGroup(view, 'set', [...LIST, 'x'], 'w2', 11, {
+      [POS]: 1.6,
+      title: 'from-w2',
+    });
 
     const rep = convergedList([...base, ...ins1, ...ins2]);
     expect(listKeys(rep)).toEqual(['a', 'x', 'b']); // one 'x', no duplicate
@@ -1129,7 +1577,10 @@ describe('PROOF LIST(3): concurrent insert of the SAME key by two writers', () =
 
 describe('PROOF LIST(4): move vs move (same element)', () => {
   it('one winner by the register race at [C,k,POS]; the list re-orders accordingly; both orders agree', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
     const move1 = subtreeGroup(view, 'set', [...LIST, 'a', POS], 'w1', 10, 0.5);
     const move2 = subtreeGroup(view, 'set', [...LIST, 'a', POS], 'w2', 11, 5);
@@ -1143,10 +1594,20 @@ describe('PROOF LIST(4): move vs move (same element)', () => {
 
 describe('PROOF LIST(5): move vs data edit (same element, disjoint paths)', () => {
   it('both survive: the element carries the new pos AND the new data; both orders agree', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
     const move = subtreeGroup(view, 'set', [...LIST, 'a', POS], 'w1', 10, 5);
-    const edit = subtreeGroup(view, 'set', [...LIST, 'a', 'title'], 'w2', 11, 'edited');
+    const edit = subtreeGroup(
+      view,
+      'set',
+      [...LIST, 'a', 'title'],
+      'w2',
+      11,
+      'edited',
+    );
 
     const rep = convergedList([...base, ...move, ...edit]);
     const a = orderedMaterialize(rep, LIST).find((e) => e.key === 'a');
@@ -1158,7 +1619,10 @@ describe('PROOF LIST(5): move vs data edit (same element, disjoint paths)', () =
 describe('PROOF LIST(6): move vs element delete', () => {
   // world: a (with a real POS register from a prior move), b
   const setup = (): { base: PathOp[]; view: TreeReplica } => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const world = viewOf(base);
     const move0 = subtreeGroup(world, 'set', [...LIST, 'a', POS], 'w0', 4, 1.2);
     world.ingestAll(move0);
@@ -1168,8 +1632,19 @@ describe('PROOF LIST(6): move vs element delete', () => {
   it('delete WINS the [C,k] race: the surviving orphan pos register drops from the list, and REVIVES on re-create', () => {
     const { base, view } = setup();
     const move = subtreeGroup(view, 'set', [...LIST, 'a', POS], 'w1', 10, 5); // cites move0's dot
-    const del = subtreeGroup(view, 'delete', [...LIST, 'a'], 'w2', 11, undefined); // delete + clear at POS
-    expect(del.some((o) => o.kind === 'clear' && pkey(o.path) === pkey([...LIST, 'a', POS]))).toBe(true);
+    const del = subtreeGroup(
+      view,
+      'delete',
+      [...LIST, 'a'],
+      'w2',
+      11,
+      undefined,
+    ); // delete + clear at POS
+    expect(
+      del.some(
+        (o) => o.kind === 'clear' && pkey(o.path) === pkey([...LIST, 'a', POS]),
+      ),
+    ).toBe(true);
 
     const rep = convergedList([...base, ...move, ...del]);
     expect(listKeys(rep)).toEqual(['b']); // delete won [C,'a'] (it cited the insert) → element absent
@@ -1179,8 +1654,13 @@ describe('PROOF LIST(6): move vs element delete', () => {
 
     // re-create by a replica that saw the delete but NOT the orphan move: cites the tombstone only
     const recreate: PathOp = {
-      writer: 'w3', hlc: 20, path: [...LIST, 'a'], kind: 'set',
-      value: { [POS]: 7, title: 're' }, cites: [{ writer: 'w2', hlc: 11 }], epoch: 1,
+      writer: 'w3',
+      hlc: 20,
+      path: [...LIST, 'a'],
+      kind: 'set',
+      value: { [POS]: 7, title: 're' },
+      cites: [{ writer: 'w2', hlc: 11 }],
+      epoch: 1,
     };
     const revived = convergedList([...base, ...move, ...del, recreate]);
     const a = orderedMaterialize(revived, LIST).find((e) => e.key === 'a');
@@ -1190,8 +1670,18 @@ describe('PROOF LIST(6): move vs element delete', () => {
 
   it('delete LOSES the [C,k] race to a concurrent re-insert (ordinary same-class LWW); both orders agree', () => {
     const { base, view } = setup();
-    const del = subtreeGroup(view, 'delete', [...LIST, 'a'], 'w2', 11, undefined);
-    const reins = subtreeGroup(view, 'set', [...LIST, 'a'], 'w3', 12, { [POS]: 4, title: 'race' });
+    const del = subtreeGroup(
+      view,
+      'delete',
+      [...LIST, 'a'],
+      'w2',
+      11,
+      undefined,
+    );
+    const reins = subtreeGroup(view, 'set', [...LIST, 'a'], 'w3', 12, {
+      [POS]: 4,
+      title: 'race',
+    });
 
     const rep = convergedList([...base, ...del, ...reins]);
     const a = orderedMaterialize(rep, LIST).find((e) => e.key === 'a');
@@ -1202,9 +1692,19 @@ describe('PROOF LIST(6): move vs element delete', () => {
 
 describe('PROOF LIST(7): un-bumped whole-list rewrite vs concurrent element edit', () => {
   it('the edit survives GRAFTED into the rewritten list at a deterministic position (categorical survival)', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
-    const edit = subtreeGroup(view, 'set', [...LIST, 'a', 'title'], 'w1', 10, 'edited');
+    const edit = subtreeGroup(
+      view,
+      'set',
+      [...LIST, 'a', 'title'],
+      'w1',
+      10,
+      'edited',
+    );
     // rewrite keeps a (new pos), drops b, adds c; un-bumped → its clears do NOT kill concurrent edits
     const rewrite = subtreeGroup(view, 'set', LIST, 'w2', 11, {
       a: { [POS]: 10, title: 'A2' },
@@ -1221,12 +1721,17 @@ describe('PROOF LIST(7): un-bumped whole-list rewrite vs concurrent element edit
 });
 
 describe('PROOF LIST(8): rebalance = epoch-bumped POS-ONLY sweep', () => {
-  const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+  const base = baseListOps([
+    ['a', 1, 'A'],
+    ['b', 2, 'B'],
+  ]);
   const view = viewOf(base);
   const reb = rebalanceGroup(view, 'admin', 11); // a → 100, b → 200, all epoch-bumped
   it('rewrites ONLY the [C,k,POS] registers (the pos-only shape is load-bearing for obligation 8b)', () => {
     expect(reb.length).toBe(2);
-    expect(reb.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS)).toBe(true);
+    expect(
+      reb.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS),
+    ).toBe(true);
     expect(reb.every((o) => (o.epoch ?? 0) === 2)).toBe(true); // observed floor 1, bumped to 2
   });
 
@@ -1239,7 +1744,14 @@ describe('PROOF LIST(8): rebalance = epoch-bumped POS-ONLY sweep', () => {
   });
 
   it('LEAVES a concurrent data edit untouched (different paths); both orders agree', () => {
-    const edit = subtreeGroup(view, 'set', [...LIST, 'b', 'title'], 'w3', 13, 'kept');
+    const edit = subtreeGroup(
+      view,
+      'set',
+      [...LIST, 'b', 'title'],
+      'w3',
+      13,
+      'kept',
+    );
     const rep = convergedList([...base, ...reb, ...edit]);
     const b = orderedMaterialize(rep, LIST).find((e) => e.key === 'b');
     expect(b?.value).toEqual({ [POS]: 200, title: 'kept' }); // rebalanced pos AND the edit, both present
@@ -1254,7 +1766,10 @@ describe('CHARACTERIZATION LIST(9): concurrent RUNS into the same gap INTERLEAVE
   // and it is exactly why collaborative TEXT stays OUT OF SCOPE for this container: text
   // needs run integrity (RGA/sequence CRDT territory), which this design does not claim.
   it('the interleaved order is nonetheless deterministic and identical across arrival orders', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const view = viewOf(base);
     const run = (writer: string, prefix: string, hlc0: number): PathOp[] => {
       // sequential midpoints into the gap (1, 2): 1.5, then 1.75, then 1.875
@@ -1264,29 +1779,69 @@ describe('CHARACTERIZATION LIST(9): concurrent RUNS into the same gap INTERLEAVE
       for (let i = 1; i <= 3; i++) {
         lo = (lo + hi) / 2;
         out.push(
-          ...subtreeGroup(view, 'set', [...LIST, `${prefix}${i}`], writer, hlc0 + i, {
-            [POS]: lo, title: `${prefix}${i}`,
-          }),
+          ...subtreeGroup(
+            view,
+            'set',
+            [...LIST, `${prefix}${i}`],
+            writer,
+            hlc0 + i,
+            {
+              [POS]: lo,
+              title: `${prefix}${i}`,
+            },
+          ),
         );
       }
       return out;
     };
-    const rep = convergedList([...base, ...run('w1', 'p', 10), ...run('w2', 'q', 20)], 8);
+    const rep = convergedList(
+      [...base, ...run('w1', 'p', 10), ...run('w2', 'q', 20)],
+      8,
+    );
     // the runs are INTERLEAVED (equal midpoints, per-element dot tiebreak), not contiguous:
-    expect(listKeys(rep)).toEqual(['a', 'p1', 'q1', 'p2', 'q2', 'p3', 'q3', 'b']);
+    expect(listKeys(rep)).toEqual([
+      'a',
+      'p1',
+      'q1',
+      'p2',
+      'q2',
+      'p3',
+      'q3',
+      'b',
+    ]);
   });
 });
 
 describe('PROOF LIST(10): duplicate delivery of whole insert/delete/rebalance groups is idempotent', () => {
   it('once vs duplicated-and-shuffled groups materialize the identical ordered list', () => {
-    const base = baseListOps([['a', 1, 'A'], ['b', 2, 'B']]);
+    const base = baseListOps([
+      ['a', 1, 'A'],
+      ['b', 2, 'B'],
+    ]);
     const world = viewOf(base);
-    const edit = subtreeGroup(world, 'set', [...LIST, 'a', 'title'], 'w1', 10, 'edited');
+    const edit = subtreeGroup(
+      world,
+      'set',
+      [...LIST, 'a', 'title'],
+      'w1',
+      10,
+      'edited',
+    );
     world.ingestAll(edit);
-    const reinsert = subtreeGroup(world, 'set', [...LIST, 'a'], 'w2', 11, { [POS]: 3, title: 'A2' });
+    const reinsert = subtreeGroup(world, 'set', [...LIST, 'a'], 'w2', 11, {
+      [POS]: 3,
+      title: 'A2',
+    });
     world.ingestAll(reinsert); // observed the edit → this group carries a clear (multi-op insert group)
     expect(reinsert.some((o) => o.kind === 'clear')).toBe(true);
-    const del = subtreeGroup(world, 'delete', [...LIST, 'b'], 'w1', 12, undefined);
+    const del = subtreeGroup(
+      world,
+      'delete',
+      [...LIST, 'b'],
+      'w1',
+      12,
+      undefined,
+    );
     world.ingestAll(del);
     const reb = rebalanceGroup(world, 'admin', 13);
     world.ingestAll(reb);
@@ -1294,11 +1849,16 @@ describe('PROOF LIST(10): duplicate delivery of whole insert/delete/rebalance gr
     const all = [...base, ...edit, ...reinsert, ...del, ...reb];
     const once = deliver(all, 1);
     for (let order = 1; order <= 5; order++) {
-      const dup = deliver([...all, ...reinsert, ...del, ...reb, ...del], order * 13 + 1);
+      const dup = deliver(
+        [...all, ...reinsert, ...del, ...reb, ...del],
+        order * 13 + 1,
+      );
       expect(listSig(dup)).toBe(listSig(once));
     }
     // and the final state is the intended one: a alone, re-inserted value, rebalanced pos
     const a = orderedMaterialize(once, LIST);
-    expect(a.map((e) => [e.key, e.value])).toEqual([['a', { [POS]: 100, title: 'A2' }]]);
+    expect(a.map((e) => [e.key, e.value])).toEqual([
+      ['a', { [POS]: 100, title: 'A2' }],
+    ]);
   });
 });

@@ -21,14 +21,19 @@ describe('formatList', () => {
 
   it('should format a list with disjunction', () => {
     TestBed.runInInjectionContext(() => {
-      const result = formatList(['Apples', 'Oranges', 'Bananas'], { type: 'disjunction' });
+      const result = formatList(['Apples', 'Oranges', 'Bananas'], {
+        type: 'disjunction',
+      });
       expect(result).toBe('Apples, Oranges, or Bananas');
     });
   });
 
   it('should accept signals for value and options', () => {
     const listSignal = signal(['A', 'B']);
-    const optSignal = signal({ style: 'short' as const, type: 'conjunction' as const });
+    const optSignal = signal({
+      style: 'short' as const,
+      type: 'conjunction' as const,
+    });
 
     TestBed.runInInjectionContext(() => {
       const result = formatList(listSignal, optSignal);

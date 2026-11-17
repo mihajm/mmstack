@@ -26,7 +26,9 @@ import { pageSink } from '../telemetry';
       </p>
       <div class="actions">
         <button (click)="addItem()">Add item (span → tracedSignal)</button>
-        <button (click)="checkout()">Checkout (span + nested HTTP + event + metric + log)</button>
+        <button (click)="checkout()">
+          Checkout (span + nested HTTP + event + metric + log)
+        </button>
         <button (click)="fail()">Fail (recorded error)</button>
         <button data-testid="demo-origin" (click)="originDemo()">
           Span with origin
@@ -111,10 +113,16 @@ export class TelemetryExample {
   readonly emits = computed(() => {
     this.version();
     return [
-      ...pageSink.events.map((e) => `event ${e.name} ${JSON.stringify(e.attrs)}`),
-      ...pageSink.metrics.map((m) => `metric ${m.name}=${m.value} (${m.kind ?? 'histogram'})`),
+      ...pageSink.events.map(
+        (e) => `event ${e.name} ${JSON.stringify(e.attrs)}`,
+      ),
+      ...pageSink.metrics.map(
+        (m) => `metric ${m.name}=${m.value} (${m.kind ?? 'histogram'})`,
+      ),
       ...pageSink.logs.map((l) => `log [${l.severity}] ${l.body}`),
-      ...pageSink.errors.map((e) => `error ${(e.err as Error).message ?? e.err}`),
+      ...pageSink.errors.map(
+        (e) => `error ${(e.err as Error).message ?? e.err}`,
+      ),
     ].reverse();
   });
 
@@ -128,7 +136,9 @@ export class TelemetryExample {
   checkout(): void {
     this.telemetry.span('checkout', (span) => {
       this.telemetry.event('checkout.started', { items: this.items() });
-      this.telemetry.metric('checkout_clicks', 1, undefined, { kind: 'counter' });
+      this.telemetry.metric('checkout_clicks', 1, undefined, {
+        kind: 'counter',
+      });
       this.http
         .get('https://jsonplaceholder.typicode.com/todos/1', {
           context: withTelemetryParent(span),

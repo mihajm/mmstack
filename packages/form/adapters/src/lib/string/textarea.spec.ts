@@ -45,7 +45,7 @@ describe('Textarea Adapter', () => {
         });
 
         expect(state.error()).toBe('Comments is required');
-        
+
         state.value.set('A very long comment that exceeds ten');
         expect(state.error()).toBe('Max 10 characters');
       });

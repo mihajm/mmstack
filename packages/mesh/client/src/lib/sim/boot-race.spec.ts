@@ -30,7 +30,8 @@ describe('scenario: boot race (disk vs relay) — KNOWN GAP, feeds branching-sta
     const b = await runBootRace({ attachOrder: 'mesh-first' });
     expect(a.bootRoot.labels.x).not.toBe(b.bootRoot.labels.x); // same inputs, different outcome
     // and neither is the merge a human would want (offline-edit on x AND from-room's counters):
-    const merged = (r: typeof a) => r.bootRoot.labels.x === 'offline-edit' && r.bootRoot.counters.a === 7;
+    const merged = (r: typeof a) =>
+      r.bootRoot.labels.x === 'offline-edit' && r.bootRoot.counters.a === 7;
     expect(merged(a)).toBe(false);
     expect(merged(b)).toBe(false);
   });

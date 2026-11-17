@@ -1,9 +1,6 @@
 import { type ElementRef, type Signal } from '@angular/core';
 import { type SensorRunOptions } from './sensor-options';
-import {
-  type BatteryStatus,
-  batteryStatus,
-} from './battery-status';
+import { type BatteryStatus, batteryStatus } from './battery-status';
 import { type ClipboardSignal, clipboard } from './clipboard';
 import {
   type ElementSizeOptions as BaseElementSizeOptions,

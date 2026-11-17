@@ -109,8 +109,7 @@ export class NavStore {
 
     return untracked(() =>
       runInInjectionContext(this.injector, () => {
-        const inputs =
-          typeof resolved === 'function' ? resolved() : resolved;
+        const inputs = typeof resolved === 'function' ? resolved() : resolved;
         const rootSnapshot = this.router.routerState.snapshot.root;
         const prefix =
           scope === DEFAULT_NAV_SCOPE

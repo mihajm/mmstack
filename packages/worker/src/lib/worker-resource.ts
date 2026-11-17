@@ -73,7 +73,9 @@ export function workerResource<TInput, TResult>(
   options: WorkerResourceOptions<TResult>,
 ): WorkerResourceRef<TResult> {
   const injector = options.injector ?? inject(Injector);
-  return runInInjectionContext(injector, () => build<TInput, TResult>(params, options));
+  return runInInjectionContext(injector, () =>
+    build<TInput, TResult>(params, options),
+  );
 }
 
 function build<TInput, TResult>(
@@ -90,7 +92,8 @@ function build<TInput, TResult>(
 
   const value = signal<TResult | undefined>(options.defaultValue, {
     equal: userEqual
-      ? (a, b) => (a === undefined || b === undefined ? a === b : userEqual(a, b))
+      ? (a, b) =>
+          a === undefined || b === undefined ? a === b : userEqual(a, b)
       : undefined,
   });
   const status = signal<ResourceStatus>('idle');
@@ -126,7 +129,10 @@ function build<TInput, TResult>(
       (err) => {
         if (inFlight === ac) inFlight = null;
         if (myEpoch !== epoch) return;
-        if (err instanceof WorkerAbortError || (err as { name?: string })?.name === 'AbortError')
+        if (
+          err instanceof WorkerAbortError ||
+          (err as { name?: string })?.name === 'AbortError'
+        )
           return;
         error.set(err);
         status.set('error');
@@ -140,7 +146,8 @@ function build<TInput, TResult>(
     const i = input();
     if (isServer || i === PAUSED) return;
     if (i === undefined) return;
-    if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error') return;
+    if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error')
+      return;
     untracked(() => start(i as TInput));
   });
 

@@ -176,7 +176,11 @@ describe('circuit-breaker', () => {
 
     it('prefers `threshold` over `treshold` when both are provided', () => {
       TestBed.runInInjectionContext(() => {
-        const cb = createCircuitBreaker({ threshold: 2, treshold: 99, timeout: 1000 });
+        const cb = createCircuitBreaker({
+          threshold: 2,
+          treshold: 99,
+          timeout: 1000,
+        });
         cb.fail();
         cb.fail();
         expect(cb.status()).toBe('OPEN');

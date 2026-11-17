@@ -23,7 +23,12 @@ export type ReorderableDefaults = {
   animation?: ReorderableAnimation | false;
   /** Default edge auto-scroll config (or `false` to keep it off). */
   autoScroll?:
-    | { edge?: number; speed?: number; edgeProportion?: number; maxSpeedAt?: number }
+    | {
+        edge?: number;
+        speed?: number;
+        edgeProportion?: number;
+        maxSpeedAt?: number;
+      }
     | false;
   /** Default keyboard-reorder enablement. */
   keyboard?: boolean;
@@ -32,7 +37,12 @@ export type ReorderableDefaults = {
   /** Default keyboard-move announcement (or `false` to disable). */
   announceMove?:
     | false
-    | ((event: { item: unknown; from: number; to: number; total: number }) => string);
+    | ((event: {
+        item: unknown;
+        from: number;
+        to: number;
+        total: number;
+      }) => string);
 };
 
 const reorderableDefaults = createDefaultsToken<ReorderableDefaults>(

@@ -16,8 +16,8 @@ import { DocSection } from '../../../layout/doc-section';
       <p>
         These three helpers share one shape.
         <code>createTitle</code>, <code>createBreadcrumb</code>, and
-        <code>createNavItems</code> attach a small piece of UI intent to a route,
-        the page title, its breadcrumb label, the menu it should show. A
+        <code>createNavItems</code> attach a small piece of UI intent to a
+        route, the page title, its breadcrumb label, the menu it should show. A
         matching reader, <code>injectBreadcrumbs</code> or
         <code>injectNavItems</code> (the title updates the document directly),
         gives a component the live, resolved result as a signal. You declare on
@@ -86,7 +86,8 @@ import { DocSection } from '../../../layout/doc-section';
           a dynamic label from a store, which is how a
           <code>/users/:id</code> crumb shows the user's name instead of the id.
           To opt a route out of auto-generation entirely, set
-          <code>data: {{ '{' }} skipBreadcrumb: true {{ '}' }}</code>.
+          <code>data: {{ '{' }} skipBreadcrumb: true {{ '}' }}</code
+          >.
         </p>
         <docs-code [code]="breadcrumbDefine" lang="ts" />
         <p>
@@ -126,17 +127,18 @@ import { DocSection } from '../../../layout/doc-section';
           <code>Signal&lt;NavItem[]&gt;</code>. The useful trick is that the
           menu follows the active route chain: when a deeper route in the chain
           registers items for the same scope, the deeper one wins, and
-          navigating away restores the shallower one. So the app shell can show a
-          global menu that a section quietly replaces while you are inside it.
+          navigating away restores the shallower one. So the app shell can show
+          a global menu that a section quietly replaces while you are inside it.
         </p>
         <docs-code [code]="navConsume" lang="ts" />
         <p>
           As with breadcrumbs, <code>item.link()</code> is a serialized URL
           string, bind it to <code>[routerLink]</code> or
-          <a mmLink="/docs/router-core/preloading"><code>[mmLink]</code></a>,
-          not <code>[href]</code>. Items are declared in the route's
+          <a mmLink="/docs/router-core/preloading"><code>[mmLink]</code></a
+          >, not <code>[href]</code>. Items are declared in the route's
           <code>resolve</code> map, and links resolve relative to the route the
-          resolver is attached to, exactly like Angular's <code>routerLink</code>
+          resolver is attached to, exactly like Angular's
+          <code>routerLink</code>
           convention. A leading slash makes a link absolute.
         </p>
         <docs-code [code]="navDefine" lang="ts" />
@@ -147,7 +149,12 @@ import { DocSection } from '../../../layout/doc-section';
           against the mount point wherever that turns out to be. The full
           resolution table (arrays, absolute escapes, <code>UrlTree</code>
           passthrough) is in the
-          <a href="https://www.npmjs.com/package/@mmstack/router-core" target="_blank" rel="noopener">package README</a>.
+          <a
+            href="https://www.npmjs.com/package/@mmstack/router-core"
+            target="_blank"
+            rel="noopener"
+            >package README</a
+          >.
         </p>
       </docs-section>
 
@@ -165,8 +172,8 @@ import { DocSection } from '../../../layout/doc-section';
           subset query params, ignore fragment), which is what you want for
           section highlighting; override it per item with
           <code>activeMatch</code> or globally with
-          <code>provideNavConfig({{ '{' }} activeMatch {{ '}' }})</code> when you
-          need exact matching.
+          <code>provideNavConfig({{ '{' }} activeMatch {{ '}' }})</code> when
+          you need exact matching.
         </p>
         <p>
           Pass <code>{{ '{' }} name {{ '}' }}</code> to
@@ -183,7 +190,8 @@ import { DocSection } from '../../../layout/doc-section';
           parent counts as active when its own link matches or any descendant is
           active, which is what you want for a grouping header that has no link
           of its own. Setting <code>activeMatch</code> on an item turns that OR
-          off; pass <code>matchesWhenChildActive: true</code> to turn it back on.
+          off; pass <code>matchesWhenChildActive: true</code> to turn it back
+          on.
         </p>
         <p>
           <code>hidden</code> filters an item and its whole subtree out of the
@@ -214,10 +222,10 @@ import { DocSection } from '../../../layout/doc-section';
           Routes register their menu on demand, so any URL with no registration
           in its active chain renders an empty menu. To keep a few items visible
           everywhere, declare fallbacks with
-          <code>provideNavConfig({{ '{' }} defaults {{ '}' }})</code>, useful for
-          landing pages, error routes, or a shell that always shows something.
-          Relative links on defaults resolve from <code>/</code>, since there is
-          no route to be relative to.
+          <code>provideNavConfig({{ '{' }} defaults {{ '}' }})</code>, useful
+          for landing pages, error routes, or a shell that always shows
+          something. Relative links on defaults resolve from <code>/</code>,
+          since there is no route to be relative to.
         </p>
         <p>
           The array form fills the default (unnamed) scope. For named scopes,

@@ -47,7 +47,9 @@ import { DocSection } from '../../../layout/doc-section';
                 </td>
               </tr>
               <tr>
-                <td>Define a reusable field type once and apply it everywhere</td>
+                <td>
+                  Define a reusable field type once and apply it everywhere
+                </td>
                 <td><a mmLink="/docs/forms/composition">Composition</a></td>
               </tr>
               <tr>
@@ -60,8 +62,8 @@ import { DocSection } from '../../../layout/doc-section';
           </table>
         </div>
         <p>
-          Each piece is independent. You can add field metadata without
-          touching composition, or track changes on a plain Signal Form.
+          Each piece is independent. You can add field metadata without touching
+          composition, or track changes on a plain Signal Form.
         </p>
       </docs-section>
     </docs-page>

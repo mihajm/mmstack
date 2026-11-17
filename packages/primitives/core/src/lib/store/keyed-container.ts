@@ -41,7 +41,8 @@ export function posBetween(before?: string, after?: string): string {
   // Neighbors can tie (concurrent inserts into the same gap leave two equal positions, ordered only
   // by key). There is no position strictly between equal bounds, so open the upper end: the new
   // position sorts just after them and stays deterministic instead of looping.
-  const upper = before != null && after != null && before >= after ? undefined : after;
+  const upper =
+    before != null && after != null && before >= after ? undefined : after;
   let i = 0;
   let out = '';
   // The upper bound only opens to BASE once we pass `after`'s last constraining digit: an adjacent
@@ -49,7 +50,12 @@ export function posBetween(before?: string, after?: string): string {
   let upperOpen = upper == null;
   for (;;) {
     const lo = before != null && i < before.length ? digitOf(before[i]) : 0;
-    const hi = upperOpen || upper == null ? BASE : i < upper.length ? digitOf(upper[i]) : 0;
+    const hi =
+      upperOpen || upper == null
+        ? BASE
+        : i < upper.length
+          ? digitOf(upper[i])
+          : 0;
     if (hi - lo >= 2) return warnIfLong(out + DIGITS[lo + ((hi - lo) >> 1)]);
     if (hi === lo) {
       // digits equal: no room yet, but `after` still constrains deeper digits, keep following it
@@ -95,7 +101,10 @@ const byReadingOrder = (a: string, b: string): number => {
 };
 
 /** The container's keys in reading order, `exclude` left out, in the shared buffer (no copies). */
-function sortedKeys(container: Record<string, unknown>, exclude?: string): string[] {
+function sortedKeys(
+  container: Record<string, unknown>,
+  exclude?: string,
+): string[] {
   keyBuffer.length = 0;
   for (const key in container)
     if (Object.hasOwn(container, key) && key !== exclude) keyBuffer.push(key);
@@ -112,7 +121,9 @@ function sortedKeys(container: Record<string, unknown>, exclude?: string): strin
  * key breaking the tie), so a peer that dropped the position field still lands somewhere
  * deterministic on every replica.
  */
-export function orderedEntries<T>(container: Record<string, T>): OrderedEntry<T>[] {
+export function orderedEntries<T>(
+  container: Record<string, T>,
+): OrderedEntry<T>[] {
   return entriesOf(container, (element) => element);
 }
 
@@ -124,7 +135,11 @@ function entriesOf<T, E>(
   const entries = new Array<OrderedEntry<T>>(keys.length);
   for (let i = 0; i < keys.length; i++) {
     const element = container[keys[i]];
-    entries[i] = { key: keys[i], pos: posOf(element), value: payloadOf(element) };
+    entries[i] = {
+      key: keys[i],
+      pos: posOf(element),
+      value: payloadOf(element),
+    };
   }
   keys.length = 0;
   return entries;
@@ -134,7 +149,8 @@ function entriesOf<T, E>(
 export type ContainerNode<T> = WritableSignal<Record<string, T>>;
 
 const devError = (msg: string): void => {
-  if (typeof ngDevMode !== 'undefined' && ngDevMode) console.error(`[keyed-container] ${msg}`);
+  if (typeof ngDevMode !== 'undefined' && ngDevMode)
+    console.error(`[keyed-container] ${msg}`);
 };
 
 declare const ngDevMode: boolean | undefined;
@@ -149,8 +165,12 @@ function neighboursAt(
 ): Neighbours {
   const keys = sortedKeys(container, exclude);
   const clamped = Math.max(0, Math.min(index, keys.length));
-  const before = clamped > 0 ? posOf(container[keys[clamped - 1]]) || undefined : undefined;
-  const after = clamped < keys.length ? posOf(container[keys[clamped]]) || undefined : undefined;
+  const before =
+    clamped > 0 ? posOf(container[keys[clamped - 1]]) || undefined : undefined;
+  const after =
+    clamped < keys.length
+      ? posOf(container[keys[clamped]]) || undefined
+      : undefined;
   keys.length = 0;
   return [before, after];
 }
@@ -160,7 +180,10 @@ function neighboursAt(
  * `before`, or the only element of an otherwise empty container. Resolved when the write is
  * applied, against the order the container holds then.
  */
-export type Anchor<K = string> = { readonly after: K } | { readonly before: K } | { readonly empty: true };
+export type Anchor<K = string> =
+  | { readonly after: K }
+  | { readonly before: K }
+  | { readonly empty: true };
 
 /**
  * The positions around an anchor in ONE scan, no sort: for `after: k`, `k`'s position and the
@@ -176,7 +199,9 @@ function resolveAnchor(
   if ('empty' in anchor) {
     for (const key in container)
       if (Object.hasOwn(container, key) && key !== exclude) {
-        devError(`${verb}: an 'empty' anchor needs an otherwise empty container; nothing written`);
+        devError(
+          `${verb}: an 'empty' anchor needs an otherwise empty container; nothing written`,
+        );
         return undefined;
       }
     return [undefined, undefined];
@@ -188,13 +213,16 @@ function resolveAnchor(
   let bestKey: string | undefined;
   let bestPos = '';
   for (const key in container) {
-    if (!Object.hasOwn(container, key) || key === exclude || key === k) continue;
+    if (!Object.hasOwn(container, key) || key === exclude || key === k)
+      continue;
     const p = posOf(container[key]);
     const beyond = after ? precedes(pk, k, p, key) : precedes(p, key, pk, k);
     if (!beyond) continue;
     const better =
       bestKey === undefined ||
-      (after ? precedes(p, key, bestPos, bestKey) : precedes(bestPos, bestKey, p, key));
+      (after
+        ? precedes(p, key, bestPos, bestKey)
+        : precedes(bestPos, bestKey, p, key));
     if (better) {
       bestKey = key;
       bestPos = p;
@@ -237,7 +265,8 @@ export function insertElement<T extends object>(
 }
 
 const inlineElement = <T extends object>(value: T, pos: string): T => {
-  if (POS_SEGMENT in value) devError(`insert: '${POS_SEGMENT}' is managed, drop it from the value`);
+  if (POS_SEGMENT in value)
+    devError(`insert: '${POS_SEGMENT}' is managed, drop it from the value`);
   return { ...value, [POS_SEGMENT]: pos };
 };
 
@@ -292,7 +321,10 @@ export function moveElement<T extends object>(
 }
 
 /** Remove the element at `key`. Deletes the whole element (a per-key delete the sync layer folds). */
-export function removeElement<T>(container: ContainerNode<T>, key: string): void {
+export function removeElement<T>(
+  container: ContainerNode<T>,
+  key: string,
+): void {
   container.update((c) => {
     if (!(key in c)) return c;
     const next = { ...c };
@@ -363,14 +395,23 @@ export type KeyedContainerConfig<T> = {
 /** The helpers of one container flavour, with keys supplied by the caller. */
 export type KeyedContainer<T extends object, E extends object = T> = {
   entries(container: Record<string, E>): OrderedEntry<T>[];
-  insert(container: ContainerNode<E>, key: string, value: T, index?: number): string;
+  insert(
+    container: ContainerNode<E>,
+    key: string,
+    value: T,
+    index?: number,
+  ): string;
   insert(
     container: ContainerNode<E>,
     key: string,
     value: T,
     index: Anchor | number | undefined,
   ): string | undefined;
-  move(container: ContainerNode<E>, key: string, index: number | Anchor): string | undefined;
+  move(
+    container: ContainerNode<E>,
+    key: string,
+    index: number | Anchor,
+  ): string | undefined;
   remove(container: ContainerNode<E>, key: string): void;
   rebalance(sync: Pick<OpSync, 'override'>, container: ContainerNode<E>): void;
 };
@@ -381,7 +422,11 @@ export type SelfKeyedContainer<T extends object, E extends object = T> = Omit<
   'insert'
 > & {
   insert(container: ContainerNode<E>, value: T, index?: number): string;
-  insert(container: ContainerNode<E>, value: T, index: Anchor | number | undefined): string | undefined;
+  insert(
+    container: ContainerNode<E>,
+    value: T,
+    index: Anchor | number | undefined,
+  ): string | undefined;
 };
 
 /**
@@ -404,7 +449,9 @@ export type SelfKeyedContainer<T extends object, E extends object = T> = Omit<
 export function keyedContainer<T extends object>(config: {
   key: (value: T) => string;
 }): SelfKeyedContainer<T>;
-export function keyedContainer<T extends object>(config?: { key?: never }): KeyedContainer<T>;
+export function keyedContainer<T extends object>(config?: {
+  key?: never;
+}): KeyedContainer<T>;
 export function keyedContainer<T extends object>(
   config: KeyedContainerConfig<T> = {},
 ): KeyedContainer<T> | SelfKeyedContainer<T> {
@@ -433,7 +480,9 @@ export function wrappedContainer<T extends object>(config?: {
 }): KeyedContainer<T, ContainerEntry<T>>;
 export function wrappedContainer<T extends object>(
   config: KeyedContainerConfig<T> = {},
-): KeyedContainer<T, ContainerEntry<T>> | SelfKeyedContainer<T, ContainerEntry<T>> {
+):
+  | KeyedContainer<T, ContainerEntry<T>>
+  | SelfKeyedContainer<T, ContainerEntry<T>> {
   return helpersFor<T, ContainerEntry<T>>(
     config.key,
     (value, pos) => ({ [POS_SEGMENT]: pos, value }),
@@ -447,13 +496,19 @@ function helpersFor<T extends object, E extends object>(
   payloadOf: (element: E) => T,
 ): KeyedContainer<T, E> & SelfKeyedContainer<T, E> {
   type Index = number | Anchor | undefined;
-  const insert = (container: ContainerNode<E>, a: string | T, b?: T | Index, c?: Index) =>
+  const insert = (
+    container: ContainerNode<E>,
+    a: string | T,
+    b?: T | Index,
+    c?: Index,
+  ) =>
     extract
       ? insertInto(container, extract(a as T), a as T, b as Index, elementOf)
       : insertInto(container, a as string, b as T, c, elementOf);
   return {
     entries: (container) => entriesOf(container, payloadOf),
-    insert: insert as KeyedContainer<T, E>['insert'] & SelfKeyedContainer<T, E>['insert'],
+    insert: insert as KeyedContainer<T, E>['insert'] &
+      SelfKeyedContainer<T, E>['insert'],
     move: (container, key, index) => moveElement(container, key, index),
     remove: (container, key) => removeElement(container, key),
     rebalance: (sync, container) => rebalanceContainer(sync, container),

@@ -23,19 +23,25 @@ type MonCfg = { onDragStart?: Hook; onDrop?: Hook; onDropTargetChange?: Hook };
 const dropTargetMock = vi.fn();
 const monitorConfigs: MonCfg[] = [];
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/drop-target-for-external', () => ({
-  dropTargetForExternal: (config: DropCfg) => {
-    dropTargetMock(config);
-    return () => undefined;
-  },
-}));
+vi.mock(
+  '@atlaskit/pragmatic-drag-and-drop/adapter/drop-target-for-external',
+  () => ({
+    dropTargetForExternal: (config: DropCfg) => {
+      dropTargetMock(config);
+      return () => undefined;
+    },
+  }),
+);
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/monitor-for-external', () => ({
-  monitorForExternal: (config: MonCfg) => {
-    monitorConfigs.push(config);
-    return () => undefined;
-  },
-}));
+vi.mock(
+  '@atlaskit/pragmatic-drag-and-drop/adapter/monitor-for-external',
+  () => ({
+    monitorForExternal: (config: MonCfg) => {
+      monitorConfigs.push(config);
+      return () => undefined;
+    },
+  }),
+);
 
 vi.mock('@atlaskit/pragmatic-drag-and-drop/utils/contains-files', () => ({
   containsFiles: ({ source }: { source: { types: string[] } }) =>

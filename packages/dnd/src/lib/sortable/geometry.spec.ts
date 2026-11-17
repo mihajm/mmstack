@@ -133,9 +133,12 @@ describe('geometry — displacement (FLIP transform)', () => {
     ];
     for (const { source, insert } of cases) {
       let shifted = 0;
-      for (let i = 0; i < N; i++) shifted += displacement(i, source, insert, FOOT);
+      for (let i = 0; i < N; i++)
+        shifted += displacement(i, source, insert, FOOT);
       const dist = insert - source;
-      expect(shifted).toBe(dist === 0 ? 0 : -Math.sign(dist) * Math.abs(dist) * FOOT);
+      expect(shifted).toBe(
+        dist === 0 ? 0 : -Math.sign(dist) * Math.abs(dist) * FOOT,
+      );
     }
   });
 });
@@ -151,7 +154,14 @@ describe('geometry — insertIndexTransformAware (FLIP collision)', () => {
     let prev = source;
     const trail: number[] = [prev];
     for (let step = 0; step < 50; step++) {
-      const next = insertIndexTransformAware(centers, source, FOOT, pos, prev, deadband);
+      const next = insertIndexTransformAware(
+        centers,
+        source,
+        FOOT,
+        pos,
+        prev,
+        deadband,
+      );
       trail.push(next);
       if (next === prev) return { fixed: true, value: next, trail };
       prev = next;
@@ -162,7 +172,13 @@ describe('geometry — insertIndexTransformAware (FLIP collision)', () => {
   it('seeded at the source with the pointer on its center is a no-op (returns source)', () => {
     for (let source = 0; source < N; source++) {
       expect(
-        insertIndexTransformAware(centers, source, FOOT, centers[source], source),
+        insertIndexTransformAware(
+          centers,
+          source,
+          FOOT,
+          centers[source],
+          source,
+        ),
       ).toBe(source);
     }
   });
@@ -225,7 +241,9 @@ describe('geometry — insertIndexTransformAware (FLIP collision)', () => {
     const prev = 2;
     const advanceThreshold = (d: number) => {
       for (let pos = -20; pos <= 140; pos++) {
-        if (insertIndexTransformAware(centers, source, FOOT, pos, prev, d) > prev) {
+        if (
+          insertIndexTransformAware(centers, source, FOOT, pos, prev, d) > prev
+        ) {
           return pos;
         }
       }
@@ -269,10 +287,12 @@ describe('geometry — close/openDisplacement (cross-list asymmetry)', () => {
   it('insert at the end opens nothing (append); insert at 0 opens everything', () => {
     const n = 4;
     let openedAtEnd = 0;
-    for (let i = 0; i < n; i++) openedAtEnd += openDisplacement(i, n, FOOT) === FOOT ? 1 : 0;
+    for (let i = 0; i < n; i++)
+      openedAtEnd += openDisplacement(i, n, FOOT) === FOOT ? 1 : 0;
     expect(openedAtEnd).toBe(0); // append → no item shifts
     let openedAtStart = 0;
-    for (let i = 0; i < n; i++) openedAtStart += openDisplacement(i, 0, FOOT) === FOOT ? 1 : 0;
+    for (let i = 0; i < n; i++)
+      openedAtStart += openDisplacement(i, 0, FOOT) === FOOT ? 1 : 0;
     expect(openedAtStart).toBe(n); // all shift
   });
 
@@ -283,7 +303,8 @@ describe('geometry — close/openDisplacement (cross-list asymmetry)', () => {
     const insert = insertIndexFromCenters(targetCenters, 1000);
     expect(insert).toBe(n); // append index (N, beyond the last item) — not capped at N-1
 
-    for (let i = 0; i < n; i++) expect(openDisplacement(i, insert, FOOT)).toBe(0); // nothing moves
+    for (let i = 0; i < n; i++)
+      expect(openDisplacement(i, insert, FOOT)).toBe(0); // nothing moves
     const { to } = transfer(['dragged'], 0, ['t0', 't1', 't2'], insert);
     expect(to).toEqual(['t0', 't1', 't2', 'dragged']); // landed at the end
   });

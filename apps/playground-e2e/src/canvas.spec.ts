@@ -11,7 +11,9 @@ test.describe('canvas — free-form controller', () => {
     await expect(page.locator('[data-mm-canvas-ready]')).toBeAttached();
   });
 
-  test('a move commits on release, snapped to the 8px grid', async ({ page }) => {
+  test('a move commits on release, snapped to the 8px grid', async ({
+    page,
+  }) => {
     const before = await widget(page, 'w1').boundingBox();
     if (!before) throw new Error('no box');
     const center = await resolvePoint(widget(page, 'w1'));
@@ -39,7 +41,10 @@ test.describe('canvas — free-form controller', () => {
     await drag(
       page,
       widget(page, 'w1'),
-      { x: source.x + source.width / 2 + 24, y: target.y + source.height / 2 + 2 },
+      {
+        x: source.x + source.width / 2 + 24,
+        y: target.y + source.height / 2 + 2,
+      },
       { release: false, settle: 60 },
     );
     await expect
@@ -48,7 +53,9 @@ test.describe('canvas — free-form controller', () => {
     await page.mouse.up();
   });
 
-  test('marquee selects intersecting widgets; empty click clears', async ({ page }) => {
+  test('marquee selects intersecting widgets; empty click clears', async ({
+    page,
+  }) => {
     const surface = await page.locator('[data-canvas="main"]').boundingBox();
     if (!surface) throw new Error('no surface');
 
@@ -96,7 +103,12 @@ test.describe('canvas — free-form controller', () => {
 
     const before = await widget(page, 'w2').boundingBox();
     const start = await resolvePoint(grip);
-    await drag(page, start, { x: start.x + 48, y: start.y + 24 }, { settle: 60 });
+    await drag(
+      page,
+      start,
+      { x: start.x + 48, y: start.y + 24 },
+      { settle: 60 },
+    );
     const after = await widget(page, 'w2').boundingBox();
     if (!before || !after) throw new Error('no boxes');
     expect(after.width).toBeGreaterThan(before.width + 30);
@@ -110,7 +122,12 @@ test.describe('canvas — free-form controller', () => {
     const start = await resolvePoint(rotate);
     if (!box) throw new Error('no box');
 
-    await drag(page, start, { x: box.x + box.width + 40, y: box.y + box.height / 2 }, { settle: 60 });
+    await drag(
+      page,
+      start,
+      { x: box.x + box.width + 40, y: box.y + box.height / 2 },
+      { settle: 60 },
+    );
     await expect
       .poll(() => widget(page, 'w3').evaluate((el) => el.style.transform))
       .toContain('rotate');
@@ -126,14 +143,19 @@ test.describe('canvas — free-form controller', () => {
       .toBeCloseTo(before.x + 8, 0);
   });
 
-  test('wheel-zoom keeps gestures accurate (zoom, then drag lands correctly)', async ({ page }) => {
+  test('wheel-zoom keeps gestures accurate (zoom, then drag lands correctly)', async ({
+    page,
+  }) => {
     const surface = await page.locator('[data-canvas="main"]').boundingBox();
     if (!surface) throw new Error('no surface');
 
     // zoom in around w1's center so it stays under the cursor (and in view)
     const anchor = await widget(page, 'w1').boundingBox();
     if (!anchor) throw new Error('no box');
-    await page.mouse.move(anchor.x + anchor.width / 2, anchor.y + anchor.height / 2);
+    await page.mouse.move(
+      anchor.x + anchor.width / 2,
+      anchor.y + anchor.height / 2,
+    );
     await page.mouse.wheel(0, -300);
     await expect
       .poll(() => page.locator('.space').evaluate((el) => el.style.transform))
@@ -141,7 +163,10 @@ test.describe('canvas — free-form controller', () => {
 
     const before = await widget(page, 'w1').boundingBox();
     if (!before) throw new Error('no box');
-    const from = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+    const from = {
+      x: before.x + before.width / 2,
+      y: before.y + before.height / 2,
+    };
     await drag(page, from, { x: from.x + 80, y: from.y }, { settle: 60 });
 
     const after = await widget(page, 'w1').boundingBox();
@@ -152,7 +177,9 @@ test.describe('canvas — free-form controller', () => {
 });
 
 test.describe('canvas — containment (stages)', () => {
-  test('dragging a task into another stage reparents with a rebased frame', async ({ page }) => {
+  test('dragging a task into another stage reparents with a rebased frame', async ({
+    page,
+  }) => {
     await page.goto('/canvas-containers');
     const task = page.locator('[data-task="t1"]');
     await expect(task).toBeVisible();
@@ -161,7 +188,12 @@ test.describe('canvas — containment (stages)', () => {
 
     const review = await page.locator('[data-stage="review"]').boundingBox();
     if (!review) throw new Error('no stage box');
-    await drag(page, task, { x: review.x + 160, y: review.y + 120 }, { settle: 80 });
+    await drag(
+      page,
+      task,
+      { x: review.x + 160, y: review.y + 120 },
+      { settle: 80 },
+    );
 
     await expect(page.getByTestId('parents')).toContainText('t1→review');
     // the task now renders inside the review stage
@@ -171,14 +203,21 @@ test.describe('canvas — containment (stages)', () => {
     expect(t1.x + t1.width).toBeLessThan(review.x + review.width + 1);
   });
 
-  test('dropping a task on empty canvas moves it to the root', async ({ page }) => {
+  test('dropping a task on empty canvas moves it to the root', async ({
+    page,
+  }) => {
     await page.goto('/canvas-containers');
     await expect(page.locator('[data-mm-canvas-ready]')).toBeAttached();
     const task = page.locator('[data-task="t2"]');
     const surface = await page.locator('[data-canvas="stages"]').boundingBox();
     if (!surface) throw new Error('no surface');
 
-    await drag(page, task, { x: surface.x + 390, y: surface.y + 395 }, { settle: 80 });
+    await drag(
+      page,
+      task,
+      { x: surface.x + 390, y: surface.y + 395 },
+      { settle: 80 },
+    );
     await expect(page.getByTestId('parents')).toContainText('t2→root');
   });
 });
@@ -189,7 +228,9 @@ test.describe('canvas — perf guard', () => {
     'CDP performance metrics are Chromium-only',
   );
 
-  test('a move over 200 widgets is transform-only and independent of N', async ({ page }) => {
+  test('a move over 200 widgets is transform-only and independent of N', async ({
+    page,
+  }) => {
     await page.goto('/canvas-controller?n=200');
     await expect(widget(page, 'w1')).toBeVisible();
     await expect(page.locator('[data-mm-canvas-ready]')).toBeAttached();
@@ -214,7 +255,10 @@ test.describe('canvas — perf guard', () => {
     const before = await counts();
     const MOVES = 60;
     for (let i = 0; i < MOVES; i++) {
-      await page.mouse.move(start.x + 6 + (i % 24) * 5, start.y + 6 + (i % 16) * 5);
+      await page.mouse.move(
+        start.x + 6 + (i % 24) * 5,
+        start.y + 6 + (i % 16) * 5,
+      );
     }
     const after = await counts();
     await page.mouse.up();

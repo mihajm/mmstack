@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { hashRequest } from '../hash-request';
 import { Cache } from './cache';
 
@@ -89,7 +88,11 @@ describe('Cache', () => {
       const list = hashRequest({ url: '/api/posts' });
       const page2 = hashRequest({ url: '/api/posts', params: { page: '2' } });
       const detail = hashRequest({ url: '/api/posts/1' });
-      const search = hashRequest({ method: 'POST', url: '/api/posts', body: { q: 'x' } });
+      const search = hashRequest({
+        method: 'POST',
+        url: '/api/posts',
+        body: { q: 'x' },
+      });
       const users = hashRequest({ url: '/api/users' });
       [list, page2, detail, search, users].forEach((k) => cache.store(k, 'v'));
 
@@ -128,7 +131,9 @@ describe('Cache', () => {
     });
 
     it('dev-warns once when nothing matched and every key is foreign-shaped', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       const cache = new Cache<string>();
       cache.store('totally-custom-key-a', 'v');
       cache.store('totally-custom-key-b', 'v');
@@ -141,7 +146,9 @@ describe('Cache', () => {
     });
 
     it('does NOT warn when an auto-shape key exists (default is working)', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       const cache = new Cache<string>();
       cache.store(hashRequest({ url: '/api/users' }), 'v');
       cache.store('totally-custom-key', 'v');

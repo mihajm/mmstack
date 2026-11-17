@@ -62,14 +62,14 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           One difference: a string can carry its own query and fragment.
           <code>mmLink="/docs/page?tab=api#install"</code> goes to that path
-          with the <code>tab</code> query param and the <code>install</code>
-          fragment, where <code>routerLink</code> would encode the
-          <code>?</code> and <code>#</code> into the path. A bare
+          with the <code>tab</code> query param and the
+          <code>install</code> fragment, where <code>routerLink</code> would
+          encode the <code>?</code> and <code>#</code> into the path. A bare
           <code>"#install"</code> or <code>"?tab=api"</code> stays on the route
           that hosts the link. An explicit <code>fragment</code> input wins over
           the inline one, and explicit <code>queryParams</code> are merged on
-          top of the inline ones. Commands arrays pass through untouched, so
-          use one when a path segment really contains a <code>?</code> or
+          top of the inline ones. Commands arrays pass through untouched, so use
+          one when a path segment really contains a <code>?</code> or
           <code>#</code>.
         </p>
         <docs-code [code]="link" lang="ts" />

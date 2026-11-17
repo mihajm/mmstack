@@ -43,7 +43,6 @@ describe('discoverFromProject', () => {
 
     expect(result.map((n) => n.namespace).sort()).toEqual(['common', 'quote']);
 
-    // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const quote = result.find((n) => n.namespace === 'quote')!;
     expect(quote.source.translation).toEqual({
       title: 'Quotes',
@@ -55,7 +54,6 @@ describe('discoverFromProject', () => {
       translation: { title: 'Citati', by: 'avtor {author}' },
     });
 
-    // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const common = result.find((n) => n.namespace === 'common')!;
     expect(common.locales).toHaveLength(0);
     expect(common.source.translation).toEqual({
@@ -135,13 +133,11 @@ describe('discoverFromProject', () => {
         translation: de,
       }),
     );
-    // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const quoteCall = findRegisterNamespaceCalls(
       p.getSourceFileOrThrow('/registry.ts'),
     ).find((c) => c.getText().includes('m.quote.translation'))!;
     addLocaleLoader(quoteCall, 'de', './quote.de', 'quoteDe');
 
-    // eslint-disable-next-line  @typescript-eslint/no-non-null-assertion
     const quote = discoverFromProject(p, { sourceLocale: 'en' }).find(
       (n) => n.namespace === 'quote',
     )!;

@@ -16,9 +16,10 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="chunked, work spread over frames" id="chunked">
         <p>
           You have a signal holding a large array and something downstream that
-          is expensive per item: a <code>&#64;for</code> that renders a heavy row,
-          a computation that walks the whole list. Feeding all of it in at once
-          means one long frame and a visible stall while the browser catches up.
+          is expensive per item: a <code>&#64;for</code> that renders a heavy
+          row, a computation that walks the whole list. Feeding all of it in at
+          once means one long frame and a visible stall while the browser
+          catches up.
         </p>
         <p>
           <code>chunked</code> returns a signal that reveals the source array a
@@ -48,12 +49,12 @@ import { DocSection } from '../../../layout/doc-section';
 
       <docs-section title="Object pools for hot derivations" id="pools">
         <p>
-          A <code>computed</code> that builds a fresh array, <code>Set</code>, or
-          <code>Map</code> every time it runs allocates a new container on every
-          recomputation. For a derivation that fires many times a second (a
-          filter over a live list, an aggregate recomputed on every keystroke)
-          that steady allocation is pressure the garbage collector has to clean
-          up later, in pauses you do not control.
+          A <code>computed</code> that builds a fresh array, <code>Set</code>,
+          or <code>Map</code> every time it runs allocates a new container on
+          every recomputation. For a derivation that fires many times a second
+          (a filter over a live list, an aggregate recomputed on every
+          keystroke) that steady allocation is pressure the garbage collector
+          has to clean up later, in pauses you do not control.
         </p>
         <p>
           <code>pooled</code> backs a signal with a two-slot buffer pool. It
@@ -76,16 +77,17 @@ import { DocSection } from '../../../layout/doc-section';
           The common containers have presets so you skip the
           <code>create</code>/<code>reset</code> boilerplate:
           <code>pooledArray</code>, <code>pooledMap</code>, and
-          <code>pooledSet</code> each supply their own factory and reset
-          (<code>length = 0</code> for arrays, <code>.clear()</code> for the
-          rest). Pass a computation function for the common case, or the full
-          options object when you need <code>eager</code> pre-allocation or a
-          custom container.
+          <code>pooledSet</code> each supply their own factory and reset (<code
+            >length = 0</code
+          >
+          for arrays, <code>.clear()</code> for the rest). Pass a computation
+          function for the common case, or the full options object when you need
+          <code>eager</code> pre-allocation or a custom container.
         </p>
         <docs-code [code]="pooledArrayEx" lang="ts" />
         <p>
-          Use a pool only where the allocation actually shows up in a profile:
-          a hot, high-frequency derivation whose output is consumed and dropped
+          Use a pool only where the allocation actually shows up in a profile: a
+          hot, high-frequency derivation whose output is consumed and dropped
           within the same tick. For anything read once and kept, a plain
           <code>computed</code> is simpler and the retention contract does not
           get in your way.

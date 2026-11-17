@@ -52,7 +52,8 @@ const PACKAGES: Pkg[] = [
   {
     name: '@mmstack/worker',
     link: '/docs/worker',
-    blurb: 'Off-thread state & compute. A worker owns state, the UI reads a live replica.',
+    blurb:
+      'Off-thread state & compute. A worker owns state, the UI reads a live replica.',
     experimental: true,
   },
   {

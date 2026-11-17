@@ -1,4 +1,8 @@
-import { defaultMergeMessage, mergeValidators, createMergeValidators } from './merge-validators';
+import {
+  defaultMergeMessage,
+  mergeValidators,
+  createMergeValidators,
+} from './merge-validators';
 import { type Validator } from './validator.type';
 
 describe('mergeValidators', () => {
@@ -35,8 +39,9 @@ describe('mergeValidators', () => {
   });
 
   describe('mergeValidators utility', () => {
-    const required: Validator<string | null> = (v) => v ? '' : 'required';
-    const min3: Validator<string | null> = (v) => v && v.length >= 3 ? '' : 'too short';
+    const required: Validator<string | null> = (v) => (v ? '' : 'required');
+    const min3: Validator<string | null> = (v) =>
+      v && v.length >= 3 ? '' : 'too short';
 
     it('should return an array of error messages', () => {
       const merged = mergeValidators(required, min3);
@@ -54,12 +59,12 @@ describe('mergeValidators', () => {
   describe('createMergeValidators integration', () => {
     it('should create a function that joins errors with internal delimiter', () => {
       const merge = createMergeValidators();
-      const required: Validator<string> = (v) => v ? '' : 'required';
-      const min: Validator<string> = (v) => v.length > 2 ? '' : 'min';
-      
+      const required: Validator<string> = (v) => (v ? '' : 'required');
+      const min: Validator<string> = (v) => (v.length > 2 ? '' : 'min');
+
       const validate = merge([required, min]);
       const result = validate('');
-      
+
       expect(result).toContain('required');
       expect(result).toContain('::INTERNAL_MMSTACK_MERGE_DELIM::');
       expect(result).toContain('min');
@@ -67,9 +72,9 @@ describe('mergeValidators', () => {
 
     it('should resolve the merged error using the merge function', () => {
       const merge = createMergeValidators();
-      const validatorFn = merge([(v) => 'error1', (v) => 'error2']);
+      const validatorFn = merge([() => 'error1', () => 'error2']);
       const mergedError = validatorFn('anything');
-      
+
       const resolved = validatorFn.resolve(mergedError);
       expect(resolved.error).toBe('error1, +1 issues');
       expect(resolved.tooltip).toBe('error1\nerror2');
@@ -78,8 +83,8 @@ describe('mergeValidators', () => {
     it('should support custom merge function', () => {
       const customMerge = (errors: string[]) => errors.join(' | ');
       const merge = createMergeValidators(customMerge);
-      const validatorFn = merge([(v) => 'e1', (v) => 'e2']);
-      
+      const validatorFn = merge([() => 'e1', () => 'e2']);
+
       const resolved = validatorFn.resolve(validatorFn('test'));
       expect(resolved.error).toBe('e1 | e2');
     });

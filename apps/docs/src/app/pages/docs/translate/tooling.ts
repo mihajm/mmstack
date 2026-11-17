@@ -20,7 +20,9 @@ import { DocSection } from '../../../layout/doc-section';
         cannot ingest one. This tool bridges that: it exports your
         <em>translations</em> to plain JSON, and imports the translated JSON
         back as generated
-        <a mmLink="/docs/translate/namespaces"><code>createTranslation</code></a>
+        <a mmLink="/docs/translate/namespaces"
+          ><code>createTranslation</code></a
+        >
         modules, wiring each new locale into its
         <code>registerNamespace</code> call for you. Your source
         <code>createNamespace</code> is never touched.
@@ -37,11 +39,11 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Three commands, in order. <code>export</code> writes one nested JSON
           file per namespace per locale, keys mirroring your
-          <code>createNamespace</code> tree with ICU messages preserved verbatim.
-          A translator or TMS edits those. <code>import</code> reads them back,
-          generates a <code>createTranslation</code> module per new locale next
-          to the source namespace, and inserts the loader into the matching
-          registry.
+          <code>createNamespace</code> tree with ICU messages preserved
+          verbatim. A translator or TMS edits those. <code>import</code> reads
+          them back, generates a <code>createTranslation</code> module per new
+          locale next to the source namespace, and inserts the loader into the
+          matching registry.
         </p>
         <docs-code [code]="workflow" lang="bash" />
         <p>
@@ -61,8 +63,8 @@ import { DocSection } from '../../../layout/doc-section';
           the same placeholders as the source, so a dropped or renamed
           <code>{{ '{' }} name {{ '}' }}</code> is reported. It must cover every
           source key, so a missing translation is reported. And it must contain
-          no unknown keys, because <code>createTranslation</code> is typed to the
-          source shape and an extra key would generate code that does not
+          no unknown keys, because <code>createTranslation</code> is typed to
+          the source shape and an extra key would generate code that does not
           compile, so the tool rejects the file rather than write it.
         </p>
         <p>
@@ -106,12 +108,12 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Pinning discovery" id="manifest">
         <p>
           Discovery is automatic: the tool walks your source globs and resolves
-          each <code>registerNamespace</code> to the namespace it points at. When
-          you would rather pin that list than rely on the glob, or the glob is
-          not catching something, <code>generate-manifest</code> writes an
+          each <code>registerNamespace</code> to the namespace it points at.
+          When you would rather pin that list than rely on the glob, or the glob
+          is not catching something, <code>generate-manifest</code> writes an
           <code>mmtranslate.config.ts</code> naming the discovered namespaces,
-          their registry files, and locales. It is a starting point you hand-edit
-          and commit.
+          their registry files, and locales. It is a starting point you
+          hand-edit and commit.
         </p>
         <docs-code [code]="manifest" lang="bash" />
         <p>

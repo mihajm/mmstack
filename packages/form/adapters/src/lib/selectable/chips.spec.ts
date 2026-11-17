@@ -17,24 +17,24 @@ describe('Chips Adapter', () => {
     });
 
     it('should compute labeledValue summaries', () => {
-        const state = createChipsState(['a', 'b'], {
-            display: () => (v) => v.toUpperCase()
-        });
-        expect(state.labeledValue()).toEqual([
-            { value: 'a', label: 'A' },
-            { value: 'b', label: 'B' }
-        ]);
+      const state = createChipsState(['a', 'b'], {
+        display: () => (v) => v.toUpperCase(),
+      });
+      expect(state.labeledValue()).toEqual([
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+      ]);
     });
 
     it('should filter selectable options based on query signal', () => {
-        const state = createChipsState([], {
-            options: () => ['Apple', 'Banana', 'Cherry']
-        });
-        expect(state.options()).toHaveLength(3);
-        
-        state.query.set('ban');
-        expect(state.options()).toHaveLength(1);
-        expect(state.options()[0].value).toBe('Banana');
+      const state = createChipsState([], {
+        options: () => ['Apple', 'Banana', 'Cherry'],
+      });
+      expect(state.options()).toHaveLength(3);
+
+      state.query.set('ban');
+      expect(state.options()).toHaveLength(1);
+      expect(state.options()[0].value).toBe('Banana');
     });
   });
 
@@ -54,7 +54,7 @@ describe('Chips Adapter', () => {
         });
 
         expect(state.error()).toBe('Min 1 items');
-        
+
         state.value.set(['tag1']);
         expect(state.error()).toBe('');
       });

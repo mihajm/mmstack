@@ -12,7 +12,7 @@ describe('DateTime Adapter', () => {
 
       expect(state.value()).toEqual(initialDate);
       expect(state.type).toBe('datetime');
-      
+
       expect(state.dateControl).toBeDefined();
       expect(state.timeControl).toBeDefined();
       expect(state.dateControl.value()).toBe(initialDate);
@@ -27,7 +27,7 @@ describe('DateTime Adapter', () => {
 
       const nextDate = new Date('2024-03-22T12:00:00Z');
       state.value.set(nextDate);
-      
+
       expect(state.dateControl.value()).toBe(nextDate);
       expect(state.timeControl.value()).toBe(nextDate);
     });
@@ -50,10 +50,10 @@ describe('DateTime Adapter', () => {
         });
 
         expect(state.error()).toBe('Event is required');
-        
+
         expect(state.dateControl.label()).toBe('Event');
         expect(state.timeControl.label()).toBe('Event Time');
-        
+
         state.value.set(new Date('2024-03-20T10:00:00Z'));
         expect(state.error()).toBe('');
       });

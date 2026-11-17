@@ -272,7 +272,9 @@ import { DocSection } from '../../../layout/doc-section';
               </tr>
               <tr>
                 <td><code>current()</code></td>
-                <td>The value being mutated, or <code>null</code> when idle.</td>
+                <td>
+                  The value being mutated, or <code>null</code> when idle.
+                </td>
               </tr>
               <tr>
                 <td><code>progress()</code></td>
@@ -301,15 +303,15 @@ import { DocSection } from '../../../layout/doc-section';
                 <td>
                   The last failure as
                   <code>{{ '{' }} error, generation {{ '}' }}</code
-                  >. Unlike <code>outcome()</code> it stays after the ref is back
-                  to idle, until the next <code>mutate()</code> starts.
+                  >. Unlike <code>outcome()</code> it stays after the ref is
+                  back to idle, until the next <code>mutate()</code> starts.
                 </td>
               </tr>
               <tr>
                 <td><code>loads()</code></td>
                 <td>
-                  How many requests it has started. A transaction uses it to tell
-                  its own work from work that was already running.
+                  How many requests it has started. A transaction uses it to
+                  tell its own work from work that was already running.
                 </td>
               </tr>
               <tr>

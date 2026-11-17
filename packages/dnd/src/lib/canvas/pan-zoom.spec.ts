@@ -4,7 +4,8 @@ import { TestBed } from '@angular/core/testing';
 import { panZoom, type PanZoomOptions } from './pan-zoom';
 
 function pe(type: string, x: number, y: number, button = 0): Event {
-  const e = new Event(type, { bubbles: true }) as Event & Record<string, unknown>;
+  const e = new Event(type, { bubbles: true }) as Event &
+    Record<string, unknown>;
   e['pointerId'] = 1;
   e['clientX'] = x;
   e['clientY'] = y;
@@ -34,7 +35,17 @@ function wheel(
 function setup(opts: PanZoomOptions = {}) {
   const el = document.createElement('div');
   el.getBoundingClientRect = () =>
-    ({ left: 0, top: 0, x: 0, y: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+    ({
+      left: 0,
+      top: 0,
+      x: 0,
+      y: 0,
+      right: 0,
+      bottom: 0,
+      width: 0,
+      height: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [{ provide: ElementRef, useValue: new ElementRef(el) }],
@@ -145,7 +156,10 @@ describe('panZoom', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         { provide: PLATFORM_ID, useValue: 'server' },
       ],
     });

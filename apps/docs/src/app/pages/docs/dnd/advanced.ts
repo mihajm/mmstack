@@ -213,9 +213,9 @@ import { DocSection } from '../../../layout/doc-section';
           <code>provideDndDefaults()</code> holds the cross-primitive defaults
           (<code>engine</code> and <code>touchActivation</code>), so one line
           flips your whole app to the pointer engine or turns on long-press
-          everywhere. Each primitive also has its own provider for
-          options only it understands, and it inherits the common defaults
-          unless it sets that key itself.
+          everywhere. Each primitive also has its own provider for options only
+          it understands, and it inherits the common defaults unless it sets
+          that key itself.
         </p>
         <docs-code [code]="defaultsEx" lang="ts" />
         <p>
@@ -246,16 +246,17 @@ import { DocSection } from '../../../layout/doc-section';
           <code>movable</code>. It is off by default; turn it on for the whole
           app with <code>provideDndDefaults</code>, and pass
           <code>false</code> to opt a single list out. The board demo on
-          <a mmLink="/docs/dnd/reorderable">sortable lists</a> and the
-          wrap-grid and placement-grid demos on
-          <a mmLink="/docs/dnd/grids">grids</a> use it.
+          <a mmLink="/docs/dnd/reorderable">sortable lists</a> and the wrap-grid
+          and placement-grid demos on <a mmLink="/docs/dnd/grids">grids</a> use
+          it.
         </p>
         <p>
-          Without it, a list item takes the touch only along the list's axis:
-          a vertical list leaves sideways swipes to the page and a horizontal
-          one leaves vertical swipes. Lists that drag in two directions, and
-          items without a handle in a group, claim the whole touch. The
-          <a href="https://github.com/mihajm/mmstack/tree/master/packages/dnd#touch"
+          Without it, a list item takes the touch only along the list's axis: a
+          vertical list leaves sideways swipes to the page and a horizontal one
+          leaves vertical swipes. Lists that drag in two directions, and items
+          without a handle in a group, claim the whole touch. The
+          <a
+            href="https://github.com/mihajm/mmstack/tree/master/packages/dnd#touch"
             >README</a
           >
           lists every case.
@@ -291,7 +292,8 @@ import { DocSection } from '../../../layout/doc-section';
           pieces the library is built from: the gesture chassis
           (<code>driveGesture</code>) and the geometry and hit-testing helpers
           behind the sortable, grid, and canvas, that way you can assemble a
-          bespoke interaction on the same reactive session everything else reads.
+          bespoke interaction on the same reactive session everything else
+          reads.
         </p>
         <p>
           These helpers are not documented symbol by symbol, on purpose: keeping

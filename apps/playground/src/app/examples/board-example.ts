@@ -35,12 +35,38 @@ const isCard = (d: unknown): d is Card =>
     }
   `,
   styles: `
-    :host { display: flex; gap: 1rem; font-family: system-ui, sans-serif; }
-    section { flex: 1; min-height: 120px; padding: .75rem; border: 1px solid #e2e8f0; border-radius: 8px; }
-    section.over { border-color: #2563eb; background: #eff6ff; }
-    h3 { margin: 0 0 .5rem; text-transform: capitalize; }
-    article { margin-bottom: .5rem; padding: .5rem .75rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; cursor: grab; user-select: none; }
-    article.dragging { opacity: .4; }
+    :host {
+      display: flex;
+      gap: 1rem;
+      font-family: system-ui, sans-serif;
+    }
+    section {
+      flex: 1;
+      min-height: 120px;
+      padding: 0.75rem;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+    }
+    section.over {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+    h3 {
+      margin: 0 0 0.5rem;
+      text-transform: capitalize;
+    }
+    article {
+      margin-bottom: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      cursor: grab;
+      user-select: none;
+    }
+    article.dragging {
+      opacity: 0.4;
+    }
   `,
 })
 export class BoardExample {

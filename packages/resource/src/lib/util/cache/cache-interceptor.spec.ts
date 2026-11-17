@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
   HttpClient,
   HttpContext,
@@ -59,9 +58,7 @@ const stubInterceptor: HttpInterceptorFn = (req) => {
         );
 
   // delay() lets errors through immediately; timer+concatMap defers both channels
-  return stub.delayMs
-    ? timer(stub.delayMs).pipe(concatMap(() => res$))
-    : res$;
+  return stub.delayMs ? timer(stub.delayMs).pipe(concatMap(() => res$)) : res$;
 };
 
 function makeContext(

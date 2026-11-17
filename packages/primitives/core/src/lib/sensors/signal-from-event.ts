@@ -98,9 +98,7 @@ export function signalFromEvent<TEvent extends Event, U>(
 
   const {
     destroyRef: providedDestroyRef,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     injector: _injector,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     debugName: _debugName,
     ...listenerOpts
   } = opt ?? {};

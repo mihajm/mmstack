@@ -1,8 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { at, drag, filmstrip } from './support/pointer';
 
-const tiles = (page: Page) =>
-  page.locator('ul[data-list="gallery"] li');
+const tiles = (page: Page) => page.locator('ul[data-list="gallery"] li');
 const labels = async (page: Page) => tiles(page).allInnerTexts();
 
 test.describe('wrap grid — 2D sortable', () => {
@@ -20,38 +19,28 @@ test.describe('wrap grid — 2D sortable', () => {
       tiles(page).nth(4),
     ]);
 
-    await expect.poll(() => labels(page)).toEqual([
-      'T2',
-      'T3',
-      'T4',
-      'T5',
-      'T1',
-      'T6',
-      'T7',
-      'T8',
-      'T9',
-    ]);
+    await expect
+      .poll(() => labels(page))
+      .toEqual(['T2', 'T3', 'T4', 'T5', 'T1', 'T6', 'T7', 'T8', 'T9']);
   });
 
   test('a drag within the same slot commits nothing', async ({ page }) => {
     const before = await labels(page);
-    await drag(page, tiles(page).first(), await at(tiles(page).first(), { fx: 0.6, fy: 0.6 }));
+    await drag(
+      page,
+      tiles(page).first(),
+      await at(tiles(page).first(), { fx: 0.6, fy: 0.6 }),
+    );
     await expect.poll(() => labels(page)).toEqual(before);
   });
 
-  test('keyboard: ArrowRight steps, ArrowDown jumps a row', async ({ page }) => {
+  test('keyboard: ArrowRight steps, ArrowDown jumps a row', async ({
+    page,
+  }) => {
     await tiles(page).first().press('ArrowRight');
-    await expect.poll(() => labels(page)).toEqual([
-      'T2',
-      'T1',
-      'T3',
-      'T4',
-      'T5',
-      'T6',
-      'T7',
-      'T8',
-      'T9',
-    ]);
+    await expect
+      .poll(() => labels(page))
+      .toEqual(['T2', 'T1', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']);
 
     // Down lands on the geometrically nearest tile in the row BELOW, wherever
     // the responsive wrap put the row break.
@@ -67,7 +56,9 @@ test.describe('wrap grid — 2D sortable', () => {
       .toBeLessThan(60); // stayed in (or next to) its column
   });
 
-  test('moves between the tray list and the wrap grid (one group)', async ({ page }) => {
+  test('moves between the tray list and the wrap grid (one group)', async ({
+    page,
+  }) => {
     const mini = page.locator('ul[data-list="mini"] li');
     const tray = page.locator('ul[data-list="tray"] li');
     await expect(mini).toHaveCount(5);

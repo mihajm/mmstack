@@ -37,7 +37,10 @@ export function parseLoader(
   }
 
   const thenAccess = body.getExpression();
-  if (!Node.isPropertyAccessExpression(thenAccess) || thenAccess.getName() !== 'then')
+  if (
+    !Node.isPropertyAccessExpression(thenAccess) ||
+    thenAccess.getName() !== 'then'
+  )
     return null;
 
   const importCall = thenAccess.getExpression();

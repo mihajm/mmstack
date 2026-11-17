@@ -15,7 +15,6 @@
  * content shows, and the text of every binding. Independently of the model, the real DOM must
  * show exactly one branch, and shown content must be one consistent frame with no poisoned text.
  */
-/* eslint-disable @angular-eslint/component-selector */
 import {
   Component,
   computed,

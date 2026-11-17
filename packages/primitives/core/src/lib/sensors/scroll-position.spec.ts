@@ -10,8 +10,14 @@ describe('scrollPosition', () => {
     vi.useFakeTimers();
     fakeScrollX = 0;
     fakeScrollY = 0;
-    Object.defineProperty(window, 'scrollX', { get: () => fakeScrollX, configurable: true });
-    Object.defineProperty(window, 'scrollY', { get: () => fakeScrollY, configurable: true });
+    Object.defineProperty(window, 'scrollX', {
+      get: () => fakeScrollX,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'scrollY', {
+      get: () => fakeScrollY,
+      configurable: true,
+    });
   });
 
   afterEach(() => {
@@ -23,7 +29,7 @@ describe('scrollPosition', () => {
   it('should track window scroll with throttle delay', () => {
     TestBed.runInInjectionContext(() => {
       const scroll = scrollPosition({ throttle: 50 });
-      
+
       expect(scroll()).toEqual({ x: 0, y: 0 });
 
       fakeScrollX = 100;
@@ -31,10 +37,10 @@ describe('scrollPosition', () => {
       window.dispatchEvent(new Event('scroll'));
 
       expect(scroll.unthrottled()).toEqual({ x: 100, y: 200 });
-      expect(scroll()).toEqual({ x: 0, y: 0 }); 
+      expect(scroll()).toEqual({ x: 0, y: 0 });
 
       vi.advanceTimersByTime(50);
-      expect(scroll()).toEqual({ x: 100, y: 200 }); 
+      expect(scroll()).toEqual({ x: 100, y: 200 });
     });
   });
 
@@ -43,7 +49,10 @@ describe('scrollPosition', () => {
       const el = document.createElement('div');
       Object.assign(el, { scrollLeft: 0, scrollTop: 0 });
 
-      const scroll = scrollPosition({ target: new ElementRef(el), throttle: 0 });
+      const scroll = scrollPosition({
+        target: new ElementRef(el),
+        throttle: 0,
+      });
 
       expect(scroll()).toEqual({ x: 0, y: 0 });
 

@@ -33,7 +33,8 @@ export function extractRouteParams(
 
   const query: Record<string, string> = {};
   if (rawQuery) {
-    for (const [key, value] of new URLSearchParams(rawQuery)) query[key] = value;
+    for (const [key, value] of new URLSearchParams(rawQuery))
+      query[key] = value;
   }
 
   return { params, query };

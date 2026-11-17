@@ -263,7 +263,7 @@ export class Cache<T> {
       destroySyncTabs();
     };
 
-    this.db
+    void this.db
       .then(async (db) => {
         if (destroyed) return [];
         return db.getAll();
@@ -464,7 +464,7 @@ export class Cache<T> {
     });
 
     if (!fromSync) {
-      if (persist) this.db.then((db) => db.store(next));
+      if (persist) void this.db.then((db) => db.store(next));
 
       if (broadcast)
         this.broadcast({
@@ -579,7 +579,7 @@ export class Cache<T> {
       });
     }
     if (!fromSync) {
-      this.db.then((db) => db.remove(key));
+      void this.db.then((db) => db.remove(key));
       this.broadcast({ action: 'invalidate', entry: { key } });
     }
   }

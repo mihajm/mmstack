@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { Component, Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';

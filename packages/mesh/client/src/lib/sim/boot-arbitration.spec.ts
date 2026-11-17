@@ -1,5 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { isConflicted, opSync, policyStrategy, preserve, store } from '@mmstack/primitives/core';
+import {
+  isConflicted,
+  opSync,
+  policyStrategy,
+  preserve,
+  store,
+} from '@mmstack/primitives/core';
 import { initialDoc, type SimDoc } from './model';
 
 /**
@@ -10,31 +16,57 @@ import { initialDoc, type SimDoc } from './model';
  * substrate B builds on already resolves what A flagged — both sides survive, no split-brain.
  */
 describe('boot arbitration (branching-state) — resolves the boot race by rebase, not race', () => {
-  const ancestor: SimDoc = { counters: { a: 0, b: 0, c: 0 }, labels: { x: 'synced', y: '' } };
+  const ancestor: SimDoc = {
+    counters: { a: 0, b: 0, c: 0 },
+    labels: { x: 'synced', y: '' },
+  };
 
   it('preserves BOTH offline edits and room edits when they touch different fields', () => {
-    const disk: SimDoc = { counters: { a: 42, b: 0, c: 0 }, labels: { x: 'offline-edit', y: '' } };
-    const room: SimDoc = { counters: { a: 0, b: 5, c: 0 }, labels: { x: 'synced', y: 'room-edit' } };
+    const disk: SimDoc = {
+      counters: { a: 42, b: 0, c: 0 },
+      labels: { x: 'offline-edit', y: '' },
+    };
+    const room: SimDoc = {
+      counters: { a: 0, b: 5, c: 0 },
+      labels: { x: 'synced', y: 'room-edit' },
+    };
 
     const merged = policyStrategy<SimDoc>([])(ancestor, disk, room);
 
     // offline edits (a, x) AND room edits (b, y) both survive — the boot race loses one or the other
-    expect(merged).toEqual({ counters: { a: 42, b: 5, c: 0 }, labels: { x: 'offline-edit', y: 'room-edit' } });
+    expect(merged).toEqual({
+      counters: { a: 42, b: 5, c: 0 },
+      labels: { x: 'offline-edit', y: 'room-edit' },
+    });
   });
 
   it('resolves a true conflict per policy (default lww keeps the offline side deterministically)', () => {
-    const disk: SimDoc = { counters: { a: 0, b: 0, c: 0 }, labels: { x: 'offline-x', y: '' } };
-    const room: SimDoc = { counters: { a: 0, b: 0, c: 0 }, labels: { x: 'room-x', y: '' } };
+    const disk: SimDoc = {
+      counters: { a: 0, b: 0, c: 0 },
+      labels: { x: 'offline-x', y: '' },
+    };
+    const room: SimDoc = {
+      counters: { a: 0, b: 0, c: 0 },
+      labels: { x: 'room-x', y: '' },
+    };
 
     const merged = policyStrategy<SimDoc>([])(ancestor, disk, room);
     expect(merged.labels.x).toBe('offline-x'); // both changed x → lww default → mine (disk)
   });
 
   it('a preserve policy surfaces the conflict as data instead of silently dropping a side', () => {
-    const disk: SimDoc = { counters: { a: 0, b: 0, c: 0 }, labels: { x: 'offline-x', y: '' } };
-    const room: SimDoc = { counters: { a: 0, b: 0, c: 0 }, labels: { x: 'room-x', y: '' } };
+    const disk: SimDoc = {
+      counters: { a: 0, b: 0, c: 0 },
+      labels: { x: 'offline-x', y: '' },
+    };
+    const room: SimDoc = {
+      counters: { a: 0, b: 0, c: 0 },
+      labels: { x: 'room-x', y: '' },
+    };
 
-    const merged = policyStrategy<SimDoc>([{ path: 'labels.x', merge: preserve }])(ancestor, disk, room);
+    const merged = policyStrategy<SimDoc>([
+      { path: 'labels.x', merge: preserve },
+    ])(ancestor, disk, room);
     expect(isConflicted(merged.labels.x)).toBe(true);
   });
 
@@ -47,7 +79,10 @@ describe('boot arbitration (branching-state) — resolves the boot race by rebas
       s.labels.x.set('offline-edit'); // edited while disconnected (never sent)
       TestBed.tick();
 
-      const roomRoot: SimDoc = { counters: { a: 0, b: 5, c: 0 }, labels: { x: 'init', y: 'room-edit' } };
+      const roomRoot: SimDoc = {
+        counters: { a: 0, b: 5, c: 0 },
+        labels: { x: 'init', y: 'room-edit' },
+      };
       // reconnect: adopt the room checkpoint, re-apply the offline pending
       sync.hydrate({ root: roomRoot, registers: [], wm: {} });
       TestBed.tick();

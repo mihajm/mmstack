@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
@@ -24,7 +23,9 @@ const USER = routeDataKey<HeldResource<User | undefined>>('user');
 
 @Component({
   selector: 'held-user',
-  template: `user:{{ data.value()?.name ?? 'BLANK' }}|loading:{{ data.isLoading() }}`,
+  template: `user:{{ data.value()?.name ?? 'BLANK' }}|loading:{{
+      data.isLoading()
+    }}`,
 })
 class UserCmp {
   readonly data = injectRouteData(USER);

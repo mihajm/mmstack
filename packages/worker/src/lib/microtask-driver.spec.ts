@@ -1,4 +1,9 @@
-import { createStoreContext, opLog, store, type OpBatch } from '@mmstack/primitives/core';
+import {
+  createStoreContext,
+  opLog,
+  store,
+  type OpBatch,
+} from '@mmstack/primitives/core';
 import { microtaskOpLogDriver } from '@mmstack/worker/host';
 import { describe, expect, it } from 'vitest';
 
@@ -15,7 +20,11 @@ describe('microtaskOpLogDriver', () => {
     s.n.set(1);
     await tick();
     expect(batches).toEqual([
-      { origin: 'w', version: 1, ops: [{ kind: 'set', path: ['n'], next: 1, prev: 0 }] },
+      {
+        origin: 'w',
+        version: 1,
+        ops: [{ kind: 'set', path: ['n'], next: 1, prev: 0 }],
+      },
     ]);
 
     s.n.set(2);

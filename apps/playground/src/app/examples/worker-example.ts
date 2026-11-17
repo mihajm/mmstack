@@ -180,7 +180,7 @@ export class WorkerExample {
   });
 
   add(n: number): void {
-    this.counter.write((d) => {
+    void this.counter.write((d) => {
       const next = (d.value() ?? 0) + n;
       d.value.set(next);
       d.history.set([...(d.history() ?? []), next]);

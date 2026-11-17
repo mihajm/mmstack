@@ -16,7 +16,6 @@ const tile = (label: string, hue: number): Tile => ({
 });
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-wrap-grid-example',
   imports: [Reorderable, ReorderableItem],
   template: `

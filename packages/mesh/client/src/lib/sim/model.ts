@@ -39,14 +39,18 @@ export function applyWrites(s: SimStore, r: Prng, n: number): void {
  */
 export function installRng(r: Prng): () => void {
   const origRandom = Math.random;
-  const cryptoObj = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const cryptoObj = globalThis.crypto as
+    | { randomUUID?: () => string }
+    | undefined;
   const origUuid = cryptoObj?.randomUUID;
 
   Math.random = () => r.float();
   if (cryptoObj) {
     try {
       cryptoObj.randomUUID = () =>
-        uuidv4({ rng: () => bytes16(r) }) as `${string}-${string}-${string}-${string}-${string}`;
+        uuidv4({
+          rng: () => bytes16(r),
+        }) as `${string}-${string}-${string}-${string}-${string}`;
     } catch {
       // non-writable: opSync falls back to the (stubbed) Math.random
     }

@@ -22,9 +22,9 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="host" lang="ts" />
         <p>
-          <code>workerStoreContext()</code> returns the one store context for the
-          worker. Pass it to every store you create there so they share proxy
-          identity and cleanup. It is the worker's version of
+          <code>workerStoreContext()</code> returns the one store context for
+          the worker. Pass it to every store you create there so they share
+          proxy identity and cleanup. It is the worker's version of
           <code>providedIn: 'root'</code>, scoped to the thread because the
           <code>/host</code> entry only loads inside a worker. Do not use it on
           the main thread.
@@ -35,17 +35,21 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>connectWorker</code> spawns the worker and runs the handshake.
           You pass a factory that returns the worker, not the worker itself,
-          which is what keeps it safe on the server and puts the
-          bundler-visible literal in your app code.
+          which is what keeps it safe on the server and puts the bundler-visible
+          literal in your app code.
         </p>
         <docs-code [code]="connect" lang="ts" />
         <p>
-          The <code>new Worker(new URL('./x.worker', import.meta.url), &#123;
-          type: 'module' &#125;)</code> form must be written literally: a string
-          literal path, and <code>import.meta.url</code> as the second argument.
-          This is the one shape the Angular application builder, webpack 5, and
-          Vite all recognize and turn into a separate worker bundle. A computed
-          path silently opts out.
+          The
+          <code
+            >new Worker(new URL('./x.worker', import.meta.url), &#123; type:
+            'module' &#125;)</code
+          >
+          form must be written literally: a string literal path, and
+          <code>import.meta.url</code> as the second argument. This is the one
+          shape the Angular application builder, webpack 5, and Vite all
+          recognize and turn into a separate worker bundle. A computed path
+          silently opts out.
         </p>
       </docs-section>
 
@@ -57,7 +61,8 @@ import { DocSection } from '../../../layout/doc-section';
         </p>
         <docs-code [code]="typing" lang="ts" />
         <p>
-          For an untyped connection you can still set the value type by hand with
+          For an untyped connection you can still set the value type by hand
+          with
           <code>workerStore&lt;Todo[]&gt;(worker, 'todos')</code>.
         </p>
       </docs-section>

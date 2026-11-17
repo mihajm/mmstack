@@ -32,7 +32,10 @@ async function idbGet(page: Page, key: string): Promise<unknown> {
             resolve(null);
             return;
           }
-          const g = conn.transaction('keyval', 'readonly').objectStore('keyval').get(k);
+          const g = conn
+            .transaction('keyval', 'readonly')
+            .objectStore('keyval')
+            .get(k);
           g.onsuccess = () => {
             conn.close();
             resolve(g.result ?? null);

@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const column = (page: Page, name: string) =>
-  page
-    .locator('section.col')
-    .filter({ has: page.locator('header', { hasText: new RegExp(`^${name}$`) }) });
+  page.locator('section.col').filter({
+    has: page.locator('header', { hasText: new RegExp(`^${name}$`) }),
+  });
 
 test.describe('core — draggable + dropTarget + monitor', () => {
   test.beforeEach(async ({ page }) => {
@@ -18,7 +18,9 @@ test.describe('core — draggable + dropTarget + monitor', () => {
     await card.dragTo(done);
 
     await expect(done.getByText('Design landing page')).toBeVisible();
-    await expect(column(page, 'todo').getByText('Design landing page')).toHaveCount(0);
+    await expect(
+      column(page, 'todo').getByText('Design landing page'),
+    ).toHaveCount(0);
   });
 
   test('reflects the active drag in the monitor banner, then clears on drop', async ({
@@ -41,11 +43,17 @@ test.describe('core — draggable + dropTarget + monitor', () => {
     await expect(done.getByText('Write copy')).toBeVisible();
   });
 
-  test('only the innermost accepting zone receives the drop', async ({ page }) => {
+  test('only the innermost accepting zone receives the drop', async ({
+    page,
+  }) => {
     // moving a card to 'doing' should remove it from 'todo' (single owner)
     const card = page.getByText('Set up analytics');
     await card.dragTo(column(page, 'doing'));
-    await expect(column(page, 'doing').getByText('Set up analytics')).toBeVisible();
-    await expect(column(page, 'todo').getByText('Set up analytics')).toHaveCount(0);
+    await expect(
+      column(page, 'doing').getByText('Set up analytics'),
+    ).toBeVisible();
+    await expect(
+      column(page, 'todo').getByText('Set up analytics'),
+    ).toHaveCount(0);
   });
 });

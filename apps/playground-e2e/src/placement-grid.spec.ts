@@ -5,9 +5,7 @@ const widget = (page: Page, label: string) =>
   page.locator('[data-grid="dashboard"] .widget', { hasText: label });
 
 async function cellOf(page: Page, label: string) {
-  const grid = await page
-    .locator('[data-grid="dashboard"]')
-    .boundingBox();
+  const grid = await page.locator('[data-grid="dashboard"]').boundingBox();
   const box = await widget(page, label).boundingBox();
   if (!grid || !box) throw new Error('missing boxes');
   // 12 cols, 8px gap, 56px rows (see the demo config)
@@ -26,7 +24,9 @@ test.describe('placement grid — spanning dashboard', () => {
     await expect(widget(page, 'Chart')).toBeVisible();
   });
 
-  test('dragging a widget reflows neighbours and commits on release', async ({ page }) => {
+  test('dragging a widget reflows neighbours and commits on release', async ({
+    page,
+  }) => {
     expect(await cellOf(page, 'KPIs')).toMatchObject({ x: 6, y: 0 });
 
     // drag KPIs onto Chart's origin: Chart yields (pushes down), gravity settles
@@ -44,21 +44,35 @@ test.describe('placement grid — spanning dashboard', () => {
     // no overlap anywhere after the commit
     const chart = await cellOf(page, 'Chart');
     const kpis = await cellOf(page, 'KPIs');
-    expect(kpis.y + kpis.h <= chart.y || chart.y + chart.h <= kpis.y || kpis.x + kpis.w <= chart.x || chart.x + chart.w <= kpis.x).toBe(true);
+    expect(
+      kpis.y + kpis.h <= chart.y ||
+        chart.y + chart.h <= kpis.y ||
+        kpis.x + kpis.w <= chart.x ||
+        chart.x + chart.w <= kpis.x,
+    ).toBe(true);
   });
 
-  test('resize by the corner grip changes spans in whole cells', async ({ page }) => {
+  test('resize by the corner grip changes spans in whole cells', async ({
+    page,
+  }) => {
     const before = await cellOf(page, 'KPIs');
     const grip = widget(page, 'KPIs').locator('.grip');
     const start = await resolvePoint(grip);
-    await drag(page, start, { x: start.x + 120, y: start.y + 60 }, { settle: 80 });
+    await drag(
+      page,
+      start,
+      { x: start.x + 120, y: start.y + 60 },
+      { settle: 80 },
+    );
 
     const after = await cellOf(page, 'KPIs');
     expect(after.w).toBeGreaterThan(before.w);
     expect(Number.isInteger(after.w)).toBe(true);
   });
 
-  test('keyboard: arrows move a cell, Shift+arrows resize', async ({ page }) => {
+  test('keyboard: arrows move a cell, Shift+arrows resize', async ({
+    page,
+  }) => {
     const kpis = widget(page, 'KPIs');
     const before = await cellOf(page, 'KPIs');
     await kpis.press('ArrowLeft');
@@ -72,7 +86,9 @@ test.describe('placement grid — spanning dashboard', () => {
       .toBe(before.w + 1);
   });
 
-  test('a grid widget over the tray morphs to a row preview and drops in', async ({ page }) => {
+  test('a grid widget over the tray morphs to a row preview and drops in', async ({
+    page,
+  }) => {
     const tray = page.locator('ul[data-list="widget-tray"] li');
     await expect(tray).toHaveCount(2);
 
@@ -89,7 +105,9 @@ test.describe('placement grid — spanning dashboard', () => {
     await expect(widget(page, 'Feed')).toHaveCount(0); // left the grid
   });
 
-  test('a tray card drops into the grid at the pointed cell', async ({ page }) => {
+  test('a tray card drops into the grid at the pointed cell', async ({
+    page,
+  }) => {
     const tray = page.locator('ul[data-list="widget-tray"] li');
     await expect(tray).toHaveCount(2);
     const grid = page.locator('[data-grid="dashboard"]');
@@ -110,7 +128,9 @@ test.describe('placement grid — spanning dashboard', () => {
     await expect(widget(page, 'Notes')).toBeVisible();
   });
 
-  test('a move released outside the grid cancels; re-entering first commits', async ({ page }) => {
+  test('a move released outside the grid cancels; re-entering first commits', async ({
+    page,
+  }) => {
     const grid = page.locator('[data-grid="dashboard"]');
     const g = await grid.boundingBox();
     if (!g) throw new Error('no grid box');
@@ -131,7 +151,7 @@ test.describe('placement grid — spanning dashboard', () => {
         release: false,
       });
       await expect
-        .poll(async () => (await cellOf(page, 'KPIs')))
+        .poll(async () => await cellOf(page, 'KPIs'))
         .toEqual(before.kpis);
       await page.mouse.up();
       await page.waitForTimeout(250);
@@ -140,13 +160,17 @@ test.describe('placement grid — spanning dashboard', () => {
     }
 
     // out and back in before release: the move commits
-    await drag(page, widget(page, 'Chart'), [farRight, overKpis], { settle: 80 });
+    await drag(page, widget(page, 'Chart'), [farRight, overKpis], {
+      settle: 80,
+    });
     await expect
       .poll(async () => (await cellOf(page, 'Chart')).x)
       .not.toBe(before.chart.x);
   });
 
-  test('compact none: valid cells light up and occupied cells reject', async ({ page }) => {
+  test('compact none: valid cells light up and occupied cells reject', async ({
+    page,
+  }) => {
     const masked = page.locator('[data-grid="masked"]');
     const a = masked.locator('.widget', { hasText: 'A' });
     const b = masked.locator('.widget', { hasText: 'B' });
@@ -155,7 +179,12 @@ test.describe('placement grid — spanning dashboard', () => {
     if (!bBox || !aBefore) throw new Error('missing boxes');
 
     // mid-drag the mask cells appear and the projected drop cell highlights
-    await drag(page, a, { x: bBox.x + 10, y: bBox.y + 10 }, { release: false, settle: 60 });
+    await drag(
+      page,
+      a,
+      { x: bBox.x + 10, y: bBox.y + 10 },
+      { release: false, settle: 60 },
+    );
     await expect
       .poll(() => masked.locator('.mask-cell').count())
       .toBeGreaterThan(0);
@@ -181,7 +210,9 @@ test.describe('placement grid — perf guard', () => {
     'CDP performance metrics are Chromium-only',
   );
 
-  test('a grid drag is transform-only between cell crossings', async ({ page }) => {
+  test('a grid drag is transform-only between cell crossings', async ({
+    page,
+  }) => {
     await page.goto('/placement-grid');
     await expect(widget(page, 'Chart')).toBeVisible();
 

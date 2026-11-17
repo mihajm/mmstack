@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { expect, test } from '@playwright/test';
 
 // Two real browser peers sharing pointer positions over a lossy RTCPeerConnection data channel.

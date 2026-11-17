@@ -15,10 +15,10 @@ import { DocSection } from '../../../layout/doc-section';
       <p>
         <code>workerStore</code> gives the main thread a store the worker owns.
         For an owned subtree it is a real, writable signal store: you read it
-        deeply per leaf and route changes with <code>write</code>, like any store
-        from <code>&#64;mmstack/primitives</code>. It hydrates from the owner's
-        first checkpoint, then folds each owner update in through an echo-free
-        apply.
+        deeply per leaf and route changes with <code>write</code>, like any
+        store from <code>&#64;mmstack/primitives</code>. It hydrates from the
+        owner's first checkpoint, then folds each owner update in through an
+        echo-free apply.
       </p>
 
       <docs-code [code]="replica" lang="ts" />
@@ -29,10 +29,10 @@ import { DocSection } from '../../../layout/doc-section';
           diff to the owner as minimal operations, and the owner folds it in and
           echoes it back. The returned promise resolves once that echo lands, so
           you can await confirmation while the value is already on screen. The
-          main thread and the worker run the same convergent sync, so interleaved
-          writes from several components land on the same state everywhere, and an
-          authoritative owner correction wins wherever it meets a concurrent
-          write.
+          main thread and the worker run the same convergent sync, so
+          interleaved writes from several components land on the same state
+          everywhere, and an authoritative owner correction wins wherever it
+          meets a concurrent write.
         </p>
         <docs-code [code]="write" lang="ts" />
       </docs-section>
@@ -41,20 +41,22 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           Optimistic is the default because it matches how the rest of the stack
           syncs. If you'd rather not show a value until the owner confirms it
-          (say the owner can reject the write), fork the store, write to the fork,
-          and reveal it only when the <code>write</code> promise resolves.
+          (say the owner can reject the write), fork the store, write to the
+          fork, and reveal it only when the <code>write</code> promise resolves.
         </p>
         <docs-code [code]="honest" lang="ts" />
       </docs-section>
 
       <docs-section title="Compose: sync and persistence" id="compose">
         <p>
-          Because the owned store is a writable op-log endpoint, the readers from
+          Because the owned store is a writable op-log endpoint, the readers
+          from
           <code>&#64;mmstack/primitives</code> and
           <code>&#64;mmstack/mesh</code> attach to it directly, no bridge.
           <code>persist</code> makes the worker-owned graph durable;
-          <code>meshSync</code> replicates it to peers. The worker owns the graph
-          off the main thread; sync and durability are readers over its op-log.
+          <code>meshSync</code> replicates it to peers. The worker owns the
+          graph off the main thread; sync and durability are readers over its
+          op-log.
         </p>
         <docs-code [code]="compose" lang="ts" />
       </docs-section>
@@ -63,26 +65,28 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           A published entry is a value the worker computes, mirrored read-only.
           Because it satisfies the resource surface, an in-flight worker
-          computation shows as pending on the main thread while it holds the last
-          value. This is how a worker-side derivation participates in a Suspense
-          boundary just like a fetch would.
+          computation shows as pending on the main thread while it holds the
+          last value. This is how a worker-side derivation participates in a
+          Suspense boundary just like a fetch would.
         </p>
         <docs-code [code]="published" lang="ts" />
         <p>
           A published subtree has no <code>write()</code> at the type level, so
-          calling it is a compile error. The distinction between owned (writable)
-          and published (read-only) is inferred from the worker's contract.
+          calling it is a compile error. The distinction between owned
+          (writable) and published (read-only) is inferred from the worker's
+          contract.
         </p>
       </docs-section>
 
       <docs-section title="Resilience" id="resilience">
         <p>
           The replica recovers on its own. If it sees a version gap from a lost
-          message it holds the stale value, re-subscribes, and re-hydrates from a
-          fresh snapshot. A duplicate batch is dropped by version. If the worker
-          crashes it respawns with backoff and every replica re-subscribes;
-          pending writes reject with <code>WorkerCrashedError</code> so the
-          caller, who still has the value and the recipe, can retry.
+          message it holds the stale value, re-subscribes, and re-hydrates from
+          a fresh snapshot. A duplicate batch is dropped by version. If the
+          worker crashes it respawns with backoff and every replica
+          re-subscribes; pending writes reject with
+          <code>WorkerCrashedError</code> so the caller, who still has the value
+          and the recipe, can retry.
         </p>
       </docs-section>
     </docs-page>

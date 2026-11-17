@@ -157,7 +157,11 @@ describe('dropTarget — derived state', () => {
     });
     const { ref, session } = TestBed.runInInjectionContext(() => {
       const session = TestBed.inject(DndSession).session;
-      const ref = dropTarget<Card>({ accepts: isCard, edges: ['top'], disabled });
+      const ref = dropTarget<Card>({
+        accepts: isCard,
+        edges: ['top'],
+        disabled,
+      });
       return { ref, session };
     });
     session.set(makeSession([{ element, data: { __edge: 'top' } }]));
@@ -202,7 +206,10 @@ describe('dropTarget — registration hooks (read lazily)', () => {
       providers: [
         provideDnd({
           plugins: {
-            hitbox: { attachClosestEdge: attach, extractClosestEdge: () => null },
+            hitbox: {
+              attachClosestEdge: attach,
+              extractClosestEdge: () => null,
+            },
           },
         }),
       ],
@@ -218,7 +225,10 @@ describe('dropTarget — registration hooks (read lazily)', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         { provide: PLATFORM_ID, useValue: 'server' },
       ],
     });
@@ -237,7 +247,10 @@ describe('dropTarget — callbacks & reactivity', () => {
     ɵclearWarnedPlugins();
   });
 
-  function build(opts: Record<string, unknown> = {}, providers: unknown[] = []) {
+  function build(
+    opts: Record<string, unknown> = {},
+    providers: unknown[] = [],
+  ) {
     const element = document.createElement('div');
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
@@ -393,7 +406,10 @@ describe('dropTarget — reactivity (recomputation counts) & gate separation', (
   it('isDragOver reflects membership, but dragOverData still gates on accepts (foreign source)', () => {
     const { ref, element, session } = setup();
     session.set(
-      makeSession([{ element, data: {} }], boxData<unknown>({ notACard: true })),
+      makeSession(
+        [{ element, data: {} }],
+        boxData<unknown>({ notACard: true }),
+      ),
     );
     expect(ref.isDragOver()).toBe(true); // element is in the hovered stack
     expect(ref.dragOverData()).toBeUndefined(); // ...but the payload isn't accepted
@@ -443,9 +459,10 @@ describe('dropTarget — pointer engine', () => {
     kind: 'transfer' as const,
   });
 
-  function setupPointerEdges(
-    onDrop?: (e: DropEvent<Card>) => void,
-  ): { ref: ReturnType<typeof dropTarget<Card>>; engine: StubPointerEngine } {
+  function setupPointerEdges(onDrop?: (e: DropEvent<Card>) => void): {
+    ref: ReturnType<typeof dropTarget<Card>>;
+    engine: StubPointerEngine;
+  } {
     const element = document.createElement('div');
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({

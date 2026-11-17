@@ -62,7 +62,9 @@ export const emptyAdmission = (): ClientAdmission => ({
 
 /** The admission evidence a snapshot welcome carries, as of its seq. */
 export const admissionOf = (src: ClientAdmissionRecord): ClientAdmission => ({
-  ranges: new Map(Object.entries(src.ranges).map(([o, r]) => [o, createRanges(r)])),
+  ranges: new Map(
+    Object.entries(src.ranges).map(([o, r]) => [o, createRanges(r)]),
+  ),
   settled: new Map(Object.entries(src.settled)),
   firstStamps: new Map(Object.entries(src.firstStamps)),
 });
@@ -113,7 +115,12 @@ export function uncoveredCites(
   const out: { path: readonly Key[]; dot: Dot }[] = [];
   for (const op of env.ops) {
     for (const dot of op.cites ?? []) {
-      if (dot.origin === env.origin && dot.hlc.p === env.hlc.p && dot.hlc.l === env.hlc.l) continue;
+      if (
+        dot.origin === env.origin &&
+        dot.hlc.p === env.hlc.p &&
+        dot.hlc.l === env.hlc.l
+      )
+        continue;
       if (!admits(store, ctx, op.path, dot)) out.push({ path: op.path, dot });
     }
   }
@@ -138,16 +145,23 @@ export type WelcomeFence = {
  */
 export function welcomeVerdict(
   installed: WelcomeFence,
-  msg: { readonly index: number; readonly instance: string; readonly seq: number },
+  msg: {
+    readonly index: number;
+    readonly instance: string;
+    readonly seq: number;
+  },
 ): 'newer' | 'same' | 'stale' | 'older-than-traffic' {
   if (msg.index > installed.index) return 'newer';
-  if (msg.instance !== installed.instance || msg.seq < installed.seq) return 'stale';
+  if (msg.instance !== installed.instance || msg.seq < installed.seq)
+    return 'stale';
   if (msg.seq < installed.maxSeq) return 'older-than-traffic';
   return 'same';
 }
 
 /** A pending envelope of an earlier generation, as the tail policy reads it. */
-type Pending = { readonly env: Pick<OpEnvelope, 'origin' | 'instance' | 'version'> };
+type Pending = {
+  readonly env: Pick<OpEnvelope, 'origin' | 'instance' | 'version'>;
+};
 
 /**
  * A new generation's first step with the pending tail: in version order, an envelope whose version
@@ -163,7 +177,8 @@ export function trimByReceipts<T extends Pending>(
   receipts: Receipts,
 ): { readonly trimmed: T[]; readonly keep: T[] } {
   const sorted = [...pending].sort(
-    (a, b) => a.env.version - b.env.version || (a.env.origin < b.env.origin ? -1 : 1),
+    (a, b) =>
+      a.env.version - b.env.version || (a.env.origin < b.env.origin ? -1 : 1),
   );
   // the union over every generation's ranges of the origin
   const held = (origin: string, version: number): boolean =>
@@ -180,12 +195,16 @@ export function trimByReceipts<T extends Pending>(
 }
 
 /** A refusal was classified: a snapshot at or past its seq is owed. */
-export const owedAfterRefusal = (owed: number | undefined, seq: number): number =>
-  Math.max(owed ?? 0, seq);
+export const owedAfterRefusal = (
+  owed: number | undefined,
+  seq: number,
+): number => Math.max(owed ?? 0, seq);
 
 /** A snapshot installed at `seq`: the owed rehydration completes when it reaches the refusal. */
-export const owedAfterInstall = (owed: number | undefined, seq: number): number | undefined =>
-  owed !== undefined && seq >= owed ? undefined : owed;
+export const owedAfterInstall = (
+  owed: number | undefined,
+  seq: number,
+): number | undefined => (owed !== undefined && seq >= owed ? undefined : owed);
 
 /**
  * A member's readiness for a consensus cut: it pressed Compact, it is connected, and nothing it
@@ -206,9 +225,15 @@ export const readyValue = (s: {
  * an op's epoch rises above the register baseline at its path as the client held it before the
  * envelope (the relay's own test for a bump).
  */
-export type Intent = { readonly raws: readonly StoreOp[]; readonly bump: boolean };
+export type Intent = {
+  readonly raws: readonly StoreOp[];
+  readonly bump: boolean;
+};
 
-export function intentOf(env: OpEnvelope, baseline: (path: readonly Key[]) => number): Intent {
+export function intentOf(
+  env: OpEnvelope,
+  baseline: (path: readonly Key[]) => number,
+): Intent {
   const raws: StoreOp[] = [];
   let bump = false;
   for (const op of env.ops) {

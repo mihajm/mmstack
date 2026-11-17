@@ -21,7 +21,6 @@ type Node = {
 };
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-canvas-containers-example',
   imports: [Canvas, CanvasItem],
   template: `

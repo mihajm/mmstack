@@ -9,7 +9,9 @@ import { BASE_TIME, installRng, simStore, type SimDoc } from './model';
 const DOC_KEY = 'sim-doc';
 
 /** An in-memory {@link AsyncStore} standing in for disk (IndexedDB). Reads resolve on a microtask. */
-function fakeDisk(seed?: SimDoc): AsyncStore & { readonly data: Map<string, unknown> } {
+function fakeDisk(
+  seed?: SimDoc,
+): AsyncStore & { readonly data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
   if (seed) data.set(DOC_KEY, seed);
   return {
@@ -60,7 +62,11 @@ export async function runBootRace(opt: {
     // a live peer establishes the room's current state
     const room = TestBed.runInInjectionContext(() => {
       const s = simStore();
-      const mesh = meshSync(s, { room: 'sim', writer: 'room', transport: directTransport(relay, { writer: 'room' }) });
+      const mesh = meshSync(s, {
+        room: 'sim',
+        writer: 'room',
+        transport: directTransport(relay, { writer: 'room' }),
+      });
       return { s, mesh };
     });
     TestBed.tick();
@@ -70,16 +76,26 @@ export async function runBootRace(opt: {
     const roomState = structuredClone(room.s());
 
     // disk holds a STALE snapshot from an offline session (never reached the relay)
-    const diskSnapshot: SimDoc = { counters: { a: 42, b: 0, c: 0 }, labels: { x: 'offline-edit', y: '' } };
+    const diskSnapshot: SimDoc = {
+      counters: { a: 42, b: 0, c: 0 },
+      labels: { x: 'offline-edit', y: '' },
+    };
     const disk = fakeDisk(diskSnapshot);
 
     // the reboot: one store, two hydration sources, racing
     const boot = TestBed.runInInjectionContext(() => {
       const s = simStore();
       const attachMesh = () =>
-        meshSync(s, { room: 'sim', writer: 'boot', transport: directTransport(relay, { writer: 'boot' }) });
+        meshSync(s, {
+          room: 'sim',
+          writer: 'boot',
+          transport: directTransport(relay, { writer: 'boot' }),
+        });
       const attachPersist = () => persist(s, { key: DOC_KEY, store: disk });
-      const mesh = opt.attachOrder === 'persist-first' ? (attachPersist(), attachMesh()) : attachMesh();
+      const mesh =
+        opt.attachOrder === 'persist-first'
+          ? (attachPersist(), attachMesh())
+          : attachMesh();
       if (opt.attachOrder === 'mesh-first') attachPersist();
       return { s, mesh };
     });

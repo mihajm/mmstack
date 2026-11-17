@@ -94,9 +94,7 @@ describe('monitor — derived state', () => {
     const ref = TestBed.runInInjectionContext(() =>
       monitor<Card, { [KIND]: string }>({ accepts: isCard }),
     );
-    session.set(
-      makeSession({ ...boxData<Card>({ id: 'a' }), [KIND]: 'todo' }),
-    );
+    session.set(makeSession({ ...boxData<Card>({ id: 'a' }), [KIND]: 'todo' }));
     expect(ref.source()?.meta[KIND]).toBe('todo');
   });
 });
@@ -201,7 +199,12 @@ describe('monitor — subscription lifecycle', () => {
         current: {
           input: {} as never,
           dropTargets: [
-            { element: document.createElement('div'), data: {}, dropEffect: 'move', isActiveDueToStickiness: false },
+            {
+              element: document.createElement('div'),
+              data: {},
+              dropEffect: 'move',
+              isActiveDueToStickiness: false,
+            },
           ],
         },
         previous: { dropTargets: [] },

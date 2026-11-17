@@ -51,13 +51,24 @@ const snapshotWelcome = (
   instance: string,
   seq: number,
   title: string,
-  gen: { index?: number; policy?: 'discard' | 'replay'; receipts?: Record<string, Record<string, [number, number][]>> } = {},
+  gen: {
+    index?: number;
+    policy?: 'discard' | 'replay';
+    receipts?: Record<string, Record<string, [number, number][]>>;
+  } = {},
 ): ServerMsg => {
   const registers = [
     {
       path: [],
       siblings: [
-        { kind: 'set' as const, value: { title, count: 0 }, writer: 'seed', origin: 'seed', hlc: { p: 1, l: 0 }, epoch: 0 },
+        {
+          kind: 'set' as const,
+          value: { title, count: 0 },
+          writer: 'seed',
+          origin: 'seed',
+          hlc: { p: 1, l: 0 },
+          epoch: 0,
+        },
       ],
       water: {},
     },
@@ -75,7 +86,12 @@ const snapshotWelcome = (
     ...(index > 0 ? { seed: registers } : { registers }),
     wm: index > 0 ? {} : { seed: 1 },
     index,
-    reason: index === 0 ? 'genesis' : gen.policy === 'replay' ? 'compaction' : 'migration',
+    reason:
+      index === 0
+        ? 'genesis'
+        : gen.policy === 'replay'
+          ? 'compaction'
+          : 'migration',
     policy: gen.policy ?? 'discard',
     extent: { '': { seed: { p: 1, l: 0 } } },
     preCutMax: index > 0 ? { seed: { p: 1, l: 0 } } : {},
@@ -87,14 +103,22 @@ const snapshotWelcome = (
 };
 
 const sentEnvs = (wire: ReturnType<typeof scripted>): OpEnvelope[] =>
-  wire.sent.filter((m): m is Extract<ClientMsg, { t: 'env' }> => m.t === 'env').map((m) => m.env);
+  wire.sent
+    .filter((m): m is Extract<ClientMsg, { t: 'env' }> => m.t === 'env')
+    .map((m) => m.env);
 const hellos = (wire: ReturnType<typeof scripted>) =>
-  wire.sent.filter((m): m is Extract<ClientMsg, { t: 'hello' }> => m.t === 'hello');
+  wire.sent.filter(
+    (m): m is Extract<ClientMsg, { t: 'hello' }> => m.t === 'hello',
+  );
 
 describe('session: the relay answers every envelope it does not echo', () => {
   it('stamps a write with the generation the welcome named, and takes "duplicate" as the acknowledgement', async () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshotWelcome('g1', 1, 'init'));
     expect(a.status()).toBe('live');
     a.setAtPath('title', 'mine');
@@ -103,7 +127,14 @@ describe('session: the relay answers every envelope it does not echo', () => {
     expect(a.acked()).toBe(false);
     const barrier = a.whenAcked();
     // the echo was lost; the resend after a reconnect is answered "duplicate"
-    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'duplicate', seq: 1 });
+    wire.push({
+      t: 'drop',
+      room: 'r',
+      origin: env.origin,
+      version: env.version,
+      reason: 'duplicate',
+      seq: 1,
+    });
     await expect(barrier).resolves.toBeUndefined();
     expect(a.acked()).toBe(true);
     expect(a.snapshot().title).toBe('mine');
@@ -124,7 +155,14 @@ describe('session: the relay answers every envelope it does not echo', () => {
     const [env] = sentEnvs(wire);
     const barrier = a.whenAcked();
     const hellosBefore = hellos(wire).length;
-    wire.push({ t: 'drop', room: 'r', origin: env.origin, version: env.version, reason: 'generation', seq: 4 });
+    wire.push({
+      t: 'drop',
+      room: 'r',
+      origin: env.origin,
+      version: env.version,
+      reason: 'generation',
+      seq: 4,
+    });
     // the write is not refused by the reply: it waits for the welcome that names the new generation
     expect(refused).toEqual([]);
     expect(a.acked()).toBe(false);
@@ -133,10 +171,21 @@ describe('session: the relay answers every envelope it does not echo', () => {
     expect(after.length).toBe(hellosBefore + 1);
     expect(after[after.length - 1].seq).toBeUndefined();
     expect(a.stableSnapshot()).toBeNull(); // the write is still shown until the snapshot lands
-    wire.push(snapshotWelcome('g2', 5, 'theirs', { index: 1, policy: 'discard' }));
+    wire.push(
+      snapshotWelcome('g2', 5, 'theirs', { index: 1, policy: 'discard' }),
+    );
     await expect(barrier).rejects.toThrow('refused: generation');
-    expect(refused).toEqual([{ env: expect.objectContaining({ version: env.version }), reason: 'generation' }]);
-    expect(refused[0].env.ops[0]).toMatchObject({ kind: 'set', path: ['title'], next: 'stale' });
+    expect(refused).toEqual([
+      {
+        env: expect.objectContaining({ version: env.version }),
+        reason: 'generation',
+      },
+    ]);
+    expect(refused[0].env.ops[0]).toMatchObject({
+      kind: 'set',
+      path: ['title'],
+      next: 'stale',
+    });
     expect(a.snapshot().title).toBe('theirs'); // gone locally: the room never had it
     expect(a.status()).toBe('live');
     a.close();
@@ -157,7 +206,9 @@ describe('session: the relay answers every envelope it does not echo', () => {
     const barrier = a.whenAcked();
     expect(sentEnvs(wire).every((e) => e.instance === 'g1')).toBe(true);
     // the cut: the relay re-welcomes under a new nonce with its seed
-    wire.push(snapshotWelcome('g2', 2, 'fresh', { index: 1, policy: 'discard' }));
+    wire.push(
+      snapshotWelcome('g2', 2, 'fresh', { index: 1, policy: 'discard' }),
+    );
     await expect(barrier).rejects.toThrow('refused: generation');
     expect(refused).toEqual(['generation', 'generation']);
     expect(a.snapshot()).toEqual({ title: 'fresh', count: 0 });
@@ -171,9 +222,19 @@ describe('session: the relay answers every envelope it does not echo', () => {
 
   it('a settled notice is applied to the fold without changing the value', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(welcome('g1'));
-    const remote = (origin: string, version: number, seq: number, title: string, cites: OpEnvelope['ops'][number]['cites']): SeqEnvelope => ({
+    const remote = (
+      origin: string,
+      version: number,
+      seq: number,
+      title: string,
+      cites: OpEnvelope['ops'][number]['cites'],
+    ): SeqEnvelope => ({
       proto: OP_PROTO_VERSION,
       instance: 'g1',
       origin,
@@ -185,10 +246,20 @@ describe('session: the relay answers every envelope it does not echo', () => {
       seq,
     });
     wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 1, 'first', []) });
-    wire.push({ t: 'env', room: 'r', env: remote('pb', 1, 2, 'second', [{ origin: 'pa', hlc: { p: 10, l: 0 } }]) });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pb', 1, 2, 'second', [
+        { origin: 'pa', hlc: { p: 10, l: 0 } },
+      ]),
+    });
     expect(a.snapshot().title).toBe('second');
     expect(a.sync.liveAt(['title']).map((s) => s.origin)).toEqual(['pb']);
-    wire.push({ t: 'settled', room: 'r', settled: { pa: { p: 10, l: 0 }, pb: { p: 20, l: 0 } } });
+    wire.push({
+      t: 'settled',
+      room: 'r',
+      settled: { pa: { p: 10, l: 0 }, pb: { p: 20, l: 0 } },
+    });
     expect(a.snapshot().title).toBe('second');
     expect(a.sync.liveAt(['title']).map((s) => s.origin)).toEqual(['pb']);
     a.close();

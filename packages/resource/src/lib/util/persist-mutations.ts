@@ -110,21 +110,18 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
  */
 export const MUTATION_PERSISTENCE_DB = new InjectionToken<
   Promise<CacheDB<Envelope>>
->(
-  '@mmstack/resource:mutation-persistence-db',
-  {
-    providedIn: 'root',
-    factory: () => {
-      if (inject(PLATFORM_ID) === 'server')
-        return Promise.resolve(createNoopDB<Envelope>());
-      return createSingleStoreDB<Envelope>(
-        'mmstack-mutation-queue-db',
-        (version) => `mutations_v${version}`,
-        1,
-      );
-    },
+>('@mmstack/resource:mutation-persistence-db', {
+  providedIn: 'root',
+  factory: () => {
+    if (inject(PLATFORM_ID) === 'server')
+      return Promise.resolve(createNoopDB<Envelope>());
+    return createSingleStoreDB<Envelope>(
+      'mmstack-mutation-queue-db',
+      (version) => `mutations_v${version}`,
+      1,
+    );
   },
-);
+});
 
 /**
  * @internal Cross-tab lock seam — `navigator.locks` where available, `null` on the server
@@ -473,7 +470,7 @@ export class MutationPersistence {
       origin: 'local',
     };
     untracked(() => this.rows.inline((map) => map.set(id, row)));
-    this.db.then((db) =>
+    void this.db.then((db) =>
       db.store({
         key: id,
         value: { persistKey: key, seq, raw, session: this.instanceId },
@@ -499,7 +496,7 @@ export class MutationPersistence {
     if (!this.hydrated) this.tombstones.add(id);
     if (this.activeRefreshes > 0) this.refreshTombstones.add(id);
     untracked(() => this.rows.inline((map) => map.delete(id)));
-    this.db.then((db) => db.remove(id));
+    void this.db.then((db) => db.remove(id));
     this.sync?.postMessage({
       type: 'mmstack-mutation-sync',
       sender: this.instanceId,
@@ -616,7 +613,7 @@ export class MutationPersistence {
 
     if (!this.locks) {
       this.heldLocks.add(key);
-      this.whenHydrated.then(invokeIfCurrent);
+      void this.whenHydrated.then(invokeIfCurrent);
       return () => this.heldLocks.delete(key);
     }
 

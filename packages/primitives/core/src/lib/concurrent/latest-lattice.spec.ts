@@ -110,9 +110,11 @@ function modelOutcome(
   if (mode === 'first')
     return m.stop === undefined || m.stop === 'thrown' ? m.stop : m.stop.at;
   let best: { at: number | 'thrown'; r: number } | undefined;
-  const candidates: { at: number | 'thrown'; kind: Kind | 'T' }[] = [
-    ...m.demands.map((d) => ({ at: d.at, kind: d.kind })),
-  ];
+  const candidates: { at: number | 'thrown'; kind: Kind | 'T' }[] =
+    m.demands.map((d) => ({
+      at: d.at,
+      kind: d.kind,
+    }));
   if (m.stop === 'thrown') candidates.push({ at: 'thrown', kind: 'T' });
   for (const c of candidates) {
     const r = rank(c.kind, mode);

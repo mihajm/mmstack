@@ -24,14 +24,14 @@ describe('String Adapter', () => {
     });
 
     it('should handle shortened hints and tooltips', () => {
-        const hint = signal('');
-        const state = createStringState('', {
-            maxErrorHintLength: () => 5,
-            hint: () => hint()
-        });
-        hint.set('Too long');
-        expect(state.hint()).toBe('Too l...');
-        expect(state.hintTooltip()).toBe('Too long');
+      const hint = signal('');
+      const state = createStringState('', {
+        maxErrorHintLength: () => 5,
+        hint: () => hint(),
+      });
+      hint.set('Too long');
+      expect(state.hint()).toBe('Too l...');
+      expect(state.hintTooltip()).toBe('Too long');
     });
   });
 
@@ -52,7 +52,7 @@ describe('String Adapter', () => {
 
         expect(state.error()).toContain('Name is required');
         expect(state.error()).toContain('+1 issues');
-        
+
         state.value.set('ab');
         expect(state.error()).toBe('Min 3 characters');
 
@@ -70,18 +70,20 @@ describe('String Adapter', () => {
 
         // Combined errors: "Field is required, +1 issues"
         expect(state.error()).toContain('Field is required' + ', +1 issues');
-        expect(state.errorTooltip()).toContain('Field is required' + '\n' + 'Min 10 characters');
+        expect(state.errorTooltip()).toContain(
+          'Field is required' + '\n' + 'Min 10 characters',
+        );
       });
     });
 
     it('should be required based on validation options', () => {
-        TestBed.runInInjectionContext(() => {
-          const createString = injectCreateStringState();
-          const state = createString(null, {
-            validation: () => ({ required: true })
-          });
-          expect(state.required()).toBe(true);
+      TestBed.runInInjectionContext(() => {
+        const createString = injectCreateStringState();
+        const state = createString(null, {
+          validation: () => ({ required: true }),
         });
+        expect(state.required()).toBe(true);
+      });
     });
   });
 });

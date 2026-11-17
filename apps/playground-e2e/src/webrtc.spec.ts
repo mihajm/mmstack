@@ -23,7 +23,9 @@ test.describe('webRtcMesh over a real RTCPeerConnection', () => {
     await expect(bob.getByTestId('status')).toHaveText('live');
 
     // a data channel only opens after real offer/answer + ICE + DTLS succeed → peers == 1
-    await expect(alice.getByTestId('peers')).toHaveText('1', { timeout: 20_000 });
+    await expect(alice.getByTestId('peers')).toHaveText('1', {
+      timeout: 20_000,
+    });
     await expect(bob.getByTestId('peers')).toHaveText('1', { timeout: 20_000 });
     await expect(alice.getByTestId('status')).toHaveText('live');
 

@@ -41,9 +41,7 @@ export function extractUrlFromKey(key: string): string | null {
   const start = key.indexOf(KEY_DELIMITER);
   if (start === -1) return null;
   const end = key.indexOf(KEY_DELIMITER, start + 1);
-  return end === -1
-    ? key.slice(start + 1)
-    : key.slice(start + 1, end);
+  return end === -1 ? key.slice(start + 1) : key.slice(start + 1, end);
 }
 
 /**

@@ -8,10 +8,7 @@ import {
   type Signal,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import {
-  type ActivatedRouteSnapshot,
-  type ResolveFn,
-} from '@angular/router';
+import { type ActivatedRouteSnapshot, type ResolveFn } from '@angular/router';
 import { mutable, until } from '@mmstack/primitives';
 import { injectLeafRoutes, injectSnapshotPathResolver } from '../util';
 import { createStagedApply } from '../util/staged-apply';

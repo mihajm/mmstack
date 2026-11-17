@@ -17,11 +17,11 @@ import { DocSection } from '../../../layout/doc-section';
           <code>createRelay</code> takes an optional policy, a policy version,
           limits, and a journal size. <code>relay.connect(socket, ctx)</code>
           attaches one authenticated connection and returns
-          <code>{{ '{' }} receive, disconnect {{ '}' }}</code>. The socket is
-          anything with <code>send</code> and <code>close</code>, so the same
-          relay drives a WebSocket server, a Durable Object, or an in-memory pair
-          in a test. The relay never mints identity; your adapter supplies the
-          principal.
+          <code>{{ '{' }} receive, disconnect {{ '}' }}</code
+          >. The socket is anything with <code>send</code> and
+          <code>close</code>, so the same relay drives a WebSocket server, a
+          Durable Object, or an in-memory pair in a test. The relay never mints
+          identity; your adapter supplies the principal.
         </p>
         <docs-code [code]="create" lang="ts" />
       </docs-section>
@@ -52,14 +52,15 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           What the relay enforces is shape and path access: a well-formed
           envelope and a writer allowed to touch that path. It does not verify
-          the precedence an op claims (its authority level) or that its citations
-          are genuine, so a room that needs "only this role may override" enforces
-          that in the policy, on a trusted <code>writer</code> that your adapter
-          authenticates. Eject is scoped to that writer, which bans the principal
-          across its connections rather than one device. Two clients connected
-          directly over WebRTC skip the relay, so a peer-to-peer room is
-          trust-full for authority: use it among clients that already trust each
-          other, or route through the relay when they do not.
+          the precedence an op claims (its authority level) or that its
+          citations are genuine, so a room that needs "only this role may
+          override" enforces that in the policy, on a trusted
+          <code>writer</code> that your adapter authenticates. Eject is scoped
+          to that writer, which bans the principal across its connections rather
+          than one device. Two clients connected directly over WebRTC skip the
+          relay, so a peer-to-peer room is trust-full for authority: use it
+          among clients that already trust each other, or route through the
+          relay when they do not.
         </p>
         <docs-code [code]="policy" lang="ts" />
       </docs-section>
@@ -69,8 +70,10 @@ import { DocSection } from '../../../layout/doc-section';
           Rooms live in memory, and the relay exposes a seam rather than a
           storage engine. <code>onCommit</code> fires after every envelope is
           sequenced and retained, with the envelope and the room's current
-          <code>{{ '{' }} seq, instance, registers, wm, schemaVersion {{ '}' }}</code>.
-          The envelope is the persistence record: append it to a journal and
+          <code
+            >{{ '{' }} seq, instance, registers, wm, schemaVersion
+            {{ '}' }}</code
+          >. The envelope is the persistence record: append it to a journal and
           checkpoint the register state as often as you like.
           <code>relay.hydrate</code> restores a persisted room before clients
           join and refuses once the room has state or members. Restoring the

@@ -47,8 +47,8 @@ import { DocSection } from '../../../layout/doc-section';
           from a vertical tray into the grid and back. The slot model is exact
           for uniform tiles and a good approximation for mixed sizes, the same
           trade dnd-kit's rect sorting strategy makes. Wrap is pointer-engine
-          territory; combining it with the native indicator engine falls back
-          to vertical behaviour with a dev warning.
+          territory; combining it with the native indicator engine falls back to
+          vertical behaviour with a dev warning.
         </p>
       </docs-section>
 
@@ -59,9 +59,9 @@ import { DocSection } from '../../../layout/doc-section';
           in grid cells) on a fixed column count, and you own the array signal.
           Dragging projects the pointer to a cell and previews the reflow as
           pure derivation. Nothing touches your signal until the drop, which
-          commits in one write with untouched items reference-identical.
-          Resize by the corner grip; arrows move a focused widget one cell and
-          Shift with an arrow resizes it.
+          commits in one write with untouched items reference-identical. Resize
+          by the corner grip; arrows move a focused widget one cell and Shift
+          with an arrow resizes it.
         </p>
         <docs-demo title="Drag to reflow, resize by the grip">
           @defer (on viewport) {
@@ -86,10 +86,10 @@ import { DocSection } from '../../../layout/doc-section';
           above goes away. Let go there and nothing is written; bring the
           pointer back over the grid to carry on with the move. Outside means
           outside the grid's box as it was when the drag started, so a preview
-          that grows under the pointer can't flip the answer. Resizes are
-          exempt (pulling the grip past the edge is how you reach the widest
-          span), Escape cancels any gesture, and over another member of the
-          grid's group a release is a transfer, covered below.
+          that grows under the pointer can't flip the answer. Resizes are exempt
+          (pulling the grip past the edge is how you reach the widest span),
+          Escape cancels any gesture, and over another member of the grid's
+          group a release is a transfer, covered below.
         </p>
       </docs-section>
 
@@ -108,8 +108,8 @@ import { DocSection } from '../../../layout/doc-section';
         <p>
           <code>targetMask()</code> exposes the validity mask while dragging
           (<code>mask[y * cols + x]</code>), so free cells can light up, and a
-          <code>canPlace</code> predicate layers your own placement rules on
-          top of the built-in overlap check.
+          <code>canPlace</code> predicate layers your own placement rules on top
+          of the built-in overlap check.
         </p>
       </docs-section>
 

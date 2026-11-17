@@ -12,7 +12,6 @@ const isChip = (d: unknown): d is Chip =>
  * composable call resolves fine at creation.
  */
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: '[appDrag]',
   host: {
     '[class.dragging]': 'dnd.dragging()',
@@ -29,7 +28,6 @@ export class PointerDrag {
 }
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: '[appDropZone]',
   host: { '[class.over]': 'zone.isDragOver()' },
 })
@@ -48,7 +46,6 @@ export class PointerDropZone {
  * mirrors the live edge for the e2e; the drop reports the resolved edge.
  */
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: '[appEdgeZone]',
   host: {
     '[class.over]': 'zone.isDragOver()',
@@ -66,7 +63,6 @@ export class PointerEdgeZone {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-pointer-engine-example',
   imports: [PointerDrag, PointerDropZone, PointerEdgeZone],
   template: `
@@ -94,8 +90,8 @@ export class PointerEdgeZone {
       </div>
 
       <p class="hint">
-        Closest-edge detection works on the pointer engine too. Hover a chip over
-        the upper or lower half of the panel below.
+        Closest-edge detection works on the pointer engine too. Hover a chip
+        over the upper or lower half of the panel below.
       </p>
       <div
         class="edgezone"

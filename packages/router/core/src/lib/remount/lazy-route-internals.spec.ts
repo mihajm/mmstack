@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector, @typescript-eslint/no-non-null-assertion */
 // Private-slot pin. Every assertion here runs against a config the REAL Router built by
 // really loading a real `loadChildren`, so a rename or reshape of Angular's private slots fails
 // this file rather than silently degrading remount/mount-switch into no-ops.

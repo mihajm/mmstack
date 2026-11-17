@@ -30,18 +30,26 @@ describe('extractPlaceholders', () => {
 
   it('extracts simple, plural, select, and selectordinal argument names', () => {
     expect(extractPlaceholders('Hi {name}')).toEqual(new Set(['name']));
-    expect(extractPlaceholders('{n, plural, one {#} other {#}}')).toEqual(new Set(['n']));
-    expect(extractPlaceholders('{g, select, male {x} other {y}}')).toEqual(new Set(['g']));
-    expect(extractPlaceholders('{n, selectordinal, one {#st} other {#th}}')).toEqual(
+    expect(extractPlaceholders('{n, plural, one {#} other {#}}')).toEqual(
       new Set(['n']),
     );
+    expect(extractPlaceholders('{g, select, male {x} other {y}}')).toEqual(
+      new Set(['g']),
+    );
+    expect(
+      extractPlaceholders('{n, selectordinal, one {#st} other {#th}}'),
+    ).toEqual(new Set(['n']));
   });
 
   it('extracts names nested inside plural/select arms and tag children', () => {
     expect(
-      extractPlaceholders('{count, plural, one {# by {author}} other {# by {author}}}'),
+      extractPlaceholders(
+        '{count, plural, one {# by {author}} other {# by {author}}}',
+      ),
     ).toEqual(new Set(['count', 'author']));
-    expect(extractPlaceholders('<b>{x}</b> {y}')).toEqual(new Set(['b', 'x', 'y']));
+    expect(extractPlaceholders('<b>{x}</b> {y}')).toEqual(
+      new Set(['b', 'x', 'y']),
+    );
   });
 });
 

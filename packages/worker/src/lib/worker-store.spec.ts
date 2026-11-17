@@ -120,9 +120,9 @@ describe('workerStore — write() routed to the owner', () => {
 
   it('rejects a write issued before the replica has hydrated', async () => {
     const { replica } = wire(); // deliberately NOT awaiting hydration
-    await expect(
-      replica.write((d) => d.user.name.set('x')),
-    ).rejects.toThrow('hydrated');
+    await expect(replica.write((d) => d.user.name.set('x'))).rejects.toThrow(
+      'hydrated',
+    );
   });
 
   it('a write from one client converges on every replica (echo-free single-sequencer)', async () => {

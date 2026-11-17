@@ -189,9 +189,7 @@ describe('classifyUsage', () => {
   });
 
   it('a ≥2-segment prefix passed around whole → unknown', () => {
-    expect(
-      classifyUsage('detail.save', ['render(t.detail);']),
-    ).toBe('unknown');
+    expect(classifyUsage('detail.save', ['render(t.detail);'])).toBe('unknown');
   });
 
   it('nothing matching → unused (single identifiers alone do not rescue)', () => {
@@ -221,9 +219,9 @@ describe('unused (end to end over a project)', () => {
     });
     const report = lint(withApp, ['unused']);
     expect(report.findings.map(keyOf)).toEqual([]);
-    expect(report.unknownKeys.map((u) => `${u.namespace}:${u.key}`).sort()).toEqual(
-      ['quote:detail.authorLabel', 'quote:detail.save'],
-    );
+    expect(
+      report.unknownKeys.map((u) => `${u.namespace}:${u.key}`).sort(),
+    ).toEqual(['quote:detail.authorLabel', 'quote:detail.save']);
   });
 });
 

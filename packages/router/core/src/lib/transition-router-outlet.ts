@@ -79,7 +79,6 @@ export type SwapCommitEvent = {
  * {@link injectVisualCommit}, or move the work into the swapped-in view's own subtree.
  */
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'mm-transition-outlet',
   providers: [provideForwardingTransitionScope()],
 })

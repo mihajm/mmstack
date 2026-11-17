@@ -21,11 +21,20 @@ import {
 // Compile-time contracts: a real ResourceRef passes to use() as-is, and a LatestSignal
 // satisfies both surfaces (nesting + scope registration). Breaking any of these
 // assignabilities is an API break, caught here without a runtime test.
-type _RefIsUseSource = ResourceRef<number> extends UseSource<number> ? true : never;
-type _RefIsResourceLike = ResourceRef<number> extends ResourceLike ? true : never;
-type _LatestIsUseSource = LatestSignal<number> extends UseSource<number> ? true : never;
-type _LatestIsResourceLike = LatestSignal<number> extends ResourceLike ? true : never;
-const _contracts: [_RefIsUseSource, _RefIsResourceLike, _LatestIsUseSource, _LatestIsResourceLike] = [true, true, true, true];
+type _RefIsUseSource =
+  ResourceRef<number> extends UseSource<number> ? true : never;
+type _RefIsResourceLike =
+  ResourceRef<number> extends ResourceLike ? true : never;
+type _LatestIsUseSource =
+  LatestSignal<number> extends UseSource<number> ? true : never;
+type _LatestIsResourceLike =
+  LatestSignal<number> extends ResourceLike ? true : never;
+const _contracts: [
+  _RefIsUseSource,
+  _RefIsResourceLike,
+  _LatestIsUseSource,
+  _LatestIsResourceLike,
+] = [true, true, true, true];
 void _contracts;
 
 /**
@@ -290,7 +299,7 @@ describe('latest / use', () => {
       expect(label.pending()).toBe(false);
     });
 
-    it("drops a member from the aggregate when a branch stops reading it", () => {
+    it('drops a member from the aggregate when a branch stops reading it', () => {
       const a = fakeRes<number>({ status: 'resolved', value: 1 });
       const b = fakeRes<number>({ status: 'resolved', value: 2 });
       const useA = signal(true);
@@ -413,7 +422,10 @@ describe('latest / use', () => {
     });
 
     it('propagates reloading + held value through an inner latest', () => {
-      const user = fakeRes<{ name: string }>({ status: 'resolved', value: { name: 'Ada' } });
+      const user = fakeRes<{ name: string }>({
+        status: 'resolved',
+        value: { name: 'Ada' },
+      });
       const inner = latest(() => use(user).name);
       const outer = latest(() => `hello ${use(inner)}`);
       expect(outer()).toBe('hello Ada');
@@ -509,7 +521,10 @@ describe('latest / use', () => {
 
       const child = createEnvironmentInjector([], parent);
       const r = fakeRes<number>({ status: 'loading' });
-      const d = latest(() => use(r), { register: 'indicator', injector: child });
+      const d = latest(() => use(r), {
+        register: 'indicator',
+        injector: child,
+      });
 
       expect(scope.resources()).toContain(d);
       expect(scope.pending()).toBe(true);
@@ -589,7 +604,7 @@ describe('latest / use', () => {
       expect(label.pending()).toBe(false);
     });
 
-    it("survives the real error state — where resource.value() actually throws", async () => {
+    it('survives the real error state — where resource.value() actually throws', async () => {
       const { res, resolvers } = realResource();
       const label = TestBed.runInInjectionContext(() =>
         latest(() => `hello ${use(res).name}`),

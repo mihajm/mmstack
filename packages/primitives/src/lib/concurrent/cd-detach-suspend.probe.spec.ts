@@ -1,5 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
-
 import {
   ChangeDetectorRef,
   Component,
@@ -78,7 +76,9 @@ describe('CD-detach suspension probe (zoneless)', () => {
     expect({
       tmplDelta,
       effDelta,
-      domStale: container.textContent?.includes('0') && !container.textContent?.includes('1'),
+      domStale:
+        container.textContent?.includes('0') &&
+        !container.textContent?.includes('1'),
     }).toEqual({ tmplDelta: 0, effDelta: 1, domStale: true });
   });
 

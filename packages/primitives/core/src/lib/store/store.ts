@@ -263,9 +263,7 @@ export function toStore<T extends AnyRecord>(
     noUnionLeaves,
     [STORE_SHARED_GLOBALS]: {
       // the `injector!` reads run only when a global is absent
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       cache: sharedGlobals?.cache ?? injector!.get(PROXY_CACHE_TOKEN),
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       registry: sharedGlobals?.registry ?? injector!.get(PROXY_CLEANUP_TOKEN),
     },
   };

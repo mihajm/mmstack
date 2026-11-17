@@ -34,7 +34,10 @@ describe('persistedStore', () => {
   it('hydrates from the backend after boot (initial value shows until then)', async () => {
     const backend = memoryBackend({ prefs: { theme: 'dark', n: 2 } });
     const p = TestBed.runInInjectionContext(() =>
-      persistedStore({ theme: 'light', n: 0 }, { key: 'prefs', store: backend }),
+      persistedStore(
+        { theme: 'light', n: 0 },
+        { key: 'prefs', store: backend },
+      ),
     );
 
     expect(p.store.theme()).toBe('light'); // async: not hydrated yet
@@ -48,7 +51,10 @@ describe('persistedStore', () => {
   it('persists changes to the backend (debounced, observable after flush)', async () => {
     const backend = memoryBackend();
     const p = TestBed.runInInjectionContext(() =>
-      persistedStore({ count: 0 }, { key: 'c', store: backend, writeDebounceMs: 5 }),
+      persistedStore(
+        { count: 0 },
+        { key: 'c', store: backend, writeDebounceMs: 5 },
+      ),
     );
     await tick(); // hydrate (empty)
 
@@ -86,7 +92,10 @@ describe('persistedStore', () => {
   it('round-trips through the backend into a fresh store (survives a reload)', async () => {
     const backend = memoryBackend();
     const first = TestBed.runInInjectionContext(() =>
-      persistedStore({ items: [] as string[] }, { key: 'r', store: backend, writeDebounceMs: 1 }),
+      persistedStore(
+        { items: [] as string[] },
+        { key: 'r', store: backend, writeDebounceMs: 1 },
+      ),
     );
     await tick();
     first.store.items.set(['a', 'b']);
@@ -159,7 +168,9 @@ describe('persistedStore', () => {
   describe('versioning + migration', () => {
     it('writes a version envelope and migrates an older snapshot forward on boot', async () => {
       // v1 on disk: { name } → v2 shape: { first, last }
-      const backend = memoryBackend({ u: { __mmstack_pv: 1, data: { name: 'Ada Lovelace' } } });
+      const backend = memoryBackend({
+        u: { __mmstack_pv: 1, data: { name: 'Ada Lovelace' } },
+      });
       const p = TestBed.runInInjectionContext(() =>
         persistedStore(
           { first: '', last: '' },
@@ -193,7 +204,10 @@ describe('persistedStore', () => {
         // stand-in for `await import('./migrations/v2')`
         Promise.resolve().then(() => ({ v: (data as { v: number }).v * 10 }));
       const p = TestBed.runInInjectionContext(() =>
-        persistedStore({ v: 0 }, { key: 'k', store: backend, version: 2, migrate: lazyMigrate }),
+        persistedStore(
+          { v: 0 },
+          { key: 'k', store: backend, version: 2, migrate: lazyMigrate },
+        ),
       );
       expect(p.hydrated()).toBe(false);
       await tick();
@@ -225,10 +239,15 @@ describe('persistedStore', () => {
     });
 
     it('adopts a matching-version snapshot without calling migrate', async () => {
-      const backend = memoryBackend({ m: { __mmstack_pv: 3, data: { ok: true } } });
+      const backend = memoryBackend({
+        m: { __mmstack_pv: 3, data: { ok: true } },
+      });
       const migrate = vi.fn((d: unknown) => d as { ok: boolean });
       const p = TestBed.runInInjectionContext(() =>
-        persistedStore({ ok: false }, { key: 'm', store: backend, version: 3, migrate }),
+        persistedStore(
+          { ok: false },
+          { key: 'm', store: backend, version: 3, migrate },
+        ),
       );
       await tick();
       expect(p.store().ok).toBe(true);
@@ -236,11 +255,18 @@ describe('persistedStore', () => {
     });
 
     it('leaves a newer-than-this-build snapshot untouched and warns', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       try {
-        const backend = memoryBackend({ n: { __mmstack_pv: 5, data: { shape: 'future' } } });
+        const backend = memoryBackend({
+          n: { __mmstack_pv: 5, data: { shape: 'future' } },
+        });
         const p = TestBed.runInInjectionContext(() =>
-          persistedStore({ shape: 'initial' }, { key: 'n', store: backend, version: 2 }),
+          persistedStore(
+            { shape: 'initial' },
+            { key: 'n', store: backend, version: 2 },
+          ),
         );
         await tick();
         expect(p.store().shape).toBe('initial'); // did NOT adopt the newer snapshot
@@ -260,7 +286,10 @@ describe('persistedStore', () => {
       return origSet(k, val);
     };
     const p = TestBed.runInInjectionContext(() =>
-      persistedStore({ v: 0 }, { key: 'w', store: backend, writeDebounceMs: 1 }),
+      persistedStore(
+        { v: 0 },
+        { key: 'w', store: backend, writeDebounceMs: 1 },
+      ),
     );
     await tick();
     await tick(); // let any debounced write fire
@@ -297,7 +326,10 @@ describe('persistedStore', () => {
 
     for (const backend of [idbLike, dexieLike]) {
       const p = TestBed.runInInjectionContext(() =>
-        persistedStore({ ok: false }, { key: 'a', store: backend, writeDebounceMs: 1 }),
+        persistedStore(
+          { ok: false },
+          { key: 'a', store: backend, writeDebounceMs: 1 },
+        ),
       );
       await tick();
       p.store.ok.set(true);

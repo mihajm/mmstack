@@ -105,29 +105,29 @@ npx mmtranslate lint   --src "src/**/*.ts" --report json
 Suppress findings with comments in the translation module, same principle as eslint (rule names `duplicate` and `unused`; no names = all rules):
 
 ```ts
-/* mmtranslate-disable duplicate */        // before the first statement — whole file
+/* mmtranslate-disable duplicate */ // before the first statement — whole file
 
 export const common = createNamespace('common', {
   save: 'Save',
   // mmtranslate-disable-next-line duplicate
-  confirm: 'Save',                         // just this key
+  confirm: 'Save', // just this key
 });
 ```
 
-Comments are located with the TypeScript scanner, so a marker inside a translation *string* never suppresses anything. Suppressed keys leave their duplicate group before the ≥2 check — suppressing all but one member silences the group.
+Comments are located with the TypeScript scanner, so a marker inside a translation _string_ never suppresses anything. Suppressed keys leave their duplicate group before the ≥2 check — suppressing all but one member silences the group.
 
 ### Options
 
-| Flag                       | Applies to                 | Default                                     | Meaning                                                                |
-| -------------------------- | -------------------------- | ------------------------------------------- | ---------------------------------------------------------------------- |
-| `--src <glob>`             | all (repeatable)           | `src/**/*.ts`                               | Source files to scan.                                                  |
-| `--out <dir\|file>`        | export / generate-manifest | `translations` / `mmtranslate.config.ts`    | Output dir (export) or manifest file.                                  |
-| `--in <dir>`               | import                     | `translations`                              | Directory of translated JSON.                                          |
-| `--source-locale <locale>` | all                        | `en` (import: the value recorded at export) | Label for the default/source translation (your app's `defaultLocale`). |
-| `--force`                  | import                     | off                                         | Overwrite an existing file when adding a new locale.                   |
-| `--ignore-case`            | dupes / lint               | off                                         | Compare values case-insensitively.                                     |
+| Flag                       | Applies to                 | Default                                     | Meaning                                                                 |
+| -------------------------- | -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| `--src <glob>`             | all (repeatable)           | `src/**/*.ts`                               | Source files to scan.                                                   |
+| `--out <dir\|file>`        | export / generate-manifest | `translations` / `mmtranslate.config.ts`    | Output dir (export) or manifest file.                                   |
+| `--in <dir>`               | import                     | `translations`                              | Directory of translated JSON.                                           |
+| `--source-locale <locale>` | all                        | `en` (import: the value recorded at export) | Label for the default/source translation (your app's `defaultLocale`).  |
+| `--force`                  | import                     | off                                         | Overwrite an existing file when adding a new locale.                    |
+| `--ignore-case`            | dupes / lint               | off                                         | Compare values case-insensitively.                                      |
 | `--app-src <glob>`         | unused / lint (repeatable) | the `--src` globs                           | App sources for the usage scan (definition/registry files never count). |
-| `--report json`            | dupes / unused / lint      | human output                                | Machine-readable report.                                               |
+| `--report json`            | dupes / unused / lint      | human output                                | Machine-readable report.                                                |
 
 ## How discovery works
 

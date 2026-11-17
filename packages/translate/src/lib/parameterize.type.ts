@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { type UnknownStringKeyObject } from './string-key-object.type';
 
 type Simplify<T> = T extends infer U

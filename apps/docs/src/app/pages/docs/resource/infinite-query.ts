@@ -14,9 +14,9 @@ import { DocSection } from '../../../layout/doc-section';
       lead="Pagination that accumulates. It fetches one page at a time, keeps the pages you have already loaded, and appends the next one on request. Cursor or offset, both fit."
     >
       <p>
-        A "load more" list or an infinite scroll feed is a query that grows.
-        You don't want to refetch the whole thing each time; you want to keep
-        pages one through three and fetch page four onto the end.
+        A "load more" list or an infinite scroll feed is a query that grows. You
+        don't want to refetch the whole thing each time; you want to keep pages
+        one through three and fetch page four onto the end.
         <code>infiniteQueryResource</code> is that: a query whose result is a
         list of pages, with a method to fetch the next one.
       </p>
@@ -32,9 +32,9 @@ import { DocSection } from '../../../layout/doc-section';
           Two things drive it. The request function receives a
           <code>pageParam</code> and returns the request for that page.
           <code>getNextPageParam</code> looks at the last page (and all pages so
-          far) and returns the param for the next one, or
-          <code>null</code> when there are no more. That is where cursor and
-          offset pagination diverge, and both fit the same signature.
+          far) and returns the param for the next one, or <code>null</code> when
+          there are no more. That is where cursor and offset pagination diverge,
+          and both fit the same signature.
         </p>
         <docs-code [code]="setup" lang="ts" />
         <p>
@@ -100,21 +100,23 @@ import { DocSection } from '../../../layout/doc-section';
               </tr>
               <tr>
                 <td><code>isFetchingNextPage()</code></td>
-                <td><code>true</code> while a next-page request is in flight.</td>
+                <td>
+                  <code>true</code> while a next-page request is in flight.
+                </td>
               </tr>
               <tr>
                 <td><code>reload()</code></td>
                 <td>
-                  Refetch the current page in place. The result replaces its slot
-                  rather than appending a duplicate.
+                  Refetch the current page in place. The result replaces its
+                  slot rather than appending a duplicate.
                 </td>
               </tr>
               <tr>
                 <td><code>reset()</code></td>
                 <td>
                   Drop every page and refetch from
-                  <code>initialPageParam</code>. Use it when the underlying query
-                  changes, for example a new filter.
+                  <code>initialPageParam</code>. Use it when the underlying
+                  query changes, for example a new filter.
                 </td>
               </tr>
             </tbody>
@@ -136,9 +138,9 @@ import { DocSection } from '../../../layout/doc-section';
       <docs-section title="Recipe: infinite scroll" id="recipe">
         <p>
           Trigger <code>fetchNextPage()</code> when a sentinel at the bottom of
-          the list scrolls into view. An
-          <code>IntersectionObserver</code> is the plain way; the guard on
-          <code>hasNextPage()</code> keeps it from firing past the end.
+          the list scrolls into view. An <code>IntersectionObserver</code> is
+          the plain way; the guard on <code>hasNextPage()</code> keeps it from
+          firing past the end.
         </p>
         <docs-code [code]="scroll" lang="ts" />
       </docs-section>

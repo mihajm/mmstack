@@ -65,13 +65,23 @@ export type MeshPeer = PresenceState;
  * turns a versioned reject from a dead socket into a speakable 'outdated' banner.
  */
 export type SyncHealthStatus =
-  'live' | 'waiting' | 'offline' | 'outdated' | 'ejected' | 'degraded';
+  | 'live'
+  | 'waiting'
+  | 'offline'
+  | 'outdated'
+  | 'ejected'
+  | 'degraded';
 
 export type SyncHealth = {
   readonly status: SyncHealthStatus;
   /** Why, when the status is `outdated`/`ejected`/`degraded`. */
   readonly reason?:
-    'proto' | 'policy-version' | 'schema' | 'quota' | 'worker' | (string & {});
+    | 'proto'
+    | 'policy-version'
+    | 'schema'
+    | 'quota'
+    | 'worker'
+    | (string & {});
   /** `Date.now()` of the last successful sync (welcome or applied env). */
   readonly lastSyncedAt?: number;
   /**

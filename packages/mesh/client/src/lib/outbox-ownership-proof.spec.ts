@@ -47,7 +47,9 @@ type Tab = {
   writes: number;
 };
 
-type Slot = { readonly origin: string; readonly tail: readonly string[] } | undefined;
+type Slot =
+  | { readonly origin: string; readonly tail: readonly string[] }
+  | undefined;
 
 /** Rule switches; every `true` is a MUTANT of the design, kept so the proof has teeth. */
 type Rules = {
@@ -63,8 +65,17 @@ const DESIGN: Rules = {
   ackNever: false,
 };
 
-type Access = { readonly by: string; readonly role: Role; readonly holder: string | undefined };
-type Transition = { readonly tab: string; readonly from: Role; readonly to: Role; readonly handover?: true };
+type Access = {
+  readonly by: string;
+  readonly role: Role;
+  readonly holder: string | undefined;
+};
+type Transition = {
+  readonly tab: string;
+  readonly from: Role;
+  readonly to: Role;
+  readonly handover?: true;
+};
 
 type Model = {
   readonly rules: Rules;
@@ -74,7 +85,10 @@ type Model = {
   readonly queue: string[];
   readonly room: Set<string>;
   readonly minted: Set<string>;
-  readonly writtenBy: Map<string, { readonly tab: string; readonly role: Role }>;
+  readonly writtenBy: Map<
+    string,
+    { readonly tab: string; readonly role: Role }
+  >;
   readonly slotWrites: Access[];
   readonly slotReads: Access[];
   readonly transitions: Transition[];
@@ -99,7 +113,12 @@ const model = (rules: Rules = DESIGN): Model => ({
 });
 
 const setRole = (m: Model, tab: Tab, to: Role, handover?: true): void => {
-  m.transitions.push({ tab: tab.id, from: tab.role, to, ...(handover ? { handover } : {}) });
+  m.transitions.push({
+    tab: tab.id,
+    from: tab.role,
+    to,
+    ...(handover ? { handover } : {}),
+  });
   tab.role = to;
 };
 
@@ -118,9 +137,17 @@ const restore = (m: Model, tab: Tab): void => {
 const open = (m: Model, cfg: Cfg): Tab => {
   const n = ++m.seq;
   const origin = m.rules.adoptDiskOrigin && m.slot ? m.slot.origin : `o${n}`;
-  const tab: Tab = { id: `t${n}`, cfg, role: 'closed', origin, unacked: [], writes: 0 };
+  const tab: Tab = {
+    id: `t${n}`,
+    cfg,
+    role: 'closed',
+    origin,
+    unacked: [],
+    writes: 0,
+  };
   m.tabs.set(tab.id, tab);
-  if (m.minted.has(origin) || origin === m.slot?.origin) m.staleMints.push(tab.id);
+  if (m.minted.has(origin) || origin === m.slot?.origin)
+    m.staleMints.push(tab.id);
   m.minted.add(origin);
   if (cfg === 'off') {
     setRole(m, tab, 'free');
@@ -138,9 +165,12 @@ const open = (m: Model, cfg: Cfg): Tab => {
   return tab;
 };
 
-const live = (t: Tab): boolean => t.role === 'owner' || t.role === 'ephemeral' || t.role === 'free';
+const live = (t: Tab): boolean =>
+  t.role === 'owner' || t.role === 'ephemeral' || t.role === 'free';
 const persists = (m: Model, t: Tab): boolean =>
-  t.role === 'owner' || t.role === 'free' || (t.role === 'ephemeral' && m.rules.ephemeralPersists);
+  t.role === 'owner' ||
+  t.role === 'free' ||
+  (t.role === 'ephemeral' && m.rules.ephemeralPersists);
 
 const write = (m: Model, tab: Tab): boolean => {
   if (!live(tab)) return false;
@@ -195,7 +225,8 @@ const close = (m: Model, tab: Tab, crash: boolean): boolean => {
 const lostNow = (m: Model): string[] => {
   const held = new Set<string>(m.room);
   for (const e of m.slot?.tail ?? []) held.add(e);
-  for (const t of m.tabs.values()) if (live(t)) for (const e of t.unacked) held.add(e);
+  for (const t of m.tabs.values())
+    if (live(t)) for (const e of t.unacked) held.add(e);
   return [...m.writtenBy.keys()].filter((e) => !held.has(e));
 };
 
@@ -205,7 +236,10 @@ const lostNow = (m: Model): string[] => {
  */
 const drain = (m: Model, cfg: Cfg): string[] => {
   const lost = new Set(lostNow(m));
-  if (![...m.tabs.values()].some((t) => t.role === 'owner' || t.role === 'free')) open(m, cfg);
+  if (
+    ![...m.tabs.values()].some((t) => t.role === 'owner' || t.role === 'free')
+  )
+    open(m, cfg);
   for (let guard = 0; guard < 10_000; guard++) {
     const t = [...m.tabs.values()].find((x) => live(x) && x.unacked.length > 0);
     if (!t) break;
@@ -215,24 +249,32 @@ const drain = (m: Model, cfg: Cfg): string[] => {
 };
 
 const same = (a: readonly string[], b: readonly string[]): boolean =>
-  a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
+  a.length === b.length &&
+  [...a].sort().every((x, i) => x === [...b].sort()[i]);
 
 // ── properties (each returns the first violation as text, or null) ──────────
 type Property = (m: Model) => string | null;
 
 const P1_singleOwner: Property = (m) => {
   const owners = [...m.tabs.values()].filter((t) => t.role === 'owner');
-  if (owners.length > 1) return `two owners: ${owners.map((t) => t.id).join(',')}`;
-  if (owners.length === 1 && m.holder !== owners[0].id) return `owner ${owners[0].id} is not the lock holder`;
-  if (owners.length === 0 && m.holder !== undefined) return `lock held by ${m.holder} with no owner`;
-  if (m.holder === undefined && m.queue.length > 0) return `lock free while ${m.queue.join(',')} wait`;
+  if (owners.length > 1)
+    return `two owners: ${owners.map((t) => t.id).join(',')}`;
+  if (owners.length === 1 && m.holder !== owners[0].id)
+    return `owner ${owners[0].id} is not the lock holder`;
+  if (owners.length === 0 && m.holder !== undefined)
+    return `lock held by ${m.holder} with no owner`;
+  if (m.holder === undefined && m.queue.length > 0)
+    return `lock free while ${m.queue.join(',')} wait`;
   return null;
 };
 
 /** Under the locked modes every slot access is by the tab holding the lock at that moment. */
 const P2_singleWriter: Property = (m) => {
-  const bad = [...m.slotWrites, ...m.slotReads].find((x) => x.role !== 'free' && x.by !== x.holder);
-  if (bad) return `slot accessed by ${bad.by} as ${bad.role} while ${bad.holder ?? 'nobody'} held the lock`;
+  const bad = [...m.slotWrites, ...m.slotReads].find(
+    (x) => x.role !== 'free' && x.by !== x.holder,
+  );
+  if (bad)
+    return `slot accessed by ${bad.by} as ${bad.role} while ${bad.holder ?? 'nobody'} held the lock`;
   return null;
 };
 
@@ -240,31 +282,42 @@ const P3_ownerTailOnDisk: Property = (m) => {
   const owner = [...m.tabs.values()].find((t) => t.role === 'owner');
   if (!owner) return null;
   if (!m.slot) return `owner ${owner.id} with an empty slot`;
-  if (m.slot.origin !== owner.origin) return `slot pins ${m.slot.origin}, owner is ${owner.origin}`;
-  if (!same(m.slot.tail, owner.unacked)) return `slot tail [${m.slot.tail}] ≠ owner tail [${owner.unacked}]`;
+  if (m.slot.origin !== owner.origin)
+    return `slot pins ${m.slot.origin}, owner is ${owner.origin}`;
+  if (!same(m.slot.tail, owner.unacked))
+    return `slot tail [${m.slot.tail}] ≠ owner tail [${owner.unacked}]`;
   return null;
 };
 
 /** The model never ADOPTS an origin from disk; that the generator never repeats is assumed. */
 const P4_freshOrigin: Property = (m) =>
-  m.staleMints.length ? `${m.staleMints[0]} booted with an origin already minted or on disk` : null;
+  m.staleMints.length
+    ? `${m.staleMints[0]} booted with an origin already minted or on disk`
+    : null;
 
 /** A write can be lost only if it was made by an ephemeral tab AND that tab has terminated. */
 const P5_onlyClosedEphemeralLoses: Property = (m) => {
   for (const e of lostNow(m)) {
     const w = m.writtenBy.get(e) as { tab: string; role: Role };
     if (w.role !== 'ephemeral') return `${e} (written as ${w.role}) is lost`;
-    if (m.tabs.get(w.tab)?.role !== 'closed') return `${e} is lost while its tab ${w.tab} is still alive`;
+    if (m.tabs.get(w.tab)?.role !== 'closed')
+      return `${e} is lost while its tab ${w.tab} is still alive`;
   }
   return null;
 };
 
 const P6_noPromotion: Property = (m) => {
-  const promo = m.transitions.find((x) => x.from === 'ephemeral' && x.to === 'owner');
+  const promo = m.transitions.find(
+    (x) => x.from === 'ephemeral' && x.to === 'owner',
+  );
   if (promo) return `${promo.tab} was promoted ephemeral → owner`;
-  const skip = m.transitions.find((x) => x.from === 'waiting' && x.to === 'ephemeral');
+  const skip = m.transitions.find(
+    (x) => x.from === 'waiting' && x.to === 'ephemeral',
+  );
   if (skip) return `${skip.tab} went waiting → ephemeral`;
-  const early = m.transitions.find((x) => x.from === 'waiting' && x.to === 'owner' && !x.handover);
+  const early = m.transitions.find(
+    (x) => x.from === 'waiting' && x.to === 'owner' && !x.handover,
+  );
   return early ? `${early.tab} went waiting → owner outside a handover` : null;
 };
 
@@ -302,7 +355,8 @@ function run(
   const rnd = mulberry32(seed);
   const m = model(rules);
   const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
-  const cfg = (): Cfg => (config === 'mixed' ? (rnd() < 0.5 ? 'queue' : 'ephemeral') : config);
+  const cfg = (): Cfg =>
+    config === 'mixed' ? (rnd() < 0.5 ? 'queue' : 'ephemeral') : config;
   for (let i = 0; i < steps; i++) {
     const tabs = [...m.tabs.values()].filter((t) => t.role !== 'closed');
     const r = rnd();
@@ -317,7 +371,8 @@ function run(
   }
   if (withDrain) {
     const undelivered = drain(m, cfg());
-    if (undelivered.length) return `seed ${seed} (${config}): drain left [${undelivered}] out of the room`;
+    if (undelivered.length)
+      return `seed ${seed} (${config}): drain left [${undelivered}] out of the room`;
   }
   return null;
 }
@@ -326,13 +381,16 @@ const SEEDS = 400;
 const STEPS = 80;
 
 describe('outbox ownership — pure model [PROVEN, bounded random traces]', () => {
-  describe.each<Config>(['queue', 'ephemeral', 'mixed'])('crossTab %s', (config) => {
-    it('holds P1–P6 on every step of random traces, and a drain delivers everything not lost', () => {
-      for (let seed = 0; seed < SEEDS; seed++) {
-        expect(run(seed, config, STEPS, PROPERTIES, DESIGN, true)).toBeNull();
-      }
-    });
-  });
+  describe.each<Config>(['queue', 'ephemeral', 'mixed'])(
+    'crossTab %s',
+    (config) => {
+      it('holds P1–P6 on every step of random traces, and a drain delivers everything not lost', () => {
+        for (let seed = 0; seed < SEEDS; seed++) {
+          expect(run(seed, config, STEPS, PROPERTIES, DESIGN, true)).toBeNull();
+        }
+      });
+    },
+  );
 
   it("'ephemeral' never waits: the second tab is live at once, on its own origin, with no slot access", () => {
     const m = model();
@@ -401,7 +459,11 @@ describe('outbox ownership — pure model [PROVEN, bounded random traces]', () =
   it("under 'off' the loss is reachable by random traces; under the locked modes it never is", () => {
     const reach = (config: Config): boolean => {
       for (let seed = 0; seed < SEEDS; seed++) {
-        if (run(seed, config, STEPS, [['P5', P5_onlyClosedEphemeralLoses]]) !== null) return true;
+        if (
+          run(seed, config, STEPS, [['P5', P5_onlyClosedEphemeralLoses]]) !==
+          null
+        )
+          return true;
       }
       return false;
     };
@@ -412,26 +474,47 @@ describe('outbox ownership — pure model [PROVEN, bounded random traces]', () =
   });
 
   describe('teeth: each mutant of the rules breaks the property it guards', () => {
-    const breaks = (rules: Rules, name: string, p: Property, withDrain = false): boolean => {
+    const breaks = (
+      rules: Rules,
+      name: string,
+      p: Property,
+      withDrain = false,
+    ): boolean => {
       for (let seed = 0; seed < SEEDS; seed++) {
-        if (run(seed, 'mixed', STEPS, [[name, p]], rules, withDrain) !== null) return true;
+        if (run(seed, 'mixed', STEPS, [[name, p]], rules, withDrain) !== null)
+          return true;
       }
       return false;
     };
     it('adopting the disk origin breaks P4', () => {
-      expect(breaks({ ...DESIGN, adoptDiskOrigin: true }, 'P4', P4_freshOrigin)).toBe(true);
+      expect(
+        breaks({ ...DESIGN, adoptDiskOrigin: true }, 'P4', P4_freshOrigin),
+      ).toBe(true);
     });
     it('an ephemeral tab that persists breaks P2 and P3', () => {
-      expect(breaks({ ...DESIGN, ephemeralPersists: true }, 'P2', P2_singleWriter)).toBe(true);
-      expect(breaks({ ...DESIGN, ephemeralPersists: true }, 'P3', P3_ownerTailOnDisk)).toBe(true);
+      expect(
+        breaks({ ...DESIGN, ephemeralPersists: true }, 'P2', P2_singleWriter),
+      ).toBe(true);
+      expect(
+        breaks(
+          { ...DESIGN, ephemeralPersists: true },
+          'P3',
+          P3_ownerTailOnDisk,
+        ),
+      ).toBe(true);
     });
     it('promoting the survivor breaks P6 and, without a rebase of its tail, P3', () => {
-      expect(breaks({ ...DESIGN, promoteSurvivor: true }, 'P6', P6_noPromotion)).toBe(true);
-      expect(breaks({ ...DESIGN, promoteSurvivor: true }, 'P3', P3_ownerTailOnDisk)).toBe(true);
+      expect(
+        breaks({ ...DESIGN, promoteSurvivor: true }, 'P6', P6_noPromotion),
+      ).toBe(true);
+      expect(
+        breaks({ ...DESIGN, promoteSurvivor: true }, 'P3', P3_ownerTailOnDisk),
+      ).toBe(true);
     });
     it('a room that never acks survives P1–P6 (they are safety) and is caught by the drain witness', () => {
       const never = { ...DESIGN, ackNever: true };
-      for (const [name, p] of PROPERTIES) expect(breaks(never, name, p)).toBe(false);
+      for (const [name, p] of PROPERTIES)
+        expect(breaks(never, name, p)).toBe(false);
       expect(breaks(never, 'none', () => null, true)).toBe(true);
     });
   });

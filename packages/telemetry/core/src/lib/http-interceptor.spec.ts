@@ -132,8 +132,12 @@ describe('telemetryInterceptor', () => {
       .pipe(retry(1))
       .subscribe({ error: () => undefined });
 
-    ctrl.expectOne('/api/x').flush('nope', { status: 500, statusText: 'Server Error' });
-    ctrl.expectOne('/api/x').flush('nope', { status: 500, statusText: 'Server Error' });
+    ctrl
+      .expectOne('/api/x')
+      .flush('nope', { status: 500, statusText: 'Server Error' });
+    ctrl
+      .expectOne('/api/x')
+      .flush('nope', { status: 500, statusText: 'Server Error' });
 
     expect(sink.spans.length).toBe(2);
     const [first, second] = sink.spans;
@@ -223,9 +227,7 @@ describe('telemetryInterceptor', () => {
 
   it('ignores non-Response events: no status until the response, no premature end', () => {
     const { http, ctrl, sink } = setup();
-    http
-      .get('/api/x', { reportProgress: true, observe: 'events' })
-      .subscribe();
+    http.get('/api/x', { reportProgress: true, observe: 'events' }).subscribe();
     const req = ctrl.expectOne('/api/x');
 
     req.event({ type: 3, loaded: 5, total: 10 } as never); // DownloadProgress

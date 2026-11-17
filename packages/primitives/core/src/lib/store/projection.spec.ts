@@ -26,7 +26,10 @@ describe('reconcile', () => {
     const a = { id: 1, name: 'a', active: true };
     const b = { id: 2, name: 'b', active: true };
     const prev = [a, b];
-    const next = [{ id: 2, name: 'b', active: true }, { id: 1, name: 'a', active: true }];
+    const next = [
+      { id: 2, name: 'b', active: true },
+      { id: 1, name: 'a', active: true },
+    ];
     const out = reconcile(prev, next, 'id');
     expect(out[0]).toBe(b); // id 2 kept its reference
     expect(out[1]).toBe(a); // id 1 kept its reference
@@ -35,7 +38,10 @@ describe('reconcile', () => {
   it('creates only added items and drops removed ones', () => {
     const a = { id: 1, name: 'a', active: true };
     const prev = [a];
-    const next = [{ id: 1, name: 'a', active: true }, { id: 2, name: 'b', active: true }];
+    const next = [
+      { id: 1, name: 'a', active: true },
+      { id: 2, name: 'b', active: true },
+    ];
     const out = reconcile(prev, next, 'id');
     expect(out[0]).toBe(a); // survivor kept
     expect(out[1]).toEqual({ id: 2, name: 'b', active: true }); // new item
@@ -49,7 +55,10 @@ describe('projection', () => {
         { id: 1, name: 'ada', active: true },
         { id: 2, name: 'bob', active: false },
       ]);
-      const active = projection<User[]>(() => users().filter((u) => u.active), []);
+      const active = projection<User[]>(
+        () => users().filter((u) => u.active),
+        [],
+      );
 
       TestBed.tick();
       expect(active().length).toBe(1);
@@ -97,10 +106,13 @@ describe('projection', () => {
     TestBed.runInInjectionContext(() => {
       const src = signal({ n: 1 });
       let runs = 0;
-      const p = projection<{ n: number }>(() => {
-        runs++;
-        return src();
-      }, { n: 0 });
+      const p = projection<{ n: number }>(
+        () => {
+          runs++;
+          return src();
+        },
+        { n: 0 },
+      );
 
       expect(runs).toBe(0); // creation does not compute
       src.set({ n: 2 });
@@ -132,7 +144,10 @@ describe('projection', () => {
   it('keeps per-field tracking: a computed over one field does not recompute for another', () => {
     TestBed.runInInjectionContext(() => {
       const src = signal({ a: 1, b: 1 });
-      const proj = projection<{ a: number; b: number }>(() => src(), { a: 0, b: 0 });
+      const proj = projection<{ a: number; b: number }>(() => src(), {
+        a: 0,
+        b: 0,
+      });
       TestBed.tick();
 
       let recomputes = 0;

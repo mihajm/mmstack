@@ -10,8 +10,20 @@ describe('prng (the harness must be reproducible)', () => {
   });
 
   it('different seeds diverge', () => {
-    const a = Array.from({ length: 50 }, ((r) => () => r.float())(prng(1)));
-    const b = Array.from({ length: 50 }, ((r) => () => r.float())(prng(2)));
+    const a = Array.from(
+      { length: 50 },
+      (
+        (r) => () =>
+          r.float()
+      )(prng(1)),
+    );
+    const b = Array.from(
+      { length: 50 },
+      (
+        (r) => () =>
+          r.float()
+      )(prng(2)),
+    );
     expect(a).not.toEqual(b);
   });
 

@@ -16,7 +16,6 @@ type Chip = { kind: string };
  * `/sortable` sections so the two can be compared before the old one retires.
  */
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'app-sortable-indicator-example',
   imports: [Reorderable, ReorderableItem, Draggable],
   template: `

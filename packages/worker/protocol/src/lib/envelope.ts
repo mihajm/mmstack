@@ -54,7 +54,12 @@ export type WorkerEnvelope =
   // (including the sender, whose replica reads its own echo as the acknowledgement).
   | { type: 'store:sync'; store: string; env: OpEnvelope }
   | { type: 'store:unsubscribe'; store: string; clientId: string }
-  | { type: 'store:status'; store: string; status: RemoteStatus; error?: SerializedError };
+  | {
+      type: 'store:status';
+      store: string;
+      status: RemoteStatus;
+      error?: SerializedError;
+    };
 
 /** Narrows a raw message to a specific envelope variant by its `type`. */
 export type EnvelopeOf<K extends WorkerEnvelope['type']> = Extract<

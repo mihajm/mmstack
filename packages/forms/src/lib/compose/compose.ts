@@ -1,13 +1,13 @@
 import { computed, inject, isSignal, type Signal } from '@angular/core';
 import {
-    type FieldState,
-    FORM_FIELD,
-    type FormField,
-    type LogicFn,
-    MetadataKey,
-    type PathKind,
-    type SchemaPath,
-    type SchemaPathRules,
+  type FieldState,
+  FORM_FIELD,
+  type FormField,
+  type LogicFn,
+  MetadataKey,
+  type PathKind,
+  type SchemaPath,
+  type SchemaPathRules,
 } from '@angular/forms/signals';
 
 /**

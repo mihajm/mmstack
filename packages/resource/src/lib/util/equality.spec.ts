@@ -15,12 +15,8 @@ describe('equality', () => {
     });
 
     it('should compare urls', () => {
-      expect(
-        equalRequest({ url: '/api/a' }, { url: '/api/a' }),
-      ).toBe(true);
-      expect(
-        equalRequest({ url: '/api/a' }, { url: '/api/b' }),
-      ).toBe(false);
+      expect(equalRequest({ url: '/api/a' }, { url: '/api/a' })).toBe(true);
+      expect(equalRequest({ url: '/api/a' }, { url: '/api/b' })).toBe(false);
     });
 
     it('should compare methods', () => {

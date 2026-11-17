@@ -37,7 +37,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('touch-action', () => {
-  test('a vertical list without a handle leaves horizontal panning to the page; long-press lists use manipulation', async ({ page }) => {
+  test('a vertical list without a handle leaves horizontal panning to the page; long-press lists use manipulation', async ({
+    page,
+  }) => {
     const ta = (name: string) =>
       items(page, name).evaluateAll((els) =>
         els.map((e) => getComputedStyle(e).touchAction),
@@ -72,7 +74,9 @@ async function synthetic(page: Page, target: Locator) {
 }
 
 test.describe('long-press gate (synthetic touch, every browser)', () => {
-  test('a touch that rests for the delay, then moves, reorders', async ({ page }) => {
+  test('a touch that rests for the delay, then moves, reorders', async ({
+    page,
+  }) => {
     const first = items(page, 'long-press').first();
     const third = items(page, 'long-press').nth(2);
     const a = await center(first);
@@ -148,7 +152,11 @@ async function cdpTouch(page: Page) {
     move: (x: number, y: number) => send('touchMove', x, y),
     end: () => send('touchEnd'),
     /** Glide in small steps, a frame apart, like a finger. */
-    async glide(from: { x: number; y: number }, to: { x: number; y: number }, steps = 12) {
+    async glide(
+      from: { x: number; y: number },
+      to: { x: number; y: number },
+      steps = 12,
+    ) {
       for (let i = 1; i <= steps; i++) {
         await send(
           'touchMove',
@@ -162,7 +170,10 @@ async function cdpTouch(page: Page) {
 }
 
 test.describe('real touch (Chromium, CDP)', () => {
-  test.skip(({ browserName }) => browserName !== 'chromium', 'CDP touch input is Chromium-only');
+  test.skip(
+    ({ browserName }) => browserName !== 'chromium',
+    'CDP touch input is Chromium-only',
+  );
   test.use({ hasTouch: true });
   // start mid-page so a stray scroll in either direction shows up
   test.beforeEach(async ({ page }) => {
@@ -170,7 +181,9 @@ test.describe('real touch (Chromium, CDP)', () => {
     await expect.poll(() => scrollY(page)).toBe(120);
   });
 
-  test('a vertical list drags on touch and the page does not scroll mid-drag, even with a sideways drift', async ({ page }) => {
+  test('a vertical list drags on touch and the page does not scroll mid-drag, even with a sideways drift', async ({
+    page,
+  }) => {
     const first = items(page, 'axis').first();
     const a = await center(first);
     const b = await center(items(page, 'axis').nth(2));
@@ -188,7 +201,9 @@ test.describe('real touch (Chromium, CDP)', () => {
     expect(await scrollY(page)).toBe(before);
   });
 
-  test('long-press: a quick swipe over the list scrolls the page and starts no drag', async ({ page }) => {
+  test('long-press: a quick swipe over the list scrolls the page and starts no drag', async ({
+    page,
+  }) => {
     const first = items(page, 'long-press').first();
     const a = await center(first);
     const t = await cdpTouch(page);
@@ -208,7 +223,9 @@ test.describe('real touch (Chromium, CDP)', () => {
     ]);
   });
 
-  test('long-press: hold, then drag; the page stays put for the whole drag', async ({ page }) => {
+  test('long-press: hold, then drag; the page stays put for the whole drag', async ({
+    page,
+  }) => {
     const first = items(page, 'long-press').first();
     const a = await center(first);
     const b = await center(items(page, 'long-press').nth(2));

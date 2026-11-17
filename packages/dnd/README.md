@@ -544,14 +544,14 @@ If you are building a node-and-edge editor (BPMN, CMMN, data flows), you do not 
 
 Every drag surface the library renders sets a `touch-action`, which decides whether a finger on it scrolls the page or drags:
 
-| Surface | `touch-action` |
-| --- | --- |
-| `mmReorderableItem` (no handle), single list, `axis: 'y'` | `pan-x` |
-| `mmReorderableItem` (no handle), single list, `axis: 'x'` | `pan-y` |
-| `mmReorderableItem` (no handle), `axis: 'wrap'` or in a `sortableGroup` | `none` |
-| `mmReorderableHandle`, placement grid items, the canvas surface and its move handles | `none` |
-| any of the above with `touchActivation` set | `manipulation` |
-| placement grid resize grips, canvas resize and rotate handles | `none`, always |
+| Surface                                                                              | `touch-action` |
+| ------------------------------------------------------------------------------------ | -------------- |
+| `mmReorderableItem` (no handle), single list, `axis: 'y'`                            | `pan-x`        |
+| `mmReorderableItem` (no handle), single list, `axis: 'x'`                            | `pan-y`        |
+| `mmReorderableItem` (no handle), `axis: 'wrap'` or in a `sortableGroup`              | `none`         |
+| `mmReorderableHandle`, placement grid items, the canvas surface and its move handles | `none`         |
+| any of the above with `touchActivation` set                                          | `manipulation` |
+| placement grid resize grips, canvas resize and rotate handles                        | `none`, always |
 
 A single list drags along its axis only, so the other axis is left to the page: on a vertical list a sideways swipe can still pan, while a swipe along the list drags the item instead of scrolling. Grouped and wrap lists drag in two dimensions and claim the whole touch. With a handle, only the handle claims the touch and the item body scrolls normally. Building your own item directive on `connectReorderableItem`? `reorderableItemTouchAction(controller)` returns the same value. A pointer `draggable` or `movable` sets no `touch-action` of its own: give the element `touch-action: none` for touch drags, or use `touchActivation`.
 

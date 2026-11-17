@@ -16,9 +16,9 @@ import { DocSection } from '../../../layout/doc-section';
       <p>
         The use cases are things like a lazy feature whose routes are generated
         from data that changes, a preview of a page the user is editing, or an
-        A/B variant. Both primitives are keyed by a <strong>marker id</strong>
-        rather than by <code>Route</code> identity, because
-        <code>Router.resetConfig</code> shallow-copies every route it
+        A/B variant. Both primitives are keyed by a
+        <strong>marker id</strong> rather than by <code>Route</code> identity,
+        because <code>Router.resetConfig</code> shallow-copies every route it
         standardizes: object identity goes stale while the marker survives.
       </p>
 
@@ -49,8 +49,8 @@ import { DocSection } from '../../../layout/doc-section';
           </li>
           <li>
             <strong>The old subtree's injectors are destroyed</strong> once the
-            replacement has loaded and its navigation is visually committed,
-            the point at which the old view is gone by construction. Under
+            replacement has loaded and its navigation is visually committed, the
+            point at which the old view is gone by construction. Under
             <code>navigation: 'none'</code> that is the eventual next load of
             the marker; the still-mounted view keeps its injector until then,
             stale by design.
@@ -83,13 +83,14 @@ import { DocSection } from '../../../layout/doc-section';
           <code>'wait'</code> (the default) runs once the in-flight navigation
           settles, and invalidations that queue up meanwhile coalesce into a
           single run. <code>'cancel-and-retry'</code> aborts the in-flight
-          navigation, then runs. <code>'reject'</code> does nothing and
-          resolves <code>{{ '{' }} outcome: 'rejected' {{ '}' }}</code>.
+          navigation, then runs. <code>'reject'</code> does nothing and resolves
+          <code>{{ '{' }} outcome: 'rejected' {{ '}' }}</code
+          >.
         </p>
         <p>
           The handle is shared per id, so every injection sees the same one.
-          <code>invalidate()</code> throws if no route in the config carries
-          the marker; that is a wiring bug, not a runtime outcome.
+          <code>invalidate()</code> throws if no route in the config carries the
+          marker; that is a wiring bug, not a runtime outcome.
         </p>
       </docs-section>
 
@@ -115,13 +116,14 @@ import { DocSection } from '../../../layout/doc-section';
             the new mount reached <code>NavigationEnd</code>.
           </li>
           <li>
-            <strong><code>rolled-back</code></strong>, with
-            <code>reason: 'cancelled' | 'error'</code>, means the navigation
-            hit a <code>NavigationError</code>, or a cancel that is not a
-            redirect (a guard rejecting the new definition, say). The previous
-            definition goes back into the config with its lazy cache intact, so
-            the loader does not re-run, and whatever the abandoned navigation
-            staged, its title registration included, is dropped with it.
+            <strong><code>rolled-back</code></strong
+            >, with <code>reason: 'cancelled' | 'error'</code>, means the
+            navigation hit a <code>NavigationError</code>, or a cancel that is
+            not a redirect (a guard rejecting the new definition, say). The
+            previous definition goes back into the config with its lazy cache
+            intact, so the loader does not re-run, and whatever the abandoned
+            navigation staged, its title registration included, is dropped with
+            it.
           </li>
           <li>
             <strong><code>superseded</code></strong> means a newer switch took
@@ -137,8 +139,8 @@ import { DocSection } from '../../../layout/doc-section';
           <code>beginSwitch()</code>. It swaps synchronously and returns the
           <code>UrlTree</code> the navigation should re-enter with, which is
           exactly what a <code>canMatch</code> guard returns to redirect. The
-          router's redirect hop then lands on the new mount, and the
-          transaction rides it rather than reading it as an abort.
+          router's redirect hop then lands on the new mount, and the transaction
+          rides it rather than reading it as an abort.
         </p>
         <docs-code [code]="beginSwitch" lang="ts" />
       </docs-section>

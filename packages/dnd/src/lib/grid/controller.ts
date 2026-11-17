@@ -1184,8 +1184,7 @@ export function placementGrid<T extends GridPlacement, K>(
       return receive(item, cell.x, cell.y);
     },
     canReceive: options.canReceive
-      ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        (item) => untracked(() => options.canReceive!(item))
+      ? (item) => untracked(() => options.canReceive!(item))
       : undefined,
   };
 

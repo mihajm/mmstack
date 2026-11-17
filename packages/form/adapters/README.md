@@ -171,7 +171,14 @@ These UI components would typically:
 This library also exports `SignalErrorValidator`, a directive useful for integrating the `error()` signal from any form state adapter with template-driven forms (`ngModel`), particularly when using UI component libraries like Angular Material's `<mat-form-field>` that rely on `NgControl`'s validation status derived from `ngModel`. Bind the state's `error()` signal to the `[mmSignalError]` input on an element that also has `ngModel`.
 
 ```html
-<input matInput [(ngModel)]="myStringState.value" [mmSignalError]="myStringState.error()" (blur)="myStringState.markAsTouched()" #myNgModel="ngModel" /> <mat-error>{{ myStringState.error() }}</mat-error>
+<input
+  matInput
+  [(ngModel)]="myStringState.value"
+  [mmSignalError]="myStringState.error()"
+  (blur)="myStringState.markAsTouched()"
+  #myNgModel="ngModel"
+/>
+<mat-error>{{ myStringState.error() }}</mat-error>
 ```
 
 Refer to the JSDoc for `SignalErrorValidator` for more details.

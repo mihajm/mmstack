@@ -5,7 +5,7 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
-import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-web';
+import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace';
 import { otelSink } from './otel-sink';
 
 // Live-collector smoke, skipped unless OTLP_E2E is set. Run it via
@@ -34,7 +34,7 @@ describe.runIf(!!process.env['OTLP_E2E'])('otel-sink OTLP e2e (live collector)',
       const metrics = observed(new OTLPMetricExporter({ url: `${BASE}/v1/metrics` }));
       const logs = observed(new OTLPLogExporter({ url: `${BASE}/v1/logs` }));
 
-      const processor = new SimpleSpanProcessor(traces.exporter);
+      const processor = new SimpleSpanProcessor({ exporter: traces.exporter });
       const metricReader = new PeriodicExportingMetricReader({
         exporter: metrics.exporter,
         exportIntervalMillis: 3_600_000, // flushed manually below

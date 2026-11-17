@@ -11,13 +11,13 @@ import {
 import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
-  WebTracerProvider,
-} from '@opentelemetry/sdk-trace-web';
+  TracerProvider,
+} from '@opentelemetry/sdk-trace';
 
 describe('@mmstack/telemetry-otel', () => {
   function setup() {
     const exporter = new InMemorySpanExporter();
-    const sink = otelSink({ processor: new SimpleSpanProcessor(exporter) });
+    const sink = otelSink({ processor: new SimpleSpanProcessor({ exporter }) });
     TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [sink] })] });
     return { exporter, telemetry: TestBed.inject(TELEMETRY) };
   }
@@ -103,8 +103,8 @@ describe('@mmstack/telemetry-otel', () => {
   describe('bring-your-own provider', () => {
     function byoSetup() {
       const exporter = new InMemorySpanExporter();
-      const provider = new WebTracerProvider({
-        spanProcessors: [new SimpleSpanProcessor(exporter)],
+      const provider = new TracerProvider({
+        spanProcessors: [new SimpleSpanProcessor({ exporter })],
       });
       const sink = otelSink({ provider });
       TestBed.configureTestingModule({

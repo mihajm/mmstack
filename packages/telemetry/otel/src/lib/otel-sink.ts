@@ -37,8 +37,8 @@ import {
   type IdGenerator,
   type SpanProcessor,
   SimpleSpanProcessor,
-  WebTracerProvider,
-} from '@opentelemetry/sdk-trace-web';
+  TracerProvider,
+} from '@opentelemetry/sdk-trace';
 
 const TRACER_NAME = '@mmstack/telemetry';
 
@@ -52,7 +52,7 @@ function randomHex(bytes: number): string {
 
 /**
  * Forces the OTel span to carry our facade ids. Span creation is synchronous in
- * sdk-trace-web (generateSpanId, then generateTraceId for roots; children inherit
+ * sdk-trace (generateSpanId, then generateTraceId for roots; children inherit
  * the trace id from the parent context), so ids are consumed once as they are
  * read and the call site clears any leftover in a `finally`. A reentrant
  * `startSpan` (e.g. a custom SpanProcessor starting spans in `onStart`) therefore
@@ -114,7 +114,7 @@ export type OtelSinkConfig = {
   readonly url?: string;
   readonly headers?: Record<string, string>;
   /** Bring your own provider. NOTE: OTel then owns ids; our facade ids ride as `mmstack.*` attrs. */
-  readonly provider?: WebTracerProvider;
+  readonly provider?: TracerProvider;
   /** Inject a span processor/exporter (e.g. `InMemorySpanExporter` in tests) instead of OTLP. */
   readonly processor?: SpanProcessor;
   /** Inject a metric reader (e.g. wrapping `InMemoryMetricExporter` in tests) instead of OTLP. */
@@ -153,13 +153,13 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
     const processor =
       config.processor ??
       (traceUrl
-        ? new SimpleSpanProcessor(
-            new OTLPTraceExporter({ url: traceUrl, headers }),
-          )
+        ? new SimpleSpanProcessor({
+            exporter: new OTLPTraceExporter({ url: traceUrl, headers }),
+          })
         : null);
     if (processor) {
       forced = new ForcedIdGenerator();
-      const own = new WebTracerProvider({
+      const own = new TracerProvider({
         idGenerator: forced,
         spanProcessors: [processor],
       });

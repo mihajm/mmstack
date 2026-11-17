@@ -22,7 +22,7 @@ import { DocSection } from '../../../layout/doc-section';
         <docs-code [code]="otel" lang="ts" />
         <p>
           <code>endpoint</code> enables all three signals. Pass an existing
-          <code>WebTracerProvider</code> to share one export pipeline with
+          <code>TracerProvider</code> to share one export pipeline with
           official OpenTelemetry instrumentation. Metrics run on a periodic
           reader, and the adapter flushes them when the page is hidden, so a
           short session still reports. All the OpenTelemetry packages are peer

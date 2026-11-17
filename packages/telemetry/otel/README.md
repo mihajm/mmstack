@@ -11,7 +11,7 @@ OTLP interchange adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/p
 ```bash
 npm install @mmstack/telemetry-otel @mmstack/telemetry-core \
   @opentelemetry/api @opentelemetry/api-logs \
-  @opentelemetry/sdk-trace-web @opentelemetry/sdk-metrics @opentelemetry/sdk-logs \
+  @opentelemetry/sdk-trace @opentelemetry/sdk-metrics @opentelemetry/sdk-logs \
   @opentelemetry/exporter-trace-otlp-http @opentelemetry/exporter-metrics-otlp-http \
   @opentelemetry/exporter-logs-otlp-http
 ```
@@ -40,7 +40,7 @@ provideTelemetry({
 
 ## Bring your own provider
 
-Pass an existing `WebTracerProvider` and the adapter uses it instead of building one. OTel then owns the span ids: facade ids ride along as `mmstack.trace_id` / `mmstack.span_id` attributes, and nested facade spans keep real OTel parent links (bridged through the OTel-side span context, which stays valid even after the parent ends). Without a custom provider, the adapter mints the facade's ids straight onto the OTel spans, so both worlds share one id space.
+Pass an existing `TracerProvider` (from `@opentelemetry/sdk-trace`) and the adapter uses it instead of building one. OTel then owns the span ids: facade ids ride along as `mmstack.trace_id` / `mmstack.span_id` attributes, and nested facade spans keep real OTel parent links (bridged through the OTel-side span context, which stays valid even after the parent ends). Without a custom provider, the adapter mints the facade's ids straight onto the OTel spans, so both worlds share one id space.
 
 One caveat: OTel auto-instrumentation (`@opentelemetry/auto-instrumentations-web`) overlaps the core's HTTP interceptor. Pick one, don't double-instrument.
 

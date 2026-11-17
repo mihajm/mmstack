@@ -60,3 +60,6 @@ test-results
 
 # vitest 5 artifact root (attachments, blob/json/junit reports)
 .vitest
+
+# pnpm
+.pnpm-store/

@@ -234,10 +234,9 @@ function build<T extends object>(
         const replayed = [...unacked.values()].filter(
           (e) => e.version > (msg.checkpoint.wm?.[sync.origin] ?? 0),
         );
-        sync.hydrate(
-          msg.checkpoint as Parameters<typeof sync.hydrate>[0],
-          [...unacked.values()],
-        );
+        sync.hydrate(msg.checkpoint as Parameters<typeof sync.hydrate>[0], [
+          ...unacked.values(),
+        ]);
         // a new owner generation REPLACES the frontier; the same one merges (a resync)
         const instance = msg.instance ?? '';
         const prev = untracked(applied);

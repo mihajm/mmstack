@@ -13,7 +13,12 @@ export {
   type AdmissionEvidence,
   type Ranges,
 } from './lib/ranges';
-export { createRegisterStore, extentOf, pathKey, type RegisterStore } from './lib/register';
+export {
+  createRegisterStore,
+  extentOf,
+  pathKey,
+  type RegisterStore,
+} from './lib/register';
 export { validateDirect, validateEnvelope } from './lib/validate';
 export {
   admits,

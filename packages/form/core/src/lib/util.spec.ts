@@ -22,7 +22,11 @@ describe('util', () => {
     it('should shallow merge objects', () => {
       const prev = { a: 1, b: 2 };
       const next = { b: 3, c: 4 };
-      expect(mergeIfObject(prev as any, next as any)).toEqual({ a: 1, b: 3, c: 4 });
+      expect(mergeIfObject(prev as any, next as any)).toEqual({
+        a: 1,
+        b: 3,
+        c: 4,
+      });
     });
 
     it('should merge arrays element by element', () => {
@@ -55,18 +59,15 @@ describe('util', () => {
     it('should merge missing previous elements', () => {
       const prev = [{ a: 1 }];
       const next = [{ a: 1, b: 2 }, { c: 3 }];
-      expect(mergeArray(prev as any, next as any)).toEqual([{ a: 1, b: 2 }, { c: 3 }]);
+      expect(mergeArray(prev as any, next as any)).toEqual([
+        { a: 1, b: 2 },
+        { c: 3 },
+      ]);
     });
 
     it('should merge complex structures', () => {
       const prev = [1, { id: 1, name: 'A' }, [10], 'extraPrev'];
-      const next = [
-        2,
-        { id: 1, status: 'B' },
-        [20, 21],
-        undefined,
-        { id: 2 },
-      ];
+      const next = [2, { id: 1, status: 'B' }, [20, 21], undefined, { id: 2 }];
       expect(mergeArray(prev as any, next as any)).toEqual([
         2,
         { id: 1, name: 'A', status: 'B' },
@@ -100,7 +101,7 @@ describe('util', () => {
 
       vi.unstubAllGlobals();
     });
-    
+
     it('should fallback if crypto is available but randomUUID is not', () => {
       vi.stubGlobal('crypto', { getRandomValues: vi.fn() });
 

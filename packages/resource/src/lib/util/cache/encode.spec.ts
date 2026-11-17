@@ -15,7 +15,9 @@ describe('encode', () => {
 
       expect(serialized.body).toEqual({ data: 'test' });
       expect(serialized.status).toBe(200);
-      expect(serialized.headers).toEqual({ 'Content-Type': ['application/json'] });
+      expect(serialized.headers).toEqual({
+        'Content-Type': ['application/json'],
+      });
       expect(serialized.url).toBe('https://example.com');
     });
 
@@ -50,7 +52,9 @@ describe('encode', () => {
       expect(deserialized).toBeInstanceOf(HttpResponse);
       expect(deserialized?.body).toEqual({ data: 'test' });
       expect(deserialized?.status).toBe(200);
-      expect(deserialized?.headers.get('content-type')).toBe('application/json');
+      expect(deserialized?.headers.get('content-type')).toBe(
+        'application/json',
+      );
       expect(deserialized?.url).toBe('https://example.com');
     });
 

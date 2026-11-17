@@ -24,7 +24,13 @@ class DeepHost {
   readonly root = signal('page-a');
 }
 
-function scopes(fixture: { debugElement: { queryAll(p: unknown): { injector: { get(t: typeof TelemetryScope): TelemetryScope } }[] } }) {
+function scopes(fixture: {
+  debugElement: {
+    queryAll(
+      p: unknown,
+    ): { injector: { get(t: typeof TelemetryScope): TelemetryScope } }[];
+  };
+}) {
   return fixture.debugElement
     .queryAll(By.directive(TelemetryScope))
     .map((d) => d.injector.get(TelemetryScope));

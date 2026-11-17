@@ -9,7 +9,12 @@ export function compareHlc(a: Hlc, b: Hlc): number {
 }
 
 /** The protocol's total order: (hlc.p, hlc.l, writer). Never returns 0 for distinct writers. */
-export function compareTotal(a: Hlc, writerA: string, b: Hlc, writerB: string): number {
+export function compareTotal(
+  a: Hlc,
+  writerA: string,
+  b: Hlc,
+  writerB: string,
+): number {
   const byClock = compareHlc(a, b);
   if (byClock !== 0) return byClock;
   return writerA < writerB ? -1 : writerA > writerB ? 1 : 0;

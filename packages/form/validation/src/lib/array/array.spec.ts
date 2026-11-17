@@ -1,9 +1,17 @@
-import { defaultMaxLengthMessageFactory, createMaxLengthValidator } from './max-length';
-import { defaultMinLengthMessageFactory, createMinLengthValidator } from './min-length';
+import {
+  defaultMaxLengthMessageFactory,
+  createMaxLengthValidator,
+} from './max-length';
+import {
+  defaultMinLengthMessageFactory,
+  createMinLengthValidator,
+} from './min-length';
 
 describe('Array Validators', () => {
   describe('maxLength', () => {
-    const validatorFactory = createMaxLengthValidator(defaultMaxLengthMessageFactory);
+    const validatorFactory = createMaxLengthValidator(
+      defaultMaxLengthMessageFactory,
+    );
 
     it('should return error if array is too long', () => {
       const validate = validatorFactory(2);
@@ -29,7 +37,9 @@ describe('Array Validators', () => {
   });
 
   describe('minLength', () => {
-    const validatorFactory = createMinLengthValidator(defaultMinLengthMessageFactory);
+    const validatorFactory = createMinLengthValidator(
+      defaultMinLengthMessageFactory,
+    );
 
     it('should return error if array is too short', () => {
       const validate = validatorFactory(2);

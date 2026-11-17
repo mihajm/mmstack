@@ -77,10 +77,9 @@ export class MmSuspenseError {
   private view: EmbeddedViewRef<WritableContext> | null = null;
 
   static ngTemplateContextGuard(
-    dir: MmSuspenseError,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ctx: unknown,
-  ): ctx is MmSuspenseErrorContext {
+    _dir: MmSuspenseError,
+    _ctx: unknown,
+  ): _ctx is MmSuspenseErrorContext {
     return true;
   }
 

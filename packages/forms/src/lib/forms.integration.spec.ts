@@ -1,9 +1,5 @@
 import { Component, model, signal } from '@angular/core';
-import {
-  form,
-  FormField,
-  type FormValueControl,
-} from '@angular/forms/signals';
+import { form, FormField, type FormValueControl } from '@angular/forms/signals';
 import { fireEvent, render, screen } from '@testing-library/angular';
 import { changeTracking, commitChanges, trackChanges } from './changed';
 import { composition } from './compose';
@@ -21,7 +17,9 @@ const [, injectText] = composition({ ...changeTracking<string>() });
       {{ label() }}
       <input #i [value]="value()" (input)="value.set(i.value)" />
     </label>
-    <span data-testid="status">{{ field.changed() ? 'changed' : 'pristine' }}</span>
+    <span data-testid="status">{{
+      field.changed() ? 'changed' : 'pristine'
+    }}</span>
     <button type="button" data-testid="reset" (click)="field.reset()">
       reset
     </button>

@@ -35,7 +35,6 @@ const [withLongest, injectLongest] = fieldMetadata<string>({
 });
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'input[formField]',
 })
 class Probe {

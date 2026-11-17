@@ -1948,8 +1948,7 @@ function runTrace(
     w.mount(n, r() < 0.5 ? 'child' : 'page');
   };
   const foreignWrite = (n: Sig): void => {
-    if (r() < 0.35)
-      w.writeSig(n, { v: w.display(n).v }); // a refetch confirming what is shown
+    if (r() < 0.35) w.writeSig(n, { v: w.display(n).v }); // a refetch confirming what is shown
     else w.writeSig(n);
   };
   function runScheduled(): void {

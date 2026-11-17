@@ -8,12 +8,9 @@ import {
 
 class ScopeRegistry {
   private readonly injector = inject(Injector);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private readonly registry = new Map<Function, any>();
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private readonly resolving = new Set<Function>();
   // original factory → replacement factory (testing/storybook overrides)
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   overrides: Map<Function, Function> | null = null;
 
   getOrCreate<T>(
@@ -101,7 +98,6 @@ export type ScopeOverride<T = unknown> = readonly [() => T, () => NoInfer<T>];
 export function createScope(name?: string) {
   const token = new InjectionToken<ScopeRegistry>(name ?? '@mmstack/di/scope');
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   const factoryByInjectFn = new WeakMap<Function, Function>();
 
   const provideFn = (opt?: {

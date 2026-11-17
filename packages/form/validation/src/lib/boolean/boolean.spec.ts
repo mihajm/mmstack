@@ -1,4 +1,7 @@
-import { defaultMustBeTreFactory, createMustBeTrueValidator } from './must-be-true';
+import {
+  defaultMustBeTreFactory,
+  createMustBeTrueValidator,
+} from './must-be-true';
 
 describe('Boolean Validators', () => {
   describe('mustBeTrue', () => {

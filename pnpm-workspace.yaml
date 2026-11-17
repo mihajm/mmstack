@@ -7,3 +7,6 @@ allowBuilds:
   msgpackr-extract: false
   nx: true
   unrs-resolver: false
+# no dependency may link agent skills into the workspace
+skills:
+  dirs: []

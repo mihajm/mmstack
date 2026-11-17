@@ -28,12 +28,12 @@ describe('Date Adapter', () => {
     });
 
     it('should parse string min/max in standalone options', () => {
-        const state = createDateState(null, {
-          locale: 'en-US',
-          min: () => '2025-01-01',
-        });
-        expect(state.min()).toBeInstanceOf(Date);
-        expect(state.min()?.getFullYear()).toBe(2025);
+      const state = createDateState(null, {
+        locale: 'en-US',
+        min: () => '2025-01-01',
+      });
+      expect(state.min()).toBeInstanceOf(Date);
+      expect(state.min()?.getFullYear()).toBe(2025);
     });
   });
 
@@ -65,14 +65,14 @@ describe('Date Adapter', () => {
     });
 
     it('should handle localized error messages', () => {
-        TestBed.runInInjectionContext(() => {
-          const createDate = injectCreateDateState();
-          const state = createDate(new Date('invalid'), {
-            label: () => 'Start Date',
-          });
-          
-          expect(state.error()).toBe('Must be a valid date');
+      TestBed.runInInjectionContext(() => {
+        const createDate = injectCreateDateState();
+        const state = createDate(new Date('invalid'), {
+          label: () => 'Start Date',
         });
+
+        expect(state.error()).toBe('Must be a valid date');
+      });
     });
   });
 });

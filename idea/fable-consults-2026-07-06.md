@@ -18,10 +18,11 @@ writes to the owner, reconciles on the owner's echo); opSync is peer-LWW-registe
 authority cleanly (worker channel is single-writer so opSync's LWW never adjudicates) — or is there a trap?
 
 **Fable:**
-> Trap: the single-writer assumption is real for the channel but not for the *store* — and more
+
+> Trap: the single-writer assumption is real for the channel but not for the _store_ — and more
 > fundamentally, opSync changes write semantics from "request routed to owner, reconciled on echo" to
 > "fact applied optimistically, merged by LWW." Two concrete design points for the next agent: (1) owner
-> veto/rejection has no seam in opSync — the owner can only *compensate* with a corrective op (which does
+> veto/rejection has no seam in opSync — the owner can only _compensate_ with a corrective op (which does
 > win, since HLC receive-rules guarantee the owner's response op timestamps after the offending op), but
 > main now transiently shows the invalid state AND mesh, as a separate opSync reader on the same store,
 > will happily propagate that pre-veto op to peers before the correction lands — so if the bespoke
@@ -29,7 +30,7 @@ authority cleanly (worker channel is single-writer so opSync's LWW never adjudic
 > explicitly or keep a route-writes-to-owner shim in front of the owned subtree; (2) mesh peers writing
 > into the worker-owned subtree arrive as merged facts (mesh opSync applies them to main's store, worker
 > opSync replicates them onward), never passing through the owner's adjudication at all — so owner-
-> authority across the *composition* silently degrades to LWW even though the worker channel itself is
+> authority across the _composition_ silently degrades to LWW even though the worker channel itself is
 > single-writer.
 >
 > Gap/snapshot equivalence is the safe part: opSync's seed()/resync contract subsumes the bespoke
@@ -47,9 +48,12 @@ on A), C(c,hlc3,rank LOW,prev=x → concurrent). Order A,B,C → c; order A,C,B 
 so what's the right formulation?
 
 **Fable:**
+
 > ## Verdict: yes, it diverges, and the counterexample is sound
+>
 > Your trace is correct, and the root cause is deeper than "judged against the current register." Look at
 > the pairwise dominance relation your two-branch design induces:
+>
 > - B beats A (causal succession, hlc)
 > - C beats B (concurrent, same rank, hlc)
 > - A beats C (concurrent, rank)
@@ -60,15 +64,17 @@ so what's the right formulation?
 > it. The cycle exists in the relation itself, independent of arrival order mechanics.
 >
 > ## Is "rank breaks concurrency only" achievable with a single register?
+>
 > Not in its pure form. Convergence for a discard-losers register requires the winner to be `max` under a
 > **total order computable from the envelope alone** — associative, commutative, idempotent. Any such total
 > order either puts rank before hlc (rank overrides causally-later writes: caveat (a)) or after hlc (rank
-> never matters). "Rank applies only when concurrent" requires *evaluating* concurrency, and true
+> never matters). "Rank applies only when concurrent" requires _evaluating_ concurrency, and true
 > concurrency is a property of the causal partial order — which the envelope (hlc + prev-hint) can't carry
 > faithfully. Your `prev ≠ current value` predicate is a lossy proxy (ABA/value-identity issues), but even a
 > perfect predicate wouldn't help: the cycle above is real concurrency, correctly detected.
 >
 > ## The right formulation
+>
 > **Option A — rank inheritance (recommended for your substrate).** Global total order `(rank, hlc, writer)`,
 > uniform in `beats()`. The trick: at emission, stamp `rank = max(writerRank, rank of the register value
 > being overwritten)`. Causal successors carry rank forward the way HLC carries time forward. Causally-later
@@ -76,23 +82,24 @@ so what's the right formulation?
 > they don't inherit → rank genuinely breaks concurrency. Your example: B stamps HIGH (inherited from A),
 > final = **b** in every order. Convergent. Note the semantic delta: the "intended" answer was c, but under
 > inheritance B carries A's authority, so C (who never observed the admin's write) loses — arguably the
-> *right* policy, and the **only** convergent single-register semantics that both respects causal succession
+> _right_ policy, and the **only** convergent single-register semantics that both respects causal succession
 > and lets rank matter. One ratchet: rank on a path is monotone (admin can't "release" a field by writing
 > low-rank); if release matters, add an epoch/generation field ordered `(epoch, rank, hlc, writer)`.
 >
 > **Option B — MV-register + causal metadata.** Keep per-op causal identity (dots + context), retain all
 > causally-maximal siblings per path, resolve at read by `(rank, hlc, writer)`. The sibling set is a pure
-> function of the delivered op *set*, so it converges, and gives exactly rank-breaks-true-concurrency-only
+> function of the delivered op _set_, so it converges, and gives exactly rank-breaks-true-concurrency-only
 > (final = c). Cost: version vectors, sibling storage, GC.
 >
 > ## Bottom line
+>
 > "Rank only in the concurrent branch" over a bare LWW register is non-convergent by construction (cyclic
 > dominance), not by implementation accident. Pick (A) rank in the global order **plus inheritance-on-
 > overwrite**, or (B) pay for causal metadata + an MV-register. Given opSync's single-winner, envelope-only
 > design, A is the natural fit.
 
-*(Superseded on point A by consult #4: rank must be a dynamic EPOCH, not a static tier — inheritance is
-subsumed once the MV-register + epoch land. See §4 below and conflict-precedence §1.)*
+_(Superseded on point A by consult #4: rank must be a dynamic EPOCH, not a static tier — inheritance is
+subsumed once the MV-register + epoch land. See §4 below and conflict-precedence §1.)_
 
 ---
 
@@ -105,13 +112,16 @@ copy-on-write store; wire ships single ops. Q1: can convergence be LIGHT (retain
 keyedArray via pluggable folds? Q3: can store + wire stay SINGLE-VALUE (MV internal to the register)?
 
 **Fable:**
+
 > ## Q1 — Light works, but the hint must become a dot-citation, not a value
+>
 > HLC alone is unsound for sibling identification, full stop. HLC gives causality⇒order, never order⇒
 > causality: A writes at hlc 5, B sees it and writes at 7, partitioned C writes at 6. From stamps you cannot
 > decide whether 6 is concurrent with 7 or superseded by it. And the prev-value hint can't rescue it, for
 > exactly the ABA reason: identical values from distinct ops are indistinguishable. So: not fixable with what
 > the envelope carries today. But full version vectors are NOT mandatory. The minimal sound mechanism is the
 > **causal-context / dot-citation** pattern:
+>
 > - **Envelope change:** each set/delete carries `cites: Array<{writer, hlc}>` — the dots of the sibling(s)
 >   the writer observed at that path when it wrote. Common case: one element (the current winner's dot). The
 >   op's own dot is `(writer, hlc)`, which you already have. The prev value-hint is subsumed.
@@ -120,16 +130,18 @@ keyedArray via pluggable folds? Q3: can store + wire stay SINGLE-VALUE (MV inter
 >   writer, hlc>` watermarks. An incoming op kills its own writer's older entry automatically, marks every
 >   cited dot's watermark, and dies on arrival if its own hlc ≤ its writer's watermark. Live siblings =
 >   entries above their watermark and uncited.
-> The watermark compression is sound precisely because per-writer ops are totally ordered. This also makes
-> the scheme delivery-order-robust: a cite arriving before the op it kills just parks in the watermark, no
-> causal-delivery requirement. Cost is O(live siblings) per op, prunable below a stability frontier (relay
-> ack / seed checkpoint). That's dotted-VV *semantics* at register-local dot-list *cost*. One landmine: dots
-> require unique replica ids. If two tabs share a writer id through tabSync, dot uniqueness breaks — either
-> replica-id per tab or serialize writes through the leader.
+>   The watermark compression is sound precisely because per-writer ops are totally ordered. This also makes
+>   the scheme delivery-order-robust: a cite arriving before the op it kills just parks in the watermark, no
+>   causal-delivery requirement. Cost is O(live siblings) per op, prunable below a stability frontier (relay
+>   ack / seed checkpoint). That's dotted-VV _semantics_ at register-local dot-list _cost_. One landmine: dots
+>   require unique replica ids. If two tabs share a writer id through tabSync, dot uniqueness breaks — either
+>   replica-id per tab or serialize writes through the leader.
 >
 > ## Q2 — Yes, one retention semantic, three (four) folds
+>
 > Retention is uniform: keep the causally-maximal set. Everything else is a pure fold over `(value, dot)`
-> siblings, convergent for any fold that is a deterministic function of the *set*:
+> siblings, convergent for any fold that is a deterministic function of the _set_:
+>
 > - **LWW (default):** fold = max by (hlc, writer). Existing semantics = the trivial fold, cleanest migration.
 > - **Ranking:** payload carries rank; fold = max by (rank, hlc, writer). The ABA problem disappears because
 >   supersession is now by dot, not stamp comparison.
@@ -139,6 +151,7 @@ keyedArray via pluggable folds? Q3: can store + wire stay SINGLE-VALUE (MV inter
 >   are the better long-term shape. Fine as the shipped rung.
 >
 > ## Q3 — Store and live wire stay single-value; seed does not
+>
 > - **Store:** MV lives entirely in the register layer. At apply: recompute fold → if it equals the
 >   currently materialized value, skip the write, preserving copy-on-write reference identity even when the
 >   sibling set churned. Synchronous reads unchanged.
@@ -164,18 +177,19 @@ visibility? (C) is a pre-veto peer echo a real problem? (D) could owner-authorit
 writes at MAX rank so its op wins — making a clean deterministic (i), shim only for true before-visibility?
 
 **Fable:**
+
 > **Pick (i), via D — with one correction to the rank design. Do not build shim (ii) into the sync layer;
 > its legitimate residue is an application-level command, which needs zero protocol support.**
 >
 > **A. Surface area — the shim is thin in LOC and expensive in truth.** The routing is small next to the
-> version/gap/snapshot sequencer. But a *correct* request path needs delivery guarantees the fact path gets
+> version/gap/snapshot sequencer. But a _correct_ request path needs delivery guarantees the fact path gets
 > for free from opSync: what happens when the request is lost, duplicated, or the owner reconnects mid-flight?
 > Retries, dedupe, ordering, replay-on-reconnect — that's the sequencer regrowing under a new name. Ops are
 > idempotent facts and inherit all of that from opSync; requests are not and inherit none of it. The shim
 > also bifurcates the write model. So (ii) undercuts the win not on day one but by month three.
 >
 > **B. Consumer — the medical concern is real but mis-aimed at the state layer.** The hazard in CMMN/openEHR
-> isn't a transient pixel; it's downstream *action* on unconfirmed state. Writes that genuinely need reject-
+> isn't a transient pixel; it's downstream _action_ on unconfirmed state. Writes that genuinely need reject-
 > before-visibility (place order, complete task) are commands with preconditions, and CMMN already models
 > them as commands — they belong at the workflow-engine layer as "call the owner, owner validates, owner
 > writes the result," which any app can do today with no protocol machinery. Trying to recover command
@@ -184,29 +198,30 @@ writes at MAX rank so its op wins — making a clean deterministic (i), shim onl
 > user" means agents submit facts and the authority corrects them — same as humans.
 >
 > **C. Mesh — benign for convergence, and audit-positive.** Peers converge on the correction; a permanent
-> log of "attempted X, owner corrected" is a *feature* in a traceable medical system, not contamination. The
+> log of "attempted X, owner corrected" is a _feature_ in a traceable medical system, not contamination. The
 > only real risk is peers firing irreversible effects on pre-correction state — but that's the same
 > discipline optimistic UI always requires: gate effects on owner-settled reads (see D). Consumer discipline,
 > not a protocol defect.
 >
 > **D. Right instinct, one bug: a static owner-tier rank bricks the register.** If the owner corrects at a
 > constant MAX rank, every subsequent normal-rank write loses the fold forever — the subtree becomes owner-
-> only after the first veto. Rank must be a dynamic *epoch* (a term, Raft-style), not a tier: writers stamp
+> only after the first veto. Rank must be a dynamic _epoch_ (a term, Raft-style), not a tier: writers stamp
 > ops with the highest epoch they've observed; within an epoch, (hlc, writer) breaks ties; the owner
 > overrides by writing at epoch+1, and later normal writes adopt the new epoch and compete normally again.
 > With that fix, D is exactly right:
+>
 > - "Veto" becomes "owner's op deterministically wins the fold" — no corrective-op special case, it's just
 >   the fold.
 > - Policy binds epoch-bump rights to the owner's writer identity (opaque rank stays opaque; the rule is
 >   local).
 > - The winning op's epoch tells any reader whether the value is owner-settled — your sync-at-read
 >   confirmation seam and the gate for effects (C) at zero extra machinery. If you want positive confirmation
->   of *accepted* writes (silence vs. not-yet-seen), the owner echo-acks at owner authorship within the epoch
+>   of _accepted_ writes (silence vs. not-yet-seen), the owner echo-acks at owner authorship within the epoch
 >   — one op per accepted write, which the old sequencer effectively paid anyway.
 >
 > **The ruling:** the fork is false at the protocol level. (i) with epoch-rank is the sync layer, uniformly
 > — delete the sequencer, no subtree shim. (ii) survives only as the degenerate pattern "RPC the owner; the
-> owner's write *is* the state change," which costs nothing and lives in the consumer (Better's command
+> owner's write _is_ the state change," which costs nothing and lives in the consumer (Better's command
 > layer), where reject-before-visibility semantics actually belong.
 
 ---
@@ -226,22 +241,24 @@ that refinement correct — cite-supersession SHOULD be rank-independent — or 
 (low-rank can't supersede high-rank), which reintroduces bricking and is a different semantic?
 
 **Fable:**
+
 > **Pick: rank-independent supersession. Your refinement is correct; retire my "bricks forever" claim as
 > stated.**
 > That claim is only true in a different model than the one we actually specced: either (a) rank-gated
 > supersession, or (b) a fold over full history rather than the live set. In the dot-citation model,
-> supersession is a statement about *causal knowledge* ("I saw this op and am replacing it"), and rank is a
-> statement about *race resolution* ("when neither of us saw the other, higher rank wins"). Those are
+> supersession is a statement about _causal knowledge_ ("I saw this op and am replacing it"), and rank is a
+> statement about _race resolution_ ("when neither of us saw the other, higher rank wins"). Those are
 > orthogonal lattice dimensions and should stay orthogonal. So yes: epoch's job is de-escalation +
 > authority-settled reads, not anti-bricking.
 > Why rank-gating is the wrong semantic, beyond bricking: it breaks the theorem you just proved. With
 > gating, the live set is no longer the maximal antichain of the delivered causal order — you get causally-
 > dominated-yet-live ops, and you're forced into a choice between transitive-closure watermarks (a low-rank
-> op's cites must still count when a later high-rank op cites *it*, or the old high-rank op becomes a
+> op's cites must still count when a later high-rank op cites _it_, or the old high-rank op becomes a
 > permanent ghost) or order-dependent ghost hazards. Rank-independent keeps "live set = pure function of the
 > delivered set" clean.
 > Three holes to have on the record with rank-independent supersession — none fatal, all should be named in
 > the RFC:
+>
 > 1. **Rank is not authority.** Any peer that syncs first can cite-and-win; in a fully-online network every
 >    write is causal and rank literally never fires. Rank only wins races. If you need "students can't
 >    overwrite the teacher," that is admission control — enforce writer/rank at the relay policy layer (op
@@ -251,12 +268,12 @@ that refinement correct — cite-supersession SHOULD be rank-independent — or 
 >    anyone. If product semantics need sticky-until-cleared-by-equal-rank, that's a separate lock register or
 >    an epoch bump, not gated supersession on the value register. Don't conflate the two lattices.
 > 3. **Stale high-rank resurrection** — a superset of your (a): it's not only concurrent-in-time ops. A
->    partitioned high-rank device can surface an *old-HLC* op days later; it cites nothing recent, nothing
+>    partitioned high-rank device can surface an _old-HLC_ op days later; it cites nothing recent, nothing
 >    cites it, so it's a live sibling and wins the fold — value jumps backward. Epoch (authority-scoped,
 >    where the bump itself IS the one rank-gated operation, which is fine because it's a scoped, explicit
 >    act) kills prior-epoch ops regardless of citation and closes this too.
-> So: confirm rank-independent, epoch for (de-escalation, settled reads, durable authority when actually
-> wanted), authority enforcement at admission — and the mesh-protocol `policy.ts` seam is where hole 1 lands.
+>    So: confirm rank-independent, epoch for (de-escalation, settled reads, durable authority when actually
+>    wanted), authority enforcement at admission — and the mesh-protocol `policy.ts` seam is where hole 1 lands.
 
 ---
 
@@ -269,7 +286,9 @@ client-MV divergence? bounded state? epoch monotonicity per path? anything else)
 mis-tiered one.
 
 **Fable:**
+
 > ## Missing
+>
 > 1. **Liveness — none listed anywhere.** T1(1) is pure safety (same set → same state); nothing guarantees
 >    the sets ever equalize. Need: every op accepted at any replica is eventually delivered to every
 >    connected replica (fair-lossy channel + reconnect ⇒ anti-entropy terminates), and forwarding terminates
@@ -284,10 +303,10 @@ mis-tiered one.
 >    never runs).
 > 3. **Deletes/tombstones — absent entirely.** keyedArray merge shipped, but no invariant for remove
 >    semantics: observed-remove (delete kills only cited siblings; concurrent insert survives — or the
->    opposite, but *stated*), tombstone lifecycle, and delete×epoch interaction. Concurrent insert-vs-delete
+>    opposite, but _stated_), tombstone lifecycle, and delete×epoch interaction. Concurrent insert-vs-delete
 >    under 3+ writers is exactly the shape of your T3 divergence class.
 > 4. **Seed-equivalence as an equation, and relay-fold ≡ client-fold.** T2's journal-fold-from-base covers
->    opSync; T4's "seed ships register STATE" states the *mechanism*, not the theorem. Need: `fold(seed(S),
+>    opSync; T4's "seed ships register STATE" states the _mechanism_, not the theorem. Need: `fold(seed(S),
 >    suffix) = fold(∅, allOps)`, and — since the zero-dep relay seeds fresh rooms — either the relay is
 >    semantics-free (opaque op/state store) or its fold is spec-identical to the client's. A relay that folds
 >    MV state to a single value seeds joiners into permanent divergence from established peers.
@@ -297,7 +316,7 @@ mis-tiered one.
 >    op is rejected identically at every replica — nondeterministic rejection is itself a divergence source).
 >    Same hole applies to "only-authorized epoch bump": emission-side checking doesn't bind a malicious
 >    direct peer.
-> 6. **Crash-recovery / read-session guarantees.** Durable outbox and boot-gate are T2 *component* tests; the
+> 6. **Crash-recovery / read-session guarantees.** Durable outbox and boot-gate are T2 _component_ tests; the
 >    end-to-end invariant is missing: a locally observed/acked op survives crash+rehydrate and boot
 >    arbitration (worker+mesh+persist) never regresses exposed state — read-your-writes and monotonic-reads
 >    across the boot race. Notably this is the exact scenario you've named as the branching-state driver.
@@ -306,30 +325,31 @@ mis-tiered one.
 >    colliding dots, which silently breaks T1(1)'s set semantics. Needs the mechanism-level statement
 >    (persisted counter fencing or fresh replica-id on restore).
 > 8. **HLC well-formedness.** T1(3) leans on HLC but no invariant governs it: per-replica HLC strictly
->    monotone (across crash too — pairs with #7), bounded drift from physical time, and *correctness never
->    depends on wall clock* (wall time is tie-break/liveness only).
+>    monotone (across crash too — pairs with #7), bounded drift from physical time, and _correctness never
+>    depends on wall clock_ (wall time is tie-break/liveness only).
 > 9. **Bounded state.** Sibling set bounded by concurrent-writer count; causal context compresses to
 >    O(replicas) not O(ops); outbox growth under prolonged offline is bounded or explicitly documented
 >    unbounded. No boundedness claim exists in any tier.
-> 10. **Epoch monotone-at-read + concurrent-bump convergence, per path.** T4 covers monotone *emission*;
->    missing the fold/read side: exposed epoch per path never decreases at a replica, epoch comparison is
->    per-path, and two concurrent *authorized* bumps to the same N converge deterministically (if "epoch" in
->    T1(2) already proves this, say so explicitly — right now it's ambiguous whether the fold or just the
->    scalar compare was proven).
+> 10. **Epoch monotone-at-read + concurrent-bump convergence, per path.** T4 covers monotone _emission_;
+>     missing the fold/read side: exposed epoch per path never decreases at a replica, epoch comparison is
+>     per-path, and two concurrent _authorized_ bumps to the same N converge deterministically (if "epoch" in
+>     T1(2) already proves this, say so explicitly — right now it's ambiguous whether the fold or just the
+>     scalar compare was proven).
 > 11. **Effect exactly-once across replay.** commitOrdered/echo-free cover the live topology; nothing covers
->    crash-replay — rehydrating the journal must not re-fire onCommit for effects already executed
->    (at-least-once + idempotency key, or a durable effect watermark). Given "effects-are-edges" is creed,
->    this is a consumer-facing correctness hole.
+>     crash-replay — rehydrating the journal must not re-fire onCommit for effects already executed
+>     (at-least-once + idempotency key, or a durable effect watermark). Given "effects-are-edges" is creed,
+>     this is a consumer-facing correctness hole.
 > 12. **Migration determinism.** You have an uncommitted migration.spec.ts, but no register entry: ops
->    emitted under schema v(n) are migrated/rejected identically at every replica (migration is a
->    fold-compatible, deterministic transform), else mixed-version rooms diverge.
+>     emitted under schema v(n) are migrated/rejected identically at every replica (migration is a
+>     fold-compatible, deterministic transform), else mixed-version rooms diverge.
 >
 > ## Weak / mis-stated / mis-tiered
+>
 > - **T4 GC entry** — mis-stated, see #2. As written it permits resurrection.
-> - **T5** — mis-scoped: forged-citation rejection is partly an *impl* invariant (client ingress, T4), not
+> - **T5** — mis-scoped: forged-citation rejection is partly an _impl_ invariant (client ingress, T4), not
 >   purely relay policy, because of direct transports. Split it.
 > - **T4 seed entry** — weak: mechanism, not property. Restate as the equivalence equation (#4).
-> - **T1(6)** — mixes a theorem with a design assertion; "owner veto = the fold" is a modeling *choice*,
+> - **T1(6)** — mixes a theorem with a design assertion; "owner veto = the fold" is a modeling _choice_,
 >   "static rank can't de-escalate" is the proven part. Split the sentence so the proof obligation is crisp.
 > - **T3** — fine, but add the flip-contract: on MV-register landing these must move to T2, and T1(4)'s
 >   Condorcet counterexample should be pinned as a permanent regression oracle, not retired.
@@ -356,12 +376,13 @@ monotone? Q2: is epoch per-PATH or per-writer-global? Q3: other emission subtlet
 unauthorized writer merely CARRYING a high observed epoch forward vs BUMPING)?
 
 **Fable (2026-07-07, after credits refreshed — the consult re-ran and answered):**
+
 > **Q1 — Confirmed.** The rule must be `epoch := max(cited-dot epochs, writer's own prior epoch)`. Because
-> the per-writer sibling map keeps only best-by-HLC per writer, a writer's newer op *replaces* its older
+> the per-writer sibling map keeps only best-by-HLC per writer, a writer's newer op _replaces_ its older
 > one rather than coexisting, so exposed-epoch monotonicity at read is exactly equivalent to per-writer
 > epoch monotonicity — the citation set alone can't guarantee it (a writer may legitimately cite only stale
 > dots). Your fix is the correct and minimal one.
-> **Q2 — Per-path.** "Own prior epoch" means own prior *at that path*. Reason: epoch is causal-supersession
+> **Q2 — Per-path.** "Own prior epoch" means own prior _at that path_. Reason: epoch is causal-supersession
 > metadata for a register, so it belongs to the path's causal context, same as the dots it rides with.
 > Global scoping breaks commutativity/independence of disjoint paths — one authority bump on path X would
 > inflate the writer's epochs store-wide, spuriously superseding concurrent writes on unrelated path Y and
@@ -370,7 +391,7 @@ unauthorized writer merely CARRYING a high observed epoch forward vs BUMPING)?
 > minimal. (Corollary: per-path epoch must survive tombstone→re-create of the path, or you regress on
 > revival.)
 > **Q3 — Yes, three.** (a) The authority +1 bump must also be per-path: `max(observed-at-path) + 1`, else a
-> bump on one path silently outranks concurrent writes elsewhere. (b) An unauthorized writer *carrying* the
+> bump on one path silently outranks concurrent writes elsewhere. (b) An unauthorized writer _carrying_ the
 > observed high epoch forward (never bumping) is not just fine but required — carrying preserves
 > monotonicity without granting supersession power, since it can only tie the epoch it saw (HLC/dot
 > tiebreak resolves ties as usual). (c) Emission must read own-prior from the writer's own emission
@@ -389,6 +410,7 @@ subtree-swallow assertions will fail mid-re-point with no note. (3) `origin` is 
 `compareStamp` order but absent from the model's fold — redundant on purpose, or accidental omission?
 
 **Fable (verified against op-log.ts:215 and op-sync.ts:210 before ruling):**
+
 > **(1) Confirmed — keep `prev`.** Subsumed for SUPERSESSION only; it remains the inversion basis for
 > undo/rebase/boot-replay (the jsdoc itself says a batch stripped of prevs is not invertible). Envelope =
 > prev STAYS (inversion) + cites ADDED (supersession) + epoch ADDED (precedence). It plays no role in

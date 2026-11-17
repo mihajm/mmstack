@@ -26,7 +26,9 @@ const shim = join(dist, 'node_modules');
 
 const specifiers = process.argv.slice(2);
 if (specifiers.length === 0) {
-  console.error('usage: node scripts/check-node-load.mjs <package-specifier>...');
+  console.error(
+    'usage: node scripts/check-node-load.mjs <package-specifier>...',
+  );
   process.exit(2);
 }
 if (!existsSync(built)) {
@@ -58,10 +60,14 @@ for (const specifier of specifiers) {
     (m) => console.log('ok   ' + ${JSON.stringify(specifier)} + ' (' + Object.keys(m).length + ' exports)'),
     (e) => { console.log('FAIL ' + ${JSON.stringify(specifier)} + ': ' + String(e.message).split('\\n')[0]); process.exit(1); },
   );`;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
-    cwd: dist,
-    stdio: 'inherit',
-  });
+  const result = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', probe],
+    {
+      cwd: dist,
+      stdio: 'inherit',
+    },
+  );
   if (result.status !== 0) failed++;
 }
 process.exit(failed === 0 ? 0 : 1);

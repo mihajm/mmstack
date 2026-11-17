@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
   HttpTestingController,

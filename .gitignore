@@ -47,3 +47,7 @@ __screenshots__/
 test-results
 
 /articles
+
+.nx/migrate-runs
+# pnpm
+.pnpm-store/

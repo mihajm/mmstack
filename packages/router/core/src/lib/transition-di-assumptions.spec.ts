@@ -1,6 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
-/* eslint-disable @angular-eslint/directive-selector */
-
 // Probes for Angular DI behaviors the route-level data work relies on; a probe fails here
 // if an Angular upgrade or v21-lts backport changes them.
 import { provideLocationMocks } from '@angular/common/testing';
@@ -27,7 +24,10 @@ import { filter } from 'rxjs';
 
 const SCOPE = new InjectionToken<string>('probe-scope');
 
-@Directive({ selector: '[probeElement]', providers: [{ provide: SCOPE, useValue: 'element' }] })
+@Directive({
+  selector: '[probeElement]',
+  providers: [{ provide: SCOPE, useValue: 'element' }],
+})
 class ProbeElementDir {}
 
 @Component({
@@ -167,7 +167,9 @@ describe('Angular DI assumptions for route-level data', () => {
                 if (!holder.sig) {
                   const router = inject(Router);
                   const tick = toSignal(
-                    router.events.pipe(filter((e) => e instanceof NavigationEnd)),
+                    router.events.pipe(
+                      filter((e) => e instanceof NavigationEnd),
+                    ),
                     { initialValue: null },
                   );
                   const findId = () => {

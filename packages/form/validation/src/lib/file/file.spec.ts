@@ -1,5 +1,8 @@
 import { defaultAcceptsMessage, createAcceptsValidator } from './accepts';
-import { defaultMaxSizeMessageFactory, createMaxSizeValidator } from './max-size';
+import {
+  defaultMaxSizeMessageFactory,
+  createMaxSizeValidator,
+} from './max-size';
 import { defaultRejectsMessage, createRejectsValidator } from './rejects';
 
 describe('File Validators', () => {
@@ -41,7 +44,9 @@ describe('File Validators', () => {
   });
 
   describe('maxSize', () => {
-    const validatorFactory = createMaxSizeValidator(defaultMaxSizeMessageFactory);
+    const validatorFactory = createMaxSizeValidator(
+      defaultMaxSizeMessageFactory,
+    );
 
     it('should return error if file is too large (bytes)', () => {
       const validate = validatorFactory(100, 'b');
@@ -59,7 +64,7 @@ describe('File Validators', () => {
       const validate = validatorFactory(1, 'kb');
       const smallFile = createFile('small.png', 1024, 'image/png');
       const largeFile = createFile('large.png', 1025, 'image/png');
-      
+
       expect(validate(smallFile)).toBe('');
       expect(validate(largeFile)).toBe('Max size 1 kb');
     });
@@ -76,7 +81,9 @@ describe('File Validators', () => {
     it('should return error if mime type matches a rejected type', () => {
       const validate = validatorFactory(['application/exe', 'application/bat']);
       const file = createFile('danger.exe', 100, 'application/exe');
-      expect(validate(file)).toBe('Must not be: application/exe, application/bat');
+      expect(validate(file)).toBe(
+        'Must not be: application/exe, application/bat',
+      );
     });
 
     it('should return empty string if mime type is not rejected', () => {

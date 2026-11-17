@@ -82,9 +82,7 @@ function matchSegmentsRecursive(
   let result: boolean;
 
   if (linkIdx === linkSegments.length) {
-    result = configSegments
-      .slice(configIdx)
-      .every((s) => s.pathPart === '**');
+    result = configSegments.slice(configIdx).every((s) => s.pathPart === '**');
   } else if (configSegments[configIdx].pathPart === '**') {
     result =
       matchSegmentsRecursive(

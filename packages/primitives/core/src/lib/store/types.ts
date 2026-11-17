@@ -11,7 +11,6 @@ type BaseType =
   | bigint
   | undefined
   | null
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   | Function
   | Date
   | RegExp

@@ -50,11 +50,7 @@ export function refresh<T>(
   triggers?: RefreshTriggers,
 ): HttpResourceRef<T> {
   const normalized = typeof opt === 'number' ? { interval: opt } : (opt ?? {});
-  const {
-    interval: ms,
-    onFocus = false,
-    onReconnect = false,
-  } = normalized;
+  const { interval: ms, onFocus = false, onReconnect = false } = normalized;
 
   const hasInterval = !!ms;
   const hasTriggerEffects = !!triggers && (onFocus || onReconnect);
@@ -110,18 +106,14 @@ export function refresh<T>(
     };
   }
 
-  let sub = interval(ms)
-    .pipe(takeUntilDestroyed(destroyRef))
-    .subscribe(tick);
+  let sub = interval(ms).pipe(takeUntilDestroyed(destroyRef)).subscribe(tick);
 
   const reload = (): boolean => {
     sub.unsubscribe();
 
     const hasReloaded = resource.reload();
 
-    sub = interval(ms)
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(tick);
+    sub = interval(ms).pipe(takeUntilDestroyed(destroyRef)).subscribe(tick);
 
     return hasReloaded;
   };

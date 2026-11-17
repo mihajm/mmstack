@@ -1,6 +1,10 @@
 /** What kind of external cause started a unit of work. */
 export type OriginKind =
-  'interaction' | 'navigation' | 'request' | 'action' | 'external';
+  | 'interaction'
+  | 'navigation'
+  | 'request'
+  | 'action'
+  | 'external';
 
 /**
  * The external cause of work: a click, a navigation, a request, an action step, a timer.

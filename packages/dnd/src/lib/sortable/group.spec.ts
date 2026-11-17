@@ -169,7 +169,13 @@ describe('sortableGroup — active cross-list drag state', () => {
     expect(i.activeSource()).toBeNull();
     expect(i.activeInsertIndex()).toBe(-1);
 
-    i.setActive({ source: src, target: tgt, sourceIndex: 2, insertIndex: 4, footprint: 30 });
+    i.setActive({
+      source: src,
+      target: tgt,
+      sourceIndex: 2,
+      insertIndex: 4,
+      footprint: 30,
+    });
     expect(i.activeSource()).toBe(src);
     expect(i.activeTarget()).toBe(tgt);
     expect(i.activeSourceIndex()).toBe(2);

@@ -910,7 +910,6 @@ export function mutationResource<
       );
     }
   }
-  //eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { abort: _abort, ...spreadableResource } = resource;
 
   // The transport's default value is the private `NULL_VALUE` marker: never content.

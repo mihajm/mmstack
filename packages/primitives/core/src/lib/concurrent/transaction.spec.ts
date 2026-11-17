@@ -107,7 +107,6 @@ describe('createTransaction (undo log)', () => {
 });
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'tx-host',
   template: ``,
   providers: [provideTransitionScope()],
@@ -130,7 +129,6 @@ class Host {
   }
 }
 
-// eslint-disable-next-line @angular-eslint/component-selector
 @Component({ selector: 'tx-child', template: `` })
 class Child {
   readonly start = injectStartTransaction();
@@ -141,7 +139,6 @@ class Child {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'tx-wrap',
   imports: [Child],
   template: `@if (show()) {
@@ -593,7 +590,6 @@ describe('slice claims through startTransaction', () => {
 // ─── mid-hold readers: seeded from the ledger ──────────────────────────────────────────
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'seed-child',
   template: `{{ view() }}`,
 })
@@ -610,7 +606,6 @@ class SeedChild {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'seed-host',
   imports: [SeedChild],
   template: `@if (show()) {
@@ -775,7 +770,6 @@ describe('a view mounted while a transaction holds', () => {
 });
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'nested-boundary',
   template: ``,
   providers: [provideTransitionScope()],
@@ -789,7 +783,6 @@ class NestedBoundary {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'outer-page',
   imports: [NestedBoundary],
   template: `<nested-boundary />`,
@@ -862,7 +855,6 @@ describe('a hold on a scope holds the scopes created inside it', () => {
 // ─── seeds across scopes and hold episodes ─────────────────────────────────────────────
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'chain-reader',
   template: `{{ view() }}`,
 })
@@ -876,7 +868,6 @@ class ChainReader {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'chain-boundary',
   imports: [ChainReader],
   template: `@if (show()) {
@@ -891,7 +882,6 @@ class ChainBoundary {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'chain-page',
   imports: [ChainBoundary],
   template: `<chain-boundary />`,
@@ -1066,7 +1056,6 @@ describe('a scope destroyed while it holds', () => {
 // ─── reclamation under overlapping unrelated holds ─────────────────────────────────────
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'sib-reader',
   template: `{{ shown() }}`,
 })
@@ -1075,7 +1064,6 @@ class SibReader {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'sib-area',
   imports: [SibReader],
   template: `@if (show()) {
@@ -1090,7 +1078,6 @@ class SibArea {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'sib-host',
   imports: [SibArea],
   template: `<sib-area class="x" /><sib-area class="y" />`,

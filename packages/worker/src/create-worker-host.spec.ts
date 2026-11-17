@@ -20,10 +20,7 @@ const appStore = () => store<Model>(initial(), createStoreContext());
 
 // a hand-built, well-formed client write envelope (the shape a replica's opSync would emit)
 let clientClock = 1;
-const clientWrite = (
-  origin: string,
-  ops: OpEnvelope['ops'],
-): OpEnvelope => ({
+const clientWrite = (origin: string, ops: OpEnvelope['ops']): OpEnvelope => ({
   proto: OP_PROTO_VERSION,
   instance: '',
   origin,
@@ -36,7 +33,10 @@ const clientWrite = (
 
 describe('createWorkerHost — handshake + store mirror (deterministic harness)', () => {
   it('answers hello with ready, advertising stores and tasks', async () => {
-    const mesh = createTestMesh({ stores: { app: appStore() }, tasks: { echo: (x) => x } });
+    const mesh = createTestMesh({
+      stores: { app: appStore() },
+      tasks: { echo: (x) => x },
+    });
     const c = mesh.addClient();
 
     c.hello();
@@ -119,9 +119,13 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
 
     expect(app().count).toBe(5); // folded into the owner store
     // the host relayed the client envelope back to the subscriber (its own echo = acknowledgement)
-    const echoed = c.ofType('store:sync').filter((m) => m.env.origin === 'client-x');
+    const echoed = c
+      .ofType('store:sync')
+      .filter((m) => m.env.origin === 'client-x');
     expect(echoed.length).toBeGreaterThanOrEqual(1);
-    expect(echoed[0].env.ops).toMatchObject([{ kind: 'set', path: ['count'], next: 5 }]);
+    expect(echoed[0].env.ops).toMatchObject([
+      { kind: 'set', path: ['count'], next: 5 },
+    ]);
   });
 
   it('host.override() wins the merge against a concurrent replica write, even at a lower HLC (epoch authority)', async () => {
@@ -141,8 +145,22 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
     // it is epoch 0) carrying a FAR-FUTURE hlc — under plain LWW it would win on the later stamp
     const env: OpEnvelope = {
       ...clientWrite('client-z', [
-        { kind: 'set', path: ['user', 'name'], next: 'from-replica', prev: 'ada', cites: [], epoch: 0 },
-        { kind: 'set', path: ['count'], next: 42, prev: 0, cites: [], epoch: 0 }, // uncontended field
+        {
+          kind: 'set',
+          path: ['user', 'name'],
+          next: 'from-replica',
+          prev: 'ada',
+          cites: [],
+          epoch: 0,
+        },
+        {
+          kind: 'set',
+          path: ['count'],
+          next: 42,
+          prev: 0,
+          cites: [],
+          epoch: 0,
+        }, // uncontended field
       ]),
       hlc: { p: 9_999_999_999_999, l: 0 },
     };
@@ -214,7 +232,9 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
     const app = appStore();
     const mesh = createTestMesh({ stores: { app } });
     const c = mesh.addClient();
-    mesh.setFault({ drop: ({ to, data }) => to === 'host' && data.type === 'store:subscribe' });
+    mesh.setFault({
+      drop: ({ to, data }) => to === 'host' && data.type === 'store:subscribe',
+    });
 
     c.subscribe('app');
     await mesh.settle();
@@ -230,11 +250,19 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
   });
 
   it('dev-guards a non-cloneable store value with a clear error', () => {
-    const bad = store<{ fn: () => void }>({ fn: () => undefined }, createStoreContext());
-    const port: WorkerPortLike = { postMessage: () => undefined, onmessage: null };
+    const bad = store<{ fn: () => void }>(
+      { fn: () => undefined },
+      createStoreContext(),
+    );
+    const port: WorkerPortLike = {
+      postMessage: () => undefined,
+      onmessage: null,
+    };
     createWorkerHost({ stores: { app: bad }, port });
     expect(() =>
-      port.onmessage!({ data: { type: 'store:subscribe', store: 'app', clientId: 'c1' } }),
+      port.onmessage!({
+        data: { type: 'store:subscribe', store: 'app', clientId: 'c1' },
+      }),
     ).toThrow('cannot be sent across the worker boundary');
   });
 });
@@ -249,7 +277,9 @@ describe('WorkerHost.flush() — synchronous emission', () => {
     };
     const host = createWorkerHost({ stores: { app }, port });
 
-    port.onmessage!({ data: { type: 'store:subscribe', store: 'app', clientId: 'c1' } });
+    port.onmessage!({
+      data: { type: 'store:subscribe', store: 'app', clientId: 'c1' },
+    });
     expect(posted.filter((m) => m.type === 'store:checkpoint')).toHaveLength(1);
 
     app.count.set(7);
@@ -260,14 +290,18 @@ describe('WorkerHost.flush() — synchronous emission', () => {
     expect(syncs).toHaveLength(1);
     expect(syncs[0]).toMatchObject({
       store: 'app',
-      env: { origin: `${host.hostId}:app`, ops: [{ path: ['count'], next: 7 }] },
+      env: {
+        origin: `${host.hostId}:app`,
+        ops: [{ path: ['count'], next: 7 }],
+      },
     });
   });
 });
 
 describe('createWorkerHost — real MessageChannel fidelity', () => {
   const tick = async () => {
-    for (let i = 0; i < 8; i++) await new Promise<void>((r) => setTimeout(r, 1));
+    for (let i = 0; i < 8; i++)
+      await new Promise<void>((r) => setTimeout(r, 1));
   };
   const collect = (port: WorkerPortLike) => {
     const inbox: WorkerEnvelope[] = [];
@@ -281,16 +315,25 @@ describe('createWorkerHost — real MessageChannel fidelity', () => {
     const host = createWorkerHost({ stores: { app }, port: port2 });
     const inbox = collect(port1);
 
-    port1.postMessage({ type: 'store:subscribe', store: 'app', clientId: 'c1' });
+    port1.postMessage({
+      type: 'store:subscribe',
+      store: 'app',
+      clientId: 'c1',
+    });
     await tick();
     app.user.name.set('grace');
     await tick();
 
     const checkpoint = inbox.find((m) => m.type === 'store:checkpoint');
     const synced = inbox.find((m) => m.type === 'store:sync');
-    expect(checkpoint).toMatchObject({ checkpoint: { root: { user: { name: 'ada' }, count: 0 } } });
+    expect(checkpoint).toMatchObject({
+      checkpoint: { root: { user: { name: 'ada' }, count: 0 } },
+    });
     expect(synced).toMatchObject({
-      env: { origin: `${host.hostId}:app`, ops: [{ path: ['user', 'name'], next: 'grace' }] },
+      env: {
+        origin: `${host.hostId}:app`,
+        ops: [{ path: ['user', 'name'], next: 'grace' }],
+      },
     });
   });
 });

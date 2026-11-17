@@ -111,7 +111,7 @@ describe('breadcrumb-resolver', () => {
 
   it('should await truthy value if awaitValue is true', async () => {
     const labelSignal = signal('');
-    
+
     TestBed.configureTestingModule({
       providers: [
         { provide: BreadcrumbStore, useValue: mockStore },
@@ -133,7 +133,7 @@ describe('breadcrumb-resolver', () => {
     const router = TestBed.inject(Router);
 
     let navigationComplete = false;
-    router.navigateByUrl('/test').then(() => {
+    void router.navigateByUrl('/test').then(() => {
       navigationComplete = true;
     });
 
@@ -147,7 +147,7 @@ describe('breadcrumb-resolver', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(navigationComplete).toBe(true);
-    
+
     const registered = mockStore.register.mock.calls[0][0];
     expect(registered.label()).toBe('Truthy Label');
   });

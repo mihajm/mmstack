@@ -1,4 +1,7 @@
-import { createStoreContext, type toStoreOptions } from '@mmstack/primitives/core';
+import {
+  createStoreContext,
+  type toStoreOptions,
+} from '@mmstack/primitives/core';
 
 let context: toStoreOptions | undefined;
 

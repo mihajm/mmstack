@@ -604,7 +604,6 @@ export type FoldPolicyEntry = {
  */
 const retained = (s: SyncSibling): SyncSibling => {
   if (s.kind === 'set' || !Object.hasOwn(s, 'prev')) return s;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { prev: _dropped, ...rest } = s;
   return rest;
 };

@@ -12,9 +12,12 @@ describe('windowSize', () => {
 
   it('should track window resize with throttle', () => {
     TestBed.runInInjectionContext(() => {
-      const defaultSize = { width: window.innerWidth, height: window.innerHeight };
+      const defaultSize = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
       const size = windowSize({ throttle: 100 });
-      
+
       expect(size()).toEqual(defaultSize);
 
       Object.assign(window, { innerWidth: 1024, innerHeight: 768 });

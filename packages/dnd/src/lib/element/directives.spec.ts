@@ -174,7 +174,9 @@ describe('DropTarget directive — forwards sticky / dropEffect / hitbox (#13)',
   it('forwards sticky → getIsSticky and dropEffect → getDropEffect', () => {
     const fixture = TestBed.createComponent(DropCfgHost);
     fixture.detectChanges();
-    const el = fixture.debugElement.query(By.directive(DropTarget)).nativeElement;
+    const el = fixture.debugElement.query(
+      By.directive(DropTarget),
+    ).nativeElement;
     // find THIS host's registration, not the global last call
     const cfg = dropTargetMock.mock.calls
       .map(
@@ -186,7 +188,10 @@ describe('DropTarget directive — forwards sticky / dropEffect / hitbox (#13)',
           },
       )
       .find((c) => c.element === el);
-    expect(cfg, 'native dropTarget was not registered for the host').toBeDefined();
+    expect(
+      cfg,
+      'native dropTarget was not registered for the host',
+    ).toBeDefined();
     expect(cfg?.getIsSticky?.({})).toBe(true);
     expect(cfg?.getDropEffect?.({})).toBe('copy');
   });
@@ -199,7 +204,9 @@ describe('DropTarget directive — forwards sticky / dropEffect / hitbox (#13)',
     const el = de.nativeElement as HTMLElement;
     const session = TestBed.inject(DndSession).session;
 
-    session.set(makeSession([{ element: el, data: { __edge: 'top' } }], { id: 1 }));
+    session.set(
+      makeSession([{ element: el, data: { __edge: 'top' } }], { id: 1 }),
+    );
     expect(dt.closestEdge()).toBe('top');
   });
 });

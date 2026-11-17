@@ -106,14 +106,13 @@ export type CircuitBreakerOptions =
   | CreateCircuitBreakerOptions;
 
 /** @internal */
-const DEFAULT_OPTIONS: Required<
-  Omit<CreateCircuitBreakerOptions, 'treshold'>
-> = {
-  threshold: 5,
-  timeout: 30000,
-  shouldFail: () => true,
-  shouldFailForever: () => false,
-};
+const DEFAULT_OPTIONS: Required<Omit<CreateCircuitBreakerOptions, 'treshold'>> =
+  {
+    threshold: 5,
+    timeout: 30000,
+    shouldFail: () => true,
+    shouldFailForever: () => false,
+  };
 
 /** @internal */
 function internalCeateCircuitBreaker(

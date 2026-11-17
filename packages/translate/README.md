@@ -317,7 +317,9 @@ For runtime language switching without page refreshes (e.g. a language picker in
 ```typescript
 const locale = injectDynamicLocale();
 locale.set('sl-SI'); // missing translations load automatically
-if (locale.isLoading()) { /* show a spinner */ }
+if (locale.isLoading()) {
+  /* show a spinner */
+}
 ```
 
 Pair with `localeStorage` in `provideIntlConfig({ ... })` to persist the user's choice across reloads — `read()` runs once on init, `write()` fires on every successful change. Stored values are validated against `supportedLocales`; errors from `read()`/`write()` are swallowed (and dev-mode logged) so a misbehaving backend can't break the app. `localeStorage` is mutually exclusive with `localeParamName` at the type level.
@@ -512,7 +514,9 @@ import { injectDynamicLocale } from '@mmstack/translate';
       <option value="sl-SI">Slovenščina</option>
       <option value="de-DE">Deutsch</option>
     </select>
-    @if (locale.isLoading()) { <span>Loading…</span> }
+    @if (locale.isLoading()) {
+      <span>Loading…</span>
+    }
   `,
 })
 export class LanguageSwitcherComponent {
@@ -569,7 +573,7 @@ Locale switches load translation chunks through an internal resource; `injectLoc
 import { registerResource, injectStartTransition } from '@mmstack/primitives';
 import { injectDynamicLocale, injectLocaleLoadState } from '@mmstack/translate';
 
-@Component({ /* lives under your <mm-suspense> / scope boundary */ })
+@Component({/* lives under your <mm-suspense> / scope boundary */})
 export class LocalePicker {
   private readonly locale = injectDynamicLocale();
   private readonly startTransition = injectStartTransition();
@@ -592,9 +596,12 @@ export class LocalePicker {
 ```typescript
 import { withPrefetch } from '@mmstack/router-core';
 
-const quoteNs = registerNamespace(() => import('./quote.en').then((m) => m.quoteEn), {
-  'sl-SI': () => import('./quote.sl').then((m) => m.quoteSl),
-});
+const quoteNs = registerNamespace(
+  () => import('./quote.en').then((m) => m.quoteEn),
+  {
+    'sl-SI': () => import('./quote.sl').then((m) => m.quoteSl),
+  },
+);
 
 export const routes: Routes = [
   {
@@ -603,7 +610,8 @@ export const routes: Routes = [
     resolve: {
       i18n: withPrefetch(quoteNs.resolveNamespaceTranslation, {
         description: 'quote-i18n',
-        prefetch: (ctx) => quoteNs.warmNamespaceTranslation(ctx.params()['locale']),
+        prefetch: (ctx) =>
+          quoteNs.warmNamespaceTranslation(ctx.params()['locale']),
       }),
     },
   },
@@ -739,7 +747,9 @@ export class MyComponent {
   readonly date = new Date();
 
   // Reacts to price changes AND locale changes — no explicit locale needed
-  readonly displayPrice = computed(() => this.fmt.currency(this.price(), 'EUR'));
+  readonly displayPrice = computed(() =>
+    this.fmt.currency(this.price(), 'EUR'),
+  );
   readonly displayDate = computed(() => this.fmt.date(this.date));
 }
 ```
@@ -869,14 +879,14 @@ describe('MyComponent', () => {
 
 You don't have to change your build pipeline — `@mmstack/translate` runs alongside (or in place of) `@angular/localize` in multi-build mode without rebuilds. The migration happens at the source level: replace `$localize` template tags and `i18n` attributes with namespace-based access.
 
-| `@angular/localize`                            | `@mmstack/translate`                                                              |
-| ---------------------------------------------- | --------------------------------------------------------------------------------- |
-| ``$localize`Hello ${name}:name:` ``            | `t('quote.greeting', { name })`                                                   |
-| `<h1 i18n>Title</h1>`                          | `<h1 [translate]="'quote.title'">` / `{{ t('quote.title') }}` / pipe              |
-| `messages.xlf` extraction                      | TypeScript: `createNamespace('quote', { ... })`                                   |
-| `messages.<locale>.xlf` translation file       | TS file: `createQuoteTranslation('sl-SI', { ... })`                               |
+| `@angular/localize`                            | `@mmstack/translate`                                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| ``$localize`Hello ${name}:name:` ``            | `t('quote.greeting', { name })`                                                    |
+| `<h1 i18n>Title</h1>`                          | `<h1 [translate]="'quote.title'">` / `{{ t('quote.title') }}` / pipe               |
+| `messages.xlf` extraction                      | TypeScript: `createNamespace('quote', { ... })`                                    |
+| `messages.<locale>.xlf` translation file       | TS file: `createQuoteTranslation('sl-SI', { ... })`                                |
 | `angular.json` `localize` config (multi-build) | Same multi-build still works; or switch to a single build with `provideIntlConfig` |
-| `<my-cmp i18n-title title="Hi">`               | Bind the title from a translation: `[title]="t('ns.greeting')"`                   |
+| `<my-cmp i18n-title title="Hi">`               | Bind the title from a translation: `[title]="t('ns.greeting')"`                    |
 
 **ICU plurals and selects use the same syntax** — no conversion. They're now type-checked end to end, which the `@angular/localize` extractor doesn't provide.
 
@@ -886,18 +896,18 @@ You don't have to change your build pipeline — `@mmstack/translate` runs along
 
 Conceptually close — both are runtime, signal-aware, and namespace/scope-based. The main shift is from JSON files + a service API to TypeScript namespaces + an injected `t` function:
 
-| transloco                                                | `@mmstack/translate`                                                  |
-| -------------------------------------------------------- | --------------------------------------------------------------------- |
-| `provideTransloco({ ... })`                              | `provideIntlConfig({ ... })`                                          |
-| `scope` (e.g. `'lazy-page'`)                             | `namespace` (first arg to `createNamespace` / `registerNamespace`)    |
-| JSON translation files                                   | TS namespace files (default + one per other locale)                   |
-| `inject(TranslocoService).translate(key, params)`        | `injectQuoteT()(...)` (typed `t` from `registerNamespace`)            |
-| `translateSignal(key, params)` / `*transloco`            | `t.asSignal(key, () => params)` / `Translate` directive               |
-| `transloco` pipe                                         | `Translator` pipe (typed subclass)                                    |
-| `TranslocoService.activeLang` signal                     | `injectDynamicLocale()` (writable signal)                             |
-| `TranslocoService.langChanges$`                          | `effect(() => locale())`                                              |
-| HTTP-loader-based lazy scope                             | Dynamic `import()` factory passed to `registerNamespace`              |
-| `*translocoLoading`                                      | `locale.isLoading()` signal on `injectDynamicLocale`                  |
+| transloco                                         | `@mmstack/translate`                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `provideTransloco({ ... })`                       | `provideIntlConfig({ ... })`                                       |
+| `scope` (e.g. `'lazy-page'`)                      | `namespace` (first arg to `createNamespace` / `registerNamespace`) |
+| JSON translation files                            | TS namespace files (default + one per other locale)                |
+| `inject(TranslocoService).translate(key, params)` | `injectQuoteT()(...)` (typed `t` from `registerNamespace`)         |
+| `translateSignal(key, params)` / `*transloco`     | `t.asSignal(key, () => params)` / `Translate` directive            |
+| `transloco` pipe                                  | `Translator` pipe (typed subclass)                                 |
+| `TranslocoService.activeLang` signal              | `injectDynamicLocale()` (writable signal)                          |
+| `TranslocoService.langChanges$`                   | `effect(() => locale())`                                           |
+| HTTP-loader-based lazy scope                      | Dynamic `import()` factory passed to `registerNamespace`           |
+| `*translocoLoading`                               | `locale.isLoading()` signal on `injectDynamicLocale`               |
 
 Migration sketch:
 
@@ -910,16 +920,16 @@ Migration sketch:
 
 Same source-level shape change as transloco but with more legacy API surface to replace:
 
-| ngx-translate                                       | `@mmstack/translate`                                                              |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `TranslateModule.forRoot({ loader: ... })`          | `provideIntlConfig` + per-namespace `registerNamespace`                           |
-| `TranslateService.get(key, params)` (Observable)    | `t('ns.key', params)` (plain string) or `t.asSignal(...)` (Signal)                |
-| `TranslateService.instant(key, params)`             | `t('ns.key', params)`                                                             |
-| `TranslateService.use('locale')`                    | `injectDynamicLocale().set('locale')`                                             |
-| `TranslateService.onLangChange.subscribe(...)`      | `effect(() => locale())`                                                          |
-| `TranslateHttpLoader`                               | Dynamic `import()` factory: `() => import('./ns.<locale>').then((m) => m.default)`|
-| `translate` pipe                                    | Typed `Translator` pipe subclass                                                  |
-| `MissingTranslationHandler`                         | Falls back to the default-locale message; dev-mode `console.warn`                 |
+| ngx-translate                                    | `@mmstack/translate`                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `TranslateModule.forRoot({ loader: ... })`       | `provideIntlConfig` + per-namespace `registerNamespace`                            |
+| `TranslateService.get(key, params)` (Observable) | `t('ns.key', params)` (plain string) or `t.asSignal(...)` (Signal)                 |
+| `TranslateService.instant(key, params)`          | `t('ns.key', params)`                                                              |
+| `TranslateService.use('locale')`                 | `injectDynamicLocale().set('locale')`                                              |
+| `TranslateService.onLangChange.subscribe(...)`   | `effect(() => locale())`                                                           |
+| `TranslateHttpLoader`                            | Dynamic `import()` factory: `() => import('./ns.<locale>').then((m) => m.default)` |
+| `translate` pipe                                 | Typed `Translator` pipe subclass                                                   |
+| `MissingTranslationHandler`                      | Falls back to the default-locale message; dev-mode `console.warn`                  |
 
 Migration sketch:
 

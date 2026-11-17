@@ -1,6 +1,9 @@
 import { Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { injectTransitionScope, provideTransitionScope } from '@mmstack/primitives/core';
+import {
+  injectTransitionScope,
+  provideTransitionScope,
+} from '@mmstack/primitives/core';
 import { createWorkerHost, type WorkerPortLike } from '@mmstack/worker/host';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectWorker, type WorkerRef } from './connect-worker';
@@ -8,7 +11,8 @@ import { PAUSED, workerResource } from './worker-resource';
 
 // tasks the worker host exposes
 const double = (n: number) => n * 2;
-const slow = (n: number) => new Promise<number>((r) => setTimeout(() => r(n * 10), 5));
+const slow = (n: number) =>
+  new Promise<number>((r) => setTimeout(() => r(n * 10), 5));
 const boom = (n: number) => {
   throw new Error('bad ' + n);
 };

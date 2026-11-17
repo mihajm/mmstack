@@ -1409,11 +1409,7 @@ describe('K4′ — purity, the false positive, the missing prev, and what the g
       ]);
       W.receive(baseEnv);
       L.receive(baseEnv);
-      const set = (
-        own: unknown[],
-        next: unknown[],
-        drop: boolean,
-      ): StoreOp[] =>
+      const set = (own: unknown[], next: unknown[], drop: boolean): StoreOp[] =>
         drop
           ? [{ kind: 'set', path: ['todos'], next }]
           : [{ kind: 'set', path: ['todos'], prev: own, next }];
@@ -2719,7 +2715,7 @@ describe('N5 — merges by value: edit/revert, and the equality domain', () => {
     expect(structEq(d, d)).toBe(true);
     expect(structEq({ at: new Date(0) }, { at: new Date(0) })).toBe(false);
     expect(structEq(new Map(), new Map())).toBe(false);
-    // eslint-disable-next-line no-sparse-arrays
+    // oxlint-disable-next-line no-sparse-arrays
     expect(structEq([, 1], [undefined, 1])).toBe(true);
     expect(structEq(NaN, NaN)).toBe(true);
     expect(structEq(0, -0)).toBe(false);

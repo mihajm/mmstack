@@ -161,7 +161,8 @@ describe('submitChanges', () => {
 
     await expect(result).resolves.toBe(false);
     expect(
-      f.name()
+      f
+        .name()
         .errors()
         .some((e) => e.kind === 'server'),
     ).toBe(true);

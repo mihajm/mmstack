@@ -9,7 +9,10 @@ import {
 } from '@angular/core';
 import { render } from '@testing-library/angular';
 import { injectStartTransition } from './start-transition';
-import { injectTransitionScope, provideTransitionScope } from './transition-scope';
+import {
+  injectTransitionScope,
+  provideTransitionScope,
+} from './transition-scope';
 
 type FakeRef = ResourceRef<unknown> & {
   status: WritableSignal<ResourceStatus>;
@@ -29,8 +32,11 @@ function makeRef(status: ResourceStatus): FakeRef {
   } as unknown as FakeRef;
 }
 
-// eslint-disable-next-line @angular-eslint/component-selector
-@Component({ selector: 'st-host', template: ``, providers: [provideTransitionScope()] })
+@Component({
+  selector: 'st-host',
+  template: ``,
+  providers: [provideTransitionScope()],
+})
 class Host {
   readonly scope = injectTransitionScope();
   readonly start = injectStartTransition();

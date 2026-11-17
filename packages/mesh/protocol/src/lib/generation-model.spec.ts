@@ -498,8 +498,17 @@ describe('generation: the real relay', () => {
   it('refuses an old-generation envelope after a cut (hydrate under a new instance), answering the writer "generation"', () => {
     const relay = createRelay();
     const sent: unknown[] = [];
-    const conn = relay.connect({ send: (m) => sent.push(m), close: () => void 0 }, { writer: 'w' });
-    conn.receive({ t: 'hello', room: 'r', origin: 'o', proto: MESH_PROTO_VERSION, policyVersion: 0 });
+    const conn = relay.connect(
+      { send: (m) => sent.push(m), close: () => void 0 },
+      { writer: 'w' },
+    );
+    conn.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
     const env = {
       proto: MESH_PROTO_VERSION,
       instance: relay.room('r')?.instance ?? '',
@@ -508,20 +517,40 @@ describe('generation: the real relay', () => {
       writer: 'w',
       version: 1,
       hlc: { p: 5, l: 0 },
-      ops: [{ kind: 'set' as const, path: ['x'], next: 1, cites: [], epoch: 0 }],
+      ops: [
+        { kind: 'set' as const, path: ['x'], next: 1, cites: [], epoch: 0 },
+      ],
     };
     conn.receive({ t: 'env', room: 'r', env });
     expect(relay.room('r')?.seq).toBe(1);
     // a cut: the room comes back under a new instance at seq 0
     const relay2 = createRelay();
-    expect(relay2.hydrate('r', { seq: 0, registers: [], wm: {}, instance: 'g2' })).toBe(true);
+    expect(
+      relay2.hydrate('r', { seq: 0, registers: [], wm: {}, instance: 'g2' }),
+    ).toBe(true);
     const sent2: { t: string; reason?: string }[] = [];
-    const conn2 = relay2.connect({ send: (m) => sent2.push(m as { t: string }), close: () => void 0 }, { writer: 'w' });
-    conn2.receive({ t: 'hello', room: 'r', origin: 'o', proto: MESH_PROTO_VERSION, policyVersion: 0 });
+    const conn2 = relay2.connect(
+      { send: (m) => sent2.push(m as { t: string }), close: () => void 0 },
+      { writer: 'w' },
+    );
+    conn2.receive({
+      t: 'hello',
+      room: 'r',
+      origin: 'o',
+      proto: MESH_PROTO_VERSION,
+      policyVersion: 0,
+    });
     conn2.receive({ t: 'env', room: 'r', env }); // the old-generation envelope, byte for byte
     expect(relay2.room('r')?.seq).toBe(0);
     expect(sent2.filter((m) => m.t === 'drop')).toEqual([
-      { t: 'drop', room: 'r', origin: 'o', version: 1, reason: 'generation', seq: 0 },
+      {
+        t: 'drop',
+        room: 'r',
+        origin: 'o',
+        version: 1,
+        reason: 'generation',
+        seq: 0,
+      },
     ]);
   });
 });

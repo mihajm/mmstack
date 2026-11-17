@@ -6,7 +6,12 @@ import {
   type PrincipalCtx,
 } from './policy';
 import { createRanges, recordAdmission, type Ranges } from './ranges';
-import { createRegisterStore, extentOf, pathKey, type RegisterStore } from './register';
+import {
+  createRegisterStore,
+  extentOf,
+  pathKey,
+  type RegisterStore,
+} from './register';
 import { validateDirect, validateEnvelope } from './validate';
 import {
   MESH_PROTO_VERSION,
@@ -71,7 +76,8 @@ export type CoverContext = {
   settled(origin: string): Hlc | undefined;
 };
 
-const stampLte = (a: Hlc, b: Hlc): boolean => a.p < b.p || (a.p === b.p && a.l <= b.l);
+const stampLte = (a: Hlc, b: Hlc): boolean =>
+  a.p < b.p || (a.p === b.p && a.l <= b.l);
 
 /**
  * Is the cited `dot` at `path` covered? Two regimes, the cut as boundary. A dot at or below its
@@ -175,7 +181,11 @@ export type RelayOptions = {
    * stalls the room, see {@link RoomInfo.stalled}). A migration's cut is its envelope's commit:
    * `onCommit` reports it, with {@link RoomState.generation} already the new record.
    */
-  readonly onRow?: (room: string, row: RelayRow, state: RoomState) => void | Promise<void>;
+  readonly onRow?: (
+    room: string,
+    row: RelayRow,
+    state: RoomState,
+  ) => void | Promise<void>;
   /**
    * Generation cuts the relay takes on its own. Arming either needs `policy.verifyCitations`: a cut
    * without the citation gate lets a dropped dot replay, so {@link createRelay} refuses to start.
@@ -201,7 +211,11 @@ export type RelayOptions = {
    * The durability promise an `onRow` returned for `row` rejected: the room is stalled, exactly as
    * for {@link RelayOptions.onDurabilityFailed}. Fires once, for the row that failed.
    */
-  readonly onRowDurabilityFailed?: (room: string, row: RelayRow, cause: unknown) => void;
+  readonly onRowDurabilityFailed?: (
+    room: string,
+    row: RelayRow,
+    cause: unknown,
+  ) => void;
   readonly onDurabilityFailed?: (
     room: string,
     env: SeqEnvelope,
@@ -412,7 +426,11 @@ export type Relay = {
  * is the whole behaviour of a relay whose adapter stores synchronously.
  */
 type Release = {
-  submit(run: () => void, done?: Promise<void>, held?: SeqEnvelope | RelayRow): void;
+  submit(
+    run: () => void,
+    done?: Promise<void>,
+    held?: SeqEnvelope | RelayRow,
+  ): void;
   /** Something is queued or in flight: a fresh answer must queue behind it. */
   busy(): boolean;
   /** A durability promise rejected; the queue will never drain on its own again. */
@@ -719,7 +737,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     for (const [origin, r] of room.ranges) out[origin] = r.max();
     return out;
   };
-  const rangesRecord = (room: Room): Record<string, readonly VersionRange[]> => {
+  const rangesRecord = (
+    room: Room,
+  ): Record<string, readonly VersionRange[]> => {
     const out: Record<string, readonly VersionRange[]> = {};
     for (const [origin, r] of room.ranges) out[origin] = r.toJSON();
     return out;
@@ -727,12 +747,14 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   const settledRecord = (room: Room): Record<string, Hlc> =>
     Object.fromEntries(room.settled);
 
-  const recordOf = (m: ReadonlyMap<string, Hlc>): Record<string, Hlc> => Object.fromEntries(m);
+  const recordOf = (m: ReadonlyMap<string, Hlc>): Record<string, Hlc> =>
+    Object.fromEntries(m);
   const receiptsRecord = (room: Room): Receipts => {
     const out: Record<string, Record<string, readonly VersionRange[]>> = {};
     for (const [origin, byInstance] of room.receipts) {
       out[origin] = {};
-      for (const [instance, r] of byInstance) out[origin][instance] = r.toJSON();
+      for (const [instance, r] of byInstance)
+        out[origin][instance] = r.toJSON();
     }
     return out;
   };
@@ -869,7 +891,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           room: name,
           ...cut.doc,
           peers: [...room.presence.values()].map((e) => e.peer),
-          members: [...room.members].filter((m) => m !== member).map((m) => m.origin),
+          members: [...room.members]
+            .filter((m) => m !== member)
+            .map((m) => m.origin),
           ...iceFor(name, member.origin),
         });
       }
@@ -896,17 +920,30 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   /** Census: every connected member declared ready in this generation ⇒ a consensus cut. */
   const census = (name: string, room: Room): void => {
     if (!opt.compaction?.consensus || room.release.stalled()) return;
-    const members = [...room.members].filter((m) => !m.ejected && !room.ejected.has(m.ctx.writer));
-    if (!members.length || !members.every((m) => m.ready) || !rooted(room.registers)) return;
+    const members = [...room.members].filter(
+      (m) => !m.ejected && !room.ejected.has(m.ctx.writer),
+    );
+    if (
+      !members.length ||
+      !members.every((m) => m.ready) ||
+      !rooted(room.registers)
+    )
+      return;
     cutNow(name, room, 'consensus');
   };
   /** The tombstone budget after a commit: hard ⇒ cut now; soft ⇒ cut after a quiet commit. */
   const budget = (name: string, room: Room, quiet: boolean): void => {
-    if (!opt.compaction?.budget || room.release.stalled() || !rooted(room.registers)) return;
+    if (
+      !opt.compaction?.budget ||
+      room.release.stalled() ||
+      !rooted(room.registers)
+    )
+      return;
     const count = room.registers.droppableTombstones();
     const hard = hardBudget(room);
     if (count > hard / 2) room.softDue = true;
-    if (count > hard || (room.softDue && quiet)) cutNow(name, room, 'compaction');
+    if (count > hard || (room.softDue && quiet))
+      cutNow(name, room, 'compaction');
     else if (room.noticed !== percentOf(room, count)) notice(name, room);
   };
 
@@ -938,7 +975,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       for (const op of env.ops) {
         for (const c of op.cites) {
           // a self-citation of this very envelope's dot is ignored at ingest (born-dead guard)
-          if (c.origin === env.origin && c.hlc.p === env.hlc.p && c.hlc.l === env.hlc.l) continue;
+          if (
+            c.origin === env.origin &&
+            c.hlc.p === env.hlc.p &&
+            c.hlc.l === env.hlc.l
+          )
+            continue;
           if (!admits(room.registers, cover, op.path, c)) return 'citation';
         }
       }
@@ -972,7 +1014,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     cut: (name, options) => {
       const room = rooms.get(name);
       if (!room || room.release.stalled()) return false;
-      const replay = options.reason === 'compaction' || options.reason === 'consensus';
+      const replay =
+        options.reason === 'compaction' || options.reason === 'consensus';
       if (replay && !opt.policy?.verifyCitations) {
         throw new Error(
           `mesh relay: a ${options.reason} cut needs policy.verifyCitations — without the citation gate a cut lets a dropped write replay`,
@@ -1017,7 +1060,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           extent: g.extent,
           preCutMax: g.preCutMax,
         };
-        for (const [origin, h] of Object.entries(g.firstStamps)) room.firstStamps.set(origin, h);
+        for (const [origin, h] of Object.entries(g.firstStamps))
+          room.firstStamps.set(origin, h);
         for (const [origin, byInstance] of Object.entries(g.receipts)) {
           const held = new Map<string, Ranges>();
           for (const [instance, r] of Object.entries(byInstance)) {
@@ -1032,8 +1076,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           room.firstStamps.set(origin, { p: 0, l: 0 });
         }
       }
-      for (const [origin, h] of Object.entries(snapshot.everMax ?? {})) room.everMax.set(origin, h);
-      for (const [key, why] of Object.entries(snapshot.refused ?? {})) room.refused.set(key, why);
+      for (const [origin, h] of Object.entries(snapshot.everMax ?? {}))
+        room.everMax.set(origin, h);
+      for (const [key, why] of Object.entries(snapshot.refused ?? {}))
+        room.refused.set(key, why);
       if (snapshot.schemaVersion !== undefined)
         room.schemaVersion = snapshot.schemaVersion;
       if (snapshot.journal) {
@@ -1043,7 +1089,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           .sort((a, b) => a.seq - b.seq);
         // the first entry may be the migration envelope that cut the generation; every later one
         // belongs to it, or the checkpoint mixes generations and the room must not boot
-        const stray = g && journal.find((e) => e.seq > head && e.instance !== room.instance);
+        const stray =
+          g &&
+          journal.find((e) => e.seq > head && e.instance !== room.instance);
         if (stray) {
           rooms.delete(name);
           throw new Error(
@@ -1244,7 +1292,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
 
           // readiness for a consensus cut, bound to the generation it names
           if (msg.t === 'compact') {
-            if (!opt.compaction?.consensus || msg.instance !== room.instance) return;
+            if (!opt.compaction?.consensus || msg.instance !== room.instance)
+              return;
             if (member.ready === (msg.ready === true)) return;
             member.ready = msg.ready === true;
             notice(msg.room, room);
@@ -1284,7 +1333,9 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
           // Refusals that eject nobody. The submitter alone hears them, at once: a `drop`
           // carries no committed state, so it never waits behind durability.
-          const refuse = (reason: Exclude<DropMsg['reason'], 'compacting'>): void => {
+          const refuse = (
+            reason: Exclude<DropMsg['reason'], 'compacting'>,
+          ): void => {
             opt.onDrop?.(msg.room, env, reason);
             member.socket.send({
               t: 'drop',
@@ -1366,7 +1417,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               version: env.version,
               reason: refused,
             };
-            return answer(refused, opt.onRow?.(msg.room, row, stateOf(room)) ?? undefined, row);
+            return answer(
+              refused,
+              opt.onRow?.(msg.room, row, stateOf(room)) ?? undefined,
+              row,
+            );
           }
           // quiet: this commit arrives at least `quietMs` after the room's previous admitted commit
           const at = now();
@@ -1379,7 +1434,8 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // a migration is a generation cut whose row is its own envelope: admitted (and
           // receipted) in the generation it closes, its root write is the new generation's seed
           const migrates =
-            env.schemaVersion !== undefined && env.schemaVersion > room.schemaVersion;
+            env.schemaVersion !== undefined &&
+            env.schemaVersion > room.schemaVersion;
           recordAdmission(room, env);
           let cut: ReturnType<typeof cutRoom> | undefined;
           if (migrates) {
@@ -1420,7 +1476,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               // the settled notice rides BEHIND the envelope that moved it, so no client collects
               // a watermark before the write it protected has passed
               if (moved) {
-                broadcast(room, { t: 'settled', room: msg.room, settled: moved });
+                broadcast(room, {
+                  t: 'settled',
+                  room: msg.room,
+                  settled: moved,
+                });
               }
               if (cut) rewelcome(msg.room, room, cut)();
             },

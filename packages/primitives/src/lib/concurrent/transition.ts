@@ -92,10 +92,9 @@ export class MmTransition<T> {
   readonly pending: Signal<boolean> = this.holding.asReadonly();
 
   static ngTemplateContextGuard<T>(
-    dir: MmTransition<T>,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ctx: unknown,
-  ): ctx is MmTransitionContext<T> {
+    _dir: MmTransition<T>,
+    _ctx: unknown,
+  ): _ctx is MmTransitionContext<T> {
     return true;
   }
 

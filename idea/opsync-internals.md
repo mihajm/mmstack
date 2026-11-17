@@ -25,6 +25,7 @@ into the transport → re-entered the relay → the relay broadcasts BEFORE its 
 receive re-entrantly flushed too → onCommit fired in scrambled (non-seq) order.
 
 **NEW (freeze-before-observe + tick-deferred outbox):**
+
 ```
 receive(env):
   dedup by (origin, version); gap hook
@@ -39,11 +40,12 @@ receive(env):
 ```
 
 **Fable's ruling (2026-07-06), distilled — this is the authority for the design:**
+
 - Keep the register map as the base (order-independent, LWW-converging). "Rebase" degenerates to
   re-ingesting pending as local envelopes; invert-apply-reapply (`rebaseOps`) is NOT needed here.
 - ORIGINAL stamp, never re-stamp. "Local auto-wins" is the symmetric-form divergence bug.
-- The real invariant behind "stamp at write time" is: *stamped by a clock that has not yet observed
-  the remote being ingested* (causal independence). `opLog` has no `set()`-time hook, so
+- The real invariant behind "stamp at write time" is: _stamped by a clock that has not yet observed
+  the remote being ingested_ (causal independence). `opLog` has no `set()`-time hook, so
   freeze-at-first-flush-INSIDE-receive-BEFORE-observe realizes it for the only window that matters
   (set → first receive). This is why observe MUST move after `log.flush()`.
 - Both topologies (the receive-flush fix also fixes meshSync onCommit ordering).

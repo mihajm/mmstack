@@ -14,7 +14,9 @@ vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   dropTargetForElements: vi.fn(() => () => undefined),
 }));
 
-const src = (data: Record<string | symbol, unknown> = { id: 1 }): PointerDragSource => ({
+const src = (
+  data: Record<string | symbol, unknown> = { id: 1 },
+): PointerDragSource => ({
   el: document.createElement('div'),
   data,
   kind: 'transfer',
@@ -35,7 +37,11 @@ describe('resolveHits', () => {
       [outer, entry({ getData: () => ({ slot: 'o' }) })],
     ]);
     // elementsFromPoint order: topmost (innermost) first
-    const hits = resolveHits([inner, unregistered, outer, document.body], entries, src());
+    const hits = resolveHits(
+      [inner, unregistered, outer, document.body],
+      entries,
+      src(),
+    );
     expect(hits.map((h) => h.element)).toEqual([inner, outer]);
     expect(hits.map((h) => h.data)).toEqual([{ slot: 'i' }, { slot: 'o' }]);
   });
@@ -47,7 +53,9 @@ describe('resolveHits', () => {
       [a, entry({ accepts: () => false })],
       [b, entry()],
     ]);
-    expect(resolveHits([a, b], entries, src()).map((h) => h.element)).toEqual([b]);
+    expect(resolveHits([a, b], entries, src()).map((h) => h.element)).toEqual([
+      b,
+    ]);
   });
 
   it('filters out targets whose canDrop returns false', () => {
@@ -124,7 +132,10 @@ describe('DndPointerEngine', () => {
   it('begin/move/end drive the unified session, tagged engine:"pointer"', () => {
     const { engine, session } = setup();
     const target = document.createElement('div');
-    const dispose = engine.registerDropTarget(target, entry({ getData: () => ({ at: 1 }) }));
+    const dispose = engine.registerDropTarget(
+      target,
+      entry({ getData: () => ({ at: 1 }) }),
+    );
     engine.stack = [target, document.body];
     const source = src();
 
@@ -188,7 +199,10 @@ describe('DndPointerEngine', () => {
     const enter = vi.fn();
     const leave = vi.fn();
     const a = document.createElement('div');
-    engine.registerDropTarget(a, entry({ onDragEnter: enter, onDragLeave: leave }));
+    engine.registerDropTarget(
+      a,
+      entry({ onDragEnter: enter, onDragLeave: leave }),
+    );
     engine.stack = [a];
 
     engine.begin(src(), 0, 0);
@@ -234,14 +248,20 @@ describe('DndPointerEngine — enter/leave/drop dispatch', () => {
     const events: string[] = [];
     const a = document.createElement('div');
     const b = document.createElement('div');
-    engine.registerDropTarget(a, entry({
-      onDragEnter: () => events.push('a:enter'),
-      onDragLeave: () => events.push('a:leave'),
-    }));
-    engine.registerDropTarget(b, entry({
-      onDragEnter: () => events.push('b:enter'),
-      onDragLeave: () => events.push('b:leave'),
-    }));
+    engine.registerDropTarget(
+      a,
+      entry({
+        onDragEnter: () => events.push('a:enter'),
+        onDragLeave: () => events.push('a:leave'),
+      }),
+    );
+    engine.registerDropTarget(
+      b,
+      entry({
+        onDragEnter: () => events.push('b:enter'),
+        onDragLeave: () => events.push('b:leave'),
+      }),
+    );
     engine.stack = [a];
     engine.begin(src(), 0, 0);
     engine.stack = [b];
@@ -264,10 +284,13 @@ describe('DndPointerEngine — enter/leave/drop dispatch', () => {
     const engine = setup();
     const events: string[] = [];
     const a = document.createElement('div');
-    engine.registerDropTarget(a, entry({
-      onDragLeave: () => events.push('leave'),
-      onDrop: () => events.push('drop'),
-    }));
+    engine.registerDropTarget(
+      a,
+      entry({
+        onDragLeave: () => events.push('leave'),
+        onDrop: () => events.push('drop'),
+      }),
+    );
     engine.stack = [a];
     engine.begin(src(), 0, 0);
     engine.cancel();

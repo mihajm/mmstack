@@ -1,4 +1,10 @@
-import { converged, journalFoldMatchesClients, relayRetainsJournal, seqDense, versionsMonotone } from './invariants';
+import {
+  converged,
+  journalFoldMatchesClients,
+  relayRetainsJournal,
+  seqDense,
+  versionsMonotone,
+} from './invariants';
 import { runChaosSimulation } from './chaos-harness';
 
 describe('chaos scenarios — the real stack under network faults', () => {
@@ -16,26 +22,49 @@ describe('chaos scenarios — the real stack under network faults', () => {
     expect(j.ok, j.message).toBe(true);
     const r = relayRetainsJournal(undefined, res.journal, res.relayRegisters);
     expect(r.ok, r.message).toBe(true);
-    expect(seqDense(res.journal, res.seq).ok, seqDense(res.journal, res.seq).message).toBe(true);
-    expect(versionsMonotone(res.journal).ok, versionsMonotone(res.journal).message).toBe(true); // inv 4
+    expect(
+      seqDense(res.journal, res.seq).ok,
+      seqDense(res.journal, res.seq).message,
+    ).toBe(true);
+    expect(
+      versionsMonotone(res.journal).ok,
+      versionsMonotone(res.journal).message,
+    ).toBe(true); // inv 4
   });
 
   it('(a) reorder is reproducible per seed', () => {
-    const cfg = { seed: 4, peers: 3, rounds: 10, opsPerRound: 2, faults: { minLatencyMs: 1, maxLatencyMs: 40 } } as const;
+    const cfg = {
+      seed: 4,
+      peers: 3,
+      rounds: 10,
+      opsPerRound: 2,
+      faults: { minLatencyMs: 1, maxLatencyMs: 40 },
+    } as const;
     const a = runChaosSimulation(cfg);
     const b = runChaosSimulation(cfg);
     expect(a.roots).toEqual(b.roots);
     const sansInstance = (j: typeof a.journal) =>
-      j.map((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')));
+      j.map((e) =>
+        Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'instance')),
+      );
     expect(sansInstance(a.journal)).toEqual(sansInstance(b.journal));
   });
 
   it('(a) reorder converges across many seeds', () => {
     for (let seed = 0; seed < 30; seed++) {
-      const res = runChaosSimulation({ seed, peers: 3, rounds: 8, opsPerRound: 2, faults: { minLatencyMs: 1, maxLatencyMs: 60 } });
+      const res = runChaosSimulation({
+        seed,
+        peers: 3,
+        rounds: 8,
+        opsPerRound: 2,
+        faults: { minLatencyMs: 1, maxLatencyMs: 60 },
+      });
       const c = converged(res.roots);
       expect(c.ok, `seed ${seed}: ${c.message}`).toBe(true);
-      expect(res.statuses.every((s) => s === 'live'), `seed ${seed}: not all live`).toBe(true);
+      expect(
+        res.statuses.every((s) => s === 'live'),
+        `seed ${seed}: not all live`,
+      ).toBe(true);
     }
   });
 
@@ -48,7 +77,10 @@ describe('chaos scenarios — the real stack under network faults', () => {
       faults: { minLatencyMs: 1, maxLatencyMs: 20 },
       partition: { index: 0, atRound: 4, forRounds: 4 },
     });
-    expect(res.statuses.every((s) => s === 'live'), 'a peer failed to rejoin after heal').toBe(true);
+    expect(
+      res.statuses.every((s) => s === 'live'),
+      'a peer failed to rejoin after heal',
+    ).toBe(true);
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
     const j = journalFoldMatchesClients(undefined, res.journal, res.roots);
     expect(j.ok, j.message).toBe(true);
@@ -66,7 +98,10 @@ describe('chaos scenarios — the real stack under network faults', () => {
       });
       const c = converged(res.roots);
       expect(c.ok, `seed ${seed}: ${c.message}`).toBe(true);
-      expect(res.statuses.every((s) => s === 'live'), `seed ${seed}: not all live`).toBe(true);
+      expect(
+        res.statuses.every((s) => s === 'live'),
+        `seed ${seed}: not all live`,
+      ).toBe(true);
     }
   });
 });

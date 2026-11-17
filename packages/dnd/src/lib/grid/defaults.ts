@@ -21,7 +21,12 @@ export type PlacementGridDefaults = {
   animation?: ReorderableAnimation | false;
   /** Default edge auto-scroll config (or `false` to keep it off). */
   autoScroll?:
-    | { edge?: number; speed?: number; edgeProportion?: number; maxSpeedAt?: number }
+    | {
+        edge?: number;
+        speed?: number;
+        edgeProportion?: number;
+        maxSpeedAt?: number;
+      }
     | false;
   /** Default activation distance in px. */
   activationThreshold?: number;

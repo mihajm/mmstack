@@ -19,10 +19,7 @@ export type SelectPluralOptions = {
   locale: string;
 };
 
-function getRules(
-  locale: string,
-  type: Intl.PluralRuleType,
-): Intl.PluralRules {
+function getRules(locale: string, type: Intl.PluralRuleType): Intl.PluralRules {
   const cacheKey = `${locale}|${type}`;
   let rules = cache.get(cacheKey);
 

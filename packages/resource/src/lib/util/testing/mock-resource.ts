@@ -1,7 +1,13 @@
 import { type HttpHeaders, type HttpResourceRef } from '@angular/common/http';
 import { computed, signal, type WritableSignal } from '@angular/core';
 
-type ResourceStatus = 'idle' | 'error' | 'loading' | 'reloading' | 'resolved' | 'local';
+type ResourceStatus =
+  | 'idle'
+  | 'error'
+  | 'loading'
+  | 'reloading'
+  | 'resolved'
+  | 'local';
 
 /**
  * Creates a minimal mock of HttpResourceRef for unit testing utilities.
@@ -36,7 +42,9 @@ export function createMockResource<T>(
     status: _status as any,
     error: _error,
     statusCode: _statusCode,
-    headers: signal(undefined) as unknown as WritableSignal<HttpHeaders | undefined>,
+    headers: signal(undefined) as unknown as WritableSignal<
+      HttpHeaders | undefined
+    >,
     isLoading: computed(() => _status() === 'loading'),
     progress: signal(undefined) as any,
     hasValue: (() => _value() !== undefined) as HttpResourceRef<T>['hasValue'],

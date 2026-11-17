@@ -3088,7 +3088,7 @@ describe('the wire-fidelity law (wireValueViolation + the emit-side dev lint)', 
     expect(wireValueViolation(Infinity)).toBe('non-finite-number');
     expect(wireValueViolation({ a: undefined })).toBe('undefined-in-container');
     expect(wireValueViolation([1, undefined])).toBe('undefined-in-container');
-    // eslint-disable-next-line no-sparse-arrays
+    // oxlint-disable-next-line no-sparse-arrays
     expect(wireValueViolation([1, , 2])).toBe('sparse-array');
     expect(wireValueViolation(Object.assign([1], { extra: 2 }))).toBe(
       'array-named-property',

@@ -1,5 +1,9 @@
 import { HttpParams } from '@angular/common/http';
-import { extractUrlFromKey, hashRequest, KEY_DELIMITER as D } from './hash-request';
+import {
+  extractUrlFromKey,
+  hashRequest,
+  KEY_DELIMITER as D,
+} from './hash-request';
 
 describe('hashRequest', () => {
   describe('base composition', () => {
@@ -340,9 +344,10 @@ describe('hashRequest', () => {
     });
 
     it('NEVER embeds the raw header value — keys get persisted/broadcast', () => {
-      const key = hashRequest({ url: '/api/me', headers: { Authorization: token } }, [
-        'Authorization',
-      ]);
+      const key = hashRequest(
+        { url: '/api/me', headers: { Authorization: token } },
+        ['Authorization'],
+      );
 
       expect(key).not.toContain(token);
       expect(key).not.toContain('super-secret-token-value');

@@ -14,7 +14,9 @@ const boom = () => {
   throw new Error('task failed');
 };
 const never = (_: unknown, ctx: { signal: AbortSignal }) =>
-  new Promise((res) => ctx.signal.addEventListener('abort', () => res('aborted'), { once: true }));
+  new Promise((res) =>
+    ctx.signal.addEventListener('abort', () => res('aborted'), { once: true }),
+  );
 
 function wire(tasks: Record<string, (i: any, c: any) => any> = {}) {
   const { port1, port2 } = new MessageChannel();

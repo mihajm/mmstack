@@ -414,7 +414,8 @@ const box = (v: unknown): unknown => {
 const typedKey = (v: unknown): string => {
   if (v === undefined) return 'U';
   if (v === null) return 'N';
-  if (typeof v === 'number') return Object.is(v, -0) ? 'n:-0' : `n:${String(v)}`;
+  if (typeof v === 'number')
+    return Object.is(v, -0) ? 'n:-0' : `n:${String(v)}`;
   if (typeof v === 'string') return `s:${JSON.stringify(v)}`;
   if (typeof v === 'boolean') return `b:${String(v)}`;
   // Label-blind: the label tree is compared beside the canonical value, never inside it.
@@ -1440,9 +1441,6 @@ const consoleSink = (v: unknown): void => {
   world.events.push({ kind: 'console', ...e });
 };
 
-/** What the console (a withholding reader) shows: labeled entries dropped, values through its row. */
-const consoleView = (): unknown[] =>
-  world.console.filter((e) => !e.label).map((e) => readAs('console', e.value));
 /** What telemetry shows of the reporter channel: labeled reports dropped entirely. */
 const telemetryReports = (): unknown[] =>
   world.reporter
@@ -2451,27 +2449,6 @@ type GraphRun = {
   readsOf: string[][];
 };
 
-/** A reader view hides at least what another hides: a placeholder covers anything below it. */
-const coversView = (view: unknown, fresh: unknown): boolean => {
-  if (view === PLACEHOLDER) return true;
-  if (Array.isArray(view))
-    return (
-      Array.isArray(fresh) &&
-      view.length === fresh.length &&
-      view.every((x, i) => coversView(x, fresh[i]))
-    );
-  if (isRec(view))
-    return (
-      isRec(fresh) &&
-      JSON.stringify(Object.keys(view)) ===
-        JSON.stringify(Object.keys(fresh)) &&
-      Object.keys(view).every((k) => coversView(view[k], fresh[k]))
-    );
-  return (
-    Object.is(view, fresh) || JSON.stringify(view) === JSON.stringify(fresh)
-  );
-};
-
 const sameLabels = (a: unknown, b: unknown): boolean =>
   JSON.stringify(positions(a)) === JSON.stringify(positions(b));
 
@@ -2737,7 +2714,11 @@ describe('T1 erasure: unboxing the mode-on result everywhere gives the mode-off 
         );
         for (let pass = 0; pass < nodes.length; pass++)
           nodes.forEach((_, k) => {
-            if (on.readsOf[k].some((d) => d[0] === 'n' && exempt[Number(d.slice(1))]))
+            if (
+              on.readsOf[k].some(
+                (d) => d[0] === 'n' && exempt[Number(d.slice(1))],
+              )
+            )
               exempt[k] = true;
           });
         nodes.forEach((_, k) => {
@@ -2912,7 +2893,11 @@ describe('T1 erasure: draws of dynamic globals', () => {
         a: { t: 'src', i: 1 },
         b: { t: 'src', i: 2 },
       },
-      { t: 'obj', a: { t: 'call', fn: 'uuid', args: [] }, b: { t: 'dep', j: 0 } },
+      {
+        t: 'obj',
+        a: { t: 'call', fn: 'uuid', args: [] },
+        b: { t: 'dep', j: 0 },
+      },
       { t: 'bin', op: '===', a: { t: 'dep', j: 1 }, b: { t: 'src', i: 3 } },
     ];
     const initial: SourceSpec[] = [
@@ -3773,8 +3758,10 @@ describe('T0 named counterexamples (each fails with the rule the comment names)'
 
   it('[PIN] host-side gaps close by position: a derived value, host control flow, a structural primitive; value taint fails the last', () => {
     const GAPS: Record<string, HostAction> = {
-      derive: ([x], io) => void io.log(`${String(x)}!`),
-      branch: ([x], io) => void (x ? io.log('yes') : undefined),
+      derive: ([x], io) => io.log(`${String(x)}!`),
+      branch: ([x], io) => {
+        if (x) io.log('yes');
+      },
       count: ([x]) => (Array.isArray(x) ? x.length : 0),
     };
     const pairs: Record<string, [() => unknown, () => unknown]> = {
@@ -4020,7 +4007,11 @@ describe('T0 across time: a signal graph under independently paired histories', 
 
   it('[PIN] the draw history: { a: secret, b: uuid() }, n1 = n0.b, n2 = n1 === saved; a changing secret redraws and the agent cannot tell', () => {
     const nodes: Expr[] = [
-      { t: 'obj', a: { t: 'src', i: 0 }, b: { t: 'call', fn: 'uuid', args: [] } },
+      {
+        t: 'obj',
+        a: { t: 'src', i: 0 },
+        b: { t: 'call', fn: 'uuid', args: [] },
+      },
       { t: 'mem', o: { t: 'dep', j: 0 }, k: 'b' },
       { t: 'bin', op: '===', a: { t: 'dep', j: 1 }, b: { t: 'src', i: 1 } },
     ];
@@ -4251,7 +4242,11 @@ describe('T0 across time: a signal graph under independently paired histories', 
 describe('error identity is typed', () => {
   it('[PIN] a source error whose cause goes from { a: NaN, b: 0 } to { a: null, b: 0 } is a change: the dependent recomputes and holds the new payload', () => {
     const nodes: Expr[] = [{ t: 'src', i: 0 }];
-    const err = (cause: Plain): SourceSpec => ({ kind: 'error', cause, sens: false });
+    const err = (cause: Plain): SourceSpec => ({
+      kind: 'error',
+      cause,
+      sens: false,
+    });
     const r = runGraph(
       nodes,
       [err({ a: NaN, b: 0 }), PLAIN0, PLAIN0],

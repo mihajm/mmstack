@@ -7,17 +7,19 @@ describe('Search Adapter', () => {
   describe('createSearchState (standalone)', () => {
     it('should initialize with query and request', () => {
       vi.useFakeTimers();
-      const toRequest = vi.fn().mockImplementation((q) => q ? { url: `/users?q=${q}` } : undefined);
+      const toRequest = vi
+        .fn()
+        .mockImplementation((q) => (q ? { url: `/users?q=${q}` } : undefined));
       const state = createSearchState(null, {
         toRequest: () => toRequest,
       });
 
       expect(state.query()).toBe('');
       expect(state.request()).toBeUndefined();
-      
+
       state.query.set('Joh');
       vi.runAllTimers();
-      
+
       expect(state.request()).toEqual({ url: '/users?q=Joh' });
       expect(toRequest).toHaveBeenCalledWith('Joh');
       vi.useRealTimers();
@@ -35,11 +37,11 @@ describe('Search Adapter', () => {
     });
 
     it('should identify selected object valueLabel', () => {
-        const state = createSearchState({ id: 1, name: 'Alice' } as any, {
-          toRequest: () => () => undefined,
-          displayWith: () => (i: any) => i.name,
-        });
-        expect(state.valueLabel()).toBe('Alice');
+      const state = createSearchState({ id: 1, name: 'Alice' } as any, {
+        toRequest: () => () => undefined,
+        displayWith: () => (i: any) => i.name,
+      });
+      expect(state.valueLabel()).toBe('Alice');
     });
   });
 
@@ -60,7 +62,7 @@ describe('Search Adapter', () => {
         });
 
         expect(state.error()).toBe('Contact is required');
-        
+
         state.value.set({ id: 1 } as any);
         expect(state.error()).toBe('');
       });

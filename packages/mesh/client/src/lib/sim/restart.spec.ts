@@ -1,4 +1,8 @@
-import { converged, journalFoldMatchesClients, relayRetainsJournal } from './invariants';
+import {
+  converged,
+  journalFoldMatchesClients,
+  relayRetainsJournal,
+} from './invariants';
 import { runRestartSimulation } from './chaos-harness';
 
 describe('scenario: relay restart + hydrate', () => {
@@ -12,15 +16,26 @@ describe('scenario: relay restart + hydrate', () => {
       restartRound: 6,
       preserveInstance: true,
     });
-    expect(res.statuses.every((s) => s === 'live'), 'a client failed to rejoin the restored relay').toBe(true);
+    expect(
+      res.statuses.every((s) => s === 'live'),
+      'a client failed to rejoin the restored relay',
+    ).toBe(true);
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
     // seq space CONTINUED across the restart (hydrate restored the watermark, no reset)
     expect(res.postSeq).toBeGreaterThan(res.checkpointSeq);
     // the restored relay retained exactly checkpoint + post-restart journal (twin re-ingest)
-    const retained = relayRetainsJournal(res.checkpointRegisters, res.postJournal, res.postRelayRegisters);
+    const retained = relayRetainsJournal(
+      res.checkpointRegisters,
+      res.postJournal,
+      res.postRelayRegisters,
+    );
     expect(retained.ok, retained.message).toBe(true);
     // and folding checkpoint + post-restart journal client-side reproduces every peer's root
-    const folded = journalFoldMatchesClients(res.checkpointRegisters, res.postJournal, res.roots);
+    const folded = journalFoldMatchesClients(
+      res.checkpointRegisters,
+      res.postJournal,
+      res.roots,
+    );
     expect(folded.ok, folded.message).toBe(true);
   });
 
@@ -36,9 +51,17 @@ describe('scenario: relay restart + hydrate', () => {
     });
     expect(res.statuses.every((s) => s === 'live')).toBe(true);
     expect(converged(res.roots).ok, converged(res.roots).message).toBe(true);
-    const retained = relayRetainsJournal(res.checkpointRegisters, res.postJournal, res.postRelayRegisters);
+    const retained = relayRetainsJournal(
+      res.checkpointRegisters,
+      res.postJournal,
+      res.postRelayRegisters,
+    );
     expect(retained.ok, retained.message).toBe(true);
-    const folded = journalFoldMatchesClients(res.checkpointRegisters, res.postJournal, res.roots);
+    const folded = journalFoldMatchesClients(
+      res.checkpointRegisters,
+      res.postJournal,
+      res.roots,
+    );
     expect(folded.ok, folded.message).toBe(true);
   });
 
@@ -54,8 +77,14 @@ describe('scenario: relay restart + hydrate', () => {
         preserveInstance: seed % 2 === 0,
       });
       const c = converged(res.roots);
-      expect(c.ok, `seed ${seed} (preserveInstance=${seed % 2 === 0}): ${c.message}`).toBe(true);
-      expect(res.statuses.every((s) => s === 'live'), `seed ${seed}: not all live`).toBe(true);
+      expect(
+        c.ok,
+        `seed ${seed} (preserveInstance=${seed % 2 === 0}): ${c.message}`,
+      ).toBe(true);
+      expect(
+        res.statuses.every((s) => s === 'live'),
+        `seed ${seed}: not all live`,
+      ).toBe(true);
     }
   });
 });

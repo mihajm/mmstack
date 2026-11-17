@@ -62,9 +62,7 @@ import { DEFAULT_NAV_SCOPE, NavStore } from './nav-store';
  * ```
  */
 export function createNavItems<TMeta = Record<string, unknown>>(
-  itemsOrFactory:
-    | CreateNavItem<TMeta>[]
-    | (() => CreateNavItem<TMeta>[]),
+  itemsOrFactory: CreateNavItem<TMeta>[] | (() => CreateNavItem<TMeta>[]),
   options?: { name?: string },
 ): ResolveFn<void> {
   const factory =

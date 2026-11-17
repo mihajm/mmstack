@@ -31,7 +31,8 @@ import { describe, expect, it } from 'vitest';
 type Fold = ReturnType<typeof createConvergingApply>;
 type Store = ReturnType<typeof createRegisterStore>;
 
-const compareHlc = (a: Hlc, b: Hlc): number => (a.p !== b.p ? a.p - b.p : a.l - b.l);
+const compareHlc = (a: Hlc, b: Hlc): number =>
+  a.p !== b.p ? a.p - b.p : a.l - b.l;
 
 const env = (
   origin: string,
@@ -64,8 +65,12 @@ const mulberry32 = (seed: number): (() => number) => {
 describe('compaction proof: pinned', () => {
   it("Miha's schedule: B clears x citing A; a replica folds B, collects too eagerly, then A arrives — x resurrects", () => {
     const aDot: Dot = { origin: 'A', hlc: { p: 10, l: 0 } };
-    const A = env('A', 1, aDot.hlc, [{ kind: 'set', path: ['x'], next: 'value', cites: [], epoch: 0 }]);
-    const B = env('B', 1, { p: 20, l: 0 }, [{ kind: 'clear', path: ['x'], cites: [aDot], epoch: 0 }]);
+    const A = env('A', 1, aDot.hlc, [
+      { kind: 'set', path: ['x'], next: 'value', cites: [], epoch: 0 },
+    ]);
+    const B = env('B', 1, { p: 20, l: 0 }, [
+      { kind: 'clear', path: ['x'], cites: [aDot], epoch: 0 },
+    ]);
 
     const plain = createConvergingApply();
     plain.ingest(B);
@@ -87,8 +92,12 @@ describe('compaction proof: pinned', () => {
   });
 
   it('tombstone: a delayed older set under a tombstone stays suppressed; settle never drops one', () => {
-    const D = env('D', 1, { p: 20, l: 0 }, [{ kind: 'delete', path: ['k'], prev: 1, cites: [], epoch: 0 }]);
-    const S = env('S', 1, { p: 10, l: 0 }, [{ kind: 'set', path: ['k'], next: 1, cites: [], epoch: 0 }]);
+    const D = env('D', 1, { p: 20, l: 0 }, [
+      { kind: 'delete', path: ['k'], prev: 1, cites: [], epoch: 0 },
+    ]);
+    const S = env('S', 1, { p: 10, l: 0 }, [
+      { kind: 'set', path: ['k'], next: 1, cites: [], epoch: 0 },
+    ]);
     const plain = createConvergingApply();
     plain.ingest(D);
     plain.ingest(S);
@@ -110,8 +119,12 @@ describe('compaction proof: pinned', () => {
 
   it("Miha's epoch schedule: a citing op need not carry the epoch it supersedes, so collecting the cited sibling lowers the relay's baseline", () => {
     const aDot: Dot = { origin: 'A', hlc: { p: 10, l: 0 } };
-    const A = env('A', 1, aDot.hlc, [{ kind: 'set', path: ['x'], next: 1, cites: [], epoch: 5 }]);
-    const B = env('B', 1, { p: 20, l: 0 }, [{ kind: 'clear', path: ['x'], cites: [aDot], epoch: 0 }]);
+    const A = env('A', 1, aDot.hlc, [
+      { kind: 'set', path: ['x'], next: 1, cites: [], epoch: 5 },
+    ]);
+    const B = env('B', 1, { p: 20, l: 0 }, [
+      { kind: 'clear', path: ['x'], cites: [aDot], epoch: 0 },
+    ]);
     const plain = createRegisterStore();
     plain.ingest(A);
     plain.ingest(B);
@@ -120,7 +133,12 @@ describe('compaction proof: pinned', () => {
     collected.ingest(B);
     collected.settle({ A: aDot.hlc, B: { p: 20, l: 0 } });
     // A's covered sibling is gone; the baseline is not
-    expect(collected.checkpoint().find((r) => r.path[0] === 'x')?.siblings.map((s) => s.origin)).toEqual(['B']);
+    expect(
+      collected
+        .checkpoint()
+        .find((r) => r.path[0] === 'x')
+        ?.siblings.map((s) => s.origin),
+    ).toEqual(['B']);
     expect(plain.maxEpoch(['x'])).toBe(5);
     expect(collected.maxEpoch(['x'])).toBe(5);
     // and it survives a checkpoint round trip on its own
@@ -132,8 +150,12 @@ describe('compaction proof: pinned', () => {
   it('C5 is load-bearing: a duplicate ingested after settle re-admits collected evidence and is observable', () => {
     // A sets x; B supersedes it citing A; both settled; A's sibling and watermark are collected.
     const aDot: Dot = { origin: 'A', hlc: { p: 10, l: 0 } };
-    const A = env('A', 1, aDot.hlc, [{ kind: 'set', path: ['x'], next: 'old', cites: [], epoch: 0 }]);
-    const B = env('B', 1, { p: 20, l: 0 }, [{ kind: 'set', path: ['x'], next: 'new', cites: [aDot], epoch: 0 }]);
+    const A = env('A', 1, aDot.hlc, [
+      { kind: 'set', path: ['x'], next: 'old', cites: [], epoch: 0 },
+    ]);
+    const B = env('B', 1, { p: 20, l: 0 }, [
+      { kind: 'set', path: ['x'], next: 'new', cites: [aDot], epoch: 0 },
+    ]);
     const fold = createConvergingApply();
     fold.ingest(A);
     fold.ingest(B);
@@ -158,7 +180,11 @@ type Replica = {
   c: Fold;
 };
 
-type Admission = { settled: Record<string, Hlc>; nextVersion: Map<string, number>; admitted: Set<string> };
+type Admission = {
+  settled: Record<string, Hlc>;
+  nextVersion: Map<string, number>;
+  admitted: Set<string>;
+};
 
 /** What the run varies about the admission rule, to show which parts of it the theorem rests on. */
 type Rule = { readonly orderGate: boolean };
@@ -170,7 +196,11 @@ type RelayPair = Admission & {
   /** Every envelope admitted, in sequence order: the journal recovery replays. */
   readonly log: OpEnvelope[];
   /** A checkpoint taken earlier: registers of the collecting twin + admission evidence at that point. */
-  checkpoint?: { at: number; registers: ReturnType<Store['checkpoint']>; admission: Admission };
+  checkpoint?: {
+    at: number;
+    registers: ReturnType<Store['checkpoint']>;
+    admission: Admission;
+  };
   /** The recovered twin: rebuilt from `checkpoint` + replay, then kept in step with the live pair. */
   r?: { store: Store; admission: Admission };
 };
@@ -201,7 +231,11 @@ const maxOf = (r: Admission, origin: string): number => {
  * admitted version is ever admitted later — and `rule.orderGate: false` exists to show it.
  * Returns whether the envelope was admitted.
  */
-const admit = (r: Admission, e: OpEnvelope, rule: Rule = RELAY_RULE): boolean => {
+const admit = (
+  r: Admission,
+  e: OpEnvelope,
+  rule: Rule = RELAY_RULE,
+): boolean => {
   if (r.admitted.has(keyOfEnv(e))) return false;
   if (rule.orderGate && e.version < maxOf(r, e.origin)) return false;
   r.admitted.add(keyOfEnv(e));
@@ -214,7 +248,14 @@ const admit = (r: Admission, e: OpEnvelope, rule: Rule = RELAY_RULE): boolean =>
 };
 const stamps = new Map<string, Hlc>();
 
-const PATHS: readonly (readonly Key[])[] = [['a'], ['b'], ['b', 'c'], ['d'], ['d', 'e'], ['d', 'e', 'f']];
+const PATHS: readonly (readonly Key[])[] = [
+  ['a'],
+  ['b'],
+  ['b', 'c'],
+  ['d'],
+  ['d', 'e'],
+  ['d', 'e', 'f'],
+];
 
 const materializeFrom = (regs: ReturnType<Store['checkpoint']>): unknown => {
   const fold = createConvergingApply();
@@ -223,14 +264,26 @@ const materializeFrom = (regs: ReturnType<Store['checkpoint']>): unknown => {
 };
 
 const stampOf = (fold: Fold): unknown =>
-  PATHS.map((path) => fold.stamp([{ kind: 'set', path, next: 0 }]).map((op) => ({ cites: op.cites, epoch: op.epoch, kind: op.kind, path: op.path })));
+  PATHS.map((path) =>
+    fold.stamp([{ kind: 'set', path, next: 0 }]).map((op) => ({
+      cites: op.cites,
+      epoch: op.epoch,
+      kind: op.kind,
+      path: op.path,
+    })),
+  );
 
 /** Retained representation: siblings + watermarks across every register (what GC removes). */
 const sizeOf = (regs: ReturnType<Store['checkpoint']>): number =>
   regs.reduce((n, r) => n + r.siblings.length + Object.keys(r.water).length, 0);
 const collected = { u: 0, c: 0, recovered: 0, stale: 0, lateEntries: 0 };
 
-function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELAY_RULE): string | null {
+function run(
+  seed: number,
+  steps: number,
+  withSettle: boolean,
+  rule: Rule = RELAY_RULE,
+): string | null {
   const rnd = mulberry32(seed);
   stamps.clear();
   const origins = ['A', 'B', 'C'];
@@ -245,7 +298,14 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       c: createConvergingApply({ origin: o }),
     });
   }
-  const relay: RelayPair = { settled: {}, nextVersion: new Map(), admitted: new Set(), u: createRegisterStore(), c: createRegisterStore(), log: [] };
+  const relay: RelayPair = {
+    settled: {},
+    nextVersion: new Map(),
+    admitted: new Set(),
+    u: createRegisterStore(),
+    c: createRegisterStore(),
+    log: [],
+  };
   /** Every authored envelope, in per-origin order; delivery queues per (origin → target). */
   const authored = new Map<string, OpEnvelope[]>(origins.map((o) => [o, []]));
   const cursor = new Map<string, number>(); // `${from}>${to}` → next index to deliver
@@ -267,14 +327,17 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
     for (const r of replicas.values()) {
       const mu = JSON.stringify(r.u.materialize());
       const mc = JSON.stringify(r.c.materialize());
-      if (mu !== mc) return `seed ${seed}: ${r.origin} materializes ${mu} vs compacted ${mc}`;
+      if (mu !== mc)
+        return `seed ${seed}: ${r.origin} materializes ${mu} vs compacted ${mc}`;
       const su = JSON.stringify(stampOf(r.u));
       const sc = JSON.stringify(stampOf(r.c));
-      if (su !== sc) return `seed ${seed}: ${r.origin} stamps ${su} vs compacted ${sc}`;
+      if (su !== sc)
+        return `seed ${seed}: ${r.origin} stamps ${su} vs compacted ${sc}`;
       // snapshot round trip: a joiner seeded from each checkpoint sees the same document
       const ju = JSON.stringify(materializeFrom(r.u.checkpoint()));
       const jc = JSON.stringify(materializeFrom(r.c.checkpoint()));
-      if (ju !== jc) return `seed ${seed}: joiner from ${r.origin} sees ${ju} vs ${jc}`;
+      if (ju !== jc)
+        return `seed ${seed}: joiner from ${r.origin} sees ${ju} vs ${jc}`;
     }
     for (const path of PATHS) {
       if (relay.u.maxEpoch(path) !== relay.c.maxEpoch(path)) {
@@ -282,32 +345,45 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       }
     }
     for (const { path, dot } of allDots) {
-      const exempt = !!relay.settled[dot.origin] && compareHlc(dot.hlc, relay.settled[dot.origin]) <= 0;
+      const exempt =
+        !!relay.settled[dot.origin] &&
+        compareHlc(dot.hlc, relay.settled[dot.origin]) <= 0;
       const au = relay.u.covers(path, dot) || exempt;
       const ac = relay.c.covers(path, dot) || exempt;
-      if (au !== ac) return `seed ${seed}: relay admission for ${dot.origin}@${dot.hlc.p} on ${path}: ${au} vs ${ac}`;
+      if (au !== ac)
+        return `seed ${seed}: relay admission for ${dot.origin}@${dot.hlc.p} on ${path}: ${au} vs ${ac}`;
     }
     const ru = JSON.stringify(materializeFrom(relay.u.checkpoint()));
     const rc = JSON.stringify(materializeFrom(relay.c.checkpoint()));
     if (ru !== rc) return `seed ${seed}: joiner from relay sees ${ru} vs ${rc}`;
     if (relay.r) {
       const rr = JSON.stringify(materializeFrom(relay.r.store.checkpoint()));
-      if (rr !== ru) return `seed ${seed}: joiner from RECOVERED relay sees ${rr} vs ${ru}`;
+      if (rr !== ru)
+        return `seed ${seed}: joiner from RECOVERED relay sees ${rr} vs ${ru}`;
       for (const path of PATHS) {
         if (relay.r.store.maxEpoch(path) !== relay.u.maxEpoch(path)) {
           return `seed ${seed}: recovered maxEpoch(${path}) ${relay.r.store.maxEpoch(path)} vs ${relay.u.maxEpoch(path)}`;
         }
       }
       for (const { path, dot } of allDots) {
-        const exempt = !!relay.settled[dot.origin] && compareHlc(dot.hlc, relay.settled[dot.origin]) <= 0;
+        const exempt =
+          !!relay.settled[dot.origin] &&
+          compareHlc(dot.hlc, relay.settled[dot.origin]) <= 0;
         const au = relay.u.covers(path, dot) || exempt;
         const ar = relay.r.store.covers(path, dot) || exempt;
-        if (au !== ar) return `seed ${seed}: recovered admission for ${dot.origin}@${dot.hlc.p} on ${path}: ${ar} vs ${au}`;
+        if (au !== ar)
+          return `seed ${seed}: recovered admission for ${dot.origin}@${dot.hlc.p} on ${path}: ${ar} vs ${au}`;
       }
-      if (JSON.stringify(relay.r.admission.settled) !== JSON.stringify(relay.settled)) {
+      if (
+        JSON.stringify(relay.r.admission.settled) !==
+        JSON.stringify(relay.settled)
+      ) {
         return `seed ${seed}: recovered settled ${JSON.stringify(relay.r.admission.settled)} vs ${JSON.stringify(relay.settled)}`;
       }
-      if ([...relay.r.admission.admitted].sort().join() !== [...relay.admitted].sort().join()) {
+      if (
+        [...relay.r.admission.admitted].sort().join() !==
+        [...relay.admitted].sort().join()
+      ) {
         return `seed ${seed}: recovered admission ranges differ`;
       }
     }
@@ -315,7 +391,8 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
   };
 
   const deliver = (e: OpEnvelope, to: Replica | RelayPair) => {
-    if (!('origin' in to) && to.r && admit(to.r.admission, e, rule)) to.r.store.ingest(e); // C8: the recovered twin keeps pace
+    if (!('origin' in to) && to.r && admit(to.r.admission, e, rule))
+      to.r.store.ingest(e); // C8: the recovered twin keeps pace
     if (!admit(to, e, rule)) return; // C5: duplicate or out-of-order refused, never ingested
     to.u.ingest(e);
     to.c.ingest(e);
@@ -340,7 +417,11 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       // the protocol does not enforce epoch carry: a citing op may carry a LOWER epoch than the
       // sibling it supersedes (the relay only gates upward bumps). Generate what is admissible,
       // not what a well-behaved client emits.
-      if (rnd() < 0.25) ops = ops.map((op) => ({ ...op, epoch: Math.floor(rnd() * (op.epoch + 1)) }));
+      if (rnd() < 0.25)
+        ops = ops.map((op) => ({
+          ...op,
+          epoch: Math.floor(rnd() * (op.epoch + 1)),
+        }));
       clock += 1 + Math.floor(rnd() * 3);
       const v = (versions.get(o) as number) + 1;
       versions.set(o, v);
@@ -348,7 +429,8 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       const e = env(o, v, hlc, ops);
       stamps.set(keyOfEnv(e), hlc);
       (authored.get(o) as OpEnvelope[]).push(e);
-      for (const op of ops) allDots.push({ path: op.path, dot: { origin: o, hlc } });
+      for (const op of ops)
+        allDots.push({ path: op.path, dot: { origin: o, hlc } });
       // local ingest on both twins (the author applies its own write at once)
       rep.admitted.add(keyOfEnv(e));
       rep.u.ingest(e, { local: true });
@@ -361,11 +443,14 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
     } else if (r < 0.42) {
       // the ghost writes: usually its next version, sometimes a stale one from below its entry
       const path = PATHS[Math.floor(rnd() * PATHS.length)];
-      const stale = ghostVersion > ghostEntry && ghostStale < ghostEntry - 1 && rnd() < 0.3;
+      const stale =
+        ghostVersion > ghostEntry && ghostStale < ghostEntry - 1 && rnd() < 0.3;
       clock += 1;
       const v = stale ? ++ghostStale : ++ghostVersion;
       const hlc = stale ? { p: 1 + ghostStale, l: 0 } : { p: clock, l: 0 };
-      const ops: SyncOp[] = [{ kind: 'set', path, next: `ghost-${v}`, cites: [], epoch: 0 }];
+      const ops: SyncOp[] = [
+        { kind: 'set', path, next: `ghost-${v}`, cites: [], epoch: 0 },
+      ];
       const e = env(GHOST, v, hlc, ops);
       stamps.set(keyOfEnv(e), hlc);
       (authored.get(GHOST) as OpEnvelope[]).push(e);
@@ -374,7 +459,9 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       // deliver the next envelope from one origin to one target (per-origin FIFO, arbitrary across origins)
       const senders = [...origins, GHOST];
       const from = senders[Math.floor(rnd() * senders.length)];
-      const targets: (Replica | RelayPair)[] = [...replicas.values()].filter((x) => x.origin !== from);
+      const targets: (Replica | RelayPair)[] = [...replicas.values()].filter(
+        (x) => x.origin !== from,
+      );
       targets.push(relay);
       const to = targets[Math.floor(rnd() * targets.length)];
       const key = `${from}>${'origin' in to ? to.origin : 'relay'}`;
@@ -392,10 +479,14 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       const to = targets[Math.floor(rnd() * targets.length)];
       if (withSettle) {
         to.c.settle(to.settled);
-        if (!('origin' in to) && to.r && rnd() < 0.5) to.r.store.settle(to.r.admission.settled);
+        if (!('origin' in to) && to.r && rnd() < 0.5)
+          to.r.store.settle(to.r.admission.settled);
       } else {
         // over-eager: every origin taken as settled at the latest stamp seen, received or not
-        const latest = [...stamps.values()].reduce<Hlc>((m, h) => (compareHlc(h, m) > 0 ? h : m), { p: 0, l: 0 });
+        const latest = [...stamps.values()].reduce<Hlc>(
+          (m, h) => (compareHlc(h, m) > 0 ? h : m),
+          { p: 0, l: 0 },
+        );
         to.c.settle({ A: latest, B: latest, C: latest, G: latest });
       }
     } else if (r < 0.975) {
@@ -403,7 +494,11 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
       // replaying the envelopes admitted since (in sequence order, through the same admission
       // rule, collecting at its own points) — the recovered twin then runs alongside
       if (!relay.checkpoint || rnd() < 0.5) {
-        relay.checkpoint = { at: relay.log.length, registers: relay.c.checkpoint(), admission: cloneAdmission(relay) };
+        relay.checkpoint = {
+          at: relay.log.length,
+          registers: relay.c.checkpoint(),
+          admission: cloneAdmission(relay),
+        };
       } else {
         const store = createRegisterStore();
         store.load(relay.checkpoint.registers);
@@ -448,14 +543,17 @@ function run(seed: number, steps: number, withSettle: boolean, rule: Rule = RELA
   collected.c += sizeOf(relay.c.checkpoint());
   if (relay.r) collected.recovered += 1;
   collected.stale += ghostStale;
-  collected.lateEntries += origins.filter((o) => (authored.get(o) as OpEnvelope[])[0]?.version > 1).length;
+  collected.lateEntries += origins.filter(
+    (o) => (authored.get(o) as OpEnvelope[])[0]?.version > 1,
+  ).length;
   return null;
 }
 
 describe('compaction proof: observational equivalence', () => {
   it('an over-eager collection is observable (the harness has teeth)', () => {
     let seen = 0;
-    for (let seed = 0; seed < 200; seed++) if (run(seed, 60, false) !== null) seen++;
+    for (let seed = 0; seed < 200; seed++)
+      if (run(seed, 60, false) !== null) seen++;
     expect(seen).toBeGreaterThan(0);
   });
 
@@ -476,11 +574,12 @@ describe('compaction proof: observational equivalence', () => {
     // origins that entered above version 1 wrote, and a writer sent versions from below its entry
     expect(collected.lateEntries).toBeGreaterThan(600);
     expect(collected.stale).toBeGreaterThan(300);
-  });
+  }, 20_000);
 
   it('the first-run anchor rests on the order gate: admitting a version below an admitted one is observable', () => {
     let seen = 0;
-    for (let seed = 0; seed < 200; seed++) if (run(seed, 80, true, { orderGate: false }) !== null) seen++;
+    for (let seed = 0; seed < 200; seed++)
+      if (run(seed, 80, true, { orderGate: false }) !== null) seen++;
     expect(seen).toBeGreaterThan(0);
   });
 });

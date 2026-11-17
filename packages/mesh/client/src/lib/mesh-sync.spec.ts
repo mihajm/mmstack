@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
@@ -356,7 +355,10 @@ describe('wire twins (protocol ↔ primitives)', () => {
         lastDot.set(key, { origin, hlc });
       }
       const settled = Object.fromEntries(
-        Object.entries(conv.appliedFrontier()).map(([o, h]) => [o, { p: Math.floor(h.p * (0.5 + r())), l: 0 }]),
+        Object.entries(conv.appliedFrontier()).map(([o, h]) => [
+          o,
+          { p: Math.floor(h.p * (0.5 + r())), l: 0 },
+        ]),
       );
       conv.settle(settled);
       twin.settle(settled);
@@ -851,7 +853,15 @@ describe('ingress validation (client ↔ relay twin)', () => {
       const version = pick([1, 0, -1, 2.5, 7]);
       const hlc = pick([{ p: 1, l: 0 }, { p: NaN, l: 0 }, { p: 2 } as any]);
       const kind = pick(['set', 'delete', 'clear', 'weird']);
-      const path = pick([['a'], ['a', 'b'], [], [`c${CTRL}`], [''], ['a', ''], 'nope' as any]);
+      const path = pick([
+        ['a'],
+        ['a', 'b'],
+        [],
+        [`c${CTRL}`],
+        [''],
+        ['a', ''],
+        'nope' as any,
+      ]);
       const epoch = pick([0, 1, -1, NaN]);
       const cites = pick([
         [],

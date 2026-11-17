@@ -4,7 +4,6 @@ import { provideMockTranslations } from './testing/provide-mock-translations';
 import { Translate } from './translate';
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: '[translate]',
 })
 class TestTranslateDirective extends Translate<any, any> {}

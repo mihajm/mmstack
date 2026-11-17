@@ -37,7 +37,10 @@ npm install @mmstack/telemetry-core
 ```ts
 // app.config.ts
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideTelemetry, telemetryInterceptor } from '@mmstack/telemetry-core';
+import {
+  provideTelemetry,
+  telemetryInterceptor,
+} from '@mmstack/telemetry-core';
 import { otelSink } from '@mmstack/telemetry-otel';
 
 export const appConfig: ApplicationConfig = {
@@ -65,7 +68,9 @@ export class CheckoutComponent {
       this.telemetry.event('checkout.started', { plan: 'pro' });
       // nests the HTTP span under `checkout`
       await firstValueFrom(
-        this.http.post('/api/orders', body, { context: withTelemetryParent(span) }),
+        this.http.post('/api/orders', body, {
+          context: withTelemetryParent(span),
+        }),
       );
     });
   }
@@ -97,7 +102,11 @@ provideTelemetry({
   sinks: [posthogSink({ posthog })],
   consent: {
     requirements: [
-      { id: 'analytics', category: 'analytics', purpose: 'Anonymous product analytics' },
+      {
+        id: 'analytics',
+        category: 'analytics',
+        purpose: 'Anonymous product analytics',
+      },
     ],
     store: localStorageConsentStore(), // async stores (server-side) work too
   },
@@ -106,7 +115,7 @@ provideTelemetry({
 telemetry.event('checkout', { plan: 'pro' }, { category: 'analytics' });
 
 // in your consent prompt component
-telemetry.pending();          // requirements still needing an answer
+telemetry.pending(); // requirements still needing an answer
 telemetry.decide('analytics', true);
 ```
 

@@ -9,6 +9,7 @@ for the full enforcement record + test paths), and conflict-precedence-and-agent
 (epoch) / §5 (P2P trust-full).
 
 **As built (deltas vs the sketch below):**
+
 - Option 1: `OpPolicy.canBump(ctx, path, epoch)`; observed max = `RegisterStore.maxEpoch(path)` over
   ALL retained siblings (not just live — a superseded bump must not lower the floor mid-window);
   carry (`epoch <= observed`) always admitted, authority consulted only for raises. Reason string

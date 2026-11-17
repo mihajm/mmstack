@@ -1,6 +1,9 @@
 import { TestBed } from '@angular/core/testing';
 import { provideValidatorConfig } from '@mmstack/form-validation';
-import { createMultiSelectState, injectCreateMultiSelectState } from './multi-select';
+import {
+  createMultiSelectState,
+  injectCreateMultiSelectState,
+} from './multi-select';
 
 describe('MultiSelect Adapter', () => {
   describe('createMultiSelectState (standalone)', () => {
@@ -22,7 +25,10 @@ describe('MultiSelect Adapter', () => {
     });
 
     it('should identify and display objects', () => {
-      const items = [{ id: 1, name: 'One' }, { id: 2, name: 'Two' }];
+      const items = [
+        { id: 1, name: 'One' },
+        { id: 2, name: 'Two' },
+      ];
       const state = createMultiSelectState([items[0]], {
         options: () => items,
         identify: () => (i) => i.id.toString(),
@@ -34,14 +40,14 @@ describe('MultiSelect Adapter', () => {
     });
 
     it('should detect individual option being selected via valueIds', () => {
-        const state = createMultiSelectState(['a'], {
-            options: () => ['a', 'b']
-        });
-        expect(state.options()[0].value).toBe('a');
-        // Currently selected 'a', so it's not disabled if we were to toggle it?
-        // Actually MultiSelectState.options() disabled signal:
-        // if (valueIds().has(o.id)) return false;
-        expect(state.options()[0].disabled()).toBe(false);
+      const state = createMultiSelectState(['a'], {
+        options: () => ['a', 'b'],
+      });
+      expect(state.options()[0].value).toBe('a');
+      // Currently selected 'a', so it's not disabled if we were to toggle it?
+      // Actually MultiSelectState.options() disabled signal:
+      // if (valueIds().has(o.id)) return false;
+      expect(state.options()[0].disabled()).toBe(false);
     });
   });
 
@@ -63,7 +69,7 @@ describe('MultiSelect Adapter', () => {
 
         expect(state.error()).toBe('Min 1 items');
         expect(state.required()).toBe(true);
-        
+
         state.value.set(['a']);
         expect(state.error()).toBe('');
 

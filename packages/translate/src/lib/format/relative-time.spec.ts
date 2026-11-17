@@ -21,8 +21,12 @@ describe('formatRelativeTime', () => {
 
   it('should support numeric options', () => {
     TestBed.runInInjectionContext(() => {
-      expect(formatRelativeTime(-1, 'day', { numeric: 'auto' })).toBe('yesterday');
-      expect(formatRelativeTime(-1, 'day', { numeric: 'always' })).toBe('1 day ago');
+      expect(formatRelativeTime(-1, 'day', { numeric: 'auto' })).toBe(
+        'yesterday',
+      );
+      expect(formatRelativeTime(-1, 'day', { numeric: 'always' })).toBe(
+        '1 day ago',
+      );
     });
   });
 
@@ -30,7 +34,7 @@ describe('formatRelativeTime', () => {
     const val = signal(1);
     const unit = signal<Intl.RelativeTimeFormatUnit>('week');
     const opt = signal({ numeric: 'auto' as const });
-    
+
     TestBed.runInInjectionContext(() => {
       expect(formatRelativeTime(val, unit, opt)).toBe('next week');
     });
@@ -46,7 +50,9 @@ describe('formatRelativeTime', () => {
 
   it('should respect the given locale', () => {
     TestBed.runInInjectionContext(() => {
-      expect(formatRelativeTime(-1, 'day', { locale: 'de-DE', numeric: 'auto' })).toBe('gestern');
+      expect(
+        formatRelativeTime(-1, 'day', { locale: 'de-DE', numeric: 'auto' }),
+      ).toBe('gestern');
     });
   });
 

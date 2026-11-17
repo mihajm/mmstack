@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, vi } from 'vitest';
-import { MESH_PROTO_VERSION, type ClientMsg, type ServerMsg } from '@mmstack/mesh-protocol';
+import {
+  MESH_PROTO_VERSION,
+  type ClientMsg,
+  type ServerMsg,
+} from '@mmstack/mesh-protocol';
 import type { MeshTransportFactory } from '../transport';
 import { chaosLink } from './chaos';
 import { prng } from './prng';
@@ -33,7 +37,16 @@ function mockInner() {
 const env = (v: number): ClientMsg => ({
   t: 'env',
   room: 'r',
-  env: { proto: MESH_PROTO_VERSION, instance: '', origin: 'o', writer: 'w', version: v, hlc: { p: 0, l: v }, policyVersion: 0, ops: [] },
+  env: {
+    proto: MESH_PROTO_VERSION,
+    instance: '',
+    origin: 'o',
+    writer: 'w',
+    version: v,
+    hlc: { p: 0, l: v },
+    policyVersion: 0,
+    ops: [],
+  },
 });
 
 describe('chaosLink — the fault injector must actually inject faults', () => {
@@ -42,7 +55,10 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
 
   it('delays outbound delivery by the configured latency', () => {
     const inner = mockInner();
-    const link = chaosLink(inner.factory, prng(1), { minLatencyMs: 50, maxLatencyMs: 50 });
+    const link = chaosLink(inner.factory, prng(1), {
+      minLatencyMs: 50,
+      maxLatencyMs: 50,
+    });
     const t = link.transport();
 
     t.send(env(1));
@@ -55,7 +71,10 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
 
   it('delays inbound delivery too', () => {
     const inner = mockInner();
-    const link = chaosLink(inner.factory, prng(1), { minLatencyMs: 30, maxLatencyMs: 30 });
+    const link = chaosLink(inner.factory, prng(1), {
+      minLatencyMs: 30,
+      maxLatencyMs: 30,
+    });
     const t = link.transport();
     const received: ServerMsg[] = [];
     t.onMessage((m) => received.push(m));
@@ -69,17 +88,24 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
   it('reorders under latency variance, and is deterministic per seed', () => {
     const run = (seed: number): number[] => {
       const inner = mockInner();
-      const link = chaosLink(inner.factory, prng(seed), { minLatencyMs: 1, maxLatencyMs: 100 });
+      const link = chaosLink(inner.factory, prng(seed), {
+        minLatencyMs: 1,
+        maxLatencyMs: 100,
+      });
       const t = link.transport();
       for (let v = 1; v <= 12; v++) t.send(env(v));
       vi.advanceTimersByTime(200);
-      return inner.sent.map((m) => (m as { env: { version: number } }).env.version);
+      return inner.sent.map(
+        (m) => (m as { env: { version: number } }).env.version,
+      );
     };
     const a = run(7);
     const b = run(7);
     expect(a).toEqual(b); // deterministic
     expect(a).toHaveLength(12); // nothing lost
-    expect([...a].sort((x, y) => x - y)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); // permutation
+    expect([...a].sort((x, y) => x - y)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]); // permutation
     expect(a).not.toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); // actually reordered
   });
 
@@ -104,7 +130,10 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
 
   it('partition cuts both directions and closes the live socket', () => {
     const inner = mockInner();
-    const link = chaosLink(inner.factory, prng(1), { minLatencyMs: 5, maxLatencyMs: 5 });
+    const link = chaosLink(inner.factory, prng(1), {
+      minLatencyMs: 5,
+      maxLatencyMs: 5,
+    });
     const t = link.transport();
     const received: ServerMsg[] = [];
     let closed = false;
@@ -124,7 +153,10 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
 
   it('silence drops both directions WITHOUT closing the socket (the zombie fault)', () => {
     const inner = mockInner();
-    const link = chaosLink(inner.factory, prng(1), { minLatencyMs: 5, maxLatencyMs: 5 });
+    const link = chaosLink(inner.factory, prng(1), {
+      minLatencyMs: 5,
+      maxLatencyMs: 5,
+    });
     const t = link.transport();
     const received: ServerMsg[] = [];
     let closed = false;
@@ -149,7 +181,10 @@ describe('chaosLink — the fault injector must actually inject faults', () => {
 
   it('a reconnect attempt during a partition fails; after heal it establishes', () => {
     const inner = mockInner();
-    const link = chaosLink(inner.factory, prng(1), { minLatencyMs: 5, maxLatencyMs: 5 });
+    const link = chaosLink(inner.factory, prng(1), {
+      minLatencyMs: 5,
+      maxLatencyMs: 5,
+    });
     link.partition();
 
     const cut = link.transport(); // reconnect attempt while cut

@@ -14,11 +14,14 @@ describe('mousePosition', () => {
   it('should track mouse movements with throttling', () => {
     TestBed.runInInjectionContext(() => {
       const pos = mousePosition({ throttle: 100 });
-      
+
       expect(pos()).toEqual({ x: 0, y: 0 });
 
       // Simulate mousemove on window
-      const mockEvent = new MouseEvent('mousemove', { clientX: 100, clientY: 200 });
+      const mockEvent = new MouseEvent('mousemove', {
+        clientX: 100,
+        clientY: 200,
+      });
       window.dispatchEvent(mockEvent);
 
       expect(pos.unthrottled()).toEqual({ x: 100, y: 200 });
@@ -33,14 +36,18 @@ describe('mousePosition', () => {
   it('should handle custom element target and page coordinate space', () => {
     TestBed.runInInjectionContext(() => {
       const el = document.createElement('div');
-      const pos = mousePosition({ target: el, coordinateSpace: 'page', throttle: 0 });
-      
+      const pos = mousePosition({
+        target: el,
+        coordinateSpace: 'page',
+        throttle: 0,
+      });
+
       expect(pos()).toEqual({ x: 0, y: 0 });
 
       const mockEvent = new MouseEvent('mousemove');
       Object.defineProperty(mockEvent, 'pageX', { value: 300 });
       Object.defineProperty(mockEvent, 'pageY', { value: 400 });
-      
+
       el.dispatchEvent(mockEvent);
 
       vi.advanceTimersByTime(0);

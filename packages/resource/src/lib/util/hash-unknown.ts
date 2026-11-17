@@ -7,7 +7,8 @@ function isHashableObject(value: unknown): value is UnknownObject {
   if (value instanceof Map) return false;
   if (value instanceof Set) return false;
   if (typeof Blob !== 'undefined' && value instanceof Blob) return false;
-  if (typeof FormData !== 'undefined' && value instanceof FormData) return false;
+  if (typeof FormData !== 'undefined' && value instanceof FormData)
+    return false;
   if (
     typeof URLSearchParams !== 'undefined' &&
     value instanceof URLSearchParams

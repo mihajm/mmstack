@@ -345,7 +345,11 @@ export type VersionRange = readonly [from: number, to: number];
 
 /** Why a generation began. `genesis` is a room's first generation; every other reason is a cut. */
 export type GenerationReason =
-  'genesis' | 'migration' | 'compaction' | 'rollback' | 'consensus';
+  | 'genesis'
+  | 'migration'
+  | 'compaction'
+  | 'rollback'
+  | 'consensus';
 
 /**
  * What the new generation does with a tail written in the previous one: `discard` (migration,

@@ -119,7 +119,10 @@ class FakePort implements WorkerPortLike {
   }
 }
 
-function portPair(bus: Bus, clone: boolean): { host: FakePort; client: FakePort } {
+function portPair(
+  bus: Bus,
+  clone: boolean,
+): { host: FakePort; client: FakePort } {
   const host = new FakePort(bus, clone, 'host');
   const client = new FakePort(bus, clone, 'client');
   host.peer = client;
@@ -222,7 +225,11 @@ export function createTestMesh(
       hello: () =>
         clientSide.postMessage({ type: 'hello', proto: 1, clientId: id }),
       subscribe: (store) =>
-        clientSide.postMessage({ type: 'store:subscribe', store, clientId: id }),
+        clientSide.postMessage({
+          type: 'store:subscribe',
+          store,
+          clientId: id,
+        }),
     };
     return client;
   };
@@ -245,7 +252,10 @@ export function createTestMesh(
       return;
     }
     bus.fault = (d) => {
-      const ctx: FaultContext = { to: d.to.role, data: d.data as WorkerEnvelope };
+      const ctx: FaultContext = {
+        to: d.to.role,
+        data: d.data as WorkerEnvelope,
+      };
       if (fault.drop?.(ctx)) return null;
       if (fault.duplicate?.(ctx)) return [d, d];
       return [d];

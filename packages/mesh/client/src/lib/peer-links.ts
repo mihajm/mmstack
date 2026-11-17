@@ -96,6 +96,7 @@ export function rtcPeerConnector(
   return ({
     polite,
     sendSignal,
+    // oxlint-disable-next-line typescript/no-useless-default-assignment -- guards untyped callers of a public connector
     channels = defaultPeerChannels,
     iceServers,
   }) => {

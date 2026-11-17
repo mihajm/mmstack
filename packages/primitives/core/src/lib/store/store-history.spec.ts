@@ -244,7 +244,11 @@ describe('storeHistory — coalescing (typing runs undo as a unit)', () => {
       store<Record<string, unknown>>({ x: 1 }),
     );
     const h2 = TestBed.runInInjectionContext(() =>
-      storeHistory(s2, { origin: 'local', coalesce: { ms: 1000 }, now: () => 0 }),
+      storeHistory(s2, {
+        origin: 'local',
+        coalesce: { ms: 1000 },
+        now: () => 0,
+      }),
     );
     s2.update((v) => ({ ...v, x: 2 }));
     flush();

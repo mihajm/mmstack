@@ -27,7 +27,9 @@ export type GridPlacement = {
 
 /** Do two cell rects overlap? Pure geometry — identity is the caller's concern. */
 export function gridCollides(a: GridPlacement, b: GridPlacement): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  return (
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  );
 }
 
 function collidesAny(
@@ -39,7 +41,10 @@ function collidesAny(
 }
 
 /** Deepest bottom edge among placed rects overlapping `rect`'s columns and above-or-at it. */
-function pushedY(rect: GridPlacement, placed: readonly GridPlacement[]): number {
+function pushedY(
+  rect: GridPlacement,
+  placed: readonly GridPlacement[],
+): number {
   let y = rect.y;
   let moved = true;
   while (moved) {
@@ -149,9 +154,7 @@ export function moveGridItem<T extends GridPlacement, K>(
   const ny = Math.max(0, y);
   if (nx === target.x && ny === target.y) return items as T[];
 
-  const moved = items.map((i) =>
-    key(i) === k ? { ...i, x: nx, y: ny } : i,
-  );
+  const moved = items.map((i) => (key(i) === k ? { ...i, x: nx, y: ny } : i));
   return compactGrid(resolveDown(moved, key, k), key, k);
 }
 
@@ -191,9 +194,7 @@ export function resizeGridItem<T extends GridPlacement, K>(
   const nh = Math.max(1, h);
   if (nw === target.w && nh === target.h) return items as T[];
 
-  const resized = items.map((i) =>
-    key(i) === k ? { ...i, w: nw, h: nh } : i,
-  );
+  const resized = items.map((i) => (key(i) === k ? { ...i, w: nw, h: nh } : i));
   return compactGrid(resolveDown(resized, key, k), key, k);
 }
 

@@ -279,7 +279,10 @@ describe('DndSession', () => {
     const targetRuns = trackRuns(() => session.targets());
     TestBed.tick();
     monitorConfig?.onDragStart?.(
-      makeEvent({ sourceEl, targets: [{ element: target, data: { edge: 'top' } }] }),
+      makeEvent({
+        sourceEl,
+        targets: [{ element: target, data: { edge: 'top' } }],
+      }),
     );
     TestBed.tick();
     const elAfterStart = elRuns();
@@ -383,7 +386,9 @@ describe('DndSession', () => {
     const session = TestBed.inject(DndSession);
     session.ensureNativeMonitor();
     const sourceEl = document.createElement('div');
-    expect(() => monitorConfig?.onDrop?.(makeEvent({ sourceEl }))).not.toThrow();
+    expect(() =>
+      monitorConfig?.onDrop?.(makeEvent({ sourceEl })),
+    ).not.toThrow();
     expect(session.active()).toBe(false);
   });
 
@@ -422,7 +427,10 @@ describe('DndSession', () => {
     const outside = document.createElement('div');
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
-      providers: [{ provide: ElementRef, useValue: new ElementRef(root) }, DndSession],
+      providers: [
+        { provide: ElementRef, useValue: new ElementRef(root) },
+        DndSession,
+      ],
     });
     const session = TestBed.inject(DndSession);
     session.ensureNativeMonitor();

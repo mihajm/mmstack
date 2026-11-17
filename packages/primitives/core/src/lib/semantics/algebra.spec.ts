@@ -47,7 +47,6 @@ describe('algebra', () => {
     });
 
     it('propagates through equality including strict and self-comparison', () => {
-      // eslint-disable-next-line eqeqeq
       const looseEq = (l: unknown, r: unknown) => l == r;
       expect(strictBinary(pending, null, looseEq)).toBe(pending);
       expect(strictBinary(pending, pending, (l, r) => l === r)).toBe(pending);

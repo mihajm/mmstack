@@ -56,7 +56,9 @@ function setup<T>(initial: ResourceSnapshot<T>) {
     ...snapshotBackedResource(snapshot),
     reload: () => true,
   } as unknown as ResourceRef<T>;
-  const held = TestBed.runInInjectionContext(() => holdThroughNavigation(source));
+  const held = TestBed.runInInjectionContext(() =>
+    holdThroughNavigation(source),
+  );
   return { events, snapshot, held };
 }
 
@@ -111,9 +113,7 @@ describe('holdThroughNavigation', () => {
     events.next(new NavigationStart(1, '/x'));
     snapshot.set(resolved('b'));
     expect(held.value()).toBe('a');
-    events.next(
-      new NavigationSkipped(1, '/x', undefined as never),
-    );
+    events.next(new NavigationSkipped(1, '/x', undefined as never));
     expect(held.value()).toBe('b');
   });
 
@@ -135,7 +135,12 @@ describe('holdThroughNavigation', () => {
     events.next(new NavigationStart(1, '/y'));
     snapshot.set(loading('partial'));
     events.next(
-      new NavigationCancel(1, '/y', '', NavigationCancellationCode.GuardRejected),
+      new NavigationCancel(
+        1,
+        '/y',
+        '',
+        NavigationCancellationCode.GuardRejected,
+      ),
     );
     expect(held.value()).toBe('a');
     snapshot.set(resolved('a'));

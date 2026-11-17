@@ -59,11 +59,18 @@ export type CounterState = { value: number; history: number[] };
 export type Stats = { count: number; sum: number; max: number };
 
 // stores in a worker share ONE context (the worker's equivalent of providedIn: 'root')
-const counter = store<CounterState>({ value: 0, history: [] }, workerStoreContext());
+const counter = store<CounterState>(
+  { value: 0, history: [] },
+  workerStoreContext(),
+);
 
 const stats = computed<Stats>(() => {
   const h = counter().history;
-  return { count: h.length, sum: h.reduce((a, b) => a + b, 0), max: h.length ? Math.max(...h) : 0 };
+  return {
+    count: h.length,
+    sum: h.reduce((a, b) => a + b, 0),
+    max: h.length ? Math.max(...h) : 0,
+  };
 });
 
 const fib = (n: number): number => {
@@ -110,7 +117,8 @@ import type { AppWorker } from './demo.worker';
 export class WorkerDemo {
   // typed against the worker's contract: keys, value types, and write-ability are inferred
   private readonly worker = connectWorker<AppWorker>(
-    () => new Worker(new URL('./demo.worker', import.meta.url), { type: 'module' }),
+    () =>
+      new Worker(new URL('./demo.worker', import.meta.url), { type: 'module' }),
   );
 
   readonly connected = this.worker.connected;
@@ -133,11 +141,11 @@ export class WorkerDemo {
 
 The package ships three entry points so worker code never pulls in main-thread code and the wire types can never drift between the two sides.
 
-| Import | Where it runs | Contains |
-| --- | --- | --- |
-| `@mmstack/worker` | main thread | `connectWorker`, `workerStore`, `workerResource` |
-| `@mmstack/worker/host` | worker entry file | `createWorkerHost`, `workerStoreContext` |
-| `@mmstack/worker/protocol` | both (types) | `WorkerPortLike`, `transfer`, wire types, schema helpers |
+| Import                     | Where it runs     | Contains                                                 |
+| -------------------------- | ----------------- | -------------------------------------------------------- |
+| `@mmstack/worker`          | main thread       | `connectWorker`, `workerStore`, `workerResource`         |
+| `@mmstack/worker/host`     | worker entry file | `createWorkerHost`, `workerStoreContext`                 |
+| `@mmstack/worker/protocol` | both (types)      | `WorkerPortLike`, `transfer`, wire types, schema helpers |
 
 ## The worker side: `createWorkerHost`
 
@@ -146,8 +154,8 @@ The package ships three entry points so worker code never pulls in main-thread c
 ```ts
 const host = createWorkerHost({
   stores: { todos, filter }, // writable stores the worker owns
-  published: { visible },    // derived signals mirrored read-only
-  tasks: { search, index },  // callable functions
+  published: { visible }, // derived signals mirrored read-only
+  tasks: { search, index }, // callable functions
 });
 export type AppWorker = typeof host;
 ```
@@ -160,7 +168,8 @@ export type AppWorker = typeof host;
 
 ```ts
 const worker = connectWorker<AppWorker>(
-  () => new Worker(new URL('./demo.worker', import.meta.url), { type: 'module' }),
+  () =>
+    new Worker(new URL('./demo.worker', import.meta.url), { type: 'module' }),
 );
 
 worker.connected(); // Signal<boolean>, true after the handshake (and after any auto-restart)
@@ -214,7 +223,11 @@ fib.abort(); //     cancel the in-flight run; the value is kept, status becomes 
 Because it satisfies the same shape as a `@mmstack/resource` query, it composes with `latest()` / `use()` and registers into transition scopes:
 
 ```ts
-const fib = workerResource(() => n(), { worker, task: 'fib', register: 'indicator' });
+const fib = workerResource(() => n(), {
+  worker,
+  task: 'fib',
+  register: 'indicator',
+});
 // a boundary above now shows aria-busy while fib runs, holding the previous value
 ```
 
@@ -314,7 +327,10 @@ For large binary payloads, `transfer` moves an `ArrayBuffer` into the worker ins
 import { transfer } from '@mmstack/worker';
 
 const buffer = new Float64Array(1_000_000).buffer;
-workerResource(() => transfer({ buffer }, [buffer]), { worker, task: 'process' });
+workerResource(() => transfer({ buffer }, [buffer]), {
+  worker,
+  task: 'process',
+});
 ```
 
 ## Resilience
@@ -337,12 +353,12 @@ A worker does not make work finish sooner. It makes it finish somewhere other th
 
 `benchmarks/data-grid.mjs` runs a grid workload (filter, then a three-column sort, then a group aggregate) over a range of row counts and reports how long the main thread is blocked three ways: inline, on a worker that receives the rows on every call, and on a worker that owns the rows and answers with just the result. Run it with `node packages/worker/benchmarks/data-grid.mjs`. On one machine, main-thread blocking in milliseconds:
 
-| rows | inline | worker, ship rows each call | worker owns rows |
-| --- | --- | --- | --- |
-| 10,000 | 0.7 | 1.9 | 0.01 |
-| 100,000 | 11.7 | 19.9 | 0.02 |
-| 250,000 | 36.3 | 53.2 | 0.02 |
-| 500,000 | 81.9 | 109 | 0.02 |
+| rows    | inline | worker, ship rows each call | worker owns rows |
+| ------- | ------ | --------------------------- | ---------------- |
+| 10,000  | 0.7    | 1.9                         | 0.01             |
+| 100,000 | 11.7   | 19.9                        | 0.02             |
+| 250,000 | 36.3   | 53.2                        | 0.02             |
+| 500,000 | 81.9   | 109                         | 0.02             |
 
 Two things fall out of this. First, moving work to a worker is not automatically a win: shipping the whole grid across on every call blocks the main thread more than the inline compute did, because serializing the rows costs more than the work. Second, the win is real once the worker owns the data and only deltas cross, which is exactly what `workerStore` does over the op-log. There the main-thread cost is flat and near zero no matter how large the grid grows, because the rows are hydrated once and never re-sent.
 

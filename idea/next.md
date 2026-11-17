@@ -36,6 +36,7 @@ migration determinism, and everything below.
 ## After the demo — near-term features (demand-driven, none block anything)
 
 In rough priority (the first two are what Better/CMMN forces first):
+
 1. **Relay authority admission gate** — enforce "who may override" server-side. Designed, not built:
    `relay-epoch-admission.md`. The teeth behind admin-override / agent-authority.
 2. **Migration determinism** — rolling schema upgrades across mixed-version rooms. `evolution.md`;

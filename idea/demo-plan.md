@@ -59,13 +59,14 @@ the star. Doubles as the spine of the mgmt/dev talk. No new library work needed:
 ## The AI beat (the differentiator — build on mesh.fork)
 
 An agent proposes on a branch, a human approves, and the room never loses a concurrent human edit:
+
 - Agent runs against `mesh.fork()` (off the room). Its staged `ops()` render as a reviewable diff.
 - A human edits the room meanwhile.
 - Human clicks approve → `commit()`. The agent's edit lands as a concurrent write; the human's
   mid-review edit survives (the fold decides, not the approval). `rebase()` shows "apply on top of
   latest" instead.
-This is "an agent is a user, confined to a branch you review" made visible. Small build on top of the
-showcase page; `/mesh-agent` (relay ACL) is the complementary "trusted agent writes directly" variant.
+  This is "an agent is a user, confined to a branch you review" made visible. Small build on top of the
+  showcase page; `/mesh-agent` (relay ACL) is the complementary "trusted agent writes directly" variant.
 
 ## Phasing (each phase shippable)
 
@@ -100,6 +101,7 @@ syncs"; close on the AI branch.
 ## RESOLVED 2026-07-09 (sign-off + AI-beat design session) — build started
 
 Decisions:
+
 - **Hosting: ONE VPS, one container** ($5-20/mo fine, "tens not hundreds"). Relay, agent seat, and
   static client all served by a single Node process behind Caddy (TLS -> wss). Same-origin kills the
   client-config chicken-and-egg: the client fetches `/config` from the host that served it. No
@@ -120,6 +122,7 @@ Decisions:
 - **Scope**: phases 1-2 are the first cut; phase 3 (AI) lands before the management showing.
 
 AI beat design (supersedes the sketch above):
+
 - **Agent = a headless Node peer**, not a browser widget (the API key can't ship in a CSR bundle —
   the constraint that makes "an agent is a user" literal). Lives in the demo-server process,
   connects via webSocketTransport like any client. The demo seat gets full-store write (the

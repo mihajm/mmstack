@@ -16,12 +16,8 @@ import { mergeArray } from './util';
 
 export type FormArraySignal<
   T,
-  TIndividualState extends FormControlSignal<
-    T,
-    any,
-    any,
-    any
-  > = FormControlSignal<T, any, any, any>,
+  TIndividualState extends FormControlSignal<T, any, any, any> =
+    FormControlSignal<T, any, any, any>,
   TParent = undefined,
 > = FormControlSignal<
   T[],
@@ -94,12 +90,8 @@ function createReconcileChildren<
 
 export function formArray<
   T,
-  TIndividualState extends FormControlSignal<
-    T,
-    any,
-    any,
-    any
-  > = FormControlSignal<T, any, any, any>,
+  TIndividualState extends FormControlSignal<T, any, any, any> =
+    FormControlSignal<T, any, any, any>,
   TParent = undefined,
 >(
   initial: T[] | DerivedSignal<TParent, T[]>,

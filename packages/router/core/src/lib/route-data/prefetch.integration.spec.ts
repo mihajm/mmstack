@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {
@@ -28,12 +27,18 @@ const ITEM = routeDataKey<ReturnType<typeof httpResource<string>>>('item');
 @Component({ selector: 'route-home', template: `home` })
 class HomeCmp {}
 
-@Component({ selector: 'route-user', template: `user:{{ data.value() ?? '...' }}` })
+@Component({
+  selector: 'route-user',
+  template: `user:{{ data.value() ?? '...' }}`,
+})
 class UserCmp {
   readonly data = injectRouteData(USER);
 }
 
-@Component({ selector: 'route-item', template: `item:{{ data.value() ?? '...' }}` })
+@Component({
+  selector: 'route-item',
+  template: `item:{{ data.value() ?? '...' }}`,
+})
 class ItemCmp {
   readonly data = injectRouteData(ITEM);
 }
@@ -54,7 +59,9 @@ function routes() {
       providers: [provideRouteData(USER)],
       resolve: {
         user: createRouteData(USER, (ctx) => {
-          const res = httpResource<string>(() => `/api/users/${ctx.params()['id']}`);
+          const res = httpResource<string>(
+            () => `/api/users/${ctx.params()['id']}`,
+          );
           registerResource(res, { suspends: true });
           return res;
         }),
@@ -110,7 +117,9 @@ const flush = async (fixture: { detectChanges: () => void }) => {
 };
 
 describe('prefetch integration (withRouteData + httpResource)', () => {
-  afterEach(() => TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true }));
+  afterEach(() =>
+    TestBed.inject(HttpTestingController).verify({ ignoreCancelled: true }),
+  );
 
   it('warms an eager route’s data on the preload signal', async () => {
     const { fixture, router, http, preload } = await setup();

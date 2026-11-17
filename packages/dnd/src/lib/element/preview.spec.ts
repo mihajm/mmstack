@@ -166,12 +166,19 @@ describe('preview — config variants, cleanup & offset', () => {
   it('resolves offset: fixed {x,y}, pointer-outside (fn), and none', () => {
     const { envInjector, appRef } = env();
     const reg = (offset?: 'pointer-outside' | { x: number; y: number }) =>
-      registerCustomPreview({ render: () => undefined, offset }, envInjector, appRef, {
-        nativeSetDragImage: vi.fn(),
-      });
+      registerCustomPreview(
+        { render: () => undefined, offset },
+        envInjector,
+        appRef,
+        {
+          nativeSetDragImage: vi.fn(),
+        },
+      );
 
     reg({ x: 4, y: 6 });
-    expect(lastConfig?.getOffset?.({ container: document.createElement('div') })).toEqual({
+    expect(
+      lastConfig?.getOffset?.({ container: document.createElement('div') }),
+    ).toEqual({
       x: 4,
       y: 6,
     });

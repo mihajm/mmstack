@@ -1,17 +1,29 @@
 import { TestBed } from '@angular/core/testing';
-import { provideTelemetry, TELEMETRY, TelemetryHandles } from '@mmstack/telemetry-core';
-import { POSTHOG_REPLAY_URL, posthogSink, type PostHogClient } from './posthog-sink';
+import {
+  provideTelemetry,
+  TELEMETRY,
+  TelemetryHandles,
+} from '@mmstack/telemetry-core';
+import {
+  POSTHOG_REPLAY_URL,
+  posthogSink,
+  type PostHogClient,
+} from './posthog-sink';
 
 describe('@mmstack/telemetry-posthog', () => {
   function captureSpy() {
     const captured: { event: string; props?: Record<string, unknown> }[] = [];
-    const posthog: PostHogClient = { capture: (event, props) => captured.push({ event, props }) };
+    const posthog: PostHogClient = {
+      capture: (event, props) => captured.push({ event, props }),
+    };
     return { captured, posthog };
   }
 
   it('forwards events to the PostHog client', () => {
     const { captured, posthog } = captureSpy();
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })] });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
 
     TestBed.inject(TELEMETRY).event('checkout', { plan: 'pro' });
     expect(captured).toEqual([{ event: 'checkout', props: { plan: 'pro' } }]);
@@ -19,7 +31,9 @@ describe('@mmstack/telemetry-posthog', () => {
 
   it('correlates events emitted inside a span with the exact span ids', () => {
     const { captured, posthog } = captureSpy();
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })] });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
 
     const t = TestBed.inject(TELEMETRY);
     let ctx: { traceId: string; spanId: string } | undefined;
@@ -34,12 +48,21 @@ describe('@mmstack/telemetry-posthog', () => {
   });
 
   it('namespaces the replay handle by sink name so two instances coexist', () => {
-    const posthogA: PostHogClient = { capture: () => undefined, get_session_replay_url: () => 'https://a/replay' };
-    const posthogB: PostHogClient = { capture: () => undefined, get_session_replay_url: () => 'https://b/replay' };
+    const posthogA: PostHogClient = {
+      capture: () => undefined,
+      get_session_replay_url: () => 'https://a/replay',
+    };
+    const posthogB: PostHogClient = {
+      capture: () => undefined,
+      get_session_replay_url: () => 'https://b/replay',
+    };
     TestBed.configureTestingModule({
       providers: [
         provideTelemetry({
-          sinks: [posthogSink({ posthog: posthogA }), posthogSink({ posthog: posthogB, name: 'ph-b' })],
+          sinks: [
+            posthogSink({ posthog: posthogA }),
+            posthogSink({ posthog: posthogB, name: 'ph-b' }),
+          ],
         }),
       ],
     });
@@ -52,11 +75,17 @@ describe('@mmstack/telemetry-posthog', () => {
 
   it('publishes a posthog.replay_url handle, refreshed on capture', () => {
     const session = { url: undefined as string | undefined }; // mutated when recording "starts"
-    const posthog: PostHogClient = { capture: () => undefined, get_session_replay_url: () => session.url };
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })] });
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      get_session_replay_url: () => session.url,
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
 
     TestBed.inject(TELEMETRY); // triggers sink init → publishes the handle
-    const handle = TestBed.inject(TelemetryHandles).get<string>(POSTHOG_REPLAY_URL);
+    const handle =
+      TestBed.inject(TelemetryHandles).get<string>(POSTHOG_REPLAY_URL);
     expect(handle()).toBeUndefined(); // recording not started yet
 
     session.url = 'https://app.posthog.com/replay/abc';
@@ -66,7 +95,9 @@ describe('@mmstack/telemetry-posthog', () => {
 
   it('does not publish a replay handle when the client lacks get_session_replay_url', () => {
     const posthog: PostHogClient = { capture: () => undefined };
-    TestBed.configureTestingModule({ providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })] });
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
 
     TestBed.inject(TELEMETRY);
     const handles = TestBed.inject(TelemetryHandles);
@@ -105,7 +136,8 @@ describe('@mmstack/telemetry-posthog', () => {
     const calls: string[] = [];
     const posthog: PostHogClient = {
       capture: () => undefined,
-      identify: (id, props) => calls.push(`identify:${id}:${JSON.stringify(props)}`),
+      identify: (id, props) =>
+        calls.push(`identify:${id}:${JSON.stringify(props)}`),
       reset: () => calls.push('reset'),
     };
     TestBed.configureTestingModule({

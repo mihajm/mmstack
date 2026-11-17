@@ -34,7 +34,8 @@ const applyCall: ApplyFn = (target, args) =>
 function expectedJoin(operands: readonly unknown[]): Absorbing | undefined {
   const firstOfKind = (kind: string) =>
     operands.find((o) => isAbsorbing(o) && o.kind === kind) as
-      Absorbing | undefined;
+      | Absorbing
+      | undefined;
   return firstOfKind('loading') ?? firstOfKind('error');
 }
 

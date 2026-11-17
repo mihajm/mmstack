@@ -3,11 +3,7 @@
   "defaultBase": "master",
   "namedInputs": {
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
-    "production": [
-      "default",
-      "!{projectRoot}/.eslintrc.json",
-      "!{projectRoot}/eslint.config.mjs"
-    ],
+    "production": ["default", "!{projectRoot}/oxlint.config.mts"],
     "sharedGlobals": []
   },
   "nxCloudId": "67e0fa0bd158442904e10d69",
@@ -16,15 +12,6 @@
       "cache": true,
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
-    },
-    "@nx/eslint:lint": {
-      "cache": true,
-      "inputs": [
-        "default",
-        "{workspaceRoot}/.eslintrc.json",
-        "{workspaceRoot}/.eslintignore",
-        "{workspaceRoot}/eslint.config.mjs"
-      ]
     },
     "@angular/build:unit-test": {
       "cache": true,
@@ -44,17 +31,28 @@
       "cache": true,
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
+    },
+    "@nx/oxlint:lint": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/oxlint.config.mts",
+        "{workspaceRoot}/tsconfig.base.json",
+        {
+          "externalDependencies": ["oxlint", "oxlint-tsgolint", "@nx/oxlint"]
+        }
+      ]
     }
   },
   "generators": {
     "@nx/angular:application": {
       "e2eTestRunner": "none",
-      "linter": "eslint",
+      "linter": "none",
       "style": "scss",
       "unitTestRunner": "vitest-angular"
     },
     "@nx/angular:library": {
-      "linter": "eslint",
+      "linter": "none",
       "unitTestRunner": "vitest-angular"
     },
     "@nx/angular:component": {
@@ -63,7 +61,7 @@
   },
   "plugins": [
     {
-      "plugin": "@nx/eslint/plugin",
+      "plugin": "@nx/oxlint",
       "options": {
         "targetName": "lint"
       }

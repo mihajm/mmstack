@@ -246,7 +246,8 @@ export class Form {
   protected readonly state = createStringState('hello world!', {
     label: () => 'Greeting',
     required: () => true,
-    validator: () => (value) => (value === 'hello world!' ? '' : 'Must be "hello world!"'),
+    validator: () => (value) =>
+      value === 'hello world!' ? '' : 'Must be "hello world!"',
   });
 }
 ```
@@ -256,9 +257,26 @@ export class Form {
 No body likes 1 giant form component :) `@mmstack/form-material` & related libraries are made to create re-usable & nicely divided from state logic & components
 
 ```typescript
-import { ChangeDetectionStrategy, Component, input, isSignal, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  input,
+  isSignal,
+  signal,
+} from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
-import { derived, DerivedSignal, formGroup, FormGroupSignal, injectCreateStringState, injectCreateTextareaState, StringField, StringState, TextareaField, TextareaState } from '@mmstack/form-material';
+import {
+  derived,
+  DerivedSignal,
+  formGroup,
+  FormGroupSignal,
+  injectCreateStringState,
+  injectCreateTextareaState,
+  StringField,
+  StringState,
+  TextareaField,
+  TextareaState,
+} from '@mmstack/form-material';
 
 export type Note = {
   title: string;
@@ -277,7 +295,9 @@ type NoteState<TParent = undefined> = FormGroupSignal<
 export function injectCreateNoteState() {
   const stringFactory = injectCreateStringState();
   const textareaFactory = injectCreateTextareaState();
-  return <TParent = undefined>(value: Note | DerivedSignal<TParent, Note>): NoteState<TParent> => {
+  return <TParent = undefined>(
+    value: Note | DerivedSignal<TParent, Note>,
+  ): NoteState<TParent> => {
     const valueSignal = isSignal(value) ? value : signal(value);
 
     const title = stringFactory(derived(valueSignal, 'title'), {

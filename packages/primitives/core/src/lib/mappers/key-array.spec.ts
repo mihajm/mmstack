@@ -69,11 +69,9 @@ describe('keyArray', () => {
     TestBed.runInInjectionContext(() => {
       const destroySpy = vi.fn();
       const source = signal(['a', 'b', 'c']);
-      const mapped = keyArray(
-        source,
-        (v, i) => ({ value: v, index: i }),
-        { onDestroy: destroySpy },
-      );
+      const mapped = keyArray(source, (v, i) => ({ value: v, index: i }), {
+        onDestroy: destroySpy,
+      });
 
       mapped();
       expect(destroySpy).not.toHaveBeenCalled();
@@ -89,11 +87,7 @@ describe('keyArray', () => {
     TestBed.runInInjectionContext(() => {
       const destroySpy = vi.fn();
       const source = signal([1, 2, 3]);
-      const mapped = keyArray(
-        source,
-        (v) => v * 10,
-        { onDestroy: destroySpy },
-      );
+      const mapped = keyArray(source, (v) => v * 10, { onDestroy: destroySpy });
 
       mapped();
       source.set([]);
@@ -182,9 +176,13 @@ describe('keyArray', () => {
 
         const plainSeen: unknown[] = [];
         const plainSource = signal<Item[]>([{ id: 'x' }, { id: 'y' }]);
-        const plain = keyArray(plainSource, (v, _i, key) => (plainSeen.push(key), v), {
-          key: (item) => item.id,
-        });
+        const plain = keyArray(
+          plainSource,
+          (v, _i, key) => (plainSeen.push(key), v),
+          {
+            key: (item) => item.id,
+          },
+        );
         plain();
         expect(plainSeen).toEqual(['x', 'y']);
 

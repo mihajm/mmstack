@@ -1,7 +1,14 @@
 import { computed, signal, untracked } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { forkStore } from './fork-store';
-import { applyOps, diffOps, invertBatch, opLog, type OpBatch, type StoreOp } from './op-log';
+import {
+  applyOps,
+  diffOps,
+  invertBatch,
+  opLog,
+  type OpBatch,
+  type StoreOp,
+} from './op-log';
 import { opaque } from './opaque';
 import { mutableStore, store } from './store';
 
@@ -90,7 +97,9 @@ describe('opLog', () => {
         store<{ a?: number; b?: number }>({ a: undefined }),
       );
       const batches: OpBatch[] = [];
-      TestBed.runInInjectionContext(() => opLog(s).subscribe((b) => batches.push(b)));
+      TestBed.runInInjectionContext(() =>
+        opLog(s).subscribe((b) => batches.push(b)),
+      );
 
       s.set({ a: undefined, b: 2 }); // b ADDED
       TestBed.tick();
@@ -110,12 +119,16 @@ describe('opLog', () => {
         store<{ a: number; b?: number }>({ a: 1, b: 2 }),
       );
       const batches: OpBatch[] = [];
-      TestBed.runInInjectionContext(() => opLog(s).subscribe((b) => batches.push(b)));
+      TestBed.runInInjectionContext(() =>
+        opLog(s).subscribe((b) => batches.push(b)),
+      );
 
       s.set({ a: 1 });
       TestBed.tick();
 
-      expect(batches[0].ops).toEqual([{ kind: 'delete', path: ['b'], prev: 2 }]);
+      expect(batches[0].ops).toEqual([
+        { kind: 'delete', path: ['b'], prev: 2 },
+      ]);
     });
 
     it('arrays: same-length edits descend per index; a length change is one whole unit', () => {
@@ -140,7 +153,9 @@ describe('opLog', () => {
         store<{ v: { deep: number } | number }>({ v: { deep: 1 } }),
       );
       const batches: OpBatch[] = [];
-      TestBed.runInInjectionContext(() => opLog(s).subscribe((b) => batches.push(b)));
+      TestBed.runInInjectionContext(() =>
+        opLog(s).subscribe((b) => batches.push(b)),
+      );
 
       s.v.set(5);
       TestBed.tick();
@@ -171,7 +186,9 @@ describe('opLog', () => {
     });
 
     it('warns on a mutable store and stays silent for in-place mutations', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
       const { batches, s } = TestBed.runInInjectionContext(() => {
         const s = mutableStore<Model>(initial());
         const batches: OpBatch[] = [];
@@ -356,7 +373,9 @@ describe('opLog', () => {
       // simulate two "peers" as two stores of the same shape, piped via batches
       const { s: a, batches: fromA } = setup();
       const b = TestBed.runInInjectionContext(() => store<Model>(initial()));
-      const logB = TestBed.runInInjectionContext(() => opLog(b, { origin: 'peer-b' }));
+      const logB = TestBed.runInInjectionContext(() =>
+        opLog(b, { origin: 'peer-b' }),
+      );
       const fromB: OpBatch[] = [];
       logB.subscribe((batch) => fromB.push(batch));
 
@@ -377,12 +396,16 @@ describe('opLog', () => {
 
 describe('applyOps (pure application)', () => {
   it('replaces the whole root on a path-[] set', () => {
-    expect(applyOps({ a: 1 }, [{ kind: 'set', path: [], next: { b: 2 } }])).toEqual({ b: 2 });
+    expect(
+      applyOps({ a: 1 }, [{ kind: 'set', path: [], next: { b: 2 } }]),
+    ).toEqual({ b: 2 });
   });
 
   it('ignores a path-[] delete (a root delete is meaningless)', () => {
     const root = { a: 1 };
-    expect(applyOps(root, [{ kind: 'delete', path: [], prev: root }])).toEqual({ a: 1 });
+    expect(applyOps(root, [{ kind: 'delete', path: [], prev: root }])).toEqual({
+      a: 1,
+    });
   });
 
   it('returns the same root reference for an empty op list', () => {
@@ -391,7 +414,11 @@ describe('applyOps (pure application)', () => {
   });
 
   it('vivifies a missing object for a string key and an array for a numeric index', () => {
-    expect(applyOps({}, [{ kind: 'set', path: ['deep', 'list', 0, 'title'], next: 'hi' }])).toEqual({
+    expect(
+      applyOps({}, [
+        { kind: 'set', path: ['deep', 'list', 0, 'title'], next: 'hi' },
+      ]),
+    ).toEqual({
       deep: { list: [{ title: 'hi' }] },
     });
   });
@@ -413,7 +440,9 @@ describe('applyOps (pure application)', () => {
   });
 
   it('deletes a nested key, leaving it absent (not undefined)', () => {
-    const out = applyOps({ a: { b: 1, c: 2 } }, [{ kind: 'delete', path: ['a', 'b'], prev: 1 }]);
+    const out = applyOps({ a: { b: 1, c: 2 } }, [
+      { kind: 'delete', path: ['a', 'b'], prev: 1 },
+    ]);
     expect('b' in (out as { a: object }).a).toBe(false);
     expect(out).toEqual({ a: { c: 2 } });
   });
@@ -454,7 +483,9 @@ describe('diffOps (pure diff)', () => {
     const before = opaque({ theme: 'dark', nested: { a: 1 } });
     const after = opaque({ theme: 'light', nested: { a: 1 } });
     const ops = diffOps({ cfg: before }, { cfg: after });
-    expect(ops).toEqual([{ kind: 'set', path: ['cfg'], prev: before, next: after }]);
+    expect(ops).toEqual([
+      { kind: 'set', path: ['cfg'], prev: before, next: after },
+    ]);
   });
 
   it("same-length array reorder emits per-index value ops (identity-blind) under the default `'index'` mode", () => {
@@ -534,7 +565,9 @@ describe('invertBatch (deeper)', () => {
   });
 
   it('apply → invert → invert returns to the applied state (undo of undo = redo)', () => {
-    const s = TestBed.runInInjectionContext(() => store<{ a: number }>({ a: 1 }));
+    const s = TestBed.runInInjectionContext(() =>
+      store<{ a: number }>({ a: 1 }),
+    );
     const log = TestBed.runInInjectionContext(() => opLog(s));
     const batch: StoreOp[] = [{ kind: 'set', path: ['a'], next: 5, prev: 1 }];
 
@@ -579,14 +612,20 @@ describe('opLog — edge cases', () => {
 
   it('emits one whole-unit op for an opaque leaf change', () => {
     const before = opaque({ k: 1 });
-    const s = TestBed.runInInjectionContext(() => store<{ cfg: typeof before }>({ cfg: before }));
+    const s = TestBed.runInInjectionContext(() =>
+      store<{ cfg: typeof before }>({ cfg: before }),
+    );
     const batches: OpBatch[] = [];
-    TestBed.runInInjectionContext(() => opLog(s).subscribe((b) => batches.push(b)));
+    TestBed.runInInjectionContext(() =>
+      opLog(s).subscribe((b) => batches.push(b)),
+    );
 
     const after = opaque({ k: 2 });
     s.cfg.set(after);
     TestBed.tick();
-    expect(batches[0].ops).toEqual([{ kind: 'set', path: ['cfg'], prev: before, next: after }]);
+    expect(batches[0].ops).toEqual([
+      { kind: 'set', path: ['cfg'], prev: before, next: after },
+    ]);
   });
 
   it('a pending local write is never swallowed by a concurrent apply (survives + emits)', () => {
@@ -599,9 +638,15 @@ describe('opLog — edge cases', () => {
     // is present in state AND was emitted; the applied op never echoed
     expect(untracked(s.user.name)).toBe('local');
     expect(untracked(s.user.age)).toBe(99);
-    const localOps = batches.flatMap((b) => b.ops).filter((o) => o.path.join('.') === 'user.name');
-    expect(localOps).toEqual([{ kind: 'set', path: ['user', 'name'], prev: 'ann', next: 'local' }]);
-    const ageEmitted = batches.flatMap((b) => b.ops).some((o) => o.path.join('.') === 'user.age');
+    const localOps = batches
+      .flatMap((b) => b.ops)
+      .filter((o) => o.path.join('.') === 'user.name');
+    expect(localOps).toEqual([
+      { kind: 'set', path: ['user', 'name'], prev: 'ann', next: 'local' },
+    ]);
+    const ageEmitted = batches
+      .flatMap((b) => b.ops)
+      .some((o) => o.path.join('.') === 'user.age');
     expect(ageEmitted).toBe(false); // the applied (remote) op produced no echo
   });
 });

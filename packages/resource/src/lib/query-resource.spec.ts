@@ -801,9 +801,12 @@ describe('queryResource', () => {
         queryResource(
           () => ({
             url: 'https://example.com/focus',
-            context: createTestContext(() => {
-              requests++;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                requests++;
+              },
+              { ok: true },
+            ),
           }),
           { refresh: { onFocus: true } },
         ),
@@ -830,9 +833,12 @@ describe('queryResource', () => {
         queryResource(
           () => ({
             url: 'https://example.com/reconnect',
-            context: createTestContext(() => {
-              requests++;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                requests++;
+              },
+              { ok: true },
+            ),
           }),
           { refresh: { onReconnect: true } },
         ),
@@ -870,9 +876,12 @@ describe('queryResource', () => {
         queryResource(
           () => ({
             url: 'https://example.com/paused',
-            context: createTestContext(() => {
-              requests++;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                requests++;
+              },
+              { ok: true },
+            ),
           }),
           { pause: paused },
         ),
@@ -909,9 +918,12 @@ describe('queryResource', () => {
         queryResource(
           () => ({
             url: 'https://example.com/activity',
-            context: createTestContext(() => {
-              requests++;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                requests++;
+              },
+              { ok: true },
+            ),
           }),
           { pause: true },
         ),
@@ -933,9 +945,12 @@ describe('queryResource', () => {
         queryResource(
           () => ({
             url: 'https://example.com/no-boundary',
-            context: createTestContext(() => {
-              requests++;
-            }, { ok: true }),
+            context: createTestContext(
+              () => {
+                requests++;
+              },
+              { ok: true },
+            ),
           }),
           { pause: true },
         ),
@@ -972,9 +987,12 @@ describe('queryResource — cache provider ergonomics', () => {
     const res = TestBed.runInInjectionContext(() =>
       queryResource(() => ({
         url: 'https://example.com/no-provider',
-        context: createTestContext(() => {
-          // noop
-        }, { data: 'ok' }),
+        context: createTestContext(
+          () => {
+            // noop
+          },
+          { data: 'ok' },
+        ),
       })),
     );
 
@@ -1110,9 +1128,12 @@ describe('queryResource — parse option', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'raw' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'raw' },
+          ),
         }),
         { parse },
       ),
@@ -1127,7 +1148,9 @@ describe('queryResource — parse option', () => {
   it('should parse the response body when retrieving from the cache', async () => {
     let requests = 0;
     const url = 'https://example.com/parse-cache';
-    const validate = () => { requests++; };
+    const validate = () => {
+      requests++;
+    };
     const parse = (val: any) => ({ ...val, parsed: true });
 
     const resA = TestBed.runInInjectionContext(() =>
@@ -1173,7 +1196,10 @@ describe('queryResource — parse option', () => {
       const cache = injectQueryCache();
       cache.store(
         customKey,
-        new HttpResponse({ body: { data: 'from-db', parsed: true }, status: 200 }),
+        new HttpResponse({
+          body: { data: 'from-db', parsed: true },
+          status: 200,
+        }),
       );
     });
 
@@ -1181,9 +1207,12 @@ describe('queryResource — parse option', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            throw new Error('Should not hit network');
-          }, { data: 'should-not-hit' }),
+          context: createTestContext(
+            () => {
+              throw new Error('Should not hit network');
+            },
+            { data: 'should-not-hit' },
+          ),
         }),
         { parse, cache: { staleTime: 10000, hash: () => customKey } },
       ),
@@ -1204,9 +1233,12 @@ describe('queryResource — parse option', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'raw' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'raw' },
+          ),
         }),
         { parse, cache: { staleTime: 10000 } },
       ),
@@ -1229,9 +1261,12 @@ describe('queryResource — parse option', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'raw' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'raw' },
+          ),
         }),
         { cache: { staleTime: 10000, persist: true } },
       ),
@@ -1261,9 +1296,12 @@ describe('queryResource — parse option', () => {
       queryResource(
         () => ({
           url,
-          context: createTestContext(() => {
-            /* noop */
-          }, { data: 'raw' }),
+          context: createTestContext(
+            () => {
+              /* noop */
+            },
+            { data: 'raw' },
+          ),
         }),
         { cache: { staleTime: 10000, persist: true, skipTabSync: true } },
       ),
@@ -1283,7 +1321,6 @@ describe('queryResource — parse option', () => {
     expect(broadcastFlag).toBe(false);
   });
 });
-
 
 describe('queryResource — raw response variants (text / arrayBuffer / blob)', () => {
   beforeEach(() => {
@@ -1382,9 +1419,12 @@ describe('queryResource — raw response variants (text / arrayBuffer / blob)', 
     const res = TestBed.runInInjectionContext(() =>
       queryResource.blob(() => ({
         url,
-        context: createTestContext((req) => {
-          seenResponseType = req.responseType;
-        }, new Blob(['x'])),
+        context: createTestContext(
+          (req) => {
+            seenResponseType = req.responseType;
+          },
+          new Blob(['x']),
+        ),
       })),
     );
 

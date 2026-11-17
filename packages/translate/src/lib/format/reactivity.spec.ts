@@ -74,7 +74,9 @@ describe('formatter locale reactivity', () => {
     TestBed.runInInjectionContext(() => {
       const fmt = injectFormatDate();
       const date = new Date('2024-01-15T12:00:00Z');
-      const label = computed(() => fmt(date, { tz: 'UTC', format: 'longDate' }));
+      const label = computed(() =>
+        fmt(date, { tz: 'UTC', format: 'longDate' }),
+      );
 
       expect(label()).toContain('January');
       store.locale.set('de-DE');
@@ -210,12 +212,12 @@ describe('selectPluralCategory', () => {
   });
 
   it('supports ordinal rules', () => {
-    expect(
-      selectPluralCategory(2, { locale: 'en-US', type: 'ordinal' }),
-    ).toBe('two');
-    expect(
-      selectPluralCategory(3, { locale: 'en-US', type: 'ordinal' }),
-    ).toBe('few');
+    expect(selectPluralCategory(2, { locale: 'en-US', type: 'ordinal' })).toBe(
+      'two',
+    );
+    expect(selectPluralCategory(3, { locale: 'en-US', type: 'ordinal' })).toBe(
+      'few',
+    );
   });
 
   it('coerces invalid input to other', () => {

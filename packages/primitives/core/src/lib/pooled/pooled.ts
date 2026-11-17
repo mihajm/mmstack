@@ -82,7 +82,6 @@ export function pooled<T, U = T>({
       if (currentFresh) {
         other = current;
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by the `current !== undefined` check above
         other = untracked(() => reset(current!)) ?? current;
       }
     }

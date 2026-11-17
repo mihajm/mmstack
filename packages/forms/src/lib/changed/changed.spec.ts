@@ -152,7 +152,6 @@ describe('change tracking', () => {
   describe('reactivity', () => {
     it('does not recompute an ancestor container when an already-changed leaf is edited again', () => {
       const { f } = setup();
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const profileChanged = f.profile().metadata(CHANGED)!.changed;
       let runs = 0;
       const probe = computed(() => {
@@ -647,7 +646,6 @@ describe('change tracking', () => {
 const [, injectTrackedField] = composition({ ...changeTracking<string>() });
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'input[formField]',
 })
 class TrackProbe {

@@ -12,9 +12,13 @@ import { linkedSignal, type Signal } from '@angular/core';
  *
  * The very first value passes straight through (nothing to hold yet).
  */
-export function holdUntilReady<T>(target: Signal<T>, ready: () => boolean): Signal<T> {
+export function holdUntilReady<T>(
+  target: Signal<T>,
+  ready: () => boolean,
+): Signal<T> {
   return linkedSignal<{ t: T; ready: boolean }, T>({
     source: () => ({ t: target(), ready: ready() }),
-    computation: (curr, prev) => (prev === undefined || curr.ready ? curr.t : prev.value),
+    computation: (curr, prev) =>
+      prev === undefined || curr.ready ? curr.t : prev.value,
   });
 }

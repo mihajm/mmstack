@@ -20,7 +20,7 @@ Repo-wide grep: the ONLY caller of `record()` outside `transaction.ts` is a mock
 
 **Proposed fix, tiered:**
 
-- **T1 (docs honesty, immediate):** state that rollback covers *recorded* writes and that
+- **T1 (docs honesty, immediate):** state that rollback covers _recorded_ writes and that
   recording is the cooperating-primitive seam; today that set is empty. One paragraph in
   the README + docs page. Ship this even if T2 lands the same week — the contract should
   be explicit either way.
@@ -52,15 +52,15 @@ Repo-wide grep: the ONLY caller of `record()` outside `transaction.ts` is a mock
 transaction start is excluded "only until it first settles; a later re-trigger of the same
 resource counts as the transaction's own work."
 
-**Why it cannot hold as implemented.** Exclusion is dropped when a *read of the computed
-observes* the resource in a settled state. Two failure cases:
+**Why it cannot hold as implemented.** Exclusion is dropped when a _read of the computed
+observes_ the resource in a settled state. Two failure cases:
 
 1. **Abort+restart:** the transaction's write changes an in-flight query's request; the
    resource aborts and refires with status going `reloading` → `reloading`. No settled
    state ever exists to observe.
 2. **Same-tick settle+retrigger:** settle and re-fire happen between reads. Signals are
-   pull-based and glitch-free — the intermediate `resolved` state is unobservable *in
-   principle*, not just in practice.
+   pull-based and glitch-free — the intermediate `resolved` state is unobservable _in
+   principle_, not just in practice.
 
 Consequence in both: the resource stays excluded, the transaction sees no attributable
 work, the `afterNextRender` fallback commits early, hold releases, `abort()` is a no-op.
@@ -68,8 +68,8 @@ Case 1 (write changes a visible query's request) is arguably the most common tra
 shape. No spec covers the re-trigger claim (the existing specs only cover
 "pre-existing load is not adopted").
 
-**The load-bearing observation:** any attribution scheme built on *sampling status
-transitions* is unsound in a glitch-free pull system — intermediate states don't exist
+**The load-bearing observation:** any attribution scheme built on _sampling status
+transitions_ is unsound in a glitch-free pull system — intermediate states don't exist
 for the sampler. Flight identity must be carried in a VALUE, not inferred from observed
 transitions. This kills the tempting alternatives by construction:
 

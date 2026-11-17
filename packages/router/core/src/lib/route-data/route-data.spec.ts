@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 import { provideLocationMocks } from '@angular/common/testing';
 import {
   Component,
@@ -144,9 +143,10 @@ describe('route-data', () => {
     await router.navigateByUrl('/users/42');
     await flush(fixture);
 
-    const slotData = (fixture.debugElement.query(
-      (n) => n.componentInstance instanceof PCmp,
-    )?.componentInstance as PCmp | undefined)?.data;
+    const slotData = (
+      fixture.debugElement.query((n) => n.componentInstance instanceof PCmp)
+        ?.componentInstance as PCmp | undefined
+    )?.data;
 
     expect(slotData?.id()).toBe('42');
     expect(slotData?.typo()).toBe('');
@@ -186,11 +186,9 @@ describe('route-data', () => {
             component: ECmp,
             providers: [provideRouteData(KEY)],
             resolve: {
-              d: createRouteData(
-                KEY,
-                () => (ref = makeRef('loading')),
-                { onError: (error) => seen.push(error) },
-              ),
+              d: createRouteData(KEY, () => (ref = makeRef('loading')), {
+                onError: (error) => seen.push(error),
+              }),
             },
           },
         ]),

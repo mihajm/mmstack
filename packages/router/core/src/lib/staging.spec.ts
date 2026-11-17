@@ -1,4 +1,3 @@
-/* eslint-disable @angular-eslint/component-selector */
 // What a staged (hidden, not-yet-committed) view is allowed to affect.
 import { httpResource, provideHttpClient } from '@angular/common/http';
 import {

@@ -46,7 +46,6 @@ const [, injectSelect] = composition({
 });
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'input[formField]',
 })
 class Probe {
@@ -206,7 +205,6 @@ describe('fromMetadata', () => {
   const NULLABLE = createMetadataKey<string | null>();
 
   @Directive({
-    // eslint-disable-next-line @angular-eslint/directive-selector
     selector: 'input[formField]',
   })
   class MetaProbe {

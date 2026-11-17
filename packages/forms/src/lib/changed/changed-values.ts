@@ -80,8 +80,7 @@ function collectNode(
   if (isRecord(current) && isRecord(initial)) {
     const keys = Object.keys(current);
     // Key churn: per-child delegation can't attribute additions/removals — whole unit.
-    if (keys.length !== Object.keys(initial).length)
-      return unit(current, path);
+    if (keys.length !== Object.keys(initial).length) return unit(current, path);
 
     const out: Record<string, unknown> = {};
     const paths: string[] = [];
@@ -155,7 +154,9 @@ export function collectChanged<T>(
  * changedValues(f); // { name: 'Ada' }
  * ```
  */
-export function changedValues<T>(tree: FieldTree<T>): DeepPartial<T> | undefined {
+export function changedValues<T>(
+  tree: FieldTree<T>,
+): DeepPartial<T> | undefined {
   return collectChanged(tree)?.value;
 }
 
@@ -164,9 +165,7 @@ export function changedValues<T>(tree: FieldTree<T>): DeepPartial<T> | undefined
  * segments, the root itself as `''`). Each path is one extraction unit — the same granularity
  * {@link changedValues} emits. Useful for debugging and "what will this PATCH send".
  */
-export function changedPaths<T>(
-  tree: FieldTree<T>,
-): Signal<readonly string[]> {
+export function changedPaths<T>(tree: FieldTree<T>): Signal<readonly string[]> {
   return computed(() => collectRoot(tree as FieldTree<unknown>)?.paths ?? []);
 }
 

@@ -73,8 +73,7 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
       else routes.push(entry);
 
       route =
-        route.children?.find((c) => c.outlet === 'primary') ??
-        route.firstChild;
+        route.children?.find((c) => c.outlet === 'primary') ?? route.firstChild;
     }
 
     return routes;

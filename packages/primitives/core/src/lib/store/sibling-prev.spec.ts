@@ -183,7 +183,6 @@ const withoutDeletePrev = (envs: readonly OpEnvelope[]): OpEnvelope[] =>
     ...e,
     ops: e.ops.map((op) => {
       if (op.kind !== 'delete') return op;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { prev: _dropped, ...rest } = op as SyncOp & { prev?: unknown };
       return rest as SyncOp;
     }),

@@ -41,7 +41,10 @@ describe('Select Adapter', () => {
 
       expect(state.options()).toHaveLength(3);
       expect(state.options()).toContainEqual(
-        expect.objectContaining({ value: 'external', label: expect.anything() })
+        expect.objectContaining({
+          value: 'external',
+          label: expect.anything(),
+        }),
       );
     });
 
@@ -54,7 +57,7 @@ describe('Select Adapter', () => {
       });
 
       expect(state.options()[0].disabled()).toBe(false); // current value never disabled
-      expect(state.options()[1].disabled()).toBe(true);  // as per disableOption
+      expect(state.options()[1].disabled()).toBe(true); // as per disableOption
       expect(state.options()[2].disabled()).toBe(false);
 
       disabled.set(true);
@@ -79,7 +82,7 @@ describe('Select Adapter', () => {
         });
 
         expect(state.error()).toBe('Choice is required');
-        
+
         state.value.set('a');
         expect(state.error()).toBe('');
       });

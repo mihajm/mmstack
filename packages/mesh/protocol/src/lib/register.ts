@@ -51,7 +51,6 @@ const contains = (value: unknown, rel: readonly Key[]): boolean => {
  */
 const retained = (s: SyncSibling): SyncSibling => {
   if (s.kind === 'set' || !Object.hasOwn(s, 'prev')) return s;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { prev: _dropped, ...rest } = s;
   return rest;
 };

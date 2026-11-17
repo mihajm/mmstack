@@ -6,7 +6,7 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { mutableStore, store } from './store';
-import { MESSAGE_BUS, MessageBus, tabSync } from './tab-sync';
+import { MESSAGE_BUS, tabSync } from './tab-sync';
 
 /**
  * A synchronous cross-"tab" bus network for deterministic store-mode tests: `post` from one tab's

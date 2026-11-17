@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { RouterOutlet, type RouterOutletContract } from '@angular/router';
 import { TransitionRouterOutlet } from './transition-router-outlet';
 

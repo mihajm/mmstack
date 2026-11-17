@@ -2,10 +2,7 @@ import { computed, signal, type Provider } from '@angular/core';
 import { createIntl, createIntlCache, type IntlShape } from '@formatjs/intl';
 import { compileTranslation } from '../compile';
 import { type UnknownStringKeyObject } from '../string-key-object.type';
-import {
-  type MessageFormatOpts,
-  TranslationStore,
-} from '../translation-store';
+import { type MessageFormatOpts, TranslationStore } from '../translation-store';
 
 /**
  * Options designed to feed into the mock translations function.

@@ -41,7 +41,16 @@ const DEPARTMENTS = [
   'Ops',
   'Design',
 ];
-const LAST = ['Smith', 'Jones', 'Nguyen', 'Garcia', 'Khan', 'Muller', 'Sato', 'Novak'];
+const LAST = [
+  'Smith',
+  'Jones',
+  'Nguyen',
+  'Garcia',
+  'Khan',
+  'Muller',
+  'Sato',
+  'Novak',
+];
 
 // Deterministic PRNG so every run and both threads see identical data.
 function makeRng(seed) {
@@ -218,9 +227,7 @@ async function main() {
     const data = generateRows(n);
 
     // 1. main thread: blocking == compute.
-    const mainBlock = median(
-      timeIt(ITERS, () => runWorkload(data, PARAMS)),
-    );
+    const mainBlock = median(timeIt(ITERS, () => runWorkload(data, PARAMS)));
 
     // 2. worker-ship: block == serialize rows out (postMessage) + deserialize
     // the result; wall == the whole round trip.

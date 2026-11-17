@@ -39,13 +39,23 @@
         <div>
           <label>
             Name:
-            <input [value]="name.value()" (input)="name.value.set($any($event.target).value)" [class.invalid]="name.error() && name.touched()" (blur)="name.markAsTouched()" />
+            <input
+              [value]="name.value()"
+              (input)="name.value.set($any($event.target).value)"
+              [class.invalid]="name.error() && name.touched()"
+              (blur)="name.markAsTouched()"
+            />
           </label>
         </div>
         <div>
           <label>
             Age:
-            <input [(ngModel)]="age.value" type="number" [class.invalid]="age.error() && age.touched()" (blur)="age.markAsTouched()" />
+            <input
+              [(ngModel)]="age.value"
+              type="number"
+              [class.invalid]="age.error() && age.touched()"
+              (blur)="age.markAsTouched()"
+            />
             <span *ngIf="age.error() && age.touched()">{{ age.error() }}</span>
           </label>
         </div>
@@ -57,7 +67,8 @@
       });
       age = formControl<number | undefined>(undefined, {
         //specify the type explicitely to have number type.
-        validator: () => (value) => (value && value > 0 ? '' : 'Age must be a positive number'),
+        validator: () => (value) =>
+          value && value > 0 ? '' : 'Age must be a positive number',
       });
     }
     ```
@@ -65,9 +76,25 @@
 ## Slightly more complex example
 
 ```typescript
-import { Component, computed, inject, Injectable, isDevMode, linkedSignal, Signal, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  inject,
+  Injectable,
+  isDevMode,
+  linkedSignal,
+  Signal,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { derived, formControl, FormControlSignal, formGroup, FormGroupSignal } from '@mmstack/form-core';
+import {
+  derived,
+  formControl,
+  FormControlSignal,
+  formGroup,
+  FormGroupSignal,
+} from '@mmstack/form-core';
 import { mutationResource, queryResource } from '@mmstack/resource';
 
 type Post = {
@@ -123,7 +150,9 @@ export class PostsService {
     },
   );
 
-  readonly loading = computed(() => this.createPostResource.isLoading() || this.post.isLoading());
+  readonly loading = computed(
+    () => this.createPostResource.isLoading() || this.post.isLoading(),
+  );
 
   createPost(post: Post) {
     this.createPostResource.mutate({
@@ -174,13 +203,27 @@ function createPostState(post: Post, loading: Signal<boolean>): PostState {
   template: `
     <label
       >{{ formState().children().title.label() }}
-      <input [(ngModel)]="formState().children().title.value" [readonly]="formState().children().body.readonly()" [class.error]="formState().children().title.touched() && formState().children().title.error()" />
+      <input
+        [(ngModel)]="formState().children().title.value"
+        [readonly]="formState().children().body.readonly()"
+        [class.error]="
+          formState().children().title.touched() &&
+          formState().children().title.error()
+        "
+      />
     </label>
     <br />
 
     <label
       >{{ formState().children().body.label() }}
-      <textarea [(ngModel)]="formState().children().body.value" [readonly]="formState().children().body.readonly()" [class.error]="formState().children().body.touched() && formState().children().body.error()"></textarea>
+      <textarea
+        [(ngModel)]="formState().children().body.value"
+        [readonly]="formState().children().body.readonly()"
+        [class.error]="
+          formState().children().body.touched() &&
+          formState().children().body.error()
+        "
+      ></textarea>
     </label>
 
     <br />
@@ -192,7 +235,8 @@ export class PostFormComponent {
   protected readonly svc = inject(PostsService);
 
   protected readonly formState = linkedSignal<Post, PostState>({
-    source: () => this.svc.post.value() ?? { title: '', body: '', id: -1, userId: -1 },
+    source: () =>
+      this.svc.post.value() ?? { title: '', body: '', id: -1, userId: -1 },
     computation: (source, prev) => {
       if (prev) {
         prev.value.forceReconcile(source);

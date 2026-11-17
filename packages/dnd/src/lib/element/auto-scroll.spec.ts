@@ -2,7 +2,11 @@ import { Component, ElementRef, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { autoScroll } from './auto-scroll';
-import { provideDnd, ɵclearWarnedPlugins, type AutoScrollPlugin } from '../provide';
+import {
+  provideDnd,
+  ɵclearWarnedPlugins,
+  type AutoScrollPlugin,
+} from '../provide';
 
 const scrollMock = vi.fn();
 const scrollCleanup = vi.fn();
@@ -29,7 +33,10 @@ describe('autoScroll', () => {
   it('warns and no-ops (does not throw) when no plugin is registered', () => {
     TestBed.configureTestingModule({
       providers: [
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
       ],
     });
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -47,9 +54,7 @@ describe('autoScroll', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(scrollMock).toHaveBeenCalledOnce();
-    expect(scrollMock.mock.calls[0][0].element).toBe(
-      fixture.nativeElement,
-    );
+    expect(scrollMock.mock.calls[0][0].element).toBe(fixture.nativeElement);
   });
 
   it('cleans up the plugin on destroy', async () => {
@@ -108,7 +113,10 @@ describe('autoScroll', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: PLATFORM_ID, useValue: 'server' },
-        { provide: ElementRef, useValue: new ElementRef(document.createElement('div')) },
+        {
+          provide: ElementRef,
+          useValue: new ElementRef(document.createElement('div')),
+        },
         // intentionally NO plugin registered — server must not throw
       ],
     });

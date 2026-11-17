@@ -50,9 +50,7 @@ const f = form(model, (p) => {
   withLabel(p.name, 'Full name'); // static value, or a reactive LogicFn
 });
 
-@Component({
-  /* a control on a [formField] host */
-})
+@Component({/* a control on a [formField] host */})
 class TextField {
   readonly label = injectLabel('(unlabeled)'); // Signal<string>
 }
@@ -107,9 +105,7 @@ import { compose, type FieldRef } from '@mmstack/forms';
 // projectors read field state lazily — return a value, a getter, or a signal
 const firstError = (f: FieldRef) => () => f.state().errors()[0]?.message ?? '';
 
-@Component({
-  /* control */
-})
+@Component({/* control */})
 class TextField {
   readonly field = compose({
     label: withLabel, // a fieldMetadata rule carries its own projector

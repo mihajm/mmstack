@@ -101,7 +101,11 @@ describe('hitbox closest-edge contract', () => {
 
     const nearBottom = realHitbox.attachClosestEdge(
       {},
-      { element: el, input: makeInput(50, 98), allowedEdges: ['top', 'bottom'] },
+      {
+        element: el,
+        input: makeInput(50, 98),
+        allowedEdges: ['top', 'bottom'],
+      },
     );
     expect(realHitbox.extractClosestEdge(nearBottom)).toBe('bottom');
   });

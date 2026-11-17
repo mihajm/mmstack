@@ -16,7 +16,12 @@ const ok: Verdict = { ok: true, message: '' };
 
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+  if (
+    typeof a !== 'object' ||
+    typeof b !== 'object' ||
+    a === null ||
+    b === null
+  ) {
     return false;
   }
   if (Array.isArray(a) !== Array.isArray(b)) return false;
@@ -25,7 +30,12 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (ka.length !== kb.length) return false;
   for (const k of ka) {
     if (!Object.hasOwn(b as object, k)) return false;
-    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) {
+    if (
+      !deepEqual(
+        (a as Record<string, unknown>)[k],
+        (b as Record<string, unknown>)[k],
+      )
+    ) {
       return false;
     }
   }
@@ -140,15 +150,24 @@ export function commitOrdered(journal: readonly SeqEnvelope[]): Verdict {
  * Seq density: the committed seqs form a dense, unique `{1..N}` matching the room seq — no gaps,
  * no double-sequencing. Checks the SET, not arrival order (that is {@link commitOrdered}'s job).
  */
-export function seqDense(journal: readonly SeqEnvelope[], seq: number): Verdict {
+export function seqDense(
+  journal: readonly SeqEnvelope[],
+  seq: number,
+): Verdict {
   const seqs = journal.map((e) => e.seq);
   if (journal.length !== seq) {
-    return { ok: false, message: `journal length ${journal.length} ≠ room seq ${seq}; seqs=[${seqs}]` };
+    return {
+      ok: false,
+      message: `journal length ${journal.length} ≠ room seq ${seq}; seqs=[${seqs}]`,
+    };
   }
   const sorted = [...seqs].sort((a, b) => a - b);
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i] !== i + 1) {
-      return { ok: false, message: `seqs not dense {1..${seq}}: sorted=[${sorted}]` };
+      return {
+        ok: false,
+        message: `seqs not dense {1..${seq}}: sorted=[${sorted}]`,
+      };
     }
   }
   return ok;

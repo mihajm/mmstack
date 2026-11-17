@@ -62,11 +62,17 @@ function scripted() {
 }
 type Wire = ReturnType<typeof scripted>;
 const sentEnvs = (wire: Wire): OpEnvelope[] =>
-  wire.sent.filter((m): m is Extract<ClientMsg, { t: 'env' }> => m.t === 'env').map((m) => m.env);
+  wire.sent
+    .filter((m): m is Extract<ClientMsg, { t: 'env' }> => m.t === 'env')
+    .map((m) => m.env);
 const hellos = (wire: Wire) =>
-  wire.sent.filter((m): m is Extract<ClientMsg, { t: 'hello' }> => m.t === 'hello');
+  wire.sent.filter(
+    (m): m is Extract<ClientMsg, { t: 'hello' }> => m.t === 'hello',
+  );
 const compacts = (wire: Wire) =>
-  wire.sent.filter((m): m is Extract<ClientMsg, { t: 'compact' }> => m.t === 'compact');
+  wire.sent.filter(
+    (m): m is Extract<ClientMsg, { t: 'compact' }> => m.t === 'compact',
+  );
 
 const rootReg = (title: string, count = 0): RegisterCheckpoint => ({
   path: [],
@@ -107,7 +113,12 @@ const snapshot = (instance: string, seq: number, gen: Gen = {}): ServerMsg => {
     ...(index > 0 ? { seed: registers } : { registers }),
     wm: {},
     index,
-    reason: index === 0 ? 'genesis' : gen.policy === 'replay' ? 'compaction' : 'migration',
+    reason:
+      index === 0
+        ? 'genesis'
+        : gen.policy === 'replay'
+          ? 'compaction'
+          : 'migration',
     policy: gen.policy ?? 'discard',
     extent: index > 0 ? extentOf(registers) : {},
     preCutMax: gen.preCutMax ?? {},
@@ -140,9 +151,17 @@ const remote = (
 describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', () => {
   it('trims by receipts (exact membership), resends the rest VERBATIM in version order, and classifies a replay whose cite the cut folded away as a conflict — never sent, never applied', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 2, ['title'], 'pa') });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 2, ['title'], 'pa'),
+    });
     a.setAtPath('count', 3); // v1: admitted before the cut, its ack lost
     a.setAtPath('title', 'mine'); // v2: cites pa's dot at title
     a.setAtPath('count', 4); // v3: cites its own v1 at count
@@ -153,13 +172,29 @@ describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', (
       rootReg('init'),
       {
         path: ['title'],
-        siblings: [{ kind: 'set', value: 'pb', writer: 'pb', origin: 'pb', hlc: h(30), epoch: 0 }],
+        siblings: [
+          {
+            kind: 'set',
+            value: 'pb',
+            writer: 'pb',
+            origin: 'pb',
+            hlc: h(30),
+            epoch: 0,
+          },
+        ],
         water: {},
       },
       {
         path: ['count'],
         siblings: [
-          { kind: 'set', value: 3, writer: 'w', origin: e1.origin, hlc: e1.hlc, epoch: 0 },
+          {
+            kind: 'set',
+            value: 3,
+            writer: 'w',
+            origin: e1.origin,
+            hlc: e1.hlc,
+            epoch: 0,
+          },
         ],
         water: {},
       },
@@ -177,7 +212,9 @@ describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', (
     const resent = sentEnvs(wire).slice(before);
     // v1 trimmed, v2 a conflict, v3 resent as it was written: same ops, dot, version
     expect(resent).toEqual([{ ...e3, instance: 'g2' }]);
-    expect(a.conflicts().map((c) => [c.env.version, c.cause])).toEqual([[2, 'uncovered']]);
+    expect(a.conflicts().map((c) => [c.env.version, c.cause])).toEqual([
+      [2, 'uncovered'],
+    ]);
     expect(a.conflicts()[0].env).toEqual(e2);
     expect(a.snapshot()).toEqual({ title: 'pb', count: 4 }); // the conflict's effect is not applied
     // the echo of the replay acknowledges it in the new generation
@@ -186,9 +223,17 @@ describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', (
 
   it('re-author writes the raw ops again as a NEW write citing the current state; discard lets it go', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 2, ['title'], 'pa') });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 2, ['title'], 'pa'),
+    });
     a.setAtPath('title', 'mine');
     a.setAtPath('count', 7);
     const [e1, e2] = sentEnvs(wire);
@@ -196,12 +241,30 @@ describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', (
       rootReg('init'),
       {
         path: ['title'],
-        siblings: [{ kind: 'set', value: 'pb', writer: 'pb', origin: 'pb', hlc: h(30), epoch: 0 }],
+        siblings: [
+          {
+            kind: 'set',
+            value: 'pb',
+            writer: 'pb',
+            origin: 'pb',
+            hlc: h(30),
+            epoch: 0,
+          },
+        ],
         water: {},
       },
       {
         path: ['count'],
-        siblings: [{ kind: 'set', value: 1, writer: 'pc', origin: 'pc', hlc: h(40), epoch: 0 }],
+        siblings: [
+          {
+            kind: 'set',
+            value: 1,
+            writer: 'pc',
+            origin: 'pc',
+            hlc: h(40),
+            epoch: 0,
+          },
+        ],
         water: {},
       },
     ];
@@ -241,7 +304,11 @@ describe('session: a compaction cut replays the pending tail (D5′, D7, D9)', (
 describe('session: refusals are conflicts, and the snapshot they owe is asked for until it installs (D-b, D-b″, R16-2)', () => {
   it('a citation refusal lands as a conflict, owes a snapshot at its seq: hello without seq, re-asked after a snapshot below it, cleared at or past it; a repeated reply finds nothing to classify', async () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshot('g1', 1));
     a.setAtPath('title', 'refused');
     const [env] = sentEnvs(wire);
@@ -310,15 +377,27 @@ describe('session: refusals are conflicts, and the snapshot they owe is asked fo
 describe('session: welcomes and ingress (D-d, D10, R16-3)', () => {
   it('sequence knowledge advances on a deduplicated relay echo, so an older snapshot of the generation is ignored', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     const changes: number[] = [];
     a.changes((e) => e.kind === 'change' && changes.push(e.seq));
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 2, ['title'], 'pa') });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 2, ['title'], 'pa'),
+    });
     a.setAtPath('count', 5);
     const [own] = sentEnvs(wire);
     wire.push({ t: 'env', room: 'r', env: { ...own, seq: 4 } }); // the own echo: deduplicated
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 2, ['title'], 'pa') }); // a duplicate delivery
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 2, ['title'], 'pa'),
+    }); // a duplicate delivery
     expect(changes).toEqual([2]); // applied once: the duplicate reaches nothing
     expect(a.status()).toBe('live');
     wire.push(snapshot('g1', 3)); // older than the echo at 4
@@ -330,9 +409,17 @@ describe('session: welcomes and ingress (D-d, D10, R16-3)', () => {
 
   it('an envelope of another generation is fenced: never ingested, and it teaches no sequence', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 5, ['title'], 'stray', [], 'g0') });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 5, ['title'], 'stray', [], 'g0'),
+    });
     expect(a.snapshot().title).toBe('init');
     wire.push(snapshot('g1', 2)); // not older than anything ingested: installs
     expect(a.stableSnapshot()?.seq).toBe(2);
@@ -341,9 +428,19 @@ describe('session: welcomes and ingress (D-d, D10, R16-3)', () => {
 
   it('a stale welcome of an older generation, arriving after the newer one, is ignored', () => {
     const wire = scripted();
-    const a = agentSeat<Doc>(initial(), { room: 'r', writer: 'w', transport: wire.factory });
+    const a = agentSeat<Doc>(initial(), {
+      room: 'r',
+      writer: 'w',
+      transport: wire.factory,
+    });
     wire.push(snapshot('g1', 1));
-    wire.push(snapshot('g2', 4, { index: 1, policy: 'replay', registers: [rootReg('two')] }));
+    wire.push(
+      snapshot('g2', 4, {
+        index: 1,
+        policy: 'replay',
+        registers: [rootReg('two')],
+      }),
+    );
     wire.push(snapshot('g1', 6, { registers: [rootReg('one')] }));
     expect(a.snapshot().title).toBe('two');
     a.setAtPath('count', 1);
@@ -370,7 +467,10 @@ const microtaskDriver = (): OpLogDriver => (run) => {
   watch.notify();
   return { destroy: () => watch.destroy() };
 };
-function direct(wire: Wire, extra: { instance?: string; record?: SessionRecord } = {}) {
+function direct(
+  wire: Wire,
+  extra: { instance?: string; record?: SessionRecord } = {},
+) {
   const doc = store<Doc>(initial(), createStoreContext());
   const sync = opSync(doc as never, { writer: 'w', driver: microtaskDriver() });
   const session: MeshSession = meshSession({
@@ -397,7 +497,9 @@ describe('session: census readiness is client-declared (R16-5)', () => {
     wire.push(snapshot('g1', 1));
     expect(compacts(wire)).toEqual([]);
     session.declareReady(true);
-    expect(compacts(wire).map((m) => [m.instance, m.ready])).toEqual([['g1', true]]);
+    expect(compacts(wire).map((m) => [m.instance, m.ready])).toEqual([
+      ['g1', true],
+    ]);
     write((d) => ({ ...d, count: 1 })); // the outbox fills: not ready
     const [env] = sentEnvs(wire);
     wire.push({ t: 'env', room: 'r', env: { ...env, seq: 2 } }); // acknowledged: ready again
@@ -405,7 +507,10 @@ describe('session: census readiness is client-declared (R16-5)', () => {
     wire.push(snapshot('g2', 3, { index: 1, policy: 'replay' })); // a cut: nobody is pressed
     expect(compacts(wire).map((m) => m.ready)).toEqual([true, false, true]);
     session.declareReady(true);
-    expect(compacts(wire).at(-1)).toMatchObject({ instance: 'g2', ready: true });
+    expect(compacts(wire).at(-1)).toMatchObject({
+      instance: 'g2',
+      ready: true,
+    });
     wire.drop(); // a reconnect is a leave and a join
     session.close();
   });
@@ -414,7 +519,10 @@ describe('session: census readiness is client-declared (R16-5)', () => {
     const wire = scripted();
     const seen: unknown[] = [];
     const doc = store<Doc>(initial(), createStoreContext());
-    const sync = opSync(doc as never, { writer: 'w', driver: microtaskDriver() });
+    const sync = opSync(doc as never, {
+      writer: 'w',
+      driver: microtaskDriver(),
+    });
     const session = meshSession({
       room: 'r',
       writer: 'w',
@@ -425,7 +533,13 @@ describe('session: census readiness is client-declared (R16-5)', () => {
     });
     session.connect();
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'compaction', room: 'r', count: 3, budget: 300, ready: ['x'] });
+    wire.push({
+      t: 'compaction',
+      room: 'r',
+      count: 3,
+      budget: 300,
+      ready: ['x'],
+    });
     expect(seen).toEqual([{ count: 3, budget: 300, ready: ['x'] }]);
     session.close();
   });
@@ -435,12 +549,21 @@ describe('meshSync: the generation signal', () => {
   it('a cut welcome flips it; a same-generation welcome does not', () => {
     const wire = scripted();
     const mesh = TestBed.runInInjectionContext(() =>
-      meshSync(store<Doc>(initial()), { room: 'r', writer: 'w', transport: wire.factory }),
+      meshSync(store<Doc>(initial()), {
+        room: 'r',
+        writer: 'w',
+        transport: wire.factory,
+      }),
     );
     expect(mesh.generation()).toBeUndefined();
     wire.push(snapshot('g1', 1));
     const first = mesh.generation();
-    expect(first).toEqual({ instance: 'g1', index: 0, reason: 'genesis', policy: 'discard' });
+    expect(first).toEqual({
+      instance: 'g1',
+      index: 0,
+      reason: 'genesis',
+      policy: 'discard',
+    });
     wire.push(snapshot('g1', 2)); // the installed generation: untouched
     expect(mesh.generation()).toBe(first);
     wire.push(snapshot('g2', 3, { index: 1, policy: 'replay' })); // the cut's welcome
@@ -460,7 +583,11 @@ describe('session: the durable record (D-d)', () => {
     const first = direct(wire);
     first.session.connect();
     wire.push(snapshot('g1', 1));
-    wire.push({ t: 'env', room: 'r', env: remote('pa', 1, 2, ['title'], 'pa') });
+    wire.push({
+      t: 'env',
+      room: 'r',
+      env: remote('pa', 1, 2, ['title'], 'pa'),
+    });
     first.write((d) => ({ ...d, count: 9 }));
     const [pending] = sentEnvs(wire);
     const record = first.session.record();
@@ -478,7 +605,10 @@ describe('session: the durable record (D-d)', () => {
       {
         origin: pending.origin,
         version: pending.version,
-        intent: { raws: [{ kind: 'set', path: ['count'], next: 9, prev: 0 }], bump: false },
+        intent: {
+          raws: [{ kind: 'set', path: ['count'], next: 9, prev: 0 }],
+          bump: false,
+        },
       },
     ]);
     first.session.close();
@@ -494,7 +624,9 @@ describe('session: the durable record (D-d)', () => {
     // un-admitted own write stays applied over it
     again.push(snapshot('g1', 1, { registers: [rootReg('fresh')] }));
     expect(next.doc()).toEqual({ title: 'fresh', count: 9 });
-    expect(next.session.unackedEnvs().map((e) => e.version)).toEqual([pending.version]);
+    expect(next.session.unackedEnvs().map((e) => e.version)).toEqual([
+      pending.version,
+    ]);
     next.session.close();
   });
 
@@ -548,8 +680,19 @@ describe('generation: the pure pieces the session and the proof share', () => {
       hlc: h(5),
       policyVersion: 0,
       ops: [
-        { kind: 'set', path: ['b'], next: { c: 9 }, cites: [{ origin: 'x', hlc: h(1) }], epoch: 2 },
-        { kind: 'clear', path: ['b', 'c'], cites: [{ origin: 'y', hlc: h(2) }], epoch: 0 },
+        {
+          kind: 'set',
+          path: ['b'],
+          next: { c: 9 },
+          cites: [{ origin: 'x', hlc: h(1) }],
+          epoch: 2,
+        },
+        {
+          kind: 'clear',
+          path: ['b', 'c'],
+          cites: [{ origin: 'y', hlc: h(2) }],
+          epoch: 0,
+        },
         { kind: 'delete', path: ['k'], prev: 1, cites: [], epoch: 0 },
       ],
     };
@@ -560,17 +703,31 @@ describe('generation: the pure pieces the session and the proof share', () => {
       ],
       bump: false,
     });
-    expect(intentOf(env, (p) => (p[0] === 'b' && p.length === 1 ? 1 : 0)).bump).toBe(true);
+    expect(
+      intentOf(env, (p) => (p[0] === 'b' && p.length === 1 ? 1 : 0)).bump,
+    ).toBe(true);
   });
 
   it('the welcome fence and the receipt trim', () => {
     const fence = { index: 1, instance: 'g1', seq: 4, maxSeq: 6 };
-    expect(welcomeVerdict(fence, { index: 2, instance: 'g2', seq: 1 })).toBe('newer');
-    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 6 })).toBe('same');
-    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 5 })).toBe('older-than-traffic');
-    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 3 })).toBe('stale');
-    expect(welcomeVerdict(fence, { index: 0, instance: 'g0', seq: 9 })).toBe('stale');
-    const t = (version: number, origin = 'o') => ({ env: { origin, instance: 'g0', version } });
+    expect(welcomeVerdict(fence, { index: 2, instance: 'g2', seq: 1 })).toBe(
+      'newer',
+    );
+    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 6 })).toBe(
+      'same',
+    );
+    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 5 })).toBe(
+      'older-than-traffic',
+    );
+    expect(welcomeVerdict(fence, { index: 1, instance: 'g1', seq: 3 })).toBe(
+      'stale',
+    );
+    expect(welcomeVerdict(fence, { index: 0, instance: 'g0', seq: 9 })).toBe(
+      'stale',
+    );
+    const t = (version: number, origin = 'o') => ({
+      env: { origin, instance: 'g0', version },
+    });
     const { trimmed, keep } = trimByReceipts([t(3), t(1), t(2), t(4)], {
       o: {
         g0: [
@@ -583,7 +740,10 @@ describe('generation: the pure pieces the session and the proof share', () => {
     expect(keep.map((x) => x.env.version)).toEqual([2, 4]); // the hole below 3 is kept, never lost
     // membership is instance-agnostic: a version receipted in a LATER generation (its replay) is
     // admitted; another origin's receipt is not
-    const later = trimByReceipts([t(2), t(4)], { o: { g1: [[4, 4]] }, x: { g0: [[2, 2]] } });
+    const later = trimByReceipts([t(2), t(4)], {
+      o: { g1: [[4, 4]] },
+      x: { g0: [[2, 2]] },
+    });
     expect(later.trimmed.map((x) => x.env.version)).toEqual([4]);
     expect(later.keep.map((x) => x.env.version)).toEqual([2]);
   });

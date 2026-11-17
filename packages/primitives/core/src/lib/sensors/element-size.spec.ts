@@ -26,16 +26,14 @@ describe('elementSize', () => {
     TestBed.runInInjectionContext(() => {
       const el = document.createElement('div');
 
-      el.getBoundingClientRect = vi
-        .fn()
-        .mockReturnValue({
-          width: 100,
-          height: 200,
-          top: 0,
-          left: 0,
-          bottom: 200,
-          right: 100,
-        });
+      el.getBoundingClientRect = vi.fn().mockReturnValue({
+        width: 100,
+        height: 200,
+        top: 0,
+        left: 0,
+        bottom: 200,
+        right: 100,
+      });
 
       const sig = elementSize(el);
       TestBed.tick();

@@ -141,10 +141,9 @@ export class MmOutcome<T> implements OnChanges {
   private view: EmbeddedViewRef<Record<string, unknown>> | null = null;
 
   static ngTemplateContextGuard<T>(
-    dir: MmOutcome<T>,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ctx: unknown,
-  ): ctx is MmOutcomeContext<T> {
+    _dir: MmOutcome<T>,
+    _ctx: unknown,
+  ): _ctx is MmOutcomeContext<T> {
     return true;
   }
 

@@ -7,6 +7,8 @@ describe('delim', () => {
 
   it('should replace strings with delimiter', () => {
     expect(replaceWithDelim('app.title')).toBe('app::MMT_DELIM::title');
-    expect(replaceWithDelim('foo_bar_baz', '_')).toBe('foo::MMT_DELIM::bar::MMT_DELIM::baz');
+    expect(replaceWithDelim('foo_bar_baz', '_')).toBe(
+      'foo::MMT_DELIM::bar::MMT_DELIM::baz',
+    );
   });
 });

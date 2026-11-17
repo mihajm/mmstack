@@ -36,7 +36,9 @@ describe('published subtrees (rung 3)', () => {
     const injector = TestBed.inject(Injector);
     const worker = connect(host);
     const replica = TestBed.runInInjectionContext(() =>
-      workerStore<{ sum: number; count: number }>(worker, 'total', { injector }),
+      workerStore<{ sum: number; count: number }>(worker, 'total', {
+        injector,
+      }),
     );
     await tick();
 
@@ -52,7 +54,10 @@ describe('published subtrees (rung 3)', () => {
   it('propagates a published computation status: pending holds the value', async () => {
     const backing = signal<{ n: number }>({ n: 1 });
     const st = signal<ResourceStatus>('resolved');
-    const pub = Object.assign(computed(() => backing()), { status: st });
+    const pub = Object.assign(
+      computed(() => backing()),
+      { status: st },
+    );
 
     const host = createWorkerHost({ published: { calc: pub } });
     const injector = TestBed.inject(Injector);
@@ -79,7 +84,10 @@ describe('published subtrees (rung 3)', () => {
   it('a replica subscribing MID-computation sees pending immediately (no missed transition)', async () => {
     const backing = signal<{ n: number }>({ n: 1 });
     const st = signal<ResourceStatus>('reloading');
-    const pub = Object.assign(computed(() => backing()), { status: st });
+    const pub = Object.assign(
+      computed(() => backing()),
+      { status: st },
+    );
 
     const host = createWorkerHost({ published: { calc: pub } });
     const injector = TestBed.inject(Injector);

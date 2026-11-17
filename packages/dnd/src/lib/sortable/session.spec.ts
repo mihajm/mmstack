@@ -53,10 +53,13 @@ function setup(injector: Injector) {
   // count how many times `read()`'s value actually propagates to an effect
   const counter = (read: () => unknown) => {
     let runs = 0;
-    effect(() => {
-      read();
-      runs++;
-    }, { injector });
+    effect(
+      () => {
+        read();
+        runs++;
+      },
+      { injector },
+    );
     return {
       get runs() {
         return runs;

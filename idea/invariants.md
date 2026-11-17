@@ -25,22 +25,22 @@ every peer exactly once and **forwarding terminates** (bounded, no infinite rebr
 What stays deferred: the full fair-lossy + reconnect anti-entropy termination over the real transport, and
 L3's frontier-membership (both need the transport/membership impl, not just the algorithm).
 
-
 L1. `[DEFERRED]` **Delivery terminates.** Every op accepted at any replica is EVENTUALLY delivered to every
-    connected replica: a fair-lossy channel + reconnect ⇒ anti-entropy terminates (the sets in Tier-1(1)
-    actually equalize). Safety says "same set → same state"; nothing yet guarantees the sets converge.
+connected replica: a fair-lossy channel + reconnect ⇒ anti-entropy terminates (the sets in Tier-1(1)
+actually equalize). Safety says "same set → same state"; nothing yet guarantees the sets converge.
 L2. `[DEFERRED]` **Forwarding terminates (no infinite rebroadcast).** The P2P mesh has cycles; op-id dedup
-    gives set-SAFETY, but "a peer stops re-forwarding an op it has already relayed" is a separate LIVENESS
-    claim. Assert no unbounded rebroadcast storm.
+gives set-SAFETY, but "a peer stops re-forwarding an op it has already relayed" is a separate LIVENESS
+claim. Assert no unbounded rebroadcast storm.
 L3. `[DEFERRED]` **Frontier advances (pairs with #GC).** GC can only run if the stability frontier moves; a
-    dead/permanently-partitioned replica must not pin it forever → a membership/retirement rule is required
-    (see G3).
+dead/permanently-partitioned replica must not pin it forever → a membership/retirement rule is required
+(see G3).
 
 ## Tier 1 — Convergence & precedence THEOREMS (proven, `packages/primitives/src/lib/store/precedence-proofs.spec.ts`)
+
 Impl-independent; they stay true no matter how the register is built.
 
 1. `[PROVEN]` **Dot-citation live set = a pure function of the delivered op SET** → converges under ANY
-   arrival order, including cites-before-ops and duplicate delivery. *(the load-bearing convergence claim.)*
+   arrival order, including cites-before-ops and duplicate delivery. _(the load-bearing convergence claim.)_
 2. `[PROVEN]` **Any fold over the live set (lww / rank / epoch) is order-independent** → the materialized
    value converges. (Proven for the fold as a scalar `max` over `(epoch, hlc, writer)`; the epoch EMISSION /
    monotone-read side is NOT proven here — see E-tier.)
@@ -52,10 +52,10 @@ Impl-independent; they stay true no matter how the register is built.
 5. `[PROVEN]` **Cite-supersession is RANK-INDEPENDENT** → a causal write always wins regardless of rank; a
    field is NEVER permanently bricked. Supersession = causal knowledge; rank = race resolution; keep the
    lattices orthogonal (rank-GATING breaks invariant 1).
-6a. `[PROVEN]` **Static rank cannot de-escalate; a dynamic EPOCH can.** (the proven part)
-6b. `[DESIGN]` **"Owner veto = the fold" is a modeling CHOICE** (owner writes at epoch+1 → wins the fold) —
-    defensible, but it is a decision, not a theorem. State it as chosen semantics.
-7. `[PROVEN]` **Stale-high-rank resurrection is real** (old-hlc uncited op wins the fold → value jumps back)
+   6a. `[PROVEN]` **Static rank cannot de-escalate; a dynamic EPOCH can.** (the proven part)
+   6b. `[DESIGN]` **"Owner veto = the fold" is a modeling CHOICE** (owner writes at epoch+1 → wins the fold) —
+   defensible, but it is a decision, not a theorem. State it as chosen semantics.
+6. `[PROVEN]` **Stale-high-rank resurrection is real** (old-hlc uncited op wins the fold → value jumps back)
    and **an epoch bump closes it** (kills prior-epoch ops regardless of citation — the ONE legitimately
    rank-gated operation).
 
@@ -85,6 +85,7 @@ Impl-independent; they stay true no matter how the register is built.
 **SHIPPED 2026-07-08 — status update (authoritative as of this date; the per-item `[DEFERRED]` tags
 below predate the build).** The MV-register arc landed and was adversarially reviewed + fixed. Suites:
 primitives 817, mesh-protocol 35, mesh 117, worker 59 (all green). Now `[ASSERTED]`:
+
 - **#14** REAL `createConvergingApply` matches the model — impl-parity property + `zzz-adversarial.spec.ts`
   (incremental-deltas == materialize, every arrival order), `op-sync.spec.ts`.
 - **#15** cites correctness + `prev` kept for inversion — `op-sync.spec.ts` (release-review + emission tests).
@@ -104,14 +105,14 @@ primitives 817, mesh-protocol 35, mesh 117, worker 59 (all green). Now `[ASSERTE
   crash/clone — fresh-origin-per-boot; the clone-divergence characterization FLIPPED to convergence.
 - **#33** cross-path (subtree) dominance via clear-group — impl + `precedence-proofs.spec.ts` Part 2 +
   `op-sync.spec.ts`.
-Also now `[ASSERTED]`: **#22** HLC well-formedness (monotone-under-wall-rewind `hlc.spec.ts` +
-cross-crash safe by fresh-origin #24 + convergence wall-clock-independent); a receive-side frontier
-admission gate landed (W4) closing first-contact below-frontier straggler resurrection on the live path.
-Still genuinely DEFERRED: **#18(c)** frontier membership (L3, min-ack over live members);
-**#32** migration determinism (partial); dead-origin `versions`/`wm` eviction (tiny, W4 caveat).
-The relay epoch/citation admission gate (the #25 relay half) SHIPPED `[ASSERTED 2026-07-16]` — see
-Tier 5 for the enforcement record.
-See Tier 7 for the crash/session characterizations.
+  Also now `[ASSERTED]`: **#22** HLC well-formedness (monotone-under-wall-rewind `hlc.spec.ts` +
+  cross-crash safe by fresh-origin #24 + convergence wall-clock-independent); a receive-side frontier
+  admission gate landed (W4) closing first-contact below-frontier straggler resurrection on the live path.
+  Still genuinely DEFERRED: **#18(c)** frontier membership (L3, min-ack over live members);
+  **#32** migration determinism (partial); dead-origin `versions`/`wm` eviction (tiny, W4 caveat).
+  The relay epoch/citation admission gate (the #25 relay half) SHIPPED `[ASSERTED 2026-07-16]` — see
+  Tier 5 for the enforcement record.
+  See Tier 7 for the crash/session characterizations.
 
 **MODEL-PROVEN 2026-07-07** (`precedence-proofs.spec.ts`, 38 tests — Part 2 added same day, see #19/#33): the pure-model / algorithm halves of
 several Tier-4/5 items are now theorems — only the real-impl wiring stays deferred. Proven: **#17** seed
@@ -218,7 +219,7 @@ deterministic+total — the actual validator is still deferred). What's genuinel
 24. `[DEFERRED]` **No dot reuse across crash / clone.** The classic killer: restore-from-backup or cloned
     persisted storage resumes the SAME id+counter and mints colliding dots → silently breaks Tier-1(1) set
     semantics. Needs persisted-counter FENCING or a fresh replica-id on restore.
-33. `[DEFERRED]` **Cross-path (subtree) dominance — design STATED 2026-07-07 (conflict-precedence §5);
+25. `[DEFERRED]` **Cross-path (subtree) dominance — design STATED 2026-07-07 (conflict-precedence §5);
     model proof + impl remain.** (Appended with a global id; found by the Fable readiness review — the
     proven model is SINGLE-PATH while the real `createConvergingApply` (op-sync.ts:275-314) does stamp-based
     ancestor-rejection + descendant kill/replay, and NOTHING related the citation model to the ancestor
@@ -268,14 +269,14 @@ deterministic+total — the actual validator is still deferred). What's genuinel
     - Client half of the lift: `meshSync.flushUnacked` sends restored-tail origins BEFORE the fresh mint (a
       fresh-origin seed's clear-group cites tail dots, never the reverse), so a citation-verifying room
       admits an offline-first boot.
-    PRECONDITIONS (jsdoc'd): `verifyCitations` only for rooms where every op transits the relay AND the relay
-    is durable (hydrated across restarts) — a room that loses retained state forgets dots honest writers
-    still cite. KNOWN NARROW RACE (accepted, loud-not-divergent): a full below-frontier prune of a bumped
-    path can misclassify an in-flight honest carry as a bump (eject) if the write raced the frontier
-    broadcast to exactly that GC'd path.
-    Tests: `packages/mesh/protocol/src/lib/relay.spec.ts` (epoch-bump + citation-existence describes +
-    maxEpoch/covers unit reads; every guard neuter-verified once, incl. the carry boundary and the
-    schema-drop placement), `packages/mesh/client/src/lib/outbox.spec.ts` (tail-before-seed order, neuter-verified).
+      PRECONDITIONS (jsdoc'd): `verifyCitations` only for rooms where every op transits the relay AND the relay
+      is durable (hydrated across restarts) — a room that loses retained state forgets dots honest writers
+      still cite. KNOWN NARROW RACE (accepted, loud-not-divergent): a full below-frontier prune of a bumped
+      path can misclassify an in-flight honest carry as a bump (eject) if the write raced the frontier
+      broadcast to exactly that GC'd path.
+      Tests: `packages/mesh/protocol/src/lib/relay.spec.ts` (epoch-bump + citation-existence describes +
+      maxEpoch/covers unit reads; every guard neuter-verified once, incl. the carry boundary and the
+      schema-drop placement), `packages/mesh/client/src/lib/outbox.spec.ts` (tail-before-seed order, neuter-verified).
 
 ## Tier 6 — Architectural RULES (discipline; #27 is automatable)
 
@@ -314,6 +315,7 @@ deterministic+total — the actual validator is still deferred). What's genuinel
 ---
 
 ## How to keep this alive
+
 - When a Tier L / 4 / 5 / 7 item ships, change its tag to `[ASSERTED]` and add the test path.
 - When #13 flips, move it to Tier 2; keep the Tier-1(4) Condorcet oracle forever.
 - When #27's lint guard lands, mark it `[ASSERTED]`.

@@ -31,7 +31,7 @@ const parents = new WeakMap<object, HoldParent>();
 /** The scope a hold on `scope` lands on (a forwarding scope's current target). */
 function resolve(scope: object): object {
   const seen = new Set<object>();
-  for (let next = redirects.get(scope); next && !seen.has(scope); ) {
+  for (let next = redirects.get(scope); next && !seen.has(scope);) {
     seen.add(scope);
     scope = next();
     next = redirects.get(scope);
@@ -137,7 +137,7 @@ export function holdIntervalCount(): number {
 export function heldSince(scope: object): number | undefined {
   const all: [number, number | undefined][] = [];
   const seen = new Set<object>();
-  for (let s: object | undefined = resolve(scope); s && !seen.has(s); ) {
+  for (let s: object | undefined = resolve(scope); s && !seen.has(s);) {
     seen.add(s);
     const list = intervals.get(s);
     if (list) all.push(...list);
@@ -149,7 +149,7 @@ export function heldSince(scope: object): number | undefined {
     if (end === undefined && (since === undefined || start < since))
       since = start;
   if (since === undefined) return undefined;
-  for (let moved = true; moved; ) {
+  for (let moved = true; moved;) {
     moved = false;
     for (const [start, end] of all)
       if (end !== undefined && end > since && start < since) {

@@ -1,4 +1,10 @@
-import { inject, Injector, isDevMode, makeEnvironmentProviders, type EnvironmentProviders } from '@angular/core';
+import {
+  inject,
+  Injector,
+  isDevMode,
+  makeEnvironmentProviders,
+  type EnvironmentProviders,
+} from '@angular/core';
 import { type Sink } from './sink';
 import { createTelemetry, TELEMETRY, type TelemetryConfig } from './telemetry';
 
@@ -9,7 +15,9 @@ import { createTelemetry, TELEMETRY, type TelemetryConfig } from './telemetry';
  * handles) gets it for free. Falsy entries/results are filtered; with no valid
  * sinks, `TELEMETRY` resolves to the zero-overhead noop.
  */
-export function provideTelemetry(config: TelemetryConfig): EnvironmentProviders {
+export function provideTelemetry(
+  config: TelemetryConfig,
+): EnvironmentProviders {
   return makeEnvironmentProviders([
     {
       provide: TELEMETRY,
@@ -23,7 +31,10 @@ export function provideTelemetry(config: TelemetryConfig): EnvironmentProviders 
               return typeof entry === 'function' ? entry() : entry;
             } catch (err) {
               if (isDevMode()) {
-                console.warn('[telemetry] sink factory threw — sink skipped', err);
+                console.warn(
+                  '[telemetry] sink factory threw — sink skipped',
+                  err,
+                );
               }
               return null;
             }

@@ -93,7 +93,6 @@ describe('PreloadStrategy', () => {
 
   it('should preload when requester emits predicate matching path', async () => {
     const loadSpy = vi.fn().mockReturnValue(of(true));
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const route = (routerMock.config as Route[])[1]
       .children![0] as any as Route;
 

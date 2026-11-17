@@ -11,5 +11,11 @@
       "output": "styles"
     }
   ],
-  "allowedNonPeerDependencies": ["@mmstack/form-adapters", "@mmstack/form-core", "@mmstack/form-validation", "@mmstack/resource", "@mmstack/primitives"]
+  "allowedNonPeerDependencies": [
+    "@mmstack/form-adapters",
+    "@mmstack/form-core",
+    "@mmstack/form-validation",
+    "@mmstack/resource",
+    "@mmstack/primitives"
+  ]
 }

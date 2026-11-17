@@ -210,7 +210,7 @@ export class ChipsField<TParent = undefined> {
   protected remove({ value, label }: { value: string; label: string }) {
     const state = untracked(this.state);
     state.value.update((cur) => cur.filter((v) => v !== value));
-    this.announcer.announce(`Removed ${label}`);
+    void this.announcer.announce(`Removed ${label}`);
     state.markAsTouched();
   }
 

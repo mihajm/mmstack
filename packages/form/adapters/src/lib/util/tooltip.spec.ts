@@ -11,11 +11,15 @@ describe('Tooltip Utility', () => {
   });
 
   it('should shorten messages longer than maxLen', () => {
-    const message = signal('This is a very long message that should be shortened');
+    const message = signal(
+      'This is a very long message that should be shortened',
+    );
     const { shortened, tooltip: tooltipSignal } = tooltip(message, () => 10);
 
     expect(shortened()).toBe('This is a ...');
-    expect(tooltipSignal()).toBe('This is a very long message that should be shortened');
+    expect(tooltipSignal()).toBe(
+      'This is a very long message that should be shortened',
+    );
   });
 
   it('should use default maxLen of 40', () => {

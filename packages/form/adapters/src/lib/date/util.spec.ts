@@ -31,7 +31,7 @@ describe('Date Utils - attemptToDate', () => {
     const d = new Date();
     const mockMoment = {
       toDate: () => d,
-      unix: () => Math.floor(d.getTime() / 1000)
+      unix: () => Math.floor(d.getTime() / 1000),
     };
     expect(attemptToDate(mockMoment)).toBe(d);
   });
@@ -40,7 +40,7 @@ describe('Date Utils - attemptToDate', () => {
     const d = new Date();
     const mockLuxon = {
       toJSDate: () => d,
-      toUnixInteger: () => Math.floor(d.getTime() / 1000)
+      toUnixInteger: () => Math.floor(d.getTime() / 1000),
     };
     expect(attemptToDate(mockLuxon)).toBe(d);
   });

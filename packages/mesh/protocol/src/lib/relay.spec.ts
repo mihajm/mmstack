@@ -1037,7 +1037,8 @@ describe('pathPrefixAcl', () => {
 describe('createRelay — schemaVersion + migration', () => {
   const welcomeOf = (sock: ReturnType<typeof socket>) =>
     sock.sent.find((m) => m.t === 'welcome') as
-      Extract<ServerMsg, { t: 'welcome' }> | undefined;
+      | Extract<ServerMsg, { t: 'welcome' }>
+      | undefined;
 
   const migrate = (
     relay: ReturnType<typeof createRelay>,
@@ -1132,7 +1133,8 @@ describe('createRelay — schemaVersion + migration', () => {
       schemaVersion: 1, // older than the room's 2
     });
     const rej = old.sock.sent.find((m) => m.t === 'reject') as
-      Extract<ServerMsg, { t: 'reject' }> | undefined;
+      | Extract<ServerMsg, { t: 'reject' }>
+      | undefined;
     expect(rej?.reason).toBe('schema');
     expect(rej?.expected).toBe(2);
   });
@@ -1178,23 +1180,45 @@ describe('createRegisterStore — settle keeps tombstones and baselines', () => 
     ops,
   });
 
-  it('removes only covered siblings and watermarks at or below the origin\'s settled stamp; tombstones stay', () => {
+  it("removes only covered siblings and watermarks at or below the origin's settled stamp; tombstones stay", () => {
     const store = createRegisterStore();
     store.ingest(rEnv('oa', [set([], {})], 1));
     store.ingest(rEnv('oa', [set(['items'], { a: 1 })], 2));
     store.ingest(rEnv('oa', [set(['items', 'deep'], 9)], 3));
     store.ingest(
-      rEnv('oa', [del(['items'], { a: 1 }, { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] })], 4),
+      rEnv(
+        'oa',
+        [
+          del(
+            ['items'],
+            { a: 1 },
+            { cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }] },
+          ),
+        ],
+        4,
+      ),
     );
     store.ingest(
-      rEnv('oa', [del(['items', 'deep'], 9, { cites: [{ origin: 'oa', hlc: { p: 3, l: 0 } }] })], 5),
+      rEnv(
+        'oa',
+        [
+          del(['items', 'deep'], 9, {
+            cites: [{ origin: 'oa', hlc: { p: 3, l: 0 } }],
+          }),
+        ],
+        5,
+      ),
     );
     store.settle({ oa: { p: 100, l: 0 } });
     const cps = store.checkpoint();
     // a register keeps one sibling per origin, so the deletes replaced the sets; what settle
     // removed are the citation watermarks they left behind — the tombstones are untouched
-    expect(regAt(cps, ['items'])?.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
-    expect(regAt(cps, ['items', 'deep'])?.siblings).toEqual([expect.objectContaining({ kind: 'delete' })]);
+    expect(regAt(cps, ['items'])?.siblings).toEqual([
+      expect.objectContaining({ kind: 'delete' }),
+    ]);
+    expect(regAt(cps, ['items', 'deep'])?.siblings).toEqual([
+      expect.objectContaining({ kind: 'delete' }),
+    ]);
     expect(regAt(cps, ['items'])?.water).toEqual({});
   });
 
@@ -1202,10 +1226,23 @@ describe('createRegisterStore — settle keeps tombstones and baselines', () => 
     const store = createRegisterStore();
     store.ingest(rEnv('oa', [set(['x'], 1, { epoch: 5 })], 1));
     store.ingest(
-      rEnv('ob', [{ kind: 'clear', path: ['x'], cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }], epoch: 0 }], 1),
+      rEnv(
+        'ob',
+        [
+          {
+            kind: 'clear',
+            path: ['x'],
+            cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }],
+            epoch: 0,
+          },
+        ],
+        1,
+      ),
     );
     store.settle({ oa: { p: 1, l: 0 }, ob: { p: 1, l: 0 } });
-    expect(regAt(store.checkpoint(), ['x'])?.siblings.map((sib) => sib.origin)).toEqual(['ob']);
+    expect(
+      regAt(store.checkpoint(), ['x'])?.siblings.map((sib) => sib.origin),
+    ).toEqual(['ob']);
     expect(store.maxEpoch(['x'])).toBe(5);
     const reloaded = createRegisterStore();
     reloaded.load(store.checkpoint());
@@ -1358,7 +1395,11 @@ describe('createRelay: settled notice', () => {
     expect(at).toBeGreaterThan(0);
     expect(kinds[at - 1]).toBe('env'); // behind the write, never ahead of it
     const notice = b.sock.sent[at];
-    expect(notice).toMatchObject({ t: 'settled', room: 'r', settled: { oa: { p: 3, l: 0 } } });
+    expect(notice).toMatchObject({
+      t: 'settled',
+      room: 'r',
+      settled: { oa: { p: 3, l: 0 } },
+    });
   });
 });
 
@@ -1441,10 +1482,24 @@ describe('createRelay: epoch-bump admission (canBump)', () => {
 
     expect(violations).toEqual([]);
     expect(a.sock.closed).toBe(false);
-    const drop = { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'epoch-bump', seq: 1 };
+    const drop = {
+      t: 'drop',
+      room: 'r',
+      origin: 'oa',
+      version: 1,
+      reason: 'epoch-bump',
+      seq: 1,
+    };
     expect(a.sock.sent.filter((m) => m.t === 'drop')).toEqual([drop]);
     expect(rows).toEqual([
-      { kind: 'refuse', seq: 1, instance: expect.any(String), origin: 'oa', version: 1, reason: 'epoch-bump' },
+      {
+        kind: 'refuse',
+        seq: 1,
+        instance: expect.any(String),
+        origin: 'oa',
+        version: 1,
+        reason: 'epoch-bump',
+      },
     ]);
     // the refusal's row took a seq; the clean first op did not sequence
     expect(relay.room('r')).toMatchObject({ seq: 1, journal: 0 });
@@ -1524,7 +1579,14 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     expect(violations).toEqual([]);
     expect(forger.sock.closed).toBe(false);
     expect(forger.sock.sent.filter((m) => m.t === 'drop')).toEqual([
-      { t: 'drop', room: 'r', origin: 'of', version: 1, reason: 'citation', seq: 2 },
+      {
+        t: 'drop',
+        room: 'r',
+        origin: 'of',
+        version: 1,
+        reason: 'citation',
+        seq: 2,
+      },
     ]);
     expect(relay.room('r')).toMatchObject({ seq: 2, journal: 1 });
   });
@@ -1685,7 +1747,11 @@ describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
     ]);
     // oc cites oa's dot: oa's sibling is superseded and leaves the live set; ob's stays
     store.ingest(
-      rEnv('oc', [set(['doc'], 'c', { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] })], 3),
+      rEnv(
+        'oc',
+        [set(['doc'], 'c', { cites: [{ origin: 'oa', hlc: { p: 1, l: 0 } }] })],
+        3,
+      ),
     );
     expect(seen(['doc'])).toEqual([
       ['ob', 'b'],
@@ -1693,7 +1759,11 @@ describe('createRegisterStore — admission reads (maxEpoch / covers)', () => {
     ]);
     // a delete is a live sibling too, carried with its kind
     store.ingest(
-      rEnv('od', [del(['doc'], 'c', { cites: [{ origin: 'oc', hlc: { p: 3, l: 0 } }] })], 4),
+      rEnv(
+        'od',
+        [del(['doc'], 'c', { cites: [{ origin: 'oc', hlc: { p: 3, l: 0 } }] })],
+        4,
+      ),
     );
     expect(seen(['doc'])).toEqual([
       ['ob', 'b'],
@@ -1959,9 +2029,13 @@ describe('createRelay: per-room policy authority', () => {
     expect(
       writeTo('w3', 'o3', 'owned-room', [set(['x'], 1, { epoch: 1 })]).closed,
     ).toBe(false);
-    const refused = writeTo('w4', 'o4', 'open-room', [set(['x'], 1, { epoch: 1 })]);
+    const refused = writeTo('w4', 'o4', 'open-room', [
+      set(['x'], 1, { epoch: 1 }),
+    ]);
     expect(refused.closed).toBe(false); // refused, not ejected
-    expect(refused.sent.filter((m) => m.t === 'drop')).toMatchObject([{ reason: 'epoch-bump' }]);
+    expect(refused.sent.filter((m) => m.t === 'drop')).toMatchObject([
+      { reason: 'epoch-bump' },
+    ]);
   });
 });
 
@@ -2388,7 +2462,16 @@ describe('createRelay: durable release', () => {
     while (pending.length > 0) resolveOne(Math.floor(rnd() * pending.length));
     await settle();
 
-    return { peers, all, byDot, violations, states, crashPoint, own, instance: relay.room('r')?.instance ?? '' };
+    return {
+      peers,
+      all,
+      byDot,
+      violations,
+      states,
+      crashPoint,
+      own,
+      instance: relay.room('r')?.instance ?? '',
+    };
   };
 
   it('P1/P2/P3: nothing is released early, everything is released, per-connection seqs rise (200 seeds)', async () => {
@@ -2518,7 +2601,8 @@ describe('createRelay: durable release', () => {
       { t: 'welcome' }
     >;
     expect(welcome.mode).toBe('snapshot');
-    if (welcome.mode !== 'snapshot' || !welcome.registers) throw new Error('unreachable');
+    if (welcome.mode !== 'snapshot' || !welcome.registers)
+      throw new Error('unreachable');
     expect(welcome.seq).toBe(1);
     expect(regAt(welcome.registers, ['a'])).toBeDefined();
     expect(regAt(welcome.registers, ['later'])).toBeUndefined();
@@ -2648,14 +2732,17 @@ describe('createRelay: the commit checkpoint is a thunk', () => {
 // receive, or the two sides retain different op sets and a joiner is seeded into divergence.
 // ─────────────────────────────────────────────────────────────────────────────
 
-
 describe('createRelay: refusals answered with a drop', () => {
   const dropsTo = (sock: { sent: ServerMsg[] }) =>
-    sock.sent.filter((m): m is Extract<ServerMsg, { t: 'drop' }> => m.t === 'drop');
+    sock.sent.filter(
+      (m): m is Extract<ServerMsg, { t: 'drop' }> => m.t === 'drop',
+    );
 
   it('a resend of an admitted version is answered "duplicate" — the acknowledgement — and never sequenced twice', () => {
     const reasons: string[] = [];
-    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
+    const relay = createRelay({
+      onDrop: (_room, _env, reason) => void reasons.push(reason),
+    });
     const a = client(relay, 'wa', 'oa');
     const b = client(relay, 'wb', 'ob');
     a.hello();
@@ -2666,7 +2753,14 @@ describe('createRelay: refusals answered with a drop', () => {
     expect(relay.room('r')?.seq).toBe(1);
     expect(reasons).toEqual(['duplicate']);
     expect(dropsTo(a.sock)).toEqual([
-      { t: 'drop', room: 'r', origin: 'oa', version: 1, reason: 'duplicate', seq: 1 },
+      {
+        t: 'drop',
+        room: 'r',
+        origin: 'oa',
+        version: 1,
+        reason: 'duplicate',
+        seq: 1,
+      },
     ]);
     expect(dropsTo(b.sock)).toEqual([]); // the submitter alone hears it
     expect(b.sock.sent.filter((m) => m.t === 'env').length).toBe(echoed);
@@ -2676,12 +2770,19 @@ describe('createRelay: refusals answered with a drop', () => {
     // an agent may take a record from nobody or from another client, never from a person
     const relay = createRelay({
       policy: {
-        validate: (op: StoreOp, ctx: PrincipalCtx, _room: string, info?: PolicyRoomInfo) =>
+        validate: (
+          op: StoreOp,
+          ctx: PrincipalCtx,
+          _room: string,
+          info?: PolicyRoomInfo,
+        ) =>
           ctx.kind !== 'agent' ||
           op.kind !== 'set' ||
           op.path.join('/') !== 'wp/assignee' ||
           (info?.siblings?.(op.path) ?? []).every(
-            (s) => s.kind !== 'set' || (s.value as { kind?: string } | null)?.kind !== 'human',
+            (s) =>
+              s.kind !== 'set' ||
+              (s.value as { kind?: string } | null)?.kind !== 'human',
           ),
       },
     });
@@ -2706,7 +2807,9 @@ describe('createRelay: refusals answered with a drop', () => {
 
   it('an envelope from another generation is refused "generation" before any other evidence answers', () => {
     const reasons: string[] = [];
-    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
+    const relay = createRelay({
+      onDrop: (_room, _env, reason) => void reasons.push(reason),
+    });
     const a = client(relay, 'wa', 'oa');
     a.hello();
     a.env([set(['x'], 1)]);
@@ -2740,7 +2843,9 @@ describe('createRelay: refusals answered with a drop', () => {
 
   it('a version below the origin\'s admitted maximum that was never admitted is refused "order"', () => {
     const reasons: string[] = [];
-    const relay = createRelay({ onDrop: (_room, _env, reason) => void reasons.push(reason) });
+    const relay = createRelay({
+      onDrop: (_room, _env, reason) => void reasons.push(reason),
+    });
     const a = client(relay, 'wa', 'oa');
     a.hello();
     a.env([set(['x'], 1)], { version: 2 }); // a hole at 1 (a refused write, or a second tab)
@@ -2781,7 +2886,11 @@ describe('createRelay: refusals answered with a drop', () => {
     const reasons: string[] = [];
     back.env([set(['x'], 1)], { version: 2, hlc: { p: 2, l: 0 } }); // a resend of what the old room held
     expect(revived.room('r')?.seq).toBe(3);
-    expect(back.sock.sent.filter((m) => m.t === 'drop').map((m) => (m as { reason: string }).reason)).toEqual(['duplicate']);
+    expect(
+      back.sock.sent
+        .filter((m) => m.t === 'drop')
+        .map((m) => (m as { reason: string }).reason),
+    ).toEqual(['duplicate']);
     back.env([set(['x'], 3)], { version: 4 });
     expect(revived.room('r')?.seq).toBe(4);
     void reasons;
@@ -2838,11 +2947,18 @@ describe('createRelay: the room sequence reaches the policy', () => {
     // an agent may take a record from nobody or from another client, never from a person; the
     // rule reads the relay's register, not the op's claim of what it saw
     const holderPolicy = {
-      validate: (op: StoreOp, ctx: PrincipalCtx, _room: string, info?: PolicyRoomInfo) => {
+      validate: (
+        op: StoreOp,
+        ctx: PrincipalCtx,
+        _room: string,
+        info?: PolicyRoomInfo,
+      ) => {
         if (ctx.kind !== 'agent' || op.kind !== 'set') return true;
         if (op.path.join('/') !== 'wp/assignee') return true;
         return (info?.siblings?.(op.path) ?? []).every(
-          (s) => s.kind !== 'set' || (s.value as { kind?: string } | null)?.kind !== 'human',
+          (s) =>
+            s.kind !== 'set' ||
+            (s.value as { kind?: string } | null)?.kind !== 'human',
         );
       },
     };
@@ -2870,7 +2986,10 @@ describe('createRelay: the room sequence reaches the policy', () => {
     };
 
     const fromPerson = held({ kind: 'human', writer: 'wh' });
-    expect(last(fromPerson.sock)).toMatchObject({ t: 'eject', reason: 'validate' });
+    expect(last(fromPerson.sock)).toMatchObject({
+      t: 'eject',
+      reason: 'validate',
+    });
     expect(fromPerson.sock.closed).toBe(true);
 
     const fromClient = held({ kind: 'client', writer: 'wx' });

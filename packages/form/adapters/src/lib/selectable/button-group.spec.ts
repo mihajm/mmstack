@@ -1,6 +1,9 @@
 import { TestBed } from '@angular/core/testing';
 import { provideValidatorConfig } from '@mmstack/form-validation';
-import { createButtonGroupState, injectCreateButtonGroupState } from './button-group';
+import {
+  createButtonGroupState,
+  injectCreateButtonGroupState,
+} from './button-group';
 
 describe('ButtonGroup Adapter', () => {
   describe('createButtonGroupState (standalone)', () => {
@@ -15,12 +18,12 @@ describe('ButtonGroup Adapter', () => {
     });
 
     it('should support object identification', () => {
-        const items = [{ id: 1 }, { id: 2 }];
-        const state = createButtonGroupState(items[0], {
-            options: () => items,
-            identify: () => (i) => i.id.toString()
-        });
-        expect(state.options()[0].id).toBe('1');
+      const items = [{ id: 1 }, { id: 2 }];
+      const state = createButtonGroupState(items[0], {
+        options: () => items,
+        identify: () => (i) => i.id.toString(),
+      });
+      expect(state.options()[0].id).toBe('1');
     });
   });
 
@@ -41,7 +44,7 @@ describe('ButtonGroup Adapter', () => {
         } as any);
 
         expect(state.error()).toBe('Choice is required');
-        
+
         state.value.set('a');
         expect(state.error()).toBe('');
       });

@@ -233,10 +233,7 @@ describe('translation-store', () => {
 
       it('shares a single params object across multiple keys (class-field aliasing)', () => {
         const params = { name: 'Alice' };
-        const greet = store.buildParamKeySignal(
-          'ns::MMT_DELIM::greet',
-          params,
-        );
+        const greet = store.buildParamKeySignal('ns::MMT_DELIM::greet', params);
         const bye = store.buildParamKeySignal('ns::MMT_DELIM::bye', params);
         expect(greet.signal).not.toBe(bye.signal);
         expect(greet.container).not.toBe(bye.container);
@@ -315,7 +312,6 @@ describe('translation-store', () => {
         });
 
         @Component({
-          // eslint-disable-next-line @angular-eslint/component-selector
           selector: 'tpl-host',
           template: `
             <span class="g">{{
@@ -818,9 +814,7 @@ describe('translation-store', () => {
       });
 
       expect(store.formatMessage('live::MMT_DELIM::kept')).toBe('new kept');
-      expect(store.formatMessage('live::MMT_DELIM::fresh')).toBe(
-        'fresh value',
-      );
+      expect(store.formatMessage('live::MMT_DELIM::fresh')).toBe('fresh value');
       expect(store.formatMessage('live::MMT_DELIM::stale')).toBe('');
 
       store.locale.set('sl-SI');

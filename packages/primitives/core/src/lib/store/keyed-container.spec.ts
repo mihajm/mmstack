@@ -97,7 +97,8 @@ describe('posBetween', () => {
       const p = posBetween(lo, hi);
       keys.splice(at, 0, p);
     }
-    for (let i = 1; i < keys.length; i++) expect(keys[i - 1] < keys[i]).toBe(true);
+    for (let i = 1; i < keys.length; i++)
+      expect(keys[i - 1] < keys[i]).toBe(true);
     expect(new Set(keys).size).toBe(keys.length); // all distinct
   });
 });
@@ -145,7 +146,9 @@ type Rep = {
   readonly name: string;
   readonly element: (pos: string, title: string) => Record<string, unknown>;
   readonly titlePath: (key: string) => string[];
-  readonly entries: (container: Record<string, unknown>) => OrderedEntry<unknown>[];
+  readonly entries: (
+    container: Record<string, unknown>,
+  ) => OrderedEntry<unknown>[];
   readonly payload: (pos: string, title: string) => unknown;
 };
 
@@ -161,23 +164,29 @@ const REPS: readonly Rep[] = [
     name: 'wrapped',
     element: (pos, title) => ({ [POS]: pos, value: { title } }),
     titlePath: (key) => [...LIST, key, 'value', 'title'],
-    entries: (c) => wrappedHelpers.entries(c as Record<string, ContainerEntry<El>>),
+    entries: (c) =>
+      wrappedHelpers.entries(c as Record<string, ContainerEntry<El>>),
     payload: (_pos, title) => ({ title }),
   },
 ];
 
 const containerOf = (root: unknown): Record<string, unknown> => {
   const list = (root as { list?: unknown })?.list;
-  return list && typeof list === 'object' && !Array.isArray(list) ? (list as Record<string, unknown>) : {};
+  return list && typeof list === 'object' && !Array.isArray(list)
+    ? (list as Record<string, unknown>)
+    : {};
 };
 const listSig = (conv: ConvergingApply, rep: Rep): string =>
-  JSON.stringify(rep.entries(containerOf(conv.materialize())).map((e) => [e.key, e.value]));
+  JSON.stringify(
+    rep.entries(containerOf(conv.materialize())).map((e) => [e.key, e.value]),
+  );
 const listKeys = (conv: ConvergingApply, rep: Rep): string[] =>
   rep.entries(containerOf(conv.materialize())).map((e) => e.key);
 
 /** the world's current container positions, for computing neighbor-relative inserts/moves. Both
  *  representations keep `~pos` at the element root, so ordering reads the same either way. */
-const worldEntries = (world: ConvergingApply) => orderedEntries(containerOf(world.materialize()));
+const worldEntries = (world: ConvergingApply) =>
+  orderedEntries(containerOf(world.materialize()));
 
 const POOL = ['k0', 'k1', 'k2', 'k3', 'k4', 'k5'];
 
@@ -188,7 +197,11 @@ function genListEnvs(seed: number, rounds: number, rep: Rep): OpEnvelope[] {
   const world = createConvergingApply();
   const out: OpEnvelope[] = [];
   let clock = 0;
-  const emit = (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }): void => {
+  const emit = (
+    ops: readonly StoreOp[],
+    writer: string,
+    opt?: { bump?: boolean },
+  ): void => {
     const stamped = world.stamp(ops, opt);
     const e: OpEnvelope = {
       proto: OP_PROTO_VERSION,
@@ -211,8 +224,26 @@ function genListEnvs(seed: number, rounds: number, rep: Rep): OpEnvelope[] {
   };
 
   emit([{ kind: 'set', path: LIST, next: {} }], 'w0');
-  emit([{ kind: 'set', path: [...LIST, 'k0'], next: rep.element(posBetween(), 'seed0') }], 'w0');
-  emit([{ kind: 'set', path: [...LIST, 'k1'], next: rep.element(posBetween('k0'), 'seed1') }], 'w0');
+  emit(
+    [
+      {
+        kind: 'set',
+        path: [...LIST, 'k0'],
+        next: rep.element(posBetween(), 'seed0'),
+      },
+    ],
+    'w0',
+  );
+  emit(
+    [
+      {
+        kind: 'set',
+        path: [...LIST, 'k1'],
+        next: rep.element(posBetween('k0'), 'seed1'),
+      },
+    ],
+    'w0',
+  );
 
   for (let i = 0; i < rounds; i++) {
     const writer = 'w' + Math.floor(r() * 3);
@@ -220,13 +251,25 @@ function genListEnvs(seed: number, rounds: number, rep: Rep): OpEnvelope[] {
     const roll = r();
     if (roll < 0.3 || live.length === 0) {
       const k = POOL[Math.floor(r() * POOL.length)];
-      emit([{ kind: 'set', path: [...LIST, k], next: rep.element(posPick(), `${writer}:${i}`) }], writer);
+      emit(
+        [
+          {
+            kind: 'set',
+            path: [...LIST, k],
+            next: rep.element(posPick(), `${writer}:${i}`),
+          },
+        ],
+        writer,
+      );
     } else if (roll < 0.5) {
       const k = live[Math.floor(r() * live.length)];
       emit([{ kind: 'set', path: [...LIST, k, POS], next: posPick() }], writer);
     } else if (roll < 0.68) {
       const k = live[Math.floor(r() * live.length)];
-      emit([{ kind: 'set', path: rep.titlePath(k), next: `edit:${writer}:${i}` }], writer);
+      emit(
+        [{ kind: 'set', path: rep.titlePath(k), next: `edit:${writer}:${i}` }],
+        writer,
+      );
     } else if (roll < 0.82) {
       const k = live[Math.floor(r() * live.length)];
       emit([{ kind: 'delete', path: [...LIST, k], prev: undefined }], writer);
@@ -276,7 +319,9 @@ describe.each(REPS)(
           expect(listSig(run(envs, order + seed * 11), rep)).toBe(expected);
         }
         // split every group into one op per envelope, then duplicate half the stream
-        const split = envs.flatMap((e) => e.ops.map((op) => ({ ...e, ops: [op] })));
+        const split = envs.flatMap((e) =>
+          e.ops.map((op) => ({ ...e, ops: [op] })),
+        );
         const dup = [...split, ...split.slice(0, Math.floor(split.length / 2))];
         expect(listSig(run(split, seed * 7), rep)).toBe(expected);
         expect(listSig(run(dup, seed * 29), rep)).toBe(expected);
@@ -285,12 +330,26 @@ describe.each(REPS)(
 
     it('vacuity guard: the workload exercises every op class and leaves populated lists', () => {
       const editDepth = rep.titlePath('k').length;
-      let inserts = 0, moves = 0, edits = 0, deletes = 0, rewrites = 0, rebalances = 0, clears = 0, populated = 0;
+      let inserts = 0,
+        moves = 0,
+        edits = 0,
+        deletes = 0,
+        rewrites = 0,
+        rebalances = 0,
+        clears = 0,
+        populated = 0;
       for (let seed = 1; seed <= 20; seed++) {
         const envs = genListEnvs(seed * 47, 22, rep);
         for (const e of envs) {
-          const posSets = e.ops.filter((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS);
-          if (e.ops.length >= 2 && posSets.length === e.ops.length && posSets.length >= 2) rebalances++;
+          const posSets = e.ops.filter(
+            (o) => o.kind === 'set' && o.path[o.path.length - 1] === POS,
+          );
+          if (
+            e.ops.length >= 2 &&
+            posSets.length === e.ops.length &&
+            posSets.length >= 2
+          )
+            rebalances++;
           for (const o of e.ops) {
             const depth = o.path.length;
             const last = o.path[depth - 1];
@@ -298,13 +357,27 @@ describe.each(REPS)(
             else if (o.kind === 'delete' && depth === 2) deletes++;
             else if (o.kind === 'set' && depth === 2) inserts++;
             else if (o.kind === 'set' && depth === 3 && last === POS) moves++;
-            else if (o.kind === 'set' && depth === editDepth && last === 'title') edits++;
-            else if (o.kind === 'set' && depth === 1 && e.version > 1) rewrites++;
+            else if (
+              o.kind === 'set' &&
+              depth === editDepth &&
+              last === 'title'
+            )
+              edits++;
+            else if (o.kind === 'set' && depth === 1 && e.version > 1)
+              rewrites++;
           }
         }
         if (listKeys(run(envs, 1), rep).length >= 2) populated++;
       }
-      for (const n of [inserts, moves, edits, deletes, rewrites, rebalances, clears]) {
+      for (const n of [
+        inserts,
+        moves,
+        edits,
+        deletes,
+        rewrites,
+        rebalances,
+        clears,
+      ]) {
         expect(n).toBeGreaterThan(0);
       }
       expect(populated).toBeGreaterThanOrEqual(10);
@@ -323,13 +396,25 @@ describe.each(REPS)(
 function scenario(rep: Rep): {
   world: ConvergingApply;
   base: OpEnvelope[];
-  emit: (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }) => OpEnvelope;
-  stamp: (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }) => OpEnvelope;
+  emit: (
+    ops: readonly StoreOp[],
+    writer: string,
+    opt?: { bump?: boolean },
+  ) => OpEnvelope;
+  stamp: (
+    ops: readonly StoreOp[],
+    writer: string,
+    opt?: { bump?: boolean },
+  ) => OpEnvelope;
 } {
   const world = createConvergingApply();
   const base: OpEnvelope[] = [];
   let clock = 0;
-  const wrap = (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }): OpEnvelope => ({
+  const wrap = (
+    ops: readonly StoreOp[],
+    writer: string,
+    opt?: { bump?: boolean },
+  ): OpEnvelope => ({
     proto: OP_PROTO_VERSION,
     instance: 'g',
     origin: writer,
@@ -339,119 +424,182 @@ function scenario(rep: Rep): {
     policyVersion: 0,
     ops: world.stamp(ops, opt),
   });
-  const emit = (ops: readonly StoreOp[], writer: string, opt?: { bump?: boolean }): OpEnvelope => {
+  const emit = (
+    ops: readonly StoreOp[],
+    writer: string,
+    opt?: { bump?: boolean },
+  ): OpEnvelope => {
     const e = wrap(ops, writer, opt);
     world.ingest(e, { local: true });
     base.push(e);
     return e;
   };
   emit([{ kind: 'set', path: LIST, next: {} }], 'w0');
-  emit([{ kind: 'set', path: [...LIST, 'a'], next: rep.element('3', 'A') }], 'w0');
-  emit([{ kind: 'set', path: [...LIST, 'b'], next: rep.element('6', 'B') }], 'w0');
+  emit(
+    [{ kind: 'set', path: [...LIST, 'a'], next: rep.element('3', 'A') }],
+    'w0',
+  );
+  emit(
+    [{ kind: 'set', path: [...LIST, 'b'], next: rep.element('6', 'B') }],
+    'w0',
+  );
   return { world, base, emit, stamp: wrap };
 }
 
-const convergedList = (envs: readonly OpEnvelope[], rep: Rep, orders = 6): ConvergingApply => {
+const convergedList = (
+  envs: readonly OpEnvelope[],
+  rep: Rep,
+  orders = 6,
+): ConvergingApply => {
   const expected = listSig(run(envs, 1), rep);
-  for (let o = 2; o <= orders; o++) expect(listSig(run(envs, o * 7 + 3), rep)).toBe(expected);
+  for (let o = 2; o <= orders; o++)
+    expect(listSig(run(envs, o * 7 + 3), rep)).toBe(expected);
   return run(envs, 1);
 };
 
-describe.each(REPS)('KEYED CONTAINER obligations on the real register ($name)', (rep) => {
-  it('move vs data edit (disjoint paths) both survive; order follows the move', () => {
-    const { stamp, base } = scenario(rep);
-    const move = stamp([{ kind: 'set', path: [...LIST, 'a', POS], next: '9' }], 'w1'); // a after b
-    const edit = stamp([{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }], 'w2');
-    const conv = convergedList([...base, move, edit], rep);
-    const a = rep.entries(containerOf(conv.materialize())).find((e) => e.key === 'a');
-    expect(a?.pos).toBe('9');
-    expect(a?.value).toEqual(rep.payload('9', 'edited'));
-    expect(listKeys(conv, rep)).toEqual(['b', 'a']);
-  });
+describe.each(REPS)(
+  'KEYED CONTAINER obligations on the real register ($name)',
+  (rep) => {
+    it('move vs data edit (disjoint paths) both survive; order follows the move', () => {
+      const { stamp, base } = scenario(rep);
+      const move = stamp(
+        [{ kind: 'set', path: [...LIST, 'a', POS], next: '9' }],
+        'w1',
+      ); // a after b
+      const edit = stamp(
+        [{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }],
+        'w2',
+      );
+      const conv = convergedList([...base, move, edit], rep);
+      const a = rep
+        .entries(containerOf(conv.materialize()))
+        .find((e) => e.key === 'a');
+      expect(a?.pos).toBe('9');
+      expect(a?.value).toEqual(rep.payload('9', 'edited'));
+      expect(listKeys(conv, rep)).toEqual(['b', 'a']);
+    });
 
-  it('un-bumped whole-list rewrite SPARES a concurrent element edit (grafted into the new list)', () => {
-    const { stamp, base } = scenario(rep);
-    const edit = stamp([{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }], 'w1');
-    // rewrite keeps a (new pos), drops b, adds c; NOT bumped, so its clears do not kill the edit
-    const rewrite = stamp(
-      [{ kind: 'set', path: LIST, next: { a: rep.element('2', 'A2'), c: rep.element('5', 'C') } }],
-      'w2',
-    );
-    const conv = convergedList([...base, edit, rewrite], rep);
-    const entries = rep.entries(containerOf(conv.materialize()));
-    expect(entries.map((e) => e.key)).toEqual(['a', 'c']); // b gone
-    expect(entries[0].value).toEqual(rep.payload('2', 'edited')); // new list, your edit
-    expect(entries[1].value).toEqual(rep.payload('5', 'C'));
-  });
+    it('un-bumped whole-list rewrite SPARES a concurrent element edit (grafted into the new list)', () => {
+      const { stamp, base } = scenario(rep);
+      const edit = stamp(
+        [{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }],
+        'w1',
+      );
+      // rewrite keeps a (new pos), drops b, adds c; NOT bumped, so its clears do not kill the edit
+      const rewrite = stamp(
+        [
+          {
+            kind: 'set',
+            path: LIST,
+            next: { a: rep.element('2', 'A2'), c: rep.element('5', 'C') },
+          },
+        ],
+        'w2',
+      );
+      const conv = convergedList([...base, edit, rewrite], rep);
+      const entries = rep.entries(containerOf(conv.materialize()));
+      expect(entries.map((e) => e.key)).toEqual(['a', 'c']); // b gone
+      expect(entries[0].value).toEqual(rep.payload('2', 'edited')); // new list, your edit
+      expect(entries[1].value).toEqual(rep.payload('5', 'C'));
+    });
 
-  it('bumped rebalance KILLS a concurrent move but LEAVES a concurrent data edit', () => {
-    const { stamp, base } = scenario(rep);
-    const reb = stamp(
-      [
-        { kind: 'set', path: [...LIST, 'a', POS], next: '1' },
-        { kind: 'set', path: [...LIST, 'b', POS], next: '2' },
-      ],
-      'admin',
-      { bump: true },
-    );
-    const move = stamp([{ kind: 'set', path: [...LIST, 'a', POS], next: 'z' }], 'w1'); // higher hlc, epoch 0
-    const edit = stamp([{ kind: 'set', path: rep.titlePath('b'), next: 'kept' }], 'w2');
-    const conv = convergedList([...base, reb, move, edit], rep);
-    const entries = rep.entries(containerOf(conv.materialize()));
-    const a = entries.find((e) => e.key === 'a');
-    const b = entries.find((e) => e.key === 'b');
-    expect(a?.pos).toBe('1'); // rebalanced pos won over the higher-hlc move (epoch outermost)
-    expect(b?.pos).toBe('2');
-    expect(b?.value).toEqual(rep.payload('2', 'kept')); // rebalanced pos AND the edit both present
-    expect(entries.map((e) => e.key)).toEqual(['a', 'b']);
-  });
+    it('bumped rebalance KILLS a concurrent move but LEAVES a concurrent data edit', () => {
+      const { stamp, base } = scenario(rep);
+      const reb = stamp(
+        [
+          { kind: 'set', path: [...LIST, 'a', POS], next: '1' },
+          { kind: 'set', path: [...LIST, 'b', POS], next: '2' },
+        ],
+        'admin',
+        { bump: true },
+      );
+      const move = stamp(
+        [{ kind: 'set', path: [...LIST, 'a', POS], next: 'z' }],
+        'w1',
+      ); // higher hlc, epoch 0
+      const edit = stamp(
+        [{ kind: 'set', path: rep.titlePath('b'), next: 'kept' }],
+        'w2',
+      );
+      const conv = convergedList([...base, reb, move, edit], rep);
+      const entries = rep.entries(containerOf(conv.materialize()));
+      const a = entries.find((e) => e.key === 'a');
+      const b = entries.find((e) => e.key === 'b');
+      expect(a?.pos).toBe('1'); // rebalanced pos won over the higher-hlc move (epoch outermost)
+      expect(b?.pos).toBe('2');
+      expect(b?.value).toEqual(rep.payload('2', 'kept')); // rebalanced pos AND the edit both present
+      expect(entries.map((e) => e.key)).toEqual(['a', 'b']);
+    });
 
-  it('element delete WINS the [C,k] race; the orphan pos register REVIVES on a re-create that did not observe the move', () => {
-    const { emit, stamp, base } = scenario(rep);
-    const move0 = emit([{ kind: 'set', path: [...LIST, 'a', POS], next: '4' }], 'w0'); // real POS register
-    // move + del both observe move0 (so both supersede it) but NOT each other: genuine concurrency
-    const move = stamp([{ kind: 'set', path: [...LIST, 'a', POS], next: '8' }], 'w1');
-    const del = stamp([{ kind: 'delete', path: [...LIST, 'a'], prev: undefined }], 'w2'); // delete + clears
-    const conv0 = convergedList([...base, move0, move, del], rep);
-    expect(listKeys(conv0, rep)).toEqual(['b']); // delete cited the element → gone
+    it('element delete WINS the [C,k] race; the orphan pos register REVIVES on a re-create that did not observe the move', () => {
+      const { emit, stamp, base } = scenario(rep);
+      const move0 = emit(
+        [{ kind: 'set', path: [...LIST, 'a', POS], next: '4' }],
+        'w0',
+      ); // real POS register
+      // move + del both observe move0 (so both supersede it) but NOT each other: genuine concurrency
+      const move = stamp(
+        [{ kind: 'set', path: [...LIST, 'a', POS], next: '8' }],
+        'w1',
+      );
+      const del = stamp(
+        [{ kind: 'delete', path: [...LIST, 'a'], prev: undefined }],
+        'w2',
+      ); // delete + clears
+      const conv0 = convergedList([...base, move0, move, del], rep);
+      expect(listKeys(conv0, rep)).toEqual(['b']); // delete cited the element → gone
 
-    // re-create citing only the tombstone (did NOT observe the orphan move): the orphan pos resurfaces
-    const recreate: OpEnvelope = {
-      proto: OP_PROTO_VERSION,
-      instance: 'g',
-      origin: 'w3',
-      writer: 'w3',
-      version: 1,
-      hlc: { p: 30, l: 0 },
-      policyVersion: 0,
-      ops: [
-        {
-          kind: 'set',
-          path: [...LIST, 'a'],
-          next: rep.element('7', 're'),
-          cites: [{ origin: del.origin, hlc: del.hlc }], // cites the tombstone only
-          epoch: 1,
-        },
-      ],
-    };
-    const revived = convergedList([...base, move0, move, del, recreate], rep);
-    const a = rep.entries(containerOf(revived.materialize())).find((e) => e.key === 'a');
-    expect(a?.pos).toBe('8'); // orphan pos 8 resurfaced over the re-create's 7
-    expect(a?.value).toEqual(rep.payload('8', 're'));
-  });
+      // re-create citing only the tombstone (did NOT observe the orphan move): the orphan pos resurfaces
+      const recreate: OpEnvelope = {
+        proto: OP_PROTO_VERSION,
+        instance: 'g',
+        origin: 'w3',
+        writer: 'w3',
+        version: 1,
+        hlc: { p: 30, l: 0 },
+        policyVersion: 0,
+        ops: [
+          {
+            kind: 'set',
+            path: [...LIST, 'a'],
+            next: rep.element('7', 're'),
+            cites: [{ origin: del.origin, hlc: del.hlc }], // cites the tombstone only
+            epoch: 1,
+          },
+        ],
+      };
+      const revived = convergedList([...base, move0, move, del, recreate], rep);
+      const a = rep
+        .entries(containerOf(revived.materialize()))
+        .find((e) => e.key === 'a');
+      expect(a?.pos).toBe('8'); // orphan pos 8 resurfaced over the re-create's 7
+      expect(a?.value).toEqual(rep.payload('8', 're'));
+    });
 
-  it('duplicate delivery of whole insert/delete/rebalance groups is idempotent', () => {
-    const { emit, base } = scenario(rep);
-    const edit = emit([{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }], 'w1');
-    const reins = emit([{ kind: 'set', path: [...LIST, 'a'], next: rep.element('4', 'A2') }], 'w2');
-    const del = emit([{ kind: 'delete', path: [...LIST, 'b'], prev: undefined }], 'w1');
-    const all = [...base, edit, reins, del];
-    const once = listSig(run(all, 1), rep);
-    for (let order = 1; order <= 5; order++) {
-      expect(listSig(run([...all, reins, del, del], order * 13 + 1), rep)).toBe(once);
-    }
-  });
-});
+    it('duplicate delivery of whole insert/delete/rebalance groups is idempotent', () => {
+      const { emit, base } = scenario(rep);
+      const edit = emit(
+        [{ kind: 'set', path: rep.titlePath('a'), next: 'edited' }],
+        'w1',
+      );
+      const reins = emit(
+        [{ kind: 'set', path: [...LIST, 'a'], next: rep.element('4', 'A2') }],
+        'w2',
+      );
+      const del = emit(
+        [{ kind: 'delete', path: [...LIST, 'b'], prev: undefined }],
+        'w1',
+      );
+      const all = [...base, edit, reins, del];
+      const once = listSig(run(all, 1), rep);
+      for (let order = 1; order <= 5; order++) {
+        expect(
+          listSig(run([...all, reins, del, del], order * 13 + 1), rep),
+        ).toBe(once);
+      }
+    });
+  },
+);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Write helpers over a REAL store + opSync: element-granular ops, pos-only move, bumped rebalance
@@ -470,12 +618,18 @@ describe('write helpers over a real store + opSync', () => {
   }
 
   it('insert adds a per-key element and reads back in order', () => {
-    const { node, sync, emitted } = setup({ a: { [POS]: '3', title: 'A' } as El });
+    const { node, sync, emitted } = setup({
+      a: { [POS]: '3', title: 'A' } as El,
+    });
     insertElement(node, 'c', { title: 'C' }, 1); // append after a
     insertElement(node, 'b', { title: 'B' }, 0); // prepend before a
     sync.flush();
     const flat = emitted.flatMap((e) => e.ops);
-    expect(flat.every((o) => o.kind === 'set' && o.path[0] === 'list' && o.path.length === 2)).toBe(true);
+    expect(
+      flat.every(
+        (o) => o.kind === 'set' && o.path[0] === 'list' && o.path.length === 2,
+      ),
+    ).toBe(true);
     expect(orderedEntries(node()).map((e) => e.key)).toEqual(['b', 'a', 'c']);
   });
 
@@ -500,7 +654,9 @@ describe('write helpers over a real store + opSync', () => {
     removeElement(node, 'a');
     sync.flush();
     const flat = emitted.flatMap((e) => e.ops);
-    expect(flat.some((o) => o.kind === 'delete' && o.path.join('/') === 'list/a')).toBe(true);
+    expect(
+      flat.some((o) => o.kind === 'delete' && o.path.join('/') === 'list/a'),
+    ).toBe(true);
     expect(Object.keys(node())).toEqual(['b']);
   });
 
@@ -515,7 +671,9 @@ describe('write helpers over a real store + opSync', () => {
     sync.flush();
     const flat = emitted.flatMap((e) => e.ops) as SyncOp[];
     expect(flat.length).toBe(3);
-    expect(flat.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS)).toBe(true);
+    expect(
+      flat.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS),
+    ).toBe(true);
     expect(flat.every((o) => (o.epoch ?? 0) >= 1)).toBe(true); // authority-bumped
     expect(orderedEntries(node()).map((e) => e.key)).toEqual(before); // order preserved
   });
@@ -526,7 +684,10 @@ describe('write helpers over a real store + opSync', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 type Entry = ContainerEntry<El>;
-const entry = (pos: string, title: string): Entry => ({ [POS]: pos, value: { title } });
+const entry = (pos: string, title: string): Entry => ({
+  [POS]: pos,
+  value: { title },
+});
 
 function setupWrapped(initial: Record<string, Entry>) {
   return TestBed.runInInjectionContext(() => {
@@ -549,7 +710,10 @@ describe('wrapped container write paths', () => {
     expect(ops().length).toBe(1);
     expect(ops()[0].kind).toBe('set');
     expect(ops()[0].path).toEqual(['list', 'b']);
-    expect((ops()[0] as { next?: unknown }).next).toEqual({ [POS]: pos, value: { title: 'B' } });
+    expect((ops()[0] as { next?: unknown }).next).toEqual({
+      [POS]: pos,
+      value: { title: 'B' },
+    });
     expect(helpers.entries(node())).toEqual([
       { key: 'b', pos, value: { title: 'B' } },
       { key: 'a', pos: '3', value: { title: 'A' } },
@@ -557,25 +721,37 @@ describe('wrapped container write paths', () => {
   });
 
   it('move writes ONLY [list, key, ~pos] — never the wrapper or the payload', () => {
-    const { node, sync, ops } = setupWrapped({ a: entry('3', 'A'), b: entry('6', 'B') });
+    const { node, sync, ops } = setupWrapped({
+      a: entry('3', 'A'),
+      b: entry('6', 'B'),
+    });
     helpers.move(node, 'a', 2);
     sync.flush();
     expect(ops().length).toBe(1);
     expect(ops()[0].path).toEqual(['list', 'a', POS]);
     expect(helpers.entries(node()).map((e) => e.key)).toEqual(['b', 'a']);
-    expect(helpers.entries(node()).map((e) => e.value)).toEqual([{ title: 'B' }, { title: 'A' }]);
+    expect(helpers.entries(node()).map((e) => e.value)).toEqual([
+      { title: 'B' },
+      { title: 'A' },
+    ]);
   });
 
   it('a payload edit lands at [list, key, value, field] — disjoint from any move', () => {
     const { node, sync, ops } = setupWrapped({ a: entry('3', 'A') });
-    node.update((c) => ({ ...c, a: { ...c['a'], value: { title: 'edited' } } }));
+    node.update((c) => ({
+      ...c,
+      a: { ...c['a'], value: { title: 'edited' } },
+    }));
     sync.flush();
     expect(ops().length).toBe(1);
     expect(ops()[0].path).toEqual(['list', 'a', 'value', 'title']);
   });
 
   it('remove deletes exactly [list, key]', () => {
-    const { node, sync, ops } = setupWrapped({ a: entry('3', 'A'), b: entry('6', 'B') });
+    const { node, sync, ops } = setupWrapped({
+      a: entry('3', 'A'),
+      b: entry('6', 'B'),
+    });
     helpers.remove(node, 'a');
     sync.flush();
     expect(ops().length).toBe(1);
@@ -595,7 +771,9 @@ describe('wrapped container write paths', () => {
     sync.flush();
     const flat = emitted.flatMap((e) => e.ops) as SyncOp[];
     expect(flat.length).toBe(3);
-    expect(flat.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS)).toBe(true);
+    expect(
+      flat.every((o) => o.kind === 'set' && o.path[o.path.length - 1] === POS),
+    ).toBe(true);
     expect(flat.every((o) => (o.epoch ?? 0) >= 1)).toBe(true);
     const after = helpers.entries(node());
     expect(after.map((e) => e.key)).toEqual(before.map((e) => e.key));
@@ -614,13 +792,18 @@ describe('wrapped container write paths', () => {
     warn.mockClear();
 
     const odd = wrappedContainer<Odd>();
-    const oddNode = setupWrapped({}).node as unknown as ContainerNode<ContainerEntry<Odd>>;
+    const oddNode = setupWrapped({}).node as unknown as ContainerNode<
+      ContainerEntry<Odd>
+    >;
     odd.insert(oddNode, 'a', { [POS]: 'zzz', title: 'A' });
     odd.insert(oddNode, 'b', { [POS]: 'aaa', title: 'B' });
     expect(warn).not.toHaveBeenCalled(); // wrapped: `~pos` is an ordinary payload field
     warn.mockRestore();
     expect(odd.entries(oddNode()).map((e) => e.key)).toEqual(['a', 'b']); // entry order, not 'aaa' < 'zzz'
-    expect(odd.entries(oddNode())[0].value).toEqual({ [POS]: 'zzz', title: 'A' }); // payload verbatim
+    expect(odd.entries(oddNode())[0].value).toEqual({
+      [POS]: 'zzz',
+      title: 'A',
+    }); // payload verbatim
   });
 });
 
@@ -641,7 +824,10 @@ describe('key extractor', () => {
     sync.flush();
     expect(calls).toBe(1);
     expect(ops()[0].path).toEqual(['list', 'x']);
-    expect(items()['x']).toEqual({ [POS]: pos, value: { id: 'x', title: 'X' } });
+    expect(items()['x']).toEqual({
+      [POS]: pos,
+      value: { id: 'x', title: 'X' },
+    });
   });
 
   it('overwrites on a duplicate key, taking a fresh position at the requested index', () => {
@@ -653,7 +839,11 @@ describe('key extractor', () => {
     helpers.insert(items, { id: 'c', title: 'C' });
     helpers.insert(items, { id: 'c', title: 'C2' }, 0); // same identity, to the front
     expect(helpers.entries(items()).map((e) => e.key)).toEqual(['c', 'a', 'b']);
-    expect(helpers.entries(items()).map((e) => e.value.title)).toEqual(['C2', 'A', 'B']);
+    expect(helpers.entries(items()).map((e) => e.value.title)).toEqual([
+      'C2',
+      'A',
+      'B',
+    ]);
     // the index counts the OTHER elements, so re-inserting at their end lands last
     helpers.insert(items, { id: 'c', title: 'C3' }, 2);
     expect(helpers.entries(items()).map((e) => e.key)).toEqual(['a', 'b', 'c']);

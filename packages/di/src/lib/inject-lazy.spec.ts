@@ -85,7 +85,6 @@ describe('injectLazy', () => {
   });
 
   it('should lazily resolve a HostAttributeToken', () => {
-    // eslint-disable-next-line @angular-eslint/directive-selector
     @Directive({ selector: '[lazyAttr]' })
     class LazyAttrDirective {
       readonly getRole = injectLazy(new HostAttributeToken('role'));

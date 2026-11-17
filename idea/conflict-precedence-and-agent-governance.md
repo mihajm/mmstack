@@ -42,6 +42,7 @@ the sibling map (best-by-hlc), the epoch-3 value vanishes and the exposed epoch 
 FAILS naive, PASSES corrected; the ill-formed counterexample is pinned as a permanent proof). Fable's
 reasoning: exposed-epoch monotonicity at read IS per-writer epoch monotonicity, because best-by-hlc means
 a writer's newer op REPLACES rather than coexists; the citation set alone can't guarantee it.
+
 - **Epoch is scoped PER-PATH** (confirmed). Epoch is causal-supersession metadata for a register, so it
   belongs to the path's causal context, like the dots. Per-writer-GLOBAL would break disjoint-path
   independence: one authority bump on path X would inflate the writer's epochs store-wide → spuriously
@@ -49,13 +50,13 @@ a writer's newer op REPLACES rather than coexists; the citation set alone can't 
   per-path epoch MUST survive a tombstone→re-create of the path (see §4 delete semantics), or revival
   regresses.
 - **Three emission subtleties (Fable):** (a) the authority +1 BUMP is also per-path: `max(observed-at-path)
-  + 1`, else a bump on one path outranks concurrent writes elsewhere. (b) An UNauthorized writer merely
-  CARRYING the observed high epoch forward (never bumping) is not just fine but REQUIRED — carrying
-  preserves monotonicity without granting supersession power (it can only TIE the epoch it saw; hlc/dot
-  breaks ties). (c) Emission reads own-prior from the writer's OWN EMISSION FRONTIER, not the merged/exposed
-  view; and SYNTHESIZED ops (seed / hydration / snapshot replay) MUST honor the same own-prior-at-path floor,
-  or seeding regresses exposed epochs exactly like the naive counterexample (ties the seed contract to this
-  rule).
+  - 1`, else a bump on one path outranks concurrent writes elsewhere. (b) An UNauthorized writer merely
+    CARRYING the observed high epoch forward (never bumping) is not just fine but REQUIRED — carrying
+    preserves monotonicity without granting supersession power (it can only TIE the epoch it saw; hlc/dot
+    breaks ties). (c) Emission reads own-prior from the writer's OWN EMISSION FRONTIER, not the merged/exposed
+    view; and SYNTHESIZED ops (seed / hydration / snapshot replay) MUST honor the same own-prior-at-path floor,
+    or seeding regresses exposed epochs exactly like the naive counterexample (ties the seed contract to this
+    rule).
 
 This UNIFIES three things into one mechanic: **owner-authority** (the worker owner "vetoes"
 by writing at epoch+1 — see the worker plan in roadmap.md, the fork is false, no shim), **admin-override**,
@@ -73,6 +74,7 @@ proven theorem (the live set stops being the maximal antichain of the delivered 
 dominated-yet-live ghosts, forcing transitive-closure watermarks or order-dependent hazards). So epoch's
 job is de-escalation + authority-settled reads, NOT anti-bricking. THREE holes to name in the RFC (none
 fatal; all proven in precedence-proofs.spec.ts where modelable):
+
 1. **Rank ≠ authority.** Any peer that syncs first can cite-and-win; in a fully-online net every write is
    causal so rank NEVER fires (rank only wins races). "Students can't overwrite the teacher" is ADMISSION
    CONTROL — enforce writer/rank at the RELAY policy layer (op rejected at ingest, `mesh-protocol
@@ -93,6 +95,7 @@ one comparator: the register winner is `max` under `(rank, hlc, writer, origin)`
 included. The causal-safety trick that makes "rank first" correct is INHERITANCE: at emission, stamp
 `rank = max(writerRank, rank of the register value being overwritten)`. Causal successors carry rank
 forward exactly the way HLC carries time forward.
+
 - A causally-later LOW-rank write that overwrote a HIGH-rank value INHERITS high → it beats the stale
   high-rank value it replaced. No causal violation: the nurse's correction, having SEEN the admin's
   value, inherits the admin's rank, so it sticks.
@@ -134,6 +137,7 @@ deliberately do NOT build this).** The insight: HLC alone is unsound for identif
 causality⇒order, never order⇒causality; and the `prev` VALUE-hint can't rescue it — ABA: identical
 values from distinct ops are indistinguishable). So carry causality EXPLICITLY, but scoped per-path, at
 register-local cost — dotted-VV SEMANTICS without version vectors:
+
 - **Envelope:** each set/delete gains `cites: Array<{writer, hlc}>` — the dot(s) of the sibling(s) the
   writer OBSERVED at that path when it wrote (common case: 1 = the current winner's dot). The op's own
   dot `(writer, hlc)` you already have. The `prev` value-hint is subsumed FOR SUPERSESSION ONLY — do NOT

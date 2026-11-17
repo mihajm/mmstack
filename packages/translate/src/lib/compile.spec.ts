@@ -7,9 +7,9 @@ describe('compile', () => {
       hello: 'world',
       test: 'value',
     };
-    
+
     const compiled = compileTranslation(translation, 'myNs', 'en');
-    
+
     expect(compiled.namespace).toBe('myNs');
     expect(compiled.locale).toBe('en');
     expect(compiled.flat).toEqual({
@@ -28,17 +28,18 @@ describe('compile', () => {
         invalid: 'Invalid value',
         network: {
           timeout: 'Network timeout',
-        }
-      }
+        },
+      },
     };
-    
+
     const compiled = compileTranslation(translation, 'app');
-    
+
     expect(compiled.flat).toEqual({
       [prependDelim('common', 'save')]: 'Save',
       [prependDelim('common', 'cancel')]: 'Cancel',
       [prependDelim('errors', 'invalid')]: 'Invalid value',
-      [prependDelim('errors', prependDelim('network', 'timeout'))]: 'Network timeout',
+      [prependDelim('errors', prependDelim('network', 'timeout'))]:
+        'Network timeout',
     });
   });
 });

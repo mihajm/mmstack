@@ -1,10 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import {
-  form,
-  type FieldTree,
-  type SchemaFn,
-} from '@angular/forms/signals';
+import { form, type FieldTree, type SchemaFn } from '@angular/forms/signals';
 import {
   CHANGED,
   changedEqual,

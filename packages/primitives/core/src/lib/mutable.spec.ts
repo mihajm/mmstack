@@ -14,11 +14,11 @@ describe('mutable', () => {
     expect(comp()).toBe(2);
     expect(computedRuns).toBe(1);
 
-    sig.mutate(v => {
+    sig.mutate((v) => {
       v.push(3);
       return v;
     });
-    
+
     expect(sig()).toEqual([1, 2, 3]);
     expect(comp()).toBe(3);
     expect(computedRuns).toBe(2);
@@ -26,7 +26,9 @@ describe('mutable', () => {
 
   it('should support inline method', () => {
     const obj = mutable({ a: 1 });
-    obj.inline(v => { v.a = 2; });
+    obj.inline((v) => {
+      v.a = 2;
+    });
     expect(obj().a).toBe(2);
   });
 

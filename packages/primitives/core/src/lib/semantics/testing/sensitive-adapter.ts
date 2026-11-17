@@ -69,7 +69,8 @@ export const PRECISION_EXCLUSIONS = [
 ] as const;
 
 export type Family =
-  (typeof TOTALITY_EXCLUSIONS)[number] | (typeof PRECISION_EXCLUSIONS)[number];
+  | (typeof TOTALITY_EXCLUSIONS)[number]
+  | (typeof PRECISION_EXCLUSIONS)[number];
 
 type Env = {
   srcs: unknown[];

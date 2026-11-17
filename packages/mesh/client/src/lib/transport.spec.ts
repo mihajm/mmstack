@@ -1,6 +1,7 @@
 import {
   createRelay,
   type RegisterCheckpoint,
+  type ServerEnvMsg,
   type ServerMsg,
 } from '@mmstack/mesh-protocol';
 import { agentSeat } from './agent-seat';
@@ -138,10 +139,9 @@ describe('directTransport', () => {
     // outbound: still the JSON hop — the relay never saw the `undefined`s
     expect(registers).toEqual(JSON.parse(JSON.stringify(registers)));
     // inbound: the echo's envelope is the relay's object, not a copy of it
-    type Echo = { t: 'env'; env: { ops: readonly { next?: unknown }[] } };
     const held = inbound
-      .filter((m): m is Echo => m.t === 'env')
-      .flatMap((m) => m.env.ops.map((op) => op.next))
+      .filter((m): m is ServerEnvMsg => m.t === 'env')
+      .flatMap((m) => m.env.ops.map((op) => (op as { next?: unknown }).next))
       .find((next) => (next as { title?: unknown } | undefined)?.title === 't');
     expect(held).toEqual({ title: 't', tags: ['a', null] });
     const sibling = registers

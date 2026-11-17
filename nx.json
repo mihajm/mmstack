@@ -17,15 +17,6 @@
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
     },
-    "@nx/eslint:lint": {
-      "cache": true,
-      "inputs": [
-        "default",
-        "{workspaceRoot}/.eslintrc.json",
-        "{workspaceRoot}/.eslintignore",
-        "{workspaceRoot}/eslint.config.mjs"
-      ]
-    },
     "@angular/build:unit-test": {
       "cache": true,
       "inputs": ["default", "^production"],
@@ -67,7 +58,17 @@
       "options": {
         "targetName": "lint"
       }
+    },
+    {
+      "plugin": "@nx/playwright/plugin",
+      "options": {
+        "targetName": "e2e",
+        "ciTargetName": "e2e-ci"
+      }
     }
   ],
-  "analytics": false
+  "analytics": false,
+  "affected": {
+    "legacy": true
+  }
 }

@@ -45,6 +45,7 @@ Thumbs.db
 
 .nx/cache
 .nx/workspace-data
+.nx/migrate-runs
 
 .angular
 

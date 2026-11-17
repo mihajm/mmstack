@@ -599,7 +599,7 @@ class P5Host {
 }
 
 describe('*mmErrored: a view effect in a traversal-only pass', () => {
-  it('A-P5: the effect throw skips this boundary and lands on the nearest refreshing ancestor with an interceptor', async () => {
+  it('A-P5: the effect throw lands on this boundary, the nearest one, even when its views are only traversed', async () => {
     const { fixture, container, handler, knobs, settle } = await setup(P5Host);
     const scope = scopeOf(fixture.debugElement.injector);
     expect(container.querySelector('.eff')).not.toBeNull();
@@ -613,11 +613,12 @@ describe('*mmErrored: a view effect in a traversal-only pass', () => {
     expect(handler.viewErrors.map((r) => r.error.message)).toEqual([
       'effect-failed',
     ]);
-    expect(handler.viewErrors[0].details.caughtBy).toBeDefined();
-    expect(container.querySelector('.outer-error')).not.toBeNull();
-    expect(container.querySelector('.fb')).toBeNull(); // *mmErrored never saw it
-    expect(container.querySelector('.content')).toBeNull(); // the outer block removed it all
-    expect(scope.errored()).toEqual([]);
+    expect(handler.viewErrors[0].details.boundary?.type).toBe(Mid);
+    expect(container.querySelector('.fb')?.textContent).toBe('mm-fallback');
+    expect(isShown(container.querySelector('.content'))).toBe(false);
+    expect(container.querySelector('.outer-error')).toBeNull();
+    expect(container.querySelector('.tick')?.textContent).toBe('1');
+    expect(scope.errored().length).toBe(1);
   });
 
   it('A-P5 contrast: when the content view itself refreshes in the same pass, this boundary catches the effect throw', async () => {

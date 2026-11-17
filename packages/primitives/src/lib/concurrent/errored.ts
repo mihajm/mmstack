@@ -20,8 +20,11 @@ import {
 } from '@angular/core';
 import {
   type CensusError,
+  elementView,
   getTransitionScope,
+  isBrowser,
   memberId,
+  renderedElements,
 } from '@mmstack/primitives/core';
 
 export type MmErroredRetryOptions = {
@@ -63,6 +66,19 @@ type StyledNode = Node & { style: CSSStyleDeclaration };
 
 let ordinal = 0;
 
+const OPTED_IN = new WeakMap<object, Set<ChangeDetectorRef>>();
+
+/** Whether `node` sits under `root`, looking through shadow roots. */
+const holds = (root: Node, node: Node): boolean => {
+  for (
+    let n: Node | null = node;
+    n;
+    n = n.parentNode ?? (n as ShadowRoot).host ?? null
+  )
+    if (n === root) return true;
+  return false;
+};
+
 const NEVER = signal(false).asReadonly();
 
 const asError = (e: unknown): Error =>
@@ -100,11 +116,18 @@ const asError = (e: unknown): Error =>
  *  - **Retry** re-attaches and renders the kept view synchronously. A `computed` that cached the
  *    throw throws again until one of its dependencies changes, so a retry before the fix lands on
  *    the fallback again. The content stays hidden until a render completes without a throw.
- *    The view that threw renders again on retry even when it is an OnPush component with nothing
- *    changed. Init hooks (`ngOnInit` and friends) that already ran, or started and threw, are not
- *    run again. A block (`@if`, `@for`, `@switch`) whose new branch threw while being built has
- *    already taken its new condition, so after a retry that branch stays empty until the
- *    condition changes again.
+ *    A retry renders the kept content again, OnPush components with nothing changed included,
+ *    inside shadow roots and for elements moved elsewhere in the document too. Two kinds of
+ *    component it does not reach by itself: one that detached itself from change detection, and
+ *    a child its parent was given but does not project. Have such a component call
+ *    `injectRenderOnRetry()`. Without that, a retry rebuilds when the unprojected child's own
+ *    template threw, and leaves a detached component as it was. A retry also rebuilds off the
+ *    browser, and when a template that threw was declared by a component that is neither under
+ *    the content nor one the boundary sits in. Content rendered into another document, such as
+ *    an iframe's, cannot be found, so a retry of it always rebuilds. Init hooks (`ngOnInit` and
+ *    friends) that already ran, or started and threw, are not run again. A block (`@if`, `@for`,
+ *    `@switch`) whose new branch threw while being built has already taken its new condition,
+ *    so after a retry that branch stays empty until the condition changes again.
  *  - **Rebuild**: `retry({ rebuild: true })` destroys the faulted content view and builds it anew
  *    from the template, as `@boundary` does, so the state and the instances are new. Use the
  *    default retry for transient faults (a failed load, a value fixed since). Use a rebuild when
@@ -120,8 +143,10 @@ const asError = (e: unknown): Error =>
  *    fallback that throws is caught by the next boundary out.
  *
  * Not caught: errors in event listeners, root effects, `afterRender` callbacks, promises and
- * `@defer` loads. A view effect that runs while its view is only traversed (not refreshed) throws
- * past this boundary, to the nearest ancestor boundary whose view is refreshing in that pass.
+ * `@defer` loads. A view effect that threw does not run again on retry until one of its
+ * dependencies changes. On Angular before 22.2.4, a view effect that runs while its view is only
+ * traversed (not refreshed) throws past this boundary, to the nearest ancestor boundary whose
+ * view is refreshing in that pass.
  *
  * Inside `*mmTransition`, put the boundary in the branch template: a faulting incoming branch shows
  * its fallback and still commits.
@@ -134,11 +159,12 @@ export class MmErrored implements OnInit {
   private readonly tpl = inject(TemplateRef) as TemplateRef<unknown>;
   private readonly vcr = inject(ViewContainerRef);
   private readonly errorHandler = inject(ErrorHandler, { optional: true });
-  private readonly census =
-    getTransitionScope(inject(Injector))?.census ?? null;
+  private readonly injector = inject(Injector);
+  private readonly census = getTransitionScope(this.injector)?.census ?? null;
   private readonly hostInstance = (
     inject(ChangeDetectorRef) as Partial<EmbeddedViewRef<unknown>>
   ).context;
+  private readonly browser = isBrowser();
 
   /** Rendered while the content is faulted, with `MmErroredContext`. Without one, nothing shows. */
   readonly fallback = input<
@@ -163,6 +189,8 @@ export class MmErrored implements OnInit {
   private fallbackView: EmbeddedViewRef<WritableContext> | null = null;
   private readonly hidden = new Map<Node, Saved>();
   private retrying = false;
+  /** Set for the first fault of a retry, whose error replaces the one shown. */
+  private adopting = false;
   /** Bumped by every fault, so a retry can tell whether its render threw. */
   private faults = 0;
   private destroyed = false;
@@ -173,7 +201,8 @@ export class MmErrored implements OnInit {
       ? { id: this.id, displayName: f.displayName, message: f.error.message }
       : undefined;
   });
-  private readonly retries = signal(0);
+  /** The components whose templates threw since the last retry. */
+  private readonly faulted = new Set<unknown>();
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
@@ -195,9 +224,13 @@ export class MmErrored implements OnInit {
       const fault = this.fault();
       if (!fault || this.retrying || this.destroyed) return;
       this.retrying = true;
+      this.adopting = true;
       const before = this.faults;
       try {
-        if (options?.rebuild) this.discardContent();
+        const faulted = [...this.faulted];
+        this.faulted.clear();
+        if (options?.rebuild || !this.markContent(faulted))
+          this.discardContent();
         if (fault.kind === 'creation' || !this.content) {
           if (!this.mount()) return;
         }
@@ -205,19 +238,73 @@ export class MmErrored implements OnInit {
         if (!content) return;
         this.unhide();
         content.reattach();
-        this.retries.update((n) => n + 1);
         content.markForCheck();
-        content.detectChanges();
+        try {
+          content.detectChanges();
+          // opted-in views render by themselves: nothing else reaches one that is detached
+          for (const ref of OPTED_IN.get(this) ?? []) {
+            if (this.faults !== before) break;
+            ref.detectChanges();
+          }
+        } catch (e) {
+          if (content === this.content && this.faults === before) {
+            content.detach();
+            this.hide(content);
+          }
+          throw e;
+        }
       } finally {
         this.retrying = false;
+        this.adopting = false;
       }
       if (this.faults === before) this.settle();
     });
   }
 
+  /**
+   * Marks every view found under the kept content for check, so the retry renders it again,
+   * OnPush components with nothing changed included. False when that cannot be relied on: off
+   * the browser, or when a template that threw belongs to a component that is neither found
+   * under the content nor one of the components the boundary sits in.
+   */
+  private markContent(faulted: readonly unknown[]): boolean {
+    const content = this.content;
+    if (!content) return true;
+    if (!this.browser) return false;
+    const seen = new Set<unknown>([this.hostInstance]);
+    for (const ref of OPTED_IN.get(this) ?? [])
+      seen.add((ref as Partial<EmbeddedViewRef<unknown>>).context);
+    for (const root of content.rootNodes as Node[]) {
+      if (root.nodeType !== 1) continue;
+      for (const el of [
+        root as Element,
+        ...renderedElements(root as Element),
+      ]) {
+        const view = elementView(el);
+        if (!view) continue;
+        seen.add(view.component);
+        view.changeDetector.markForCheck();
+      }
+    }
+    return faulted.every(
+      (component) => seen.has(component) || this.sitsIn(component),
+    );
+  }
+
+  /** A template declared above the content is rendered in it by a component that is not its declarer. */
+  private sitsIn(component: unknown): boolean {
+    const type = (component as object | null | undefined)?.constructor;
+    return (
+      !!type &&
+      this.injector.get(type as Type<unknown>, null, { optional: true }) ===
+        component
+    );
+  }
+
   private discardContent(): void {
     const content = this.content;
     this.content = null;
+    this.faulted.clear();
     this.hidden.clear();
     if (!content) return;
     try {
@@ -259,12 +346,9 @@ export class MmErrored implements OnInit {
     error: Error,
     details: ErrorDetails,
   ): void {
-    // Read while the throwing view's template consumer is still active: the read becomes one of
-    // its dependencies, so a retry that bumps the counter re-runs that view even when it is
-    // OnPush and nothing it reads has changed. Its next clean render drops the dependency.
-    this.retries();
     untracked(() => {
       if (view !== this.content || this.destroyed) return;
+      this.faulted.add(details.declarationInstance);
       this.report(error, details);
       this.enterFault(error, 'update');
     });
@@ -276,9 +360,9 @@ export class MmErrored implements OnInit {
       this.content.detach();
       this.hide(this.content);
     }
-    if (this.fault() === null || this.retrying)
+    if (this.fault() === null || this.adopting)
       this.fault.set({ error, kind, displayName: untracked(this.name) });
-    this.retrying = false;
+    this.adopting = false;
     const shown = this.fault() as Fault;
     this.joinCensus();
     this.showFallback(shown.error);
@@ -328,7 +412,8 @@ export class MmErrored implements OnInit {
   }
 
   private hide(view: EmbeddedViewRef<unknown>): void {
-    for (const node of view.rootNodes as Node[]) {
+    const roots = view.rootNodes as Node[];
+    for (const node of [...roots, ...this.movedOut(roots)]) {
       if (this.hidden.has(node)) continue;
       if (node.nodeType === 1 && 'style' in node) {
         const el = node as StyledNode;
@@ -340,6 +425,20 @@ export class MmErrored implements OnInit {
         text.data = '';
       }
     }
+  }
+
+  /** Rendered elements that no longer sit under a root: the topmost of each moved subtree. */
+  private movedOut(roots: readonly Node[]): Element[] {
+    if (!this.browser) return [];
+    const outside = new Set<Element>();
+    for (const root of roots) {
+      if (root.nodeType !== 1) continue;
+      for (const el of renderedElements(root as Element))
+        if (!roots.some((r) => holds(r, el))) outside.add(el);
+    }
+    return [...outside].filter(
+      (el) => !el.parentElement || !outside.has(el.parentElement),
+    );
   }
 
   private unhide(): void {
@@ -369,4 +468,23 @@ export class MmErrored implements OnInit {
     this.leave?.();
     this.leave = null;
   }
+}
+
+/**
+ * Has the nearest `*mmErrored` above render this component again on every retry, by running its
+ * change detection directly. The boundary finds the components under it through their elements
+ * and marks them for check, which misses two kinds: a component that detached itself from change
+ * detection, and a child its parent was given but does not project. Call this in those.
+ *
+ * Call it in an injection context, such as the component's constructor. Does nothing when there
+ * is no `*mmErrored` above.
+ */
+export function injectRenderOnRetry(): void {
+  const boundary = inject(MmErrored, { optional: true });
+  if (!boundary) return;
+  const ref = inject(ChangeDetectorRef);
+  let refs = OPTED_IN.get(boundary);
+  if (!refs) OPTED_IN.set(boundary, (refs = new Set()));
+  refs.add(ref);
+  inject(DestroyRef).onDestroy(() => refs.delete(ref));
 }

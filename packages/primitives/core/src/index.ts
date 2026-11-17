@@ -7,6 +7,11 @@ export * from './lib/keep-previous';
 export * from './lib/mappers';
 export * from './lib/mutable';
 export * from './lib/pipeable/public_api';
+export {
+  elementView,
+  type ElementView,
+  renderedElements,
+} from './lib/element-view';
 export { isBrowser, isServer } from './lib/platform';
 export * from './lib/pooled';
 export * from './lib/semantics';

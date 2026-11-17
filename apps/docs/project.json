@@ -10,6 +10,7 @@
       "executor": "@angular/build:application",
       "outputs": ["{options.outputPath}"],
       "dependsOn": [],
+      "defaultConfiguration": "production",
       "options": {
         "outputPath": "dist/apps/docs",
         "browser": "apps/docs/src/main.ts",
@@ -45,12 +46,12 @@
           "extractLicenses": false,
           "sourceMap": true
         }
-      },
-      "defaultConfiguration": "production"
+      }
     },
     "serve": {
       "continuous": true,
       "executor": "@angular/build:dev-server",
+      "defaultConfiguration": "development",
       "configurations": {
         "production": {
           "buildTarget": "docs:build:production"
@@ -59,10 +60,15 @@
           "buildTarget": "docs:build:development"
         }
       },
-      "defaultConfiguration": "development"
+      "readyWhen": {
+        "signal": true
+      }
     },
     "test": {
-      "executor": "@angular/build:unit-test"
+      "executor": "@angular/build:unit-test",
+      "options": {
+        "setupFiles": ["apps/docs/src/test-setup.ts"]
+      }
     }
   }
 }

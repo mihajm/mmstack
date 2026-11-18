@@ -1,0 +1,14 @@
+{
+  "executors": {
+    "mutate": {
+      "implementation": "./executor.cjs#mutate",
+      "schema": "./schema.json",
+      "description": "Run Stryker mutation testing for the project (console output, reports in tmp/stryker/<run>/)."
+    },
+    "mutate-report": {
+      "implementation": "./executor.cjs#mutateReport",
+      "schema": "./schema.json",
+      "description": "Run Stryker for the project and write html, json and summary.md to tmp/stryker/<run>/, plus the tmp/stryker/summary.md index."
+    }
+  }
+}

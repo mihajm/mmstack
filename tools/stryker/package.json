@@ -1,0 +1,6 @@
+{
+  "name": "@mmstack/stryker-tools",
+  "private": true,
+  "description": "Workspace-local nx executors and Stryker plugins for mutation testing.",
+  "executors": "./executors.json"
+}

@@ -75,6 +75,8 @@
     "@opentelemetry/sdk-trace": "^3.1.1",
     "@oxc-project/runtime": "^0.115.0",
     "@schematics/angular": "^21.2.30",
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
     "@swc-node/register": "~1.12.1",
     "@swc/core": "~1.16.22",
     "@swc/helpers": "~0.5.24",

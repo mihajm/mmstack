@@ -42,6 +42,14 @@
           "externalDependencies": ["oxlint", "oxlint-tsgolint", "@nx/oxlint"]
         }
       ]
+    },
+    "mutate": {
+      "cache": false,
+      "parallelism": false
+    },
+    "mutate-report": {
+      "cache": false,
+      "parallelism": false
     }
   },
   "generators": {

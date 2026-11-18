@@ -34,6 +34,24 @@
           "../algebra/**/*.test.ts"
         ]
       }
+    },
+    "mutate": {
+      "executor": "./tools/stryker:mutate",
+      "options": {
+        "exclude": [
+          "packages/primitives/core/src/lib/semantics/testing/**",
+          "packages/primitives/testing/src/**"
+        ]
+      }
+    },
+    "mutate-report": {
+      "executor": "./tools/stryker:mutate-report",
+      "options": {
+        "exclude": [
+          "packages/primitives/core/src/lib/semantics/testing/**",
+          "packages/primitives/testing/src/**"
+        ]
+      }
     }
   }
 }

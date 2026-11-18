@@ -22,6 +22,12 @@
         "command": "vitest run",
         "cwd": "packages/translate-tools"
       }
+    },
+    "mutate": {
+      "executor": "./tools/stryker:mutate"
+    },
+    "mutate-report": {
+      "executor": "./tools/stryker:mutate-report"
     }
   }
 }

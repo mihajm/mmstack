@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "Stryker mutation run",
+  "type": "object",
+  "properties": {
+    "runner": {
+      "type": "string",
+      "enum": ["angular", "vitest"],
+      "description": "Test runner. Default: angular when the project's test target uses @nx/angular:unit-test, else vitest with <projectRoot>/vite.config.ts."
+    },
+    "exclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Workspace-relative globs of source files never to mutate in this project."
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["all", "logic", "angular"],
+      "default": "all",
+      "description": "Mutate only the files of one tier (see tools/stryker/config.mjs)."
+    },
+    "run": {
+      "type": "string",
+      "description": "Run name: output goes to tmp/stryker/<run>/. Defaults to the project name, plus -<tier> for a tier run."
+    },
+    "mutate": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Scoped run: mutate these files or globs (file.ts:10-40 for a line range) instead of the config's list."
+    },
+    "concurrency": {
+      "type": "number",
+      "description": "Number of Stryker workers (each runs its own Angular build). Default 4."
+    },
+    "dryRunOnly": {
+      "type": "boolean",
+      "description": "Instrument and run the initial test run only; no mutants are tested."
+    },
+    "incremental": {
+      "type": "boolean",
+      "description": "Reuse results from tmp/stryker/<run>/incremental.json for unchanged code and tests."
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": ["off", "fatal", "error", "warn", "info", "debug", "trace"],
+      "description": "Stryker log level. trace includes the Angular build output of the workers."
+    },
+    "listFiles": {
+      "type": "boolean",
+      "description": "Print the files that would be mutated, with their tier, and exit."
+    }
+  },
+  "additionalProperties": false
+}

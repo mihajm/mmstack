@@ -34,6 +34,12 @@
       "options": {
         "isolate": true
       }
+    },
+    "mutate": {
+      "executor": "./tools/stryker:mutate"
+    },
+    "mutate-report": {
+      "executor": "./tools/stryker:mutate-report"
     }
   }
 }

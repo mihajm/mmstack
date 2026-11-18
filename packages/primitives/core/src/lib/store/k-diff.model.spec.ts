@@ -879,6 +879,20 @@ function expectConverged(r: Run): unknown[] {
 
 const idBag = (arr: readonly unknown[]): string =>
   JSON.stringify(arr.map((x) => JSON.stringify(idOf(x))).sort());
+/** Equal as multisets of VALUES (not ids: a same-id replacement keeps the id bag and is no permutation). */
+function isPermutationOf(
+  a: readonly unknown[],
+  b: readonly unknown[],
+): boolean {
+  if (a.length !== b.length) return false;
+  const rest = b.slice();
+  for (const x of a) {
+    const at = rest.findIndex((y) => structEq(x, y));
+    if (at === -1) return false;
+    rest.splice(at, 1);
+  }
+  return true;
+}
 const isWritersArray = (
   r: Run,
   out: readonly unknown[],
@@ -1291,7 +1305,7 @@ describe('K4′ — positional three-way when safe (positionalRef as the array p
         const r = run(sc, 'unit', positionalPolicy());
         fc.pre(
           r.arrays.every(
-            (w) => w.length !== sc.base.length || idBag(w) === idBag(sc.base),
+            (w) => w.length !== sc.base.length || isPermutationOf(w, sc.base),
           ),
         );
         const out = expectConverged(r);
@@ -2991,6 +3005,29 @@ describe('(c′) precondition — a length-keeping remove + insert is a replacem
       positionalPolicy(),
     );
     expect(expectConverged(r)).toEqual([a, a]);
+  });
+
+  it('[PIN K4′ same-id replacements] base [c,d]; W0 removes d and inserts a fresh d′ at 1 ⇒ [c,d′]; W1 removes c and inserts a fresh c′ at 0 ⇒ [c′,d]; the id bag is the base\'s, yet neither array is a permutation of it ⇒ per slot [c′,d′]: no writer\'s array, legitimately (an id-bag (c′) precondition admitted this: fast-check seed 1312222793)', () => {
+    const c = { id: 'c', t: 'C', n: 1 };
+    const d = { id: 'd', t: 'A', n: 0 };
+    const c2 = { id: 'c', t: 'w0', n: 2 };
+    const d2 = { id: 'd', t: 'w2', n: 3 };
+    const sc: Scenario = {
+      base: [c, d],
+      writers: [[], []],
+      rank: [1, 0],
+      orderSeed: 26,
+    };
+    const r = runArrays(
+      sc,
+      (own, k) => (k === 0 ? [own[0], d2] : [c2, own[1]]),
+      positionalPolicy(),
+    );
+    const out = expectConverged(r);
+    expect(out).toEqual([c2, d2]);
+    expect(isWritersArray(r, out, sc.base)).toBe(false);
+    expect(r.arrays.every((w) => idBag(w) === idBag(sc.base))).toBe(true);
+    expect(r.arrays.some((w) => isPermutationOf(w, sc.base))).toBe(false);
   });
 });
 

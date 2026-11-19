@@ -205,3 +205,14 @@ describe('fieldMetadata', () => {
     });
   });
 });
+
+describe('fieldMetadata() with no options', () => {
+  it('sets and reads a value with the default reducer and no fallback', () => {
+    const [withPlain, , PLAIN] = fieldMetadata<string>();
+    const f = TestBed.runInInjectionContext(() =>
+      form(signal({ name: 'x', nick: 'y' }), (p) => withPlain(p.name, 'set')),
+    );
+    expect(f.name().metadata(PLAIN)?.()).toBe('set');
+    expect(f.nick().metadata(PLAIN)?.()).toBeUndefined();
+  });
+});

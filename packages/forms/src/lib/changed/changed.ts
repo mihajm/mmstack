@@ -23,6 +23,7 @@ import {
   raw,
   type RawProjection,
 } from '../compose/compose';
+import { isRecord, valueDiff } from './value-diff';
 
 /** Equality used at a leaf to decide whether a value changed from its baseline. */
 export type ChangedEqual<T = unknown> = (initial: T, current: T) => boolean;
@@ -38,25 +39,6 @@ export type ChangedEntry<T = unknown> = {
   /** Re-baselines this node — to `value` if given, otherwise to its current value. */
   readonly commit: (value?: T) => void;
 };
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** Pure value diff with `Object.is` short-circuit — the fallback when a node isn't tracked. */
-function valueDiff(initial: unknown, current: unknown): boolean {
-  if (Object.is(initial, current)) return false;
-  if (Array.isArray(current) && Array.isArray(initial)) {
-    if (current.length !== initial.length) return true;
-    return current.some((c, i) => valueDiff(initial[i], c));
-  }
-  if (isRecord(current) && isRecord(initial)) {
-    const keys = Object.keys(current);
-    if (keys.length !== Object.keys(initial).length) return true;
-    return keys.some((k) => valueDiff(initial[k], current[k]));
-  }
-  return true;
-}
 
 /** Per-path override metadata keys. @internal exported for the changed-values walker only. */
 export const CHANGED_EQUAL = createMetadataKey<ChangedEqual>();
@@ -372,10 +354,11 @@ function walk(
   fn(state);
   const value = untracked(state.value);
   const node = tree as unknown as Record<string | number, FieldTree<unknown>>;
+  // undefined values (and holes) have no field node
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) walk(node[i], fn);
+    for (let i = 0; i < value.length; i++) if (node[i]) walk(node[i], fn);
   } else if (isRecord(value)) {
-    for (const key of Object.keys(value)) walk(node[key], fn);
+    for (const key of Object.keys(value)) if (node[key]) walk(node[key], fn);
   }
 }
 
@@ -457,9 +440,27 @@ function reconcileNode(state: FieldState<unknown>, incoming: unknown): void {
 
   // Objects: recurse per-property (keep a changed leaf, adopt unchanged siblings).
   if (isRecord(current) && isRecord(incoming)) {
+    const baseline = entry ? untracked(entry.initial) : current;
+    const adopted: Record<string, unknown> = {};
     for (const key of Object.keys(incoming)) {
       const child = childState(state, key);
       if (child) reconcileNode(child, incoming[key]);
+      // No node (undefined or absent value): adopt unless the user changed it from the baseline.
+      else if (
+        !valueDiff(isRecord(baseline) ? baseline[key] : undefined, current[key])
+      )
+        adopted[key] = incoming[key];
+    }
+    const adoptedKeys = Object.keys(adopted);
+    if (adoptedKeys.length) {
+      state.value.set({
+        ...(untracked(state.value) as Record<string, unknown>),
+        ...adopted,
+      });
+      for (const key of adoptedKeys) {
+        const child = childState(state, key);
+        if (child) rebaseline(child, adopted[key]);
+      }
     }
     entry?.commit(incoming);
     return;

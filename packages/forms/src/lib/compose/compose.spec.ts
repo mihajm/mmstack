@@ -56,6 +56,7 @@ class Probe {
     label: withLabel, // carrier (getter) → computed
     error: firstError, // getter → computed
     konst: () => 'K', // plain value → constant computed
+    none: () => null, // a bare null projection
     sig: (f: FieldRef) => computed(() => f.state().value()), // signal → as-is
     // same handle projected twice → proves a single injected ref
     ff1: (f: FieldRef) => f.formField,
@@ -101,6 +102,12 @@ describe('compose / composition', () => {
     expect(p.inline.label()).toBe('L'); // carrier
     expect(p.inline.konst()).toBe('K'); // plain value
     expect(p.inline.sig()).toBe('x'); // signal passed through
+  });
+
+  it('materializes a bare null projection as a null signal', () => {
+    const p = probe();
+    expect(isSignal(p.inline.none)).toBe(true);
+    expect(p.inline.none()).toBeNull();
   });
 
   it('injects the field once — projectors share one ref', () => {
@@ -189,6 +196,27 @@ describe('composition as a schema rule', () => {
       .injector.get(Probe);
     expect(p.tf.label()).toBe('L');
     expect(p.tf.hint()).toBeUndefined();
+  });
+
+  it('an undefined entry leaves a value set by another rule in place', () => {
+    @Component({
+      imports: [FormField, Probe],
+      template: ` <input [formField]="f.name" /> `,
+    })
+    class KeepHost {
+      readonly model = signal({ name: 'x' });
+      readonly f = form(this.model, (p) => {
+        withLabel(p.name, 'A');
+        textField(p.name, { label: undefined, hint: 'H' });
+      });
+    }
+    const fixture = TestBed.createComponent(KeepHost);
+    fixture.detectChanges();
+    const p = fixture.debugElement
+      .query(By.directive(Probe))
+      .injector.get(Probe);
+    expect(p.tf.label()).toBe('A');
+    expect(p.tf.hint()).toBe('H');
   });
 
   it('throws for members that carry no rule (read-side projectables)', () => {

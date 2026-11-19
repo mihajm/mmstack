@@ -1,6 +1,7 @@
 import { computed, isDevMode, type Signal, untracked } from '@angular/core';
 import type { FieldState, FieldTree } from '@angular/forms/signals';
 import { CHANGED, CHANGED_EQUAL, CHANGED_WITH } from './changed';
+import { isRecord, valueDiff } from './value-diff';
 
 /**
  * A nested partial of `T` where arrays are kept whole: change extraction treats an array as a
@@ -13,25 +14,6 @@ export type DeepPartial<T> = T extends readonly unknown[]
     ? { [K in keyof T]?: DeepPartial<T[K]> }
     : T;
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** Same pure diff as change tracking's untracked-child fallback. */
-function valueDiff(initial: unknown, current: unknown): boolean {
-  if (Object.is(initial, current)) return false;
-  if (Array.isArray(current) && Array.isArray(initial)) {
-    if (current.length !== initial.length) return true;
-    return current.some((c, i) => valueDiff(initial[i], c));
-  }
-  if (isRecord(current) && isRecord(initial)) {
-    const keys = Object.keys(current);
-    if (keys.length !== Object.keys(initial).length) return true;
-    return keys.some((k) => valueDiff(initial[k], current[k]));
-  }
-  return true;
-}
-
 function childState(
   state: FieldState<unknown>,
   key: string | number,
@@ -43,9 +25,10 @@ function childState(
   return tree[key]?.();
 }
 
-type Collected = { readonly value: unknown; readonly paths: string[] } | null;
+type Path = readonly string[];
+type Collected = { readonly value: unknown; readonly paths: Path[] } | null;
 
-const unit = (value: unknown, path: string): Collected => ({
+const unit = (value: unknown, path: Path): Collected => ({
   value,
   paths: [path],
 });
@@ -62,7 +45,7 @@ const unit = (value: unknown, path: string): Collected => ({
  */
 function collectNode(
   state: FieldState<unknown>,
-  path: string,
+  path: Path,
   // baseline slice from the nearest tracked ancestor — used when this node has no entry
   fallbackInitial: unknown,
 ): Collected {
@@ -83,9 +66,9 @@ function collectNode(
     if (keys.length !== Object.keys(initial).length) return unit(current, path);
 
     const out: Record<string, unknown> = {};
-    const paths: string[] = [];
+    const paths: Path[] = [];
     for (const key of keys) {
-      const childPath = path ? `${path}.${key}` : key;
+      const childPath = [...path, key];
       const child = childState(state, key);
       if (child) {
         const collected = collectNode(child, childPath, initial[key]);
@@ -120,16 +103,16 @@ function collectRoot(tree: FieldTree<unknown>): Collected {
       );
     return null;
   }
-  return collectNode(state, '', undefined);
+  return collectNode(state, [], undefined);
 }
 
 /**
- * Untracked snapshot of the changed subset WITH its unit paths.
+ * Untracked snapshot of the changed subset WITH its unit paths as key segments.
  * @internal exported for submit-changes (paths drive submitted-unit re-baselining).
  */
 export function collectChanged<T>(
   tree: FieldTree<T>,
-): { readonly value: DeepPartial<T>; readonly paths: string[] } | null {
+): { readonly value: DeepPartial<T>; readonly paths: Path[] } | null {
   const collected = untracked(() => collectRoot(tree as FieldTree<unknown>));
   return collected
     ? { value: collected.value as DeepPartial<T>, paths: collected.paths }
@@ -166,7 +149,11 @@ export function changedValues<T>(
  * {@link changedValues} emits. Useful for debugging and "what will this PATCH send".
  */
 export function changedPaths<T>(tree: FieldTree<T>): Signal<readonly string[]> {
-  return computed(() => collectRoot(tree as FieldTree<unknown>)?.paths ?? []);
+  return computed(
+    () =>
+      collectRoot(tree as FieldTree<unknown>)?.paths.map((p) => p.join('.')) ??
+      [],
+  );
 }
 
 /**

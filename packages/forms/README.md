@@ -216,6 +216,15 @@ form(model, (p) => {
 > signal, but not the array's (or any ancestor's) — put the override on the **array path itself** to
 > change how the container diffs.
 
+> **Only plain objects and arrays are walked.** Every other object (`Date`, `Map`, `Set`, `File`,
+> class instances) is one value compared with `Object.is`, so a new instance reads as changed even
+> when it holds the same data. Add `changedEqual(p.due, (a, b) => a.getTime() === b.getTime())` to
+> compare by value.
+
+> **Cleared optional fields.** Setting an optional field to `undefined` is a change, and the changed
+> payload carries it as `{ nick: undefined }`. `JSON.stringify` drops `undefined` keys, so map the
+> clear to `null` in your mutation (or model the field as `T | null`) if the server must see it.
+
 ## Reset & reconcile
 
 Both build on the native `FieldState.reset` (which clears touched/dirty and optionally sets the value),

@@ -150,6 +150,8 @@ const isFiniteHlc = (h: unknown): boolean =>
   typeof h === 'object' &&
   Number.isFinite((h as { p?: unknown }).p) &&
   Number.isFinite((h as { l?: unknown }).l);
+const hlcAbove = (a: Hlc, b: Hlc): boolean =>
+  a.p > b.p || (a.p === b.p && a.l > b.l);
 
 /**
  * Deterministic, total well-formedness check for a received envelope. Returns a short reason
@@ -158,7 +160,8 @@ const isFiniteHlc = (h: unknown): boolean =>
  * identically. This validates SHAPE, not authority: it closes malformed input (control characters
  * in an id or path segment that could forge a path-key separator, a path segment that is neither a
  * string nor a non-negative integer, a non-integer version, an unknown op kind, a negative epoch,
- * forged cites, a root delete, two ops racing on one path). Authority and
+ * a malformed cite, a cite of the envelope's own origin above the envelope's own stamp, a root
+ * delete, two ops racing on one path). Authority and
  * access control stay at the relay; direct peer-to-peer rooms are trust-full for authority, so this
  * shape check is a peer's only line against a malformed neighbor.
  */
@@ -208,6 +211,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
       ) {
         return 'cites';
       }
+      if ((c as Dot).origin === env.origin && hlcAbove((c as Dot).hlc, env.hlc))
+        return 'cites';
     }
     // one op per path per envelope: a dot is (origin, hlc), so two ops on one path in one envelope
     // would share a dot and break the register's per-origin bookkeeping. Segments with control
@@ -1700,10 +1705,11 @@ export type OpSync<T = unknown> = {
    * Replace local state with a peer's checkpoint, atomically (one notification wave): adopt
    * its root, load its register state, and fold its watermark. Local envelopes the checkpoint
    * doesn't cover (per its watermark) are re-applied on top, so writes made before hydration
-   * are never silently lost; the next emitted version continues past the folded watermark.
-   * Pass `pending` (a durable outbox) to rebase from it instead of the bounded in-memory recent
-   * ring, so an offline burst larger than that ring is not dropped from the rebase. The clock
-   * observes every loaded stamp, so the next local write is stamped after all of them.
+   * are never silently lost; the next emitted version continues past the folded watermark and
+   * past every re-applied envelope's version. Pass `pending` (a durable outbox) to rebase from it
+   * instead of the bounded in-memory recent ring, so an offline burst larger than that ring is not
+   * dropped from the rebase. The clock observes every loaded stamp, the re-applied envelopes
+   * included, so the next local write is stamped after all of them.
    */
   hydrate(state: OpSyncCheckpoint<T>, pending?: readonly OpEnvelope[]): void;
   /**
@@ -2010,6 +2016,13 @@ export function opSync<T extends object>(
         for (const s of r.siblings) clock.observe(s.hlc);
         for (const h of Object.values(r.water)) clock.observe(h);
       }
+      for (const e of toReplay) {
+        clock.observe(e.hlc);
+        versions.set(
+          e.origin,
+          Math.max(versions.get(e.origin) ?? 0, e.version),
+        );
+      }
       // parity: the root is what THIS fold derives from the loaded registers, whatever fold wrote
       // the checkpoint's root (a v3 checkpoint's root keeps array winners whole)
       const deltas: StoreOp[] = conv.load(state.registers ?? []);
@@ -2075,7 +2088,8 @@ export function opSync<T extends object>(
  * emits its diff citing only those observed dots, so an edit that landed on the base mid-flight
  * stays a concurrent sibling and the configured fold decides between them, rather than the commit
  * overwriting a write it never saw. `rebase()` re-observes the base (a following commit then
- * supersedes what is visible now, the reviewed-and-apply step). Pass the same `store` and `sync`
+ * supersedes what is visible now, the reviewed-and-apply step). `discard()` drops the staged edits
+ * and re-observes the base as well. Pass the same `store` and `sync`
  * that are wired together; the fork is a plain {@link Fork} otherwise, so `forkStore` itself stays
  * sync-agnostic.
  */

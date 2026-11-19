@@ -165,6 +165,40 @@ describe('createScope', () => {
     });
   });
 
+  it('retries a factory that threw, without reporting a circular dependency', () => {
+    const [registerScope, provideScope] = createScope('retry');
+
+    let calls = 0;
+    const useFlaky = registerScope(() => {
+      calls++;
+      if (calls === 1) throw new Error('first call fails');
+      return { attempt: calls };
+    });
+
+    TestBed.configureTestingModule({ providers: [provideScope()] });
+
+    TestBed.runInInjectionContext(() => {
+      expect(() => useFlaky()).toThrowError('first call fails');
+      expect(useFlaky()).toEqual({ attempt: 2 });
+      expect(useFlaky()).toBe(useFlaky());
+    });
+  });
+
+  it.each([
+    ['an empty options object', {}],
+    ['overrides: undefined', { overrides: undefined }],
+    ['an empty overrides list', { overrides: [] }],
+  ])('resolves registrations normally when given %s', (_, options) => {
+    const [registerScope, provideScope] = createScope('optionalOverrides');
+    const useValue = registerScope(() => ({ kind: 'real' }));
+
+    TestBed.configureTestingModule({ providers: [provideScope(options)] });
+
+    TestBed.runInInjectionContext(() => {
+      expect(useValue().kind).toBe('real');
+    });
+  });
+
   it('should throw when an override target was not registered in the scope', () => {
     const [registerScope, provideScope] = createScope('strict');
 

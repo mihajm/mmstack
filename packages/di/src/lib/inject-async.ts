@@ -199,8 +199,11 @@ export function injectAsync<T>(
 
   // Prefetch only eagerly, only in the browser, and only on a healthy
   // connection — an explicit `await getter()` always loads regardless.
+  // Nobody awaits the prefetch; a failure surfaces on the next explicit call.
   if (onBrowser && options?.prefetch !== undefined && !hasSlowConnection())
-    void normalizePrefetch(options.prefetch)().then(load);
+    void normalizePrefetch(options.prefetch)()
+      .then(load)
+      .catch(() => undefined);
 
   return load;
 }

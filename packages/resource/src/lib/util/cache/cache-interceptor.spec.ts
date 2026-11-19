@@ -260,11 +260,21 @@ describe('createCacheInterceptor', () => {
       expect(cache.getUntracked('cc-2')).toBeNull();
     });
 
-    it('parses the RFC spelling s-maxage (precedence over max-age)', async () => {
-      await fetchWithHeader('cc-3', 'max-age=60, s-maxage=120');
+    it.each(['max-age=60, s-maxage=120', 's-maxage=120, max-age=60'])(
+      'ignores s-maxage, a shared-cache directive (%s)',
+      async (header) => {
+        await fetchWithHeader('cc-3', header);
 
-      vi.advanceTimersByTime(61_000);
-      expect(cache.getUntracked('cc-3')!.isStale).toBe(false);
+        vi.advanceTimersByTime(59_000);
+        expect(cache.getUntracked('cc-3')!.isStale).toBe(false);
+        vi.advanceTimersByTime(2_000);
+        expect(cache.getUntracked('cc-3')!.isStale).toBe(true);
+      },
+    );
+
+    it('ignores proxy-revalidate, a shared-cache directive', async () => {
+      await fetchWithHeader('cc-3b', 'max-age=60, proxy-revalidate');
+      expect(cache.getUntracked('cc-3b')!.isStale).toBe(false);
     });
 
     it('immutable entries survive indefinitely (no timer self-destruct)', async () => {

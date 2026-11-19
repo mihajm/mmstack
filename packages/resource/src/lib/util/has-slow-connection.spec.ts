@@ -62,4 +62,24 @@ describe('hasSlowConnection', () => {
 
     expect(hasSlowConnection()).toBe(false);
   });
+  it('should return true when the user asked to save data', () => {
+    Object.defineProperty(window, 'navigator', {
+      value: {
+        connection: { effectiveType: '4g', saveData: true },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    expect(hasSlowConnection()).toBe(true);
+  });
+
+  it('should return false without a window (server)', () => {
+    vi.stubGlobal('window', undefined);
+    try {
+      expect(hasSlowConnection()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -26,18 +26,35 @@ describe('dedupe-interceptor', () => {
   });
 
   describe('createDedupeRequestsInterceptor', () => {
-    it('should pass through non-deduped methods (POST)', () => {
+    it('should pass through non-deduped methods (POST), even when they overlap', () => {
       let callCount = 0;
       const interceptor = createDedupeRequestsInterceptor();
       const mockNext: HttpHandlerFn = () => {
         callCount++;
-        return of(new HttpResponse({ status: 200 }));
+        return new Subject<HttpEvent<unknown>>();
       };
 
       const req = new HttpRequest('POST', '/api/data', { payload: true });
       interceptor(req, mockNext).subscribe();
-      expect(callCount).toBe(1);
+      interceptor(req, mockNext).subscribe();
+      expect(callCount).toBe(2);
     });
+
+    it.each(['GET', 'DELETE', 'HEAD', 'OPTIONS'])(
+      'dedupes overlapping %s requests by default',
+      (method) => {
+        let callCount = 0;
+        const interceptor = createDedupeRequestsInterceptor();
+        const mockNext: HttpHandlerFn = () => {
+          callCount++;
+          return new Subject<HttpEvent<unknown>>();
+        };
+        const req = new HttpRequest(method as 'GET', '/api/data');
+        interceptor(req, mockNext).subscribe();
+        interceptor(req, mockNext).subscribe();
+        expect(callCount).toBe(1);
+      },
+    );
 
     it('should dedupe identical GET requests that are in-flight', () => {
       let callCount = 0;
@@ -69,7 +86,7 @@ describe('dedupe-interceptor', () => {
       const interceptor = createDedupeRequestsInterceptor();
       const mockNext: HttpHandlerFn = () => {
         callCount++;
-        return of(new HttpResponse({ status: 200 }));
+        return new Subject<HttpEvent<unknown>>();
       };
 
       const ctx = noDedupe();

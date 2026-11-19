@@ -526,12 +526,12 @@ describe('queryResource', () => {
     TestBed.tick();
 
     for (let i = 0; i < 4; i++) {
-      try {
-        await res.reload();
-      } catch {
-        // ignored
+      expect(res.disabled()).toBe(false);
+      res.reload();
+      for (let j = 0; j < 3; j++) {
+        TestBed.tick();
+        await new Promise((r) => setTimeout(r, 0));
       }
-      TestBed.tick();
     }
 
     await TestBed.runInInjectionContext(() =>

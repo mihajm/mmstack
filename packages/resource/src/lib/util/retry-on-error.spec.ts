@@ -143,4 +143,70 @@ describe('retryOnError', () => {
       expect(mock._reloadSpy).not.toHaveBeenCalled();
     });
   });
+  it.each(['local', 'idle'] as const)(
+    'cancels a pending retry when the status moves to %s',
+    (next) => {
+      TestBed.runInInjectionContext(() => {
+        const mock = createMockResource('data', { status: 'idle' });
+        retryOnError(mock, { max: 2, backoff: 1000 });
+        mock._status.set('loading');
+        TestBed.tick();
+        mock._status.set('error');
+        TestBed.tick();
+        mock._status.set(next);
+        TestBed.tick();
+        vi.advanceTimersByTime(5000);
+        expect(mock._reloadSpy).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it('cancels a pending retry once the resource resolves', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource('data', { status: 'idle' });
+      retryOnError(mock, { max: 2, backoff: 1000 });
+      mock._status.set('error');
+      TestBed.tick();
+      mock._status.set('resolved');
+      TestBed.tick();
+      vi.advanceTimersByTime(5000);
+      expect(mock._reloadSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('backs off exponentially from the configured base', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource('data', { status: 'idle' });
+      retryOnError(mock, { max: 2, backoff: 500 });
+      mock._status.set('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(500);
+      expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
+      mock._status.set('reloading');
+      TestBed.tick();
+      mock._status.set('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(999);
+      expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(mock._reloadSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('a repeated error while a retry is pending schedules one reload', () => {
+    TestBed.runInInjectionContext(() => {
+      const mock = createMockResource('data', { status: 'idle' });
+      retryOnError(mock, { max: 3, backoff: 1000 });
+      mock._status.set('error');
+      TestBed.tick();
+      mock._status.set('reloading');
+      TestBed.tick();
+      mock._status.set('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(1000);
+      expect(mock._reloadSpy).toHaveBeenCalledTimes(0);
+      vi.advanceTimersByTime(1000);
+      expect(mock._reloadSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });

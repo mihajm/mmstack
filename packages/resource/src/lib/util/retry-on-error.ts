@@ -56,8 +56,9 @@ export function retryOnError<T>(
     );
   };
 
-  const onSuccess = () => {
+  const reset = () => {
     if (timeout) clearTimeout(timeout);
+    timeout = undefined;
     retries = 0;
   };
 
@@ -66,8 +67,11 @@ export function retryOnError<T>(
       switch (res.status()) {
         case 'error':
           return handleError();
+        // a success, a value write, an abort or a disabled request ends the retry run
         case 'resolved':
-          return onSuccess();
+        case 'local':
+        case 'idle':
+          return reset();
       }
     },
     { injector },

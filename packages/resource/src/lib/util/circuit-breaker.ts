@@ -95,8 +95,7 @@ type CreateCircuitBreakerOptions = {
 
 /**
  * Options for creating a circuit breaker.
- *  - `false`: Disables circuit breaker functionality (always open).
- *  - true: Creates a new circuit breaker with default options.
+ *  - `false`: Disables circuit breaker functionality (never trips).
  *  - `CircuitBreaker`: Provides an existing `CircuitBreaker` instance to use.
  *  - `{ threshold?: number; timeout?: number; }`: Creates a new circuit breaker with the specified options.
  */
@@ -144,8 +143,9 @@ function internalCeateCircuitBreaker(
     failureCount.set(threshold - 1);
   };
 
+  // keyed on OPEN itself, so a failed half-open trial (HALF_OPEN -> OPEN) arms a new timer
   const effectRef = effect((cleanup) => {
-    if (!isOpen() || failedForever()) return;
+    if (status() !== 'OPEN' || failedForever()) return;
 
     const timeout = setTimeout(tryOnce, resetTimeout);
     return cleanup(() => {
@@ -154,7 +154,7 @@ function internalCeateCircuitBreaker(
   });
 
   const failInternal = () => {
-    failureCount.set(failureCount() + 1);
+    failureCount.update((count) => count + 1);
     halfOpen.set(false);
   };
 
@@ -262,10 +262,13 @@ function normalizeThreshold(
 ): Partial<Omit<CreateCircuitBreakerOptions, 'treshold'>> {
   if (!opt || typeof opt !== 'object' || 'isClosed' in opt) return {};
   const { treshold, threshold, ...rest } = opt;
-  return {
+  const merged: Record<string, unknown> = {
     ...rest,
     threshold: threshold ?? treshold,
   };
+  return Object.fromEntries(
+    Object.entries(merged).filter(([, v]) => v !== undefined),
+  );
 }
 
 /**
@@ -274,7 +277,6 @@ function normalizeThreshold(
  * @param options - Configuration options for the circuit breaker.  Can be:
  *   - `undefined`:  Uses defaults (threshold: 5, timeout: 30000ms) or provided defaults via {@link provideCircuitBreakerDefaultOptions}.
  *   - `false`: Creates a "no-op" circuit breaker that is always closed (never trips).
- *   - `true`: Creates a circuit breaker with default settings.
  *   - `CircuitBreaker`:  Reuses an existing `CircuitBreaker` instance.
  *   - `{ threshold?: number; timeout?: number; }`: Creates a circuit breaker with the specified threshold and timeout.
  *

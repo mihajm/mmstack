@@ -7,6 +7,8 @@ export type CacheDB<T> = {
   getAll: () => Promise<StoredEntry<T>[]>;
   store: (value: StoredEntry<T>) => Promise<void>;
   remove: (key: string) => Promise<void>;
+  /** Removes every row. Optional for custom implementations; the cache falls back to `remove` per row. */
+  clear?: () => Promise<void>;
 };
 
 export function createNoopDB<T>(): CacheDB<T> {
@@ -16,6 +18,9 @@ export function createNoopDB<T>(): CacheDB<T> {
       // noop
     },
     remove: async () => {
+      // noop
+    },
+    clear: async () => {
       // noop
     },
   };
@@ -34,7 +39,15 @@ function toCacheDB<T>(db: IDBDatabase, storeName: string): CacheDB<T> {
       // some browsers abort rather than error
       transaction.onabort = () => rej(transaction.error);
     })
-      .then((entries) => entries.filter((e) => e.expiresAt > now))
+      .then((entries) => {
+        const live = entries.filter((e) => e.expiresAt > now);
+        // rows that expired while no tab held them would otherwise stay forever
+        if (live.length !== entries.length)
+          entries
+            .filter((e) => e.expiresAt <= now)
+            .forEach((e) => void remove(e.key));
+        return live;
+      })
       .catch((err) => {
         if (isDevMode())
           console.error('Error getting all items from cache DB:', err);
@@ -72,10 +85,24 @@ function toCacheDB<T>(db: IDBDatabase, storeName: string): CacheDB<T> {
     });
   };
 
+  const clear = () => {
+    return new Promise<void>((res, rej) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      transaction.objectStore(storeName).clear();
+
+      transaction.oncomplete = () => res();
+      transaction.onerror = () => rej(transaction.error);
+      transaction.onabort = () => rej(transaction.error);
+    }).catch((err) => {
+      if (isDevMode()) console.error('Error clearing cache DB:', err);
+    });
+  };
+
   return {
     getAll,
     store,
     remove,
+    clear,
   };
 }
 
@@ -111,7 +138,17 @@ export function createSingleStoreDB<T>(
       rej(req.error);
     };
 
-    req.onsuccess = () => res(req.result);
+    // another tab still holds an older version that does not let go: run without persistence
+    req.onblocked = () => {
+      rej(new Error(`Opening "${name}" v${version} is blocked by another tab`));
+    };
+
+    req.onsuccess = () => {
+      const db = req.result;
+      // let a newer version (another tab after an upgrade) open instead of blocking it
+      db.onversionchange = () => db.close();
+      res(db);
+    };
   })
     .then((db) => toCacheDB<T>(db, storeName))
     .catch((err) => {

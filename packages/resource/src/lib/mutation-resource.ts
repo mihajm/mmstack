@@ -34,6 +34,7 @@ import {
   injectResourceOptions,
   provideTypedResourceOptions,
 } from './options';
+import { type InternalQueryHooks, ON_FINAL_ERROR } from './util/internal-hooks';
 import {
   queryResource,
   type QueryResourceOptions,
@@ -59,6 +60,14 @@ export type MutationFailure = {
   /** Distinct per failure of this mutation, so a presented failure can be told from the next one. */
   readonly generation: number;
 };
+
+/**
+ * Why a mutation can't be started right now, in order of precedence:
+ * - `'offline'`: the network is down.
+ * - `'circuit-open'`: the circuit breaker is open (a half-open breaker lets its trial through).
+ * - `'in-flight'`: another mutation is running and the resource does not queue.
+ */
+export type MutationDisabledReason = 'offline' | 'circuit-open' | 'in-flight';
 
 /** @internal A mutation's persisted-row identity, carried through its lifecycle. */
 type PersistedRef = { readonly id: string; readonly replayed: boolean };
@@ -315,7 +324,20 @@ export type MutationResourceRef<
   | 'update'
   | 'abort'
   | 'outcome'
+  | 'disabled'
+  | 'disabledReason'
 > & {
+  /**
+   * Whether a mutation can't be started right now: `true` exactly when `disabledReason()` is not
+   * `null`.
+   */
+  disabled: Signal<boolean>;
+  /**
+   * Why a mutation can't be started right now, or `null` when it can. `'offline'` wins over
+   * `'circuit-open'`, which wins over `'in-flight'`. A queued resource never reports
+   * `'in-flight'`: a new `mutate()` joins the queue.
+   */
+  disabledReason: Signal<MutationDisabledReason | null>;
   /** Whether a settled result is held: false while idle on the default, after the request clears. */
   hasValue(): boolean;
   /**
@@ -637,21 +659,21 @@ export function mutationResource<
     currentPersisted = persisted;
     next.set(value);
 
-    // nothing will be sent, so nothing will settle the run
-    if (untracked(req) === undefined) endRun({ reason: 'abort' });
-    if (deferred && untracked(req) === undefined) {
-      ctx = undefined as TCTX;
-      currentDeferred = undefined;
-      if (persisted) persistence?.remove(persisted.id);
-      currentPersisted = undefined;
-      next.set(NULL_VALUE);
-      deferred.reject(
-        new MutationCancelledError(
-          'no-request',
-          'mutation not sent: request() returned undefined',
-        ),
-      );
-    }
+    if (untracked(req) !== undefined) return;
+
+    // nothing will be sent, so nothing would ever settle it
+    endRun({ reason: 'abort' });
+    ctx = undefined as TCTX;
+    currentDeferred = undefined;
+    if (persisted) persistence?.remove(persisted.id);
+    currentPersisted = undefined;
+    next.set(NULL_VALUE);
+    deferred?.reject(
+      new MutationCancelledError(
+        'no-request',
+        'mutation not sent: request() returned undefined',
+      ),
+    );
   };
 
   const supersedeInFlight = () => {
@@ -694,32 +716,7 @@ export function mutationResource<
     { injector: options.injector },
   );
 
-  const lastValue = linkedSignal<
-    TMutation | typeof NULL_VALUE,
-    TMutation | typeof NULL_VALUE
-  >({
-    source: next,
-    computation: (next, prev) => {
-      if (next === NULL_VALUE && !!prev) return prev.value;
-      return next;
-    },
-  });
-
-  const lastValueRequest = computed(
-    (): HttpResourceRequest | undefined => {
-      const nr = lastValue();
-      if (nr === NULL_VALUE) return;
-
-      return request(nr) ?? undefined;
-    },
-    {
-      equal: (a, b) => {
-        if (a === b) return true;
-        if (a === undefined || b === undefined) return false;
-        return requestEqual(a, b);
-      },
-    },
-  );
+  const online = injectNetworkStatus(options.injector);
 
   const cb = createCircuitBreaker(
     options?.circuitBreaker === true
@@ -734,13 +731,18 @@ export function mutationResource<
     circuitBreaker: cb,
     equalRequest: requestEqual,
     defaultValue: NULL_VALUE as unknown as TResult,
-  });
+    // a failure is taken at the point the query calls it final: an attempt that trips the
+    // breaker disables the query, which would clear the error before `status` reports it
+    [ON_FINAL_ERROR]: (error: unknown) =>
+      untracked(() => settle({ status: 'error', error })),
+  } as QueryResourceOptions<TResult, TRaw> & {
+    defaultValue: TResult;
+  } & InternalQueryHooks);
 
   const destroyRef = options.injector
     ? options.injector.get(DestroyRef)
     : inject(DestroyRef);
 
-  const error$ = toObservable(resource.error, { injector: options.injector });
   const value$ = toObservable(resource.value, {
     injector: options.injector,
   }).pipe(catchError(() => of(NULL_VALUE)));
@@ -749,88 +751,83 @@ export function mutationResource<
     injector: options.injector,
   })
     .pipe(
-      combineLatestWith(error$, value$),
-      map(
-        ([status, error, value]): StatusResult<TResult> | typeof NULL_VALUE => {
-          if (status === 'error' && error) {
-            return {
-              status: 'error',
-              error,
-            };
-          }
-
-          if (status === 'resolved' && value !== NULL_VALUE) {
-            return {
-              status: 'resolved',
-              value,
-            };
-          }
-
-          return NULL_VALUE;
-        },
+      combineLatestWith(value$),
+      map(([status, value]): StatusResult<TResult> | typeof NULL_VALUE =>
+        status === 'resolved' && value !== NULL_VALUE
+          ? { status: 'resolved', value }
+          : NULL_VALUE,
       ),
       filter((v) => v !== NULL_VALUE),
       takeUntilDestroyed(destroyRef),
     )
-    .subscribe((result) => {
-      const deferred = currentDeferred;
-      currentDeferred = undefined;
-      const persisted = currentPersisted;
-      currentPersisted = undefined;
-      if (persisted) {
-        const meta: MutationErrorMeta = { replayed: persisted.replayed };
-        const keep =
-          result.status === 'error' &&
-          (typeof persist?.keepOnError === 'function'
-            ? persist.keepOnError(result.error, meta)
-            : (persist?.keepOnError ?? false));
-        if (!keep) persistence?.remove(persisted.id);
+    .subscribe((result) => settle(result));
+
+  function settle(result: StatusResult<TResult>): void {
+    const deferred = currentDeferred;
+    currentDeferred = undefined;
+    const persisted = currentPersisted;
+    currentPersisted = undefined;
+    if (persisted) {
+      const meta: MutationErrorMeta = { replayed: persisted.replayed };
+      const keep =
+        result.status === 'error' &&
+        (typeof persist?.keepOnError === 'function'
+          ? persist.keepOnError(result.error, meta)
+          : (persist?.keepOnError ?? false));
+      if (!keep) persistence?.remove(persisted.id);
+    }
+
+    // settles on a later microtask, so the callbacks below still see the guesses
+    endRun(
+      result.status === 'error'
+        ? { ok: false, error: result.error }
+        : { ok: true },
+    );
+
+    if (result.status === 'error') {
+      lastFailure.set({ error: result.error, generation: (failures += 1) });
+      onError?.(result.error, ctx, {
+        replayed: persisted?.replayed ?? false,
+      });
+      deferred?.reject(result.error);
+    } else {
+      onSuccess?.(result.value, ctx);
+
+      if (cache && invalidates) {
+        const mutation = untracked(next);
+        const prefixes =
+          typeof invalidates === 'function'
+            ? invalidates(
+                result.value,
+                (mutation === NULL_VALUE ? undefined : mutation) as TMutation,
+              )
+            : invalidates;
+
+        for (const prefix of prefixes)
+          cache.invalidateUrlPrefix(prefix, invalidateMatcher);
       }
 
-      // settles on a later microtask, so the callbacks below still see the guesses
-      endRun(
-        result.status === 'error'
-          ? { ok: false, error: result.error }
-          : { ok: true },
-      );
+      deferred?.resolve(result.value);
+    }
 
-      if (result.status === 'error') {
-        lastFailure.set({ error: result.error, generation: (failures += 1) });
-        onError?.(result.error, ctx, {
-          replayed: persisted?.replayed ?? false,
-        });
-        deferred?.reject(result.error);
-      } else {
-        onSuccess?.(result.value, ctx);
+    onSettled?.(ctx);
+    ctx = undefined as TCTX;
+    next.set(NULL_VALUE);
+  }
 
-        if (cache && invalidates) {
-          const mutation = untracked(lastValue);
-          const prefixes =
-            typeof invalidates === 'function'
-              ? invalidates(
-                  result.value,
-                  (mutation === NULL_VALUE ? undefined : mutation) as TMutation,
-                )
-              : invalidates;
+  const disabledReason = computed((): MutationDisabledReason | null => {
+    if (!online()) return 'offline';
+    if (cb.status() === 'OPEN') return 'circuit-open';
+    if (!queueEnabled && next() !== NULL_VALUE) return 'in-flight';
+    return null;
+  });
 
-          for (const prefix of prefixes)
-            cache.invalidateUrlPrefix(prefix, invalidateMatcher);
-        }
-
-        deferred?.resolve(result.value);
-      }
-
-      onSettled?.(ctx);
-      ctx = undefined as TCTX;
-      next.set(NULL_VALUE);
-    });
-
+  let destroyed = false;
   let persistDestroyed = false;
   let replayEffectRef: EffectRef | undefined;
   let releaseClaim: (() => void) | null = null;
 
   if (persistence && persist) {
-    const online = injectNetworkStatus(options.injector);
     const persistKey = persist.key;
 
     const deserializeRow = (row: {
@@ -933,6 +930,7 @@ export function mutationResource<
       return status === 'resolved' || status === 'local' ? DONE : undefined;
     }),
     destroy: () => {
+      destroyed = true;
       persistDestroyed = true;
       replayEffectRef?.destroy();
       releaseClaim?.();
@@ -945,11 +943,14 @@ export function mutationResource<
       currentDeferred?.reject(cancelled);
       currentDeferred = undefined;
       endRun({ reason: 'destroyed' });
+      ctx = undefined as TCTX;
+      next.set(NULL_VALUE);
       for (const [, , deferred] of untracked(queue)())
         deferred?.reject(cancelled);
       resource.destroy();
     },
     mutate: (value, ictx) => {
+      if (destroyed) return;
       const persisted = stash(value, ictx);
       if (queueEnabled) {
         queue().update((arr) => [...arr, [value, ictx, undefined, persisted]]);
@@ -959,6 +960,13 @@ export function mutationResource<
       begin(value, ictx, undefined, persisted);
     },
     mutateAsync: (value, ictx) => {
+      if (destroyed)
+        return Promise.reject(
+          new MutationCancelledError(
+            'destroyed',
+            'mutation not sent: resource destroyed',
+          ),
+        );
       const deferred = Promise.withResolvers<TResult>();
       const persisted = stash(value, ictx);
       if (queueEnabled) {
@@ -988,7 +996,8 @@ export function mutationResource<
         if (persisted) persistence?.remove(persisted.id);
       }
     },
-    disabled: computed(() => cb.isOpen() || lastValueRequest() === undefined),
+    disabledReason,
+    disabled: computed(() => disabledReason() !== null),
   };
 
   applyResourceRegistration(

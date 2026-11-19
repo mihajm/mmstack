@@ -45,6 +45,35 @@ describe('merge-options', () => {
         ),
       ).toEqual({ timeout: 5000, threshold: 5 });
     });
+
+    it('lets a later false turn the breaker off', () => {
+      expect(mergeCircuitBreakerOptions(true, undefined, false)).toBe(false);
+      expect(
+        mergeCircuitBreakerOptions({ threshold: 3 }, undefined, false),
+      ).toBe(false);
+      expect(mergeCircuitBreakerOptions(undefined, false, undefined)).toBe(
+        false,
+      );
+    });
+
+    it('lets a later layer turn a false back on', () => {
+      expect(mergeCircuitBreakerOptions(false, { threshold: 2 })).toEqual({
+        threshold: 2,
+      });
+      expect(mergeCircuitBreakerOptions(false, true)).toEqual({});
+    });
+
+    it('passes a breaker instance through unchanged', () => {
+      const instance = {
+        isClosed: () => true,
+      } as unknown as Parameters<typeof mergeCircuitBreakerOptions>[0];
+      expect(
+        mergeCircuitBreakerOptions({ threshold: 3 }, undefined, instance),
+      ).toBe(instance);
+      expect(mergeCircuitBreakerOptions(instance, { threshold: 2 })).toEqual({
+        threshold: 2,
+      });
+    });
   });
 
   describe('mergeRetryOptions', () => {
@@ -57,6 +86,7 @@ describe('merge-options', () => {
     it('returns a max object if a number is passed', () => {
       expect(mergeRetryOptions(3, undefined, undefined)).toEqual({ max: 3 });
       expect(mergeRetryOptions(undefined, 5, undefined)).toEqual({ max: 5 });
+      expect(mergeRetryOptions(undefined, undefined, 2)).toEqual({ max: 2 });
     });
 
     it('merges objects and numbers, latter overrides former', () => {
@@ -74,6 +104,12 @@ describe('merge-options', () => {
   describe('mergeCacheOptions', () => {
     it('returns undefined if all undefined', () => {
       expect(mergeCacheOptions(undefined, undefined)).toBeUndefined();
+    });
+
+    it('keeps query-level options when there is no per-call option', () => {
+      expect(mergeCacheOptions({ ttl: 5000 }, undefined)).toEqual({
+        ttl: 5000,
+      });
     });
 
     it('merges true into an empty object functionally representing true', () => {

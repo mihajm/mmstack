@@ -1,12 +1,20 @@
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { type Provider } from '@angular/core';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  type Provider,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   injectTransitionScope,
   provideTransitionScope,
 } from '@mmstack/primitives';
 import { provideResourceOptions } from './options';
+import { mutationResource } from './mutation-resource';
 import { provideQueryResourceOptions, queryResource } from './query-resource';
 import { provideQueryCache } from './util';
 
@@ -86,5 +94,58 @@ describe('resource options injection + auto-register', () => {
       res.destroy();
       expect(scope.resources().length).toBe(0);
     });
+  });
+  it('the factory form of provideResourceOptions applies too', () => {
+    setup([provideResourceOptions(() => ({ register: 'indicator' }))]);
+    TestBed.runInInjectionContext(() => {
+      const scope = injectTransitionScope();
+      queryResource(() => 'https://example.test/a');
+      expect(scope.resources().length).toBe(1);
+    });
+  });
+
+  it("only a mutation with register: 'suspend' gets the suspend warning", () => {
+    setup([]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    TestBed.runInInjectionContext(() => {
+      queryResource(() => 'https://example.test/a', { register: 'suspend' });
+      mutationResource(() => ({ url: 'https://example.test/m' }), {
+        register: 'indicator',
+      });
+    });
+    const suspendWarnings = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("'suspend'"),
+    );
+    expect(suspendWarnings).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('a resource created in a child injector leaves the scope when that injector is destroyed', () => {
+    setup([]);
+    const scope = TestBed.runInInjectionContext(() => injectTransitionScope());
+    const child = createEnvironmentInjector(
+      [],
+      TestBed.inject(EnvironmentInjector),
+    );
+    queryResource(() => 'https://example.test/a', {
+      register: 'indicator',
+      injector: child,
+    });
+    expect(scope.resources().length).toBe(1);
+    child.destroy();
+    expect(scope.resources().length).toBe(0);
+  });
+
+  it('destroy() on a registered resource also stops it', () => {
+    setup([]);
+    const res = TestBed.runInInjectionContext(() =>
+      queryResource(() => 'https://example.test/a', { register: 'indicator' }),
+    );
+    TestBed.tick();
+    const http = TestBed.inject(HttpTestingController);
+    const req = http.expectOne('https://example.test/a');
+    res.destroy();
+    expect(res.status()).toBe('idle');
+    expect(req.cancelled).toBe(true);
   });
 });

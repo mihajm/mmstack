@@ -213,9 +213,11 @@ describe('Cache', () => {
   it('should update existing entry on re-store', () => {
     const cache = new Cache<string>();
 
+    const storedAt = Date.now();
     cache.store('key1', 'first');
     const first = cache.getUntracked('key1')!;
     expect(first.value).toBe('first');
+    expect(first.created).toBe(storedAt);
 
     vi.advanceTimersByTime(10);
     cache.store('key1', 'second');

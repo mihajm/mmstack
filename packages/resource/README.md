@@ -131,7 +131,7 @@ All three return a signal-typed ref — `value()`, `status()`, `error()`, `heade
 
 When the cache interceptor is registered (`createCacheInterceptor()`) and a query resource opts in via `cache`, responses are stored in the shared `Cache` keyed by a string derived from the request.
 
-**Default key**: produced by `hashRequest()` (`util/hash-request.ts`). Composition is `${method}:${url}:${responseType}[:${params}][:${body}]` — sorted query params, stable body hashing (incl. `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer` markers). **It does not include headers or `HttpContext` by default.**
+**Default key**: produced by `hashRequest()` (`util/hash-request.ts`). Composition is `${method}${SEP}${url}${SEP}${responseType}[${SEP}params][${SEP}body][${SEP}vary]`, where `SEP` is a control-character delimiter (treat keys as opaque) — sorted query params, stable body hashing (incl. `File`/`Blob`/`FormData`/`URLSearchParams`/`ArrayBuffer` markers). **It does not include headers or `HttpContext` by default.**
 
 If responses differ per header — different `Authorization` users, `Accept-Language`, a tenant header — opt those headers into the key with `varyHeaders`:
 
@@ -166,7 +166,7 @@ Cache entries have two durations:
 
 Between `staleTime` and `ttl`, the cached value is **stale-but-valid**: the resource returns it immediately, then triggers a background fetch to revalidate. Consumers see the cached value first, then the fresh value when it lands.
 
-HTTP `Cache-Control` and `ETag`/`Last-Modified` headers are respected by default. A response with `s-maxage=60` will be considered fresh for 60s, `stale-while-revalidate=300` extends the stale window by 5 min, and 304 responses are honored. To opt out per-resource, pass `cache: { ignoreCacheControl: true }`.
+HTTP `Cache-Control` and `ETag`/`Last-Modified` headers are respected by default. A response with `max-age=60` will be considered fresh for 60s, `stale-while-revalidate=300` extends the stale window by 5 min, and 304 responses are honored. The cache is a private (browser) cache, so the shared-cache directives `s-maxage` and `proxy-revalidate` are ignored. To opt out per-resource, pass `cache: { ignoreCacheControl: true }`.
 
 ### Interceptors
 
@@ -514,17 +514,18 @@ readonly pct = computed(() => {
 
 ### Return shape (`MutationResourceRef<T, TMutation>`)
 
-| Member                                        | Type                                            | Notes                                                                                                                                                                                 |
-| --------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mutate`                                      | `(value, ctx?) => void`                         | Trigger the mutation (fire-and-forget).                                                                                                                                               |
-| `mutateAsync`                                 | `(value, ctx?) => Promise<TResult>`             | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`.                                                                                                 |
-| `current`                                     | `Signal<TMutation \| null>`                     | The value currently being mutated (or `null` if idle).                                                                                                                                |
-| `lastFailure`                                 | `Signal<MutationFailure \| undefined>`          | The last failed mutation's `{ error, generation }`, until the next `mutate()` starts (outlives `error()`, which clears with the request); `generation` grows by one per failure.      |
-| `progress`                                    | `Signal<HttpProgressEvent \| undefined>`        | Upload/download progress when `reportProgress: true`.                                                                                                                                 |
-| `status` / `error` / `isLoading` / `disabled` | as in `QueryResourceRef`                        | –                                                                                                                                                                                     |
-| `headers` / `statusCode`                      | as in `QueryResourceRef`                        | Response metadata, when available.                                                                                                                                                    |
-| `outcome`                                     | `Signal<T \| Loading \| ErrorSentinel \| Done>` | `undefined` while idle, a `loading` sentinel while running, then the result (`DONE` for an `undefined` result) or an `error` sentinel. See [outcome as a value](#outcome-as-a-value). |
-| `hasContent`                                  | `() => boolean`                                 | Always `true`: a mutation never suspends or blanks a boundary.                                                                                                                        |
+| Member                           | Type                                                         | Notes                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mutate`                         | `(value, ctx?) => void`                                      | Trigger the mutation (fire-and-forget).                                                                                                                                                                                                                                                                                                                                               |
+| `mutateAsync`                    | `(value, ctx?) => Promise<TResult>`                          | Trigger and `await` the result; rejects with the error or a `MutationCancelledError`.                                                                                                                                                                                                                                                                                                 |
+| `current`                        | `Signal<TMutation \| null>`                                  | The value currently being mutated (or `null` if idle).                                                                                                                                                                                                                                                                                                                                |
+| `lastFailure`                    | `Signal<MutationFailure \| undefined>`                       | The last failed mutation's `{ error, generation }`, until the next `mutate()` starts (outlives `error()`, which clears with the request); `generation` grows by one per failure.                                                                                                                                                                                                      |
+| `progress`                       | `Signal<HttpProgressEvent \| undefined>`                     | Upload/download progress when `reportProgress: true`.                                                                                                                                                                                                                                                                                                                                 |
+| `status` / `error` / `isLoading` | as in `QueryResourceRef`                                     | –                                                                                                                                                                                                                                                                                                                                                                                     |
+| `disabled` / `disabledReason`    | `Signal<boolean>` / `Signal<MutationDisabledReason \| null>` | `disabledReason()` is `'offline'`, then `'circuit-open'` (only while the breaker is fully open; a half-open breaker lets its trial through), then `'in-flight'` while a mutation runs on a resource without `queue`; `null` when a mutation can start. `disabled()` is `disabledReason() !== null`. With `queue`, an in-flight mutation does not disable: a new `mutate()` is queued. |
+| `headers` / `statusCode`         | as in `QueryResourceRef`                                     | Response metadata, when available.                                                                                                                                                                                                                                                                                                                                                    |
+| `outcome`                        | `Signal<T \| Loading \| ErrorSentinel \| Done>`              | `undefined` while idle, a `loading` sentinel while running, then the result (`DONE` for an `undefined` result) or an `error` sentinel. See [outcome as a value](#outcome-as-a-value).                                                                                                                                                                                                 |
+| `hasContent`                     | `() => boolean`                                              | Always `true`: a mutation never suspends or blanks a boundary.                                                                                                                                                                                                                                                                                                                        |
 
 (Mutations deliberately don't expose `value`, `hasValue`, `set`, `update`, or `prefetch` — those don't make sense for one-off writes.)
 
@@ -548,6 +549,8 @@ onSubmit() {
 
 - `register: 'suspend'` treats an untriggered query as ready. A suspense boundary only holds while a triggered load is in flight, so a page with an export button never blanks waiting for a click.
 - `pause` holds a `trigger()` made while paused: the request fires on resume and the returned promise settles from it (several triggers while paused collapse into one request).
+
+Every `trigger()` fetches, even when the request equals the previous one. The promise resolves with the value of that load, rejects with the error once retries are exhausted, and rejects with an `AbortError` when the load is aborted (`abort()`, a value write, a disabled request) or the resource is destroyed.
 
 ## `infiniteQueryResource`
 
@@ -716,7 +719,7 @@ mutationResource(() => ({ url: '/api/posts', method: 'POST' }), {
 });
 ```
 
-Sharing one `cb` across multiple resources means a flaky endpoint trips the breaker once and protects every consumer. Per-resource breakers (`circuitBreaker: true` or `circuitBreaker: { threshold: 3 }`) create independent state.
+Sharing one `cb` across multiple resources means a flaky endpoint trips the breaker once and protects every consumer, and destroying one of those resources leaves the shared breaker running for the rest. Per-resource breakers (`circuitBreaker: true` or `circuitBreaker: { threshold: 3 }`) create independent state. `circuitBreaker: false` turns the breaker off for one resource, even when a provider default enables it.
 
 > The misspelled `treshold` field is still accepted as a deprecated alias for `threshold` (it'll be removed in a future major).
 
@@ -904,7 +907,7 @@ beforeEach(() => {
 
 ### `provideMockResourceSensors(options?)`
 
-Resources auto-pause when the network drops or the page is hidden. To drive that behavior in a test — instead of relying on the real `navigator.onLine` / `document.visibilityState` — provide controllable sensors. Pass your own writable signals to toggle state mid-test; omit them for a static online + visible environment.
+Resources are disabled while the network is down, and `refresh.onFocus` refetches when the page becomes visible again. To drive that behavior in a test — instead of relying on the real `navigator.onLine` / `document.visibilityState` — provide controllable sensors. Pass your own writable signals to toggle state mid-test; omit them for a static online + visible environment.
 
 ```typescript
 import { signal } from '@angular/core';
@@ -979,7 +982,7 @@ Manual — for predicates the URL-prefix form can't express:
 const cache = injectQueryCache();
 mutationResource(request, {
   onSuccess: () => {
-    cache.invalidatePrefix('GET:/posts'); // auto-keys are `${method}:${url}:...`
+    cache.invalidateUrlPrefix('/posts'); // matches auto-keys by URL, any method
     // or: cache.invalidateWhere((key) => key.includes('userId=42'));
   },
 });
@@ -995,7 +998,7 @@ queryResource(() => ({ url: '/api/notifications' }), {
 });
 ```
 
-The user switches back to the tab (or the browser comes back online) → the resource refetches, unless it's disabled or paused. Compose with an interval for "poll while visible, refresh immediately on return": `refresh: { interval: 60_000, onFocus: true }`.
+The user switches back to the tab (or the browser comes back online) → the resource refetches, unless it's disabled or paused. With `onReconnect`, the first request after the network returns goes to the server even when the cached entry is still fresh. Compose with an interval for "poll while visible, refresh immediately on return": `refresh: { interval: 60_000, onFocus: true }`.
 
 ### Prefetch on hover
 

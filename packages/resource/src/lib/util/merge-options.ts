@@ -1,23 +1,37 @@
-import type { CircuitBreakerOptions } from './circuit-breaker';
+import type { CircuitBreaker, CircuitBreakerOptions } from './circuit-breaker';
 import type { RefreshOptions } from './refresh';
 import type { RetryOptions } from './retry-on-error';
 import type { ResourceCacheOptions } from '../options';
 
+function isCircuitBreaker(
+  opt: CircuitBreakerOptions | true | undefined,
+): opt is CircuitBreaker {
+  return typeof opt === 'object' && 'isClosed' in opt;
+}
+
 /**
  * Deep merges multiple circuit breaker options.
- * The latter options override the former.
+ * The latter options override the former: `false` turns the breaker off, a
+ * `CircuitBreaker` instance is used as is, and option objects merge field by field.
  */
 export function mergeCircuitBreakerOptions(
   global?: CircuitBreakerOptions | true,
   query?: CircuitBreakerOptions | true,
   local?: CircuitBreakerOptions | true,
-): CircuitBreakerOptions | true | undefined {
-  if (!global && !query && !local) return undefined;
-  return {
-    ...(global === true ? {} : global),
-    ...(query === true ? {} : query),
-    ...(local === true ? {} : local),
-  };
+): CircuitBreakerOptions | undefined {
+  let merged: CircuitBreakerOptions | undefined;
+  for (const layer of [global, query, local]) {
+    if (layer === undefined) continue;
+    if (layer === false || isCircuitBreaker(layer)) merged = layer;
+    else if (layer === true) {
+      if (!merged || isCircuitBreaker(merged)) merged = {};
+    } else
+      merged = {
+        ...(merged && !isCircuitBreaker(merged) ? merged : {}),
+        ...layer,
+      };
+  }
+  return merged;
 }
 
 /**

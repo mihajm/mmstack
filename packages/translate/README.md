@@ -715,6 +715,10 @@ const valueThatNeedsProps = t('remote.myOtherKey', {
 });
 ```
 
+### SSR hydration
+
+With server-side rendering, the remote resolver hands what it loaded on the server to the browser through Angular's `TransferState`, so the client does not fetch the same strings again. On the server, each loaded locale is stored under the key `@mmstack/translate:<namespace>:<locale>`. In the browser, the resolver reads that key first and only calls the loader when the key is missing. Nothing needs to be configured: it works wherever `TransferState` is serialized into the page, which `provideClientHydration()` and the Angular SSR setup do by default.
+
 ## Formatters
 
 The library includes a set of reactive formatters that wrap the standard `Intl.*` APIs and integrate with the dynamic locale signal.

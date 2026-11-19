@@ -1,4 +1,9 @@
-import { computed, signal, type Provider } from '@angular/core';
+import {
+  computed,
+  signal,
+  type Provider,
+  type ResourceStatus,
+} from '@angular/core';
 import { createIntl, createIntlCache, type IntlShape } from '@formatjs/intl';
 import { compileTranslation } from '../compile';
 import { type UnknownStringKeyObject } from '../string-key-object.type';
@@ -133,6 +138,10 @@ export function provideMockTranslations(
           container: new WeakMap(),
         }),
         hasLocaleLoaders: () => false,
+        hasTranslationsFor: () => true,
+        cancelPendingSwitches: () => {
+          /* noop */
+        },
         register: () => {
           /* noop */
         },
@@ -143,6 +152,8 @@ export function provideMockTranslations(
           /* noop */
         },
         dynamicLocaleLoader: {
+          status: signal<ResourceStatus>('idle'),
+          hasValue: () => false,
           isLoading: signal(false),
           value: signal(null),
           error: signal(null),

@@ -62,7 +62,9 @@ export type FormatNumberOptions = {
    */
   maxFractionDigits?: number;
   /**
-   * Whether to use grouping
+   * Whether to use grouping separators. `true` groups by the locale's rules
+   * (`Intl` `useGrouping: 'auto'`, so Spanish leaves 4-digit numbers ungrouped),
+   * `false` turns grouping off.
    * @default true
    */
   useGrouping?: boolean;
@@ -113,7 +115,7 @@ function getFormatter(
   locale: string,
   cfg: NumericFormatterConfig,
 ): Intl.NumberFormat {
-  const cacheKey = `${locale}|${cfg.style ?? 'decimal'}|${cfg.notation ?? 'standard'}|${cfg.minFractionDigits}|${cfg.maxFractionDigits}|${cfg.useGrouping}|${cfg.currency ?? 'none'}|${cfg.display ?? 'none'}|${cfg.signDisplay ?? 'auto'}|${cfg.roundingMode ?? 'halfExpand'}|${cfg.unit ?? 'none'}|${cfg.unitDisplay ?? 'short'}`;
+  const cacheKey = `${locale}|${cfg.style ?? 'decimal'}|${cfg.notation ?? 'standard'}|${cfg.minFractionDigits}|${cfg.maxFractionDigits}|${cfg.useGrouping !== false}|${cfg.currency ?? 'none'}|${cfg.display ?? 'none'}|${cfg.signDisplay ?? 'auto'}|${cfg.roundingMode ?? 'halfExpand'}|${cfg.unit ?? 'none'}|${cfg.unitDisplay ?? 'short'}`;
   let formatter = cache.get(cacheKey);
 
   if (!formatter) {
@@ -122,7 +124,7 @@ function getFormatter(
       notation: cfg.notation,
       minimumFractionDigits: cfg.minFractionDigits,
       maximumFractionDigits: cfg.maxFractionDigits,
-      useGrouping: cfg.useGrouping,
+      useGrouping: cfg.useGrouping === false ? false : 'auto',
       currency: cfg.currency,
       currencyDisplay: cfg.display,
       signDisplay: cfg.signDisplay,
@@ -184,7 +186,7 @@ export function formatNumber(
   let notation: NumberNotation | undefined;
   let minFractionDigits: number | undefined;
   let maxFractionDigits: number | undefined;
-  let useGrouping = true;
+  let useGrouping: boolean | undefined;
   let signDisplay: NumberSignDisplay | undefined;
   let roundingMode: NumberRoundingMode | undefined;
 
@@ -195,7 +197,7 @@ export function formatNumber(
     notation = unwrappedArgs.notation ?? 'standard';
     minFractionDigits = unwrappedArgs.minFractionDigits;
     maxFractionDigits = unwrappedArgs.maxFractionDigits;
-    useGrouping = unwrappedArgs.useGrouping ?? true;
+    useGrouping = unwrappedArgs.useGrouping;
     signDisplay = unwrappedArgs.signDisplay;
     roundingMode = unwrappedArgs.roundingMode;
   } else {
@@ -218,7 +220,6 @@ const [provideFormatNumberDefaults, injectFormatNumberOptions] =
     'number',
     {
       notation: 'standard',
-      useGrouping: true,
     },
     (a, b) =>
       a.notation === b.notation &&
@@ -629,7 +630,9 @@ export type FormatUnitOptions = {
    */
   maxFractionDigits?: number;
   /**
-   * Whether to use grouping
+   * Whether to use grouping separators. `true` groups by the locale's rules
+   * (`Intl` `useGrouping: 'auto'`, so Spanish leaves 4-digit numbers ungrouped),
+   * `false` turns grouping off.
    * @default true
    */
   useGrouping?: boolean;
@@ -685,7 +688,7 @@ export function formatUnit(
   return getFormatter(locale, {
     minFractionDigits: opt?.minFractionDigits,
     maxFractionDigits: opt?.maxFractionDigits,
-    useGrouping: opt?.useGrouping ?? true,
+    useGrouping: opt?.useGrouping,
     unit: unwrap(unit),
     unitDisplay: opt?.unitDisplay ?? 'short',
     style: 'unit',
@@ -699,7 +702,6 @@ const [provideFormatUnitDefaults, injectFormatUnitOptions] =
     'unit',
     {
       unitDisplay: 'short',
-      useGrouping: true,
     },
     (a, b) =>
       a.unitDisplay === b.unitDisplay &&

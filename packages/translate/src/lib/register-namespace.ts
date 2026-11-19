@@ -31,26 +31,19 @@ import {
   TranslationStore,
 } from './translation-store';
 
-function createEqualsRecord<T extends AnyStringRecord>(keys: (keyof T)[] = []) {
-  let keyMatcher: (a: T, b: T) => boolean;
+function equalRecord(a?: AnyStringRecord, b?: AnyStringRecord): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k]);
+}
 
-  if (keys.length === 0) {
-    keyMatcher = () => true;
-  } else if (keys.length === 1) {
-    const key = keys[0];
-    keyMatcher = (a, b) => a[key] === b[key];
-  } else {
-    keyMatcher = (a, b) => {
-      return keys.every((k) => a[k] === b[k]);
-    };
-  }
-
-  return (a?: T, b?: T): boolean => {
-    if (a === b) return true;
-    if (!a && !b) return true;
-    if (!a || !b) return false;
-    return keyMatcher(a, b);
-  };
+function warnDefaultFallback(locale: string, defaultLocale: string) {
+  if (!isDevMode()) return;
+  console.warn(
+    `[Translate] Failed to load translation for locale: ${locale}, falling back to the default locale (${defaultLocale}) translations.`,
+  );
 }
 
 /**
@@ -153,9 +146,7 @@ export function addSignalFn<
     const varsFn = variables;
     const varsSignal = isSignal(varsFn)
       ? varsFn
-      : computed(() => varsFn(), {
-          equal: createEqualsRecord(Object.keys(varsFn())),
-        });
+      : computed(() => varsFn(), { equal: equalRecord });
 
     return computed(() => {
       const vars = varsSignal();
@@ -402,13 +393,15 @@ export function registerNamespace<
         t.status === 'fulfilled' ? t.value : null,
       );
 
-      if (fulfilled.at(0) === null && fulfilled.at(1) === null)
+      if (fulfilled.every((v) => v === null))
         throw new Error('Failed to load translations');
 
       const [t, defaultT] = fulfilled;
 
       const ns = t?.namespace ?? defaultT?.namespace;
       if (!ns) throw new Error('No namespace found in translation');
+
+      if (!t) warnDefaultFallback(locale, defaultLocale);
 
       if (isDevMode() && t && t.locale !== locale && t.locale)
         console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
@@ -453,7 +446,7 @@ export function registerNamespace<
       shouldPreloadDefault,
     );
 
-    if (result === 'ready' && locale !== untracked(store.locale))
+    if (result !== 'failed' && locale !== untracked(store.locale))
       store.locale.set(locale);
   };
 
@@ -598,9 +591,10 @@ export function registerRemoteNamespace<TNS extends string>(
       return console.warn(`No translation found for locale: ${locale}`);
     }
 
-    if (promise === defaultTranslation && defaultTranslationLoaded) return;
-
-    if (tPromise && loadedLocales.has(locale)) {
+    if (
+      (promise === defaultTranslation && defaultTranslationLoaded) ||
+      (tPromise && loadedLocales.has(locale))
+    ) {
       if (locale !== untracked(store.locale)) store.locale.set(locale);
       return;
     }
@@ -624,7 +618,7 @@ export function registerRemoteNamespace<TNS extends string>(
         t.status === 'fulfilled' ? t.value : null,
       );
 
-      if (fulfilled.at(0) === null && fulfilled.at(1) === null)
+      if (fulfilled.every((v) => v === null))
         throw new Error('Failed to load translations');
 
       const [baseT, baseDefaultT] = fulfilled;
@@ -633,6 +627,8 @@ export function registerRemoteNamespace<TNS extends string>(
       const defaultT = baseDefaultT
         ? compileTranslation(baseDefaultT, ns, defaultLocale)
         : null;
+
+      if (!t) warnDefaultFallback(locale, defaultLocale);
 
       if (isDevMode() && t && t.locale !== locale && t.locale)
         console.warn(`Expected locale to be ${locale} but got ${t.locale}`);
@@ -736,9 +732,7 @@ export function injectUnsafeT() {
 
     const paramsSignal = isSignal(params)
       ? params
-      : computed(() => params(), {
-          equal: createEqualsRecord(Object.keys(params())),
-        });
+      : computed(() => params(), { equal: equalRecord });
 
     return computed(() => {
       const vars = paramsSignal();

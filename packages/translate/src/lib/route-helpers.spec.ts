@@ -74,4 +74,27 @@ describe('canMatchLocale', () => {
       ]);
     });
   });
+
+  it('should redirect when the locale segment is missing', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideIntlConfig({
+          supportedLocales: ['en-US'],
+          defaultLocale: 'en-US',
+        }),
+        { provide: Router, useValue: { createUrlTree: (c: any[]) => c } },
+      ],
+    });
+
+    TestBed.runInInjectionContext(() => {
+      expect(canMatchLocale()({} as Route, [], {} as any)).toEqual(['en-US']);
+      expect(
+        canMatchLocale(['app'])(
+          {} as Route,
+          [{ path: 'app', parameters: {} } as any],
+          {} as any,
+        ),
+      ).toEqual(['app', 'en-US']);
+    });
+  });
 });

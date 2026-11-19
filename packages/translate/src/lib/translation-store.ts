@@ -400,8 +400,10 @@ export class TranslationStore {
     return merged;
   });
 
+  // Fallback messages come from the store's default locale, so formatjs must format them with its rules.
   private readonly nonMessageConfig = computed(() => ({
     ...this.config,
+    defaultLocale: this.defaultLocale,
     locale: this.locale(),
   }));
 
@@ -413,10 +415,8 @@ export class TranslationStore {
   );
 
   readonly dynamicLocaleLoader = resource({
-    params: computed(() => this.loadQueue().at(0) ?? null),
+    params: computed(() => this.loadQueue().at(0)),
     loader: async ({ params: newLocale, abortSignal }) => {
-      if (!newLocale) return;
-
       const currentTranslations = untracked(this.translations);
 
       const loadPromises: Promise<{
@@ -435,7 +435,9 @@ export class TranslationStore {
 
           if (!hasNamespaceForLocale) {
             loadPromises.push(
-              loader()
+              new Promise<CompiledTranslation<UnknownStringKeyObject, string>>(
+                (resolve) => resolve(loader()),
+              )
                 .then((translation) => {
                   if (abortSignal.aborted) return null;
                   return {
@@ -519,15 +521,21 @@ export class TranslationStore {
 
       effect(() => {
         const loc = param();
-        if (
-          !loc ||
-          loc === untracked(this.locale) ||
-          untracked(this.loadQueue).includes(loc)
-        )
+        if (!loc) return;
+        if (loc === untracked(this.locale)) {
+          this.cancelPendingSwitches();
           return;
+        }
+        if (untracked(this.loadQueue).includes(loc)) {
+          this.markSwitchIntent(loc);
+          return;
+        }
         if (this.hasLocaleLoaders(loc))
           this.loadQueue.update((q) => [...q, loc]);
-        else this.locale.set(loc);
+        else {
+          this.cancelPendingSwitches();
+          this.locale.set(loc);
+        }
       });
     }
 
@@ -747,6 +755,12 @@ export class TranslationStore {
     this.dataOnlyLoads.delete(locale);
   }
 
+  /** @internal Keep queued loads as data-only so a newer choice is not overridden when they land. */
+  cancelPendingSwitches() {
+    for (const locale of untracked(this.loadQueue))
+      this.dataOnlyLoads.add(locale);
+  }
+
   hasLocaleLoaders(locale: string): boolean {
     return Array.from(this.onDemandLoaders.values()).some(
       (loaders) => loaders[locale],
@@ -849,7 +863,10 @@ export function injectDynamicLocale(): WritableSignal<string> & {
       : (locale: string) => supportedLocales.includes(locale);
 
   const set = (value: string) => {
-    if (value === untracked(source)) return;
+    if (value === untracked(source)) {
+      store.cancelPendingSwitches();
+      return;
+    }
 
     if (untracked(store.loadQueue).includes(value)) {
       // already in flight; upgrade a fallback-data load to a user switch
@@ -869,6 +886,7 @@ export function injectDynamicLocale(): WritableSignal<string> & {
 
     if (!store.hasLocaleLoaders(value)) {
       if (store.hasTranslationsFor(value)) {
+        store.cancelPendingSwitches();
         store.locale.set(value);
         return;
       }

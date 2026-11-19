@@ -38,6 +38,7 @@ describe('Translator Pipe', () => {
               greet: 'Hello {name}',
             },
           },
+          formatValues: true,
         }),
       ],
     }).compileComponents();
@@ -55,7 +56,7 @@ describe('Translator Pipe', () => {
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('#with-vars')?.textContent?.trim()).toBe(
-      'Hello {name}',
+      'Hello John',
     );
   });
 });

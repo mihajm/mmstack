@@ -298,6 +298,12 @@ describe('resolveTranslationModule', () => {
     expect(() =>
       resolveTranslationModule({ default: 'oops' } as never),
     ).toThrow(/CompiledTranslation/);
+    expect(() => resolveTranslationModule(null as never)).toThrow(
+      /CompiledTranslation/,
+    );
+    expect(() => resolveTranslationModule(undefined as never)).toThrow(
+      /CompiledTranslation/,
+    );
   });
 });
 

@@ -159,8 +159,13 @@ function selectUnit(deltaSeconds: number): {
 } {
   let duration = deltaSeconds;
   for (const division of DIVISIONS) {
-    if (Math.abs(duration) < division.amount) {
-      return { value: Math.round(duration), unit: division.unit };
+    const value = Math.round(duration);
+    // checked after rounding too, so 59.6 s reads "1 minute", not "60 seconds"
+    if (
+      Math.abs(duration) < division.amount &&
+      Math.abs(value) < division.amount
+    ) {
+      return { value, unit: division.unit };
     }
     duration /= division.amount;
   }

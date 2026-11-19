@@ -42,9 +42,11 @@ type FormatDefaults = {
 
 /**
  * Provide application-wide defaults for every format preset (date, displayName,
- * list, relativeTime, number, percent, currency) in a single call, instead of
- * calling each `provideFormatXDefaults()` individually. Pass only the presets
- * you want to override; the rest fall back to the package defaults.
+ * list, relativeTime, number, percent, currency, unit, plural) in a single call,
+ * instead of calling each `provideFormatXDefaults()` individually. Pass only the
+ * presets you want to override. A preset you leave out gets no provider here, so
+ * it keeps whatever a parent injector (or an earlier provider) set, and the
+ * package defaults when nothing did.
  *
  * @param cfg Per-preset defaults — each key is optional.
  * @returns A providers array to spread into `bootstrapApplication`'s `providers`.
@@ -82,7 +84,7 @@ export function provideFormatDefaults(cfg: FormatDefaults): Provider[] {
 /**
  * Aggregate injector that returns all formatter helpers in a single object:
  * `date`, `displayName`, `list`, `relativeTime`, `relativeTimeToNow`, `number`,
- * `percent`, `currency`, `plural`. Each is the same function you'd get from the
+ * `percent`, `currency`, `unit`, `plural`. Each is the same function you'd get from the
  * corresponding `injectFormatX()` helper. Useful when a component or service
  * needs several formatters at once.
  *

@@ -42,4 +42,13 @@ describe('compile', () => {
         'Network timeout',
     });
   });
+
+  it('skips null, undefined and non-string leaves', () => {
+    const compiled = compileTranslation(
+      { a: 'x', b: null, c: undefined, d: 5, e: { f: null, g: 'y' } } as never,
+      'ns',
+    );
+
+    expect(compiled.flat).toEqual({ a: 'x', [prependDelim('e', 'g')]: 'y' });
+  });
 });

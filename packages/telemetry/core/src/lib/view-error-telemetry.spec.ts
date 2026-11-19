@@ -83,11 +83,14 @@ describe('provideViewErrorTelemetry', () => {
     expect(fixture.nativeElement.querySelector('.caught')).not.toBeNull();
     expect(sink.findings.length).toBe(1);
     expect(sink.findings[0].finding).toMatchObject({
-      code: VIEW_ERROR_FINDING,
+      code: 'VIEW_ERROR',
       severity: 'error',
       path: Thrower.name, // the runtime class name (the compiler may prefix it, a bundler minifies it)
       node: Guarded.name,
+      message:
+        'A view threw while rendering. Fix the template or the data it reads.',
     });
+    expect(VIEW_ERROR_FINDING).toBe('VIEW_ERROR');
     expect(sink.findings[0].attrs).toMatchObject({
       declarationType: Thrower.name,
       boundaryType: Guarded.name,

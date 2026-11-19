@@ -257,7 +257,6 @@ function safe(sinkName: string, op: () => void): void {
  */
 class BufferedSinkSpan implements SinkSpan {
   private real: SinkSpan | null = null;
-  private discarded = false;
 
   constructor(private readonly enqueue: (op: () => void) => void) {}
 
@@ -272,19 +271,14 @@ class BufferedSinkSpan implements SinkSpan {
   }
 
   attachReal(real: SinkSpan): void {
-    if (!this.discarded) this.real = real;
-  }
-
-  discard(): void {
-    this.discarded = true;
+    this.real = real;
   }
 
   private run(op: (s: SinkSpan) => void): void {
-    if (this.discarded) return;
     if (this.real) op(this.real);
     else
       this.enqueue(() => {
-        if (!this.discarded && this.real) op(this.real);
+        if (this.real) op(this.real);
       });
   }
 }
@@ -298,7 +292,6 @@ class BufferedSinkSpan implements SinkSpan {
 class SinkDispatcher {
   private state: 'ready' | 'pending' | 'dropped' | 'destroyed';
   private queue: (() => void)[] = [];
-  private bufferedSpans: BufferedSinkSpan[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -346,7 +339,6 @@ class SinkDispatcher {
     const rec = new BufferedSinkSpan((op) => {
       if (this.state === 'pending') this.queue.push(op);
     });
-    this.bufferedSpans.push(rec);
     this.queue.push(() =>
       rec.attachReal(start.call(this.sink, name, ctx, attrs, startMs)),
     );
@@ -364,7 +356,6 @@ class SinkDispatcher {
     this.clearTimer();
     const queued = this.queue;
     this.queue = [];
-    this.bufferedSpans = [];
     for (const op of queued) safe(this.sink.name, op);
   }
 
@@ -373,8 +364,6 @@ class SinkDispatcher {
     this.state = 'dropped';
     this.clearTimer();
     this.queue = [];
-    for (const span of this.bufferedSpans) span.discard();
-    this.bufferedSpans = [];
     if (isDevMode()) {
       console.warn(
         `[telemetry] sink "${this.sink.name}" did not become ready in time — dropped buffered telemetry (live delivery resumes when it becomes ready)`,
@@ -384,11 +373,7 @@ class SinkDispatcher {
 
   private destroy(): void {
     this.clearTimer();
-    if (this.state === 'pending') {
-      this.queue = [];
-      for (const span of this.bufferedSpans) span.discard();
-      this.bufferedSpans = [];
-    }
+    if (this.state === 'pending') this.queue = [];
     this.state = 'destroyed';
   }
 

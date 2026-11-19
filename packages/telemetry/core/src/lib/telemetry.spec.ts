@@ -447,8 +447,8 @@ describe('AttributePolicy (deep)', () => {
         }),
       ],
     });
-    TestBed.inject(TELEMETRY).event('e', { token: 'secret' });
-    expect(sink.events[0].attrs).toEqual({ token: '#X' }); // redacted first, then hashed
+    TestBed.inject(TELEMETRY).event('e', { token: 'secret', other: 'v' });
+    expect(sink.events[0].attrs).toEqual({ token: '#X', other: 'v' }); // redacted first, then hashed
 
     TestBed.resetTestingModule();
     const sink2 = memorySink();
@@ -767,8 +767,37 @@ describe('fault isolation (telemetry must never break the app)', () => {
       expect(telemetry.enabled()).toBe(true);
       telemetry.event('e');
       expect(good.events.length).toBe(1);
-      expect(warn).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        '[telemetry] sink factory threw — sink skipped',
+        expect.any(Error),
+      );
     } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a throwing sink factory stays silent in production mode', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const g = globalThis as { ngDevMode?: unknown };
+    const prev = g.ngDevMode;
+    g.ngDevMode = false;
+    try {
+      TestBed.configureTestingModule({
+        providers: [
+          provideTelemetry({
+            sinks: [
+              () => {
+                throw new Error('factory bug');
+              },
+              memorySink('good'),
+            ],
+          }),
+        ],
+      });
+      expect(TestBed.inject(TELEMETRY).enabled()).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      g.ngDevMode = prev;
       warn.mockRestore();
     }
   });

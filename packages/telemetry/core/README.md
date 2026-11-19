@@ -165,10 +165,12 @@ const finding = expectFinding(memory, 'UNBOUND_FIELD');
 assertBudget(memory, {
   allow: ['KNOWN_LEGACY'],
   maxFindings: 0,
-  maxSpanMs: { 'checkout.submit': 200, '/^http /': 500 },
+  maxSpanMs: { 'checkout.submit': 200, 're:^http ': 500 },
 });
 ```
 
-A `maxSpanMs` key is an exact span name, or a regex written as `/body/flags`. Only ended spans with both timestamps count. `parseBudgetFile(json)` checks a checked-in file of the shape `{ formatVersion: 1, scenarios: { [name]: Budget } }` and reports every shape error at once.
+A `maxSpanMs` key is an exact span name, or a regex written as `re:<source>` (no flags). Every other key is matched exactly, so path-like names such as `/api/users` work as they are. A span literally named `re:...` cannot be budgeted by its exact name; match it with a pattern instead. Only ended spans with both timestamps count. `parseBudgetFile(json)` checks a checked-in file of the shape `{ formatVersion: 2, scenarios: { [name]: Budget } }` and reports every shape error at once.
+
+**Breaking change:** regex keys used to be written as `/source/flags`. Such a key is now an exact span name, so an old pattern silently matches nothing. Rewrite each one as `re:<source>` (for a case-insensitive match, spell the cases out, such as `re:^[Hh][Tt][Tt][Pp]`). Budget files move to `formatVersion: 2`, and `parseBudgetFile` rejects a version 1 file with a message that says what to change. Budgets passed inline to `assertBudget` carry no version, so check those by hand.
 
 Full documentation is on its way. The API surface is small; the source and its specs read well in the meantime.

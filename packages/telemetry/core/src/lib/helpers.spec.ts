@@ -125,6 +125,7 @@ describe('telemetry-core hook-ins', () => {
         b = s;
         sig.update((v) => v + 1); // update() captures identically to set()
       });
+      expect(sig()).toBe(2);
       expect(sig.causedBy()).toBe(b);
 
       sig.set(9);

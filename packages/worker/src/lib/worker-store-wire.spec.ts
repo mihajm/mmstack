@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import { droppingPort, manualLink } from '../testing/harness';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 type Model = { user: { name: string; age: number } };
 const initial = (): Model => ({ user: { name: 'ada', age: 36 } });
@@ -99,7 +98,7 @@ describe('workerStore over a hand-driven link', () => {
   it('shows reloading through a re-hydrate after the connection drops', async () => {
     const { worker, replica, link } = linked();
     await link().pump();
-    crashWorker(worker);
+    worker.restart();
     await new Promise<void>((r) => setTimeout(r, 1));
     await until(link(), 'down', 'store:checkpoint');
     expect(replica.status()).toBe('reloading');

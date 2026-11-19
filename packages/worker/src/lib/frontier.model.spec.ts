@@ -20,7 +20,6 @@ import {
 import { describe, expect, it } from 'vitest';
 import { connectWorker, type WorkerRef } from './connect-worker';
 import { workerStore, type WorkerStoreRef } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 // M3: the frontier predicate on the REAL host + replicas, over hand-driven FIFO channels (one up and
 // one down queue per replica: the postMessage contract) so the schedule is a seeded choice of which
@@ -193,7 +192,7 @@ function world(seed: number) {
       rep.gen = null;
       rep.set = new Set();
       rep.postsSinceCrash = new Set();
-      crashWorker(rep.worker);
+      rep.worker.restart();
     }
     for (let i = 0; i < 3; i++)
       await new Promise<void>((res) => setTimeout(res, 0)); // respawn

@@ -172,9 +172,10 @@ const worker = connectWorker<AppWorker>(
     new Worker(new URL('./demo.worker', import.meta.url), { type: 'module' }),
 );
 
-worker.connected(); // Signal<boolean>, true after the handshake (and after any auto-restart)
+worker.connected(); // Signal<boolean>, true after the handshake (and after any restart)
 worker.manifest(); //  Signal<{ hostId, stores, published, tasks } | null>
 worker.runTask('fib', 35); // Promise<number>, typed from the worker's tasks
+worker.restart(); //  drop the connection and start a fresh worker
 worker.destroy();
 ```
 
@@ -339,6 +340,16 @@ workerResource(() => transfer({ buffer }, [buffer]), {
 - **Duplicate message.** Batches are applied by monotonic version, so a duplicate is dropped.
 - **A worker that fails to start.** An `error` event before the handshake (a script that does not load, a top-level throw) is a startup failure. With `restart: 'auto'` (the default) the worker respawns with exponential backoff, re-handshakes, and every live replica re-subscribes. Pending tasks reject with `WorkerCrashedError`. Pass `restart: 'manual'` to surface the disconnect instead.
 - **An error in a running worker.** After the handshake an uncaught error inside the worker does not restart it: the worker keeps running and keeps its owned state. The error goes to `connectWorker(spawn, { onError })`, or to a dev-mode warning when there is no `onError`. A `messageerror` (a message that could not be read) is reported the same way and never restarts; a lost store message is recovered as above.
+- **Restarting on purpose.** When the app decides an error is fatal, `worker.restart()` drops the connection and starts a fresh worker at once, under either `restart` option. Pending tasks reject with `WorkerCrashedError`, the old worker is terminated, and every live replica re-subscribes and re-hydrates from the new worker, whose owned state starts fresh. A call while a respawn is already on its way, or after `destroy()`, does nothing.
+
+```ts
+const worker = connectWorker<AppWorker>(spawn, {
+  onError: (e) => {
+    report(e);
+    if (isFatal(e)) worker.restart();
+  },
+});
+```
 
 ## How it works
 

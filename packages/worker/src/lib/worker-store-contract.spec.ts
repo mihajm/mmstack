@@ -22,7 +22,6 @@ import {
   type WorkerStoreOptions,
   type WorkerStoreRef,
 } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 const tick = async () => {
   for (let i = 0; i < 8; i++) await new Promise<void>((r) => setTimeout(r, 1));
@@ -146,7 +145,7 @@ describe('workerStore: across a dropped connection', () => {
     const { owned, worker, replica } = world();
     const r = replica();
     await tick();
-    crashWorker(worker);
+    worker.restart();
     r.store.n.set(7);
     await Promise.resolve();
     await Promise.resolve();
@@ -164,7 +163,7 @@ describe('workerStore: across a dropped connection', () => {
     await tick();
     await r.write((d) => d.n.set(1));
     await r.write((d) => d.n.set(2));
-    crashWorker(worker);
+    worker.restart();
     await waitFor(() => worker.connected() && r.status() === 'resolved');
     await tick();
     expect(up[1].filter((m) => m.type === 'store:sync')).toHaveLength(0);
@@ -176,7 +175,7 @@ describe('workerStore: across a dropped connection', () => {
     replica('other');
     await tick();
     gone.destroy();
-    crashWorker(worker);
+    worker.restart();
     await waitFor(() => worker.connected());
     await tick();
     const subs = up[1].filter((m) => m.type === 'store:subscribe');

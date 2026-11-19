@@ -117,6 +117,22 @@ describe('@mmstack/worker in a real Web Worker', () => {
     expect(counter.value()?.value).toBe(42);
   });
 
+  it('restart() terminates the worker and a fresh one comes back and answers', async () => {
+    const worker = connect();
+    const counter = workerStore<CounterState>(worker, 'counter', {
+      injector: TestBed.inject(Injector),
+    });
+    await until(() => counter.hasValue());
+    await counter.write((d) => d.value.set(5));
+    const before = worker.manifest()?.hostId;
+
+    worker.restart();
+    expect(worker.connected()).toBe(false);
+    await until(() => worker.connected() && counter.value()?.value === 0);
+    expect(worker.manifest()?.hostId).not.toBe(before);
+    await expect(worker.runTask('fib', 10)).resolves.toBe(55);
+  });
+
   it('a worker script that fails to load takes the startup-failure path', async () => {
     let spawns = 0;
     const worker = connectWorker(

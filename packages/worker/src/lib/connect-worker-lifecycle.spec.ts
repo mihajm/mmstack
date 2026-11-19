@@ -13,7 +13,6 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 const tick = async () => {
   for (let i = 0; i < 8; i++) await new Promise<void>((r) => setTimeout(r, 1));
@@ -150,13 +149,14 @@ describe('connectWorker restart backoff', () => {
     expect(spawned).toHaveLength(3);
   });
 
-  it('passes the attempt number, reset by a ready', async () => {
+  it('passes the attempt number, starting over after a ready and a restart', async () => {
     const delays: number[] = [];
     const { spawn: base, spawned } = workers();
-    // the first two workers fail to start
+    // the first two workers fail to start, and so does the one an explicit restart spawns
     const spawn = () => {
       const w = base();
-      if (spawned.length <= 2) queueMicrotask(() => spawned.at(-1)?.fail());
+      if (spawned.length <= 2 || spawned.length === 4)
+        queueMicrotask(() => spawned.at(-1)?.fail());
       return w;
     };
     const ref = connectWorker(spawn, {
@@ -169,8 +169,9 @@ describe('connectWorker restart backoff', () => {
     await tick();
     expect(spawned).toHaveLength(3);
     expect(ref.connected()).toBe(true);
-    crashWorker(ref);
+    ref.restart();
     await tick();
+    expect(spawned).toHaveLength(5);
     expect(delays).toEqual([0, 1, 0]);
     ref.destroy();
   });

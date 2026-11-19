@@ -2580,7 +2580,7 @@ describe('P8 — history records the root a change produced, not the store at de
     expect(r.sa()).toEqual({ arr: [0, 0], k: 5 });
   });
 
-  it('[PIN scoped commit seam] default driver, initial A write (the fork commit) unflushed: a fork commit is reconciled before it is delivered: the entry is the EMITTED change ([0,2] → [1,0]), not the reconciled [1,2]; after B moves slot 1 to 3, undo ⇒ [0,2] (my emitted slot-1 write is undone), where the reconciled root would give [0,3]', () => {
+  it('[PIN scoped commit seam] default driver, initial A write (the fork commit) unflushed: a fork commit is reconciled before it is delivered: the entry is the change the store SHOWED at the commit ([0,2] → [1,2]), not the emitted [1,0] and not the store at delivery; after B moves slot 1 to 3, undo ⇒ [0,3] (only my slot-0 write is undone; my slot-1 write never showed, so B keeps slot 1), where the emitted change would give [0,2]', () => {
     const r = defaultDriverRig({ arr: [0, 0] });
     const fk = TestBed.runInInjectionContext(() =>
       syncedFork(r.a, r.sa as never),
@@ -2596,7 +2596,7 @@ describe('P8 — history records the root a change produced, not the store at de
     r.toA();
     expect(r.sa()).toEqual({ arr: [1, 3] });
     r.h.undo();
-    expect(r.sa()).toEqual({ arr: [0, 2] });
+    expect(r.sa()).toEqual({ arr: [0, 3] });
   });
 });
 

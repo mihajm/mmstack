@@ -37,10 +37,25 @@ export type StoreOp =
  * Delivered beside an emitted batch, to subscribers only (never part of the batch, so nothing new
  * reaches a transport). `root` is the value the batch's ops produce from the value they were
  * diffed from, captured when the batch was emitted: a subscriber notified later (a deferred sync
- * envelope) still sees the root of THIS change, not the store as it is by then.
+ * envelope) still sees the root of THIS change, not the store as it is by then. For an `opSync`
+ * emission reconciled to its fold result, `root` stays the raw result of the ops, a value the store
+ * may never have held; `shown` is what it held.
  */
 export type EmitContext = {
   readonly root?: unknown;
+  /**
+   * Set by `opLog` and passed on by `opSync`: the value the batch was diffed from, the very object
+   * the source held before the batch's ops. A subscriber that moves the source from where it
+   * stood before this change starts from this object, so untouched values, and the root itself,
+   * keep their identity.
+   */
+  readonly from?: unknown;
+  /**
+   * Set by `opSync`: the value the source held right after this emission, once the write landed
+   * as the registers fold it. It is `root` itself unless the emission was reconciled; then it can
+   * differ from `root`, and it is the very `from` object when the write showed nothing.
+   */
+  readonly shown?: unknown;
   /**
    * Set by `opSync`: the raw ops the envelope was stamped from (before cites, epochs and expansion
    * clears) and whether they were stamped as an authority override — the write's intent, what a
@@ -416,12 +431,13 @@ export function opLog<T extends object>(
     const next = untracked(source);
     if (Object.is(prevRoot, next)) return;
     const ops: StoreOp[] = [];
-    diffNode(prevRoot, next, [], ops, added, unit);
+    const from = prevRoot;
+    diffNode(from, next, [], ops, added, unit);
     prevRoot = next;
     if (!ops.length) return; // fresh refs, equal values — spurious-write tolerance
     const batch: OpBatch = { origin, version: ++version, ops };
     latest.set(batch);
-    const ctx: EmitContext = { root: next };
+    const ctx: EmitContext = { root: next, from };
     for (const cb of [...subscribers]) cb(batch, ctx);
   };
 

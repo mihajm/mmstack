@@ -33,7 +33,8 @@ export type StoreHistory = {
    * Revert the most recent tracked change, selectively: only what that change did is taken back,
    * and what other writers changed since stays (see {@link storeHistory}). A no-op when nothing
    * is undoable. Returns `true` when anything was written; `false` when nothing was undoable or
-   * every op of the entry was skipped (the entry is then dropped and no redo entry is pushed).
+   * every op of the entry was skipped, an op that would write the value already there included
+   * (the entry is then dropped and no redo entry is pushed).
    */
   undo(): boolean;
   /**
@@ -154,9 +155,14 @@ const OP_SEP = '';
  * `set` whose path is gone (another writer deleted the key or a parent) is skipped. Undoing my
  * add removes the key only while it still holds what I added (an edit by others wins); undoing
  * my delete restores the key while every parent still holds a plain record or array, and is
- * skipped once another writer deleted or replaced a parent. An undo whose every op is skipped
+ * skipped once another writer deleted or replaced a parent. An op that would write the value
+ * already there is skipped too. An undo whose every op is skipped
  * changes nothing, writes nothing to the store, pushes no
  * redo entry, and returns `false`.
+ *
+ * History records what the store showed. A tracked sync write that landed as its fold result
+ * (a fork commit or an `emitOps` that lost the fold in part) is recorded as the part that
+ * showed, and one that showed nothing records no entry.
  *
  * Composes with sync for collaborative undo: pass `track: syncClient` so only YOUR writes are
  * undoable, while `undo()` emits a normal op that propagates to peers (it writes through the
@@ -239,9 +245,11 @@ export function storeHistory<T extends object>(
         // undoing my delete: restore while the parent chain stands (a peer's delete of a parent wins)
         next = !parentStands(root, op.path)
           ? null
-          : here.found
-            ? { kind: 'set', path: op.path, prev: here.value, next: op.next }
-            : { kind: 'set', path: op.path, next: op.next };
+          : !here.found
+            ? { kind: 'set', path: op.path, next: op.next }
+            : structEq(here.value, op.next)
+              ? null // already holds it: nothing to write
+              : { kind: 'set', path: op.path, prev: here.value, next: op.next };
       } else if (!here.found) {
         next = null; // undoing my edit where a peer deleted the key or a parent: the delete wins
       } else {
@@ -250,7 +258,9 @@ export function storeHistory<T extends object>(
           : undoMergeAt(op.path)(op.prev, op.next, here.value, {
               path: op.path,
             });
-        next = { kind: 'set', path: op.path, prev: here.value, next: value };
+        next = structEq(value, here.value)
+          ? null // the merge lands on what is there: nothing to write
+          : { kind: 'set', path: op.path, prev: here.value, next: value };
       }
       if (!next) continue;
       out.push(next);
@@ -264,18 +274,48 @@ export function storeHistory<T extends object>(
     if (stack.length > limit) stack.shift();
   };
 
-  const record = (batch: OpBatch, ctx?: EmitContext): void => {
-    if (applying) return; // an undo/redo's own emission must not re-enter history
-    if (!batch.ops.length) return;
-    // the root right after THIS change, as captured when it was emitted: a deferred sync
-    // notification arrives after remote folds, and the store by then holds them too
+  /**
+   * What the store showed for this change: before and after as the store held them. A sync write
+   * reconciled to its fold result (`shown` differs from the raw `root`) counts only as what showed;
+   * any other change is its ops from the root right after it, as captured when it was emitted (a
+   * deferred sync notification arrives after remote folds, and the store by then holds them too).
+   */
+  const changeOf = (
+    batch: OpBatch,
+    ctx?: EmitContext,
+  ): { ops: readonly StoreOp[]; before: unknown; after: unknown } | null => {
+    if (
+      ctx &&
+      Object.hasOwn(ctx, 'shown') &&
+      Object.hasOwn(ctx, 'from') &&
+      !Object.is(ctx.shown, ctx.root)
+    ) {
+      if (Object.is(ctx.from, ctx.shown)) return null; // the store never showed it
+      return {
+        ops: diffOps(ctx.from, ctx.shown, UNIT),
+        before: ctx.from,
+        after: ctx.shown,
+      };
+    }
     const after =
       ctx && Object.hasOwn(ctx, 'root')
         ? ctx.root
         : (untracked(source) as unknown);
-    const before = applyOps(after, invertBatch(batch)); // and right before it
+    return {
+      ops: batch.ops,
+      before: applyOps(after, invertBatch(batch)),
+      after,
+    };
+  };
+
+  const record = (batch: OpBatch, ctx?: EmitContext): void => {
+    if (applying) return; // an undo/redo's own emission must not re-enter history
+    if (!batch.ops.length) return;
+    const change = changeOf(batch, ctx);
+    if (!change || !change.ops.length) return;
+    const { ops, before, after } = change;
     const at = now();
-    const sig = coalesce ? sigOf(batch.ops) : '';
+    const sig = coalesce ? sigOf(ops) : '';
     const top = undoStack[undoStack.length - 1];
     if (
       coalesce &&
@@ -285,11 +325,9 @@ export function storeHistory<T extends object>(
       at - lastAt <= coalesce.ms &&
       (coalesce.samePath === false || sig === lastSig) &&
       // continuous: every path this change touches starts where the run left it
-      batch.ops.every(
-        (o) => o.kind === 'clear' || sameAt(before, top.after, o.path),
-      )
+      ops.every((o) => o.kind === 'clear' || sameAt(before, top.after, o.path))
     ) {
-      top.after = applyOps(top.after, batch.ops); // my own ops onto my own after-root
+      top.after = applyOps(top.after, ops); // my own ops onto my own after-root
       if (!changes(top.before, top.after)) {
         // the run came back to where it started: no entry (an undo that does nothing)
         undoStack.pop();

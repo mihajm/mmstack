@@ -173,7 +173,8 @@ export class BreadcrumbStore {
       );
     },
     {
-      equal: (a, b) => a.link === b.link,
+      // a navigation that keeps the link still brings a new snapshot (data, config)
+      equal: (a, b) => a.link === b.link && a.route === b.route,
     },
   );
 

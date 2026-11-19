@@ -6,6 +6,7 @@ import {
   Injector,
   signal,
   type Signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -98,9 +99,28 @@ export class VisualCommitCoordinator {
   private navigationId: number | null = null;
 
   constructor() {
-    inject(Router)
-      .events.pipe(takeUntilDestroyed())
+    const router = inject(Router);
+    router.events
+      .pipe(takeUntilDestroyed())
       .subscribe((e: Event) => this.onEvent(e));
+    this.catchUp(router);
+  }
+
+  /** Created after a navigation started (or ended): pick it up as if its events had been seen. */
+  private catchUp(router: Router): void {
+    const inFlight = untracked(router.currentNavigation);
+    if (inFlight) {
+      this.navigationId = inFlight.id;
+      this.current.set({ status: 'pending', navigationId: inFlight.id });
+      return;
+    }
+    const last = untracked(router.lastSuccessfulNavigation);
+    if (!last) return;
+    this.navigationId = last.id;
+    this.current.set({ status: 'pending', navigationId: last.id });
+    this.ended.add(last.id);
+    if (!this.onBrowser) this.commitIfSettled(last.id);
+    else this.commitAfterRender(last.id);
   }
 
   /** An outlet is activating for the current navigation and owes a terminal swap. */

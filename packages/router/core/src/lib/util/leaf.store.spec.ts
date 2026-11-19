@@ -8,6 +8,18 @@ import {
 import { Subject } from 'rxjs';
 import { injectLeafRoutes, RouteLeafStore } from './leaf.store';
 
+// Snapshot mocks list each child under `children` with its outlet, as real snapshots do.
+function primaryChain<T>(node: T): T {
+  const n = node as {
+    firstChild?: unknown;
+    children?: unknown[];
+    outlet?: string;
+  };
+  n.outlet = 'primary';
+  n.children = n.firstChild ? [primaryChain(n.firstChild)] : [];
+  return node;
+}
+
 describe('leafStore', () => {
   let routerMock: Partial<Router>;
   let eventsSubject: Subject<any>;
@@ -25,7 +37,7 @@ describe('leafStore', () => {
       }),
       routerState: {
         snapshot: {
-          root: {
+          root: primaryChain({
             url: [],
             pathFromRoot: [{ routeConfig: { path: '' }, url: [] }],
             firstChild: {
@@ -44,7 +56,7 @@ describe('leafStore', () => {
                 firstChild: null,
               } as unknown as ActivatedRouteSnapshot,
             } as unknown as ActivatedRouteSnapshot,
-          } as unknown as ActivatedRouteSnapshot,
+          } as unknown as ActivatedRouteSnapshot),
         } as unknown as RouterStateSnapshot,
       } as any,
     };
@@ -84,7 +96,7 @@ describe('leafStore', () => {
       const resultInitial = store.leaves();
       expect(resultInitial.length).toBe(3);
 
-      const newRootMock = {
+      const newRootMock = primaryChain({
         url: [],
         pathFromRoot: [
           { routeConfig: { path: 'home' }, url: [{ path: 'home' }] },
@@ -97,7 +109,7 @@ describe('leafStore', () => {
           ],
           firstChild: null,
         },
-      } as unknown as ActivatedRouteSnapshot;
+      } as unknown as ActivatedRouteSnapshot);
 
       (routerMock as any).routerState.snapshot.root = newRootMock;
       eventsSubject.next({

@@ -411,6 +411,57 @@ describe('remountable / injectRemountHandle', () => {
       expect(handle.generation()).toBe(1);
     });
 
+    it('waits by default when no inFlight policy is given', async () => {
+      const { router, closeGate, openGate } = setup();
+      const handle = handleOf();
+      await router.navigateByUrl('/feature');
+      await router.navigateByUrl('/eager');
+
+      closeGate();
+      const nav = router.navigateByUrl('/feature');
+      await settle();
+      const invalidation = handle.invalidate({ navigation: 'none' });
+      openGate();
+      await nav;
+      expect(await invalidation).toEqual({ outcome: 'remounted' });
+    });
+
+    it('`wait` keeps the strongest queued intent: a reload request wins over none', async () => {
+      const { router, closeGate, openGate, loadCalls } = setup();
+      const handle = handleOf();
+      await router.navigateByUrl('/feature');
+      await router.navigateByUrl('/eager');
+
+      closeGate();
+      const nav = router.navigateByUrl('/feature');
+      await settle();
+      const first = handle.invalidate({ navigation: 'none' });
+      const second = handle.invalidate();
+      openGate();
+      await nav;
+      await first;
+      await second;
+      await settle();
+      expect(loadCalls()).toBe(2);
+      expect(router.url).toBe('/feature');
+    });
+
+    it('`wait` lets the in-flight navigation finish before reloading', async () => {
+      const { router, closeGate, openGate } = setup();
+      const handle = handleOf();
+      await router.navigateByUrl('/feature');
+      await router.navigateByUrl('/eager');
+
+      closeGate();
+      const nav = router.navigateByUrl('/feature');
+      await settle();
+      const invalidation = handle.invalidate({ inFlight: 'wait' });
+      openGate();
+      expect(await nav).toBe(true);
+      await invalidation;
+      expect(router.url).toBe('/feature');
+    });
+
     it('`cancel-and-retry` aborts the in-flight navigation, then invalidates', async () => {
       const { router, closeGate, openGate } = setup();
       const handle = handleOf();

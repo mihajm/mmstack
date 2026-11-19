@@ -202,9 +202,8 @@ export function queryParam<T = string>(
     return raw === null ? null : parse(raw);
   });
 
-  const writeToUrl = (newValue: T | null) => {
+  const writeToUrl = (newValue: T | null, key: string) => {
     const serialized = newValue === null ? null : serialize(newValue);
-    const key = untracked(keySignal);
     if (batch) enqueueParamWrite(router, route, key, serialized, replaceUrl);
     else writeParamNow(router, route, key, serialized, replaceUrl);
   };
@@ -213,9 +212,11 @@ export function queryParam<T = string>(
   destroyRef.onDestroy(() => clearTimeout(debounceTimer));
 
   const set = (newValue: T | null) => {
-    if (!debounce) return writeToUrl(newValue);
+    // the key in effect when set() runs, also for a debounced write
+    const key = untracked(keySignal);
+    if (!debounce) return writeToUrl(newValue, key);
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => writeToUrl(newValue), debounce);
+    debounceTimer = setTimeout(() => writeToUrl(newValue, key), debounce);
   };
 
   return toWritable(queryParam, set);

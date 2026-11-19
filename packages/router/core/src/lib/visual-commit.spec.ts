@@ -243,7 +243,14 @@ describe('visual commit coordinator', () => {
   );
 
   it('is idle before anything navigates', async () => {
-    const { commit } = await setup(CommitHost);
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter(routes),
+        provideLocationMocks(),
+        provideHttpClientTesting(),
+      ],
+    });
+    const commit = TestBed.runInInjectionContext(() => injectVisualCommit());
     expect(commit()).toEqual({ status: 'idle', navigationId: null });
   });
 

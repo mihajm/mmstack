@@ -52,7 +52,9 @@ const isLoadingStatus = (s: ResourceStatus): boolean =>
  *   the navigation's refetch usually starts just AFTER `NavigationEnd` (live params tick on it),
  *   so the last settled snapshot is held through that first load cycle and revealed when it
  *   lands. Once the cycle completes, loads pass through live again (a later `reload()`'s
- *   indicator shows normally) until the next navigation.
+ *   indicator shows normally) until the next navigation. A load that completes before
+ *   `NavigationEnd` belongs to the navigation itself, not to that cycle: the first load after
+ *   `NavigationEnd` is still held, even when it is a user's `reload()`.
  * - **On a true rollback** (`NavigationError`, or a `NavigationCancel` that isn't a redirect /
  *   superseded-by-a-new-navigation) the same settle logic holds the pre-navigation snapshot
  *   until the cancelled load settles back — never revealing the would-be state of the route we

@@ -1,5 +1,6 @@
 import {
   afterNextRender,
+  type AfterRenderRef,
   booleanAttribute,
   type ComponentRef,
   computed,
@@ -11,6 +12,7 @@ import {
   inject,
   Injector,
   input,
+  isDevMode,
   output,
   type OutputEmitterRef,
   untracked,
@@ -24,6 +26,11 @@ import {
   provideForwardingTransitionScope,
   type ResourceLike,
 } from '@mmstack/primitives';
+import { HeldRouteInjectors } from './held-route-injectors';
+import {
+  heldInjectorDestroyedWarning,
+  warnIfAutoCleanupNotHoldAware,
+} from './transition-route-reuse-strategy';
 import { RouterViewTransitions } from './view-transition';
 import { VisualCommitCoordinator } from './visual-commit';
 
@@ -57,6 +64,10 @@ export type SwapCommitEvent = {
  *
  * Set `data: { immediateTransition: true }` on a route to skip holding for it.
  *
+ * With `withAutoCleanupInjectors()`, add {@link provideTransitionRouteReuseStrategy} so the
+ * injector of a held route stays alive until the swap; the router destroys it on its next
+ * cleanup pass. Without it, the outlet swaps early when the router destroys that injector.
+ *
  * Provides a forwarding transition scope: per navigation it re-points at the incoming
  * route's own scope when the route opts in (via `provideRouteData`/`provideTransitionScope()`),
  * giving per-view isolation. Routes that don't opt in share the outlet's own scope, where the
@@ -88,6 +99,10 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private readonly transitionScope = this.forwarder;
   private readonly container = inject(ViewContainerRef);
   private readonly outletInjector = inject(Injector);
+  private readonly parentOutlet = inject(TransitionRouterOutlet, {
+    skipSelf: true,
+    optional: true,
+  });
   /** Scope inherited from the outlet's env injector — distinguishes "route opted in". */
   private readonly inheritedScope = getTransitionScope(
     inject(EnvironmentInjector),
@@ -95,6 +110,10 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   private readonly routerViewTransitions = inject(RouterViewTransitions);
   private readonly visualCommit = inject(VisualCommitCoordinator);
+  private readonly heldInjectors = inject(HeldRouteInjectors);
+  private readonly warnHeldInjectorDestroyed = isDevMode()
+    ? heldInjectorDestroyedWarning()
+    : null;
 
   /**
    * Fires once per swap this outlet performs, saying how it ended. `committed` and `immediate`
@@ -124,8 +143,11 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private releaseHeldGuard: (() => void) | null = null;
   private hiddenIncoming: HTMLElement[] | null = null;
   private currentEnv: EnvironmentInjector | null = null;
+  /** The env each live view was activated with, so a re-attached view brings its own back. */
+  private readonly envOf = new WeakMap<object, EnvironmentInjector>();
   private sawPending = false;
   private armed = false;
+  private pendingImmediate: AfterRenderRef | null = null;
 
   /** Outgoing view's resources, snapshotted so the swap ignores them. */
   private outgoingRefs = new Set<ResourceLike>();
@@ -142,6 +164,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   constructor() {
     super();
+    if (isDevMode()) warnIfAutoCleanupNotHoldAware();
     effect(() => {
       const pending = this.incomingPending();
       untracked(() => {
@@ -167,6 +190,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
       : new Set(untracked(this.transitionScope.resources));
 
     super.activateWith(route, env);
+    this.envOf.set(this.component, env);
 
     if (!hadHeld || route.snapshot.data?.['immediateTransition'] === true) {
       this.dropHeld();
@@ -187,6 +211,11 @@ export class TransitionRouterOutlet extends RouterOutlet {
       return;
     }
 
+    if (this.pendingImmediate) {
+      this.cancelImmediate();
+      this.visualCommit.release(this);
+    }
+
     if (this.held) {
       this.hiddenIncoming = null;
       this.resetArm();
@@ -196,6 +225,12 @@ export class TransitionRouterOutlet extends RouterOutlet {
     }
 
     const env = this.currentEnv;
+    this.heldInjectors.hold(
+      this,
+      this.activatedRoute.snapshot.pathFromRoot.flatMap((s) =>
+        s.routeConfig ? [s.routeConfig] : [],
+      ),
+    );
     const ref = super.detach();
     this.container.insert(ref.hostView);
     this.held = ref;
@@ -203,13 +238,26 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.scheduleOrphanCheck(ref);
   }
 
-  /** Drop the hold if no activation follows the deactivation in the same pass. */
+  /**
+   * Drop the hold if no activation follows the deactivation in the same pass, unless an ancestor
+   * outlet is holding the view this outlet lives in: that view stays on screen whole until the
+   * ancestor swaps, and destroying it takes this outlet and its held view along.
+   */
   private scheduleOrphanCheck(ref: ComponentRef<unknown>): void {
     queueMicrotask(() => {
-      if (this.held === ref && !this.armed) {
+      if (this.held === ref && !this.armed && !this.insideHeldView()) {
         this.dropHeld();
       }
     });
+  }
+
+  private insideHeldView(): boolean {
+    const self = this.container.element.nativeElement as Node;
+    for (let o = this.parentOutlet; o; o = o.parentOutlet) {
+      const held = o.held?.location.nativeElement as Node | undefined;
+      if (held?.contains(self)) return true;
+    }
+    return false;
   }
 
   override attach(ref: ComponentRef<unknown>, route: ActivatedRoute): void {
@@ -217,6 +265,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.dropHeld();
     this.resetArm();
     super.attach(ref, route);
+    this.currentEnv = this.envOf.get(ref.instance as object) ?? null;
     this.armImmediate();
   }
 
@@ -224,6 +273,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.swapEpoch++;
     const wasHolding = !!this.held;
     this.armed = false;
+    this.cancelImmediate();
     this.dropHeld();
     this.visualCommit.release(this);
     if (wasHolding) this.swapCommit.emit({ outcome: 'outlet-destroyed' });
@@ -259,10 +309,21 @@ export class TransitionRouterOutlet extends RouterOutlet {
 
   /** An activation that never holds still owes the navigation one render before it is visible. */
   private armImmediate(): void {
+    this.cancelImmediate();
     this.visualCommit.arm(this);
-    afterNextRender(() => this.report('immediate'), {
-      injector: this.outletInjector,
-    });
+    this.pendingImmediate = afterNextRender(
+      () => {
+        this.pendingImmediate = null;
+        this.report('immediate');
+      },
+      { injector: this.outletInjector },
+    );
+  }
+
+  /** A view replaced before its first render never reached the screen, so it has nothing to report. */
+  private cancelImmediate(): void {
+    this.pendingImmediate?.destroy();
+    this.pendingImmediate = null;
   }
 
   private report(outcome: SwapCommitEvent['outcome']): void {
@@ -305,7 +366,10 @@ export class TransitionRouterOutlet extends RouterOutlet {
     this.report('committed');
   }
 
-  /** Commit immediately if the held view's env injector is destroyed under it. */
+  /**
+   * Never leave the held view rendering on a destroyed env injector: commit the swap at once, or,
+   * when no activation is waiting, drop the held view.
+   */
   private guardHeldInjector(
     env: EnvironmentInjector | null,
     ref: ComponentRef<unknown>,
@@ -316,7 +380,10 @@ export class TransitionRouterOutlet extends RouterOutlet {
       if (!destroyRef) return;
       this.releaseHeldGuard = destroyRef.onDestroy(() => {
         this.releaseHeldGuard = null;
-        if (this.held === ref) this.commitSwap();
+        if (this.held !== ref) return;
+        this.warnHeldInjectorDestroyed?.();
+        if (this.armed) this.commitSwap();
+        else this.dropHeld();
       });
     } catch {
       // injector already destroyed
@@ -326,6 +393,7 @@ export class TransitionRouterOutlet extends RouterOutlet {
   private dropHeld(): void {
     this.releaseHeldGuard?.();
     this.releaseHeldGuard = null;
+    this.heldInjectors.release(this);
     if (!this.held) return;
     const instance = this.held.instance;
     this.held.destroy();

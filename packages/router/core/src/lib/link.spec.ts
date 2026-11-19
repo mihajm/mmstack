@@ -277,6 +277,20 @@ describe('link primitives & directive', () => {
 
       expect(reqMock.startPreload).toHaveBeenCalledWith('/test', 'all');
     });
+
+    it.each([null, 'hover'] as const)(
+      'visibility does not preload when preloadOn is %s',
+      (preloadOn) => {
+        component.preloadOn = preloadOn;
+        fixture.detectChanges();
+        expect(observerCallbacks.length).toBeGreaterThan(0);
+        for (const cb of observerCallbacks)
+          cb([{ target: linkElement, isIntersecting: true }]);
+        fixture.detectChanges();
+        TestBed.tick();
+        expect(reqMock.startPreload).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('anchor-detection parity (custom-element hosts)', () => {

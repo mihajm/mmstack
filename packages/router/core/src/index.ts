@@ -11,6 +11,7 @@ export * from './lib/route-data/public_api';
 export { provideTransitionScrollRestoration } from './lib/scroll/transition-scroll';
 export * from './lib/title/public_api';
 export * from './lib/transition-router-outlet';
+export { provideTransitionRouteReuseStrategy } from './lib/transition-route-reuse-strategy';
 export { mmRouterViewTransitions } from './lib/view-transition';
 export {
   injectVisualCommit,

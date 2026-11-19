@@ -527,3 +527,32 @@ describe('mountSwitchRoute / injectMountController', () => {
     expect(router.url).toBe('/preview');
   });
 });
+
+describe('mount switch contract', () => {
+  it('a committed switch is not pending: a later blocked switch rolls back to the committed mount', async () => {
+    const { routes, options } = setup();
+    const { fixture, container, router, controller } = await renderWith(routes);
+
+    await router.navigateByUrl('/preview');
+    await flush(fixture);
+    options.variant = 'v2';
+    expect(await controller.switch()).toEqual({ outcome: 'committed' });
+    await flush(fixture);
+    const cachedV2 = loadedChildrenOf(mountRoute(router));
+
+    options.block = 'guard';
+    const result = await controller.switch();
+    await flush(fixture);
+    expect(result).toEqual({ outcome: 'rolled-back', reason: 'cancelled' });
+    expect(container.textContent).toContain('V2');
+    expect(loadedChildrenOf(mountRoute(router))).toBe(cachedV2);
+  });
+
+  it('beginSwitch outside a navigation returns the current URL', async () => {
+    const { routes } = setup();
+    const { fixture, router, controller } = await renderWith(routes);
+    await router.navigateByUrl('/preview');
+    await flush(fixture);
+    expect(router.serializeUrl(controller.beginSwitch())).toBe('/preview');
+  });
+});

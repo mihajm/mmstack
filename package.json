@@ -88,6 +88,8 @@
     "@testing-library/dom": "^10.4.2",
     "@types/node": "26.6.6",
     "@types/ws": "^8.18.2",
+    "@vitest/browser-playwright": "5.1.0",
+    "fake-indexeddb": "^6.2.8",
     "fast-check": "^4.10.2",
     "happy-dom": "^21.0.4",
     "ng-packagr": "^22.2.6",

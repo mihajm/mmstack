@@ -19,14 +19,26 @@ function stringify(value: unknown): string {
   }
 }
 
-/** Renders any thrown value (Error or otherwise) into a {@link SerializedError}, chaining `cause`. */
+/**
+ * Renders any thrown value (Error or otherwise) into a {@link SerializedError}, chaining `cause`.
+ * A cause chain that loops back to an error already rendered stops there.
+ */
 export function serializeError(err: unknown): SerializedError {
+  return serializeWith(err, new WeakSet());
+}
+
+function serializeWith(err: unknown, seen: WeakSet<Error>): SerializedError {
   if (err instanceof Error) {
+    seen.add(err);
+    const cause = err.cause;
     return {
       name: err.name,
       message: err.message,
       stack: err.stack,
-      cause: err.cause !== undefined ? serializeError(err.cause) : undefined,
+      cause:
+        cause !== undefined && !(cause instanceof Error && seen.has(cause))
+          ? serializeWith(cause, seen)
+          : undefined,
     };
   }
   return { name: 'Error', message: stringify(err) };

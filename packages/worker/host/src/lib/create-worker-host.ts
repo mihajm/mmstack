@@ -19,6 +19,7 @@ import {
   generateId,
   PROTO_VERSION,
   serializeError,
+  takeTransferables,
   type HasSchema,
   type StoreFrontier,
   type SignalValueOf,
@@ -37,7 +38,11 @@ export type WorkerTaskHandler<I = any, O = any> = (
 /** A published derivation: a plain signal, or a status-bearing one (a `latest()`) for pending propagation. */
 export type PublishedSource<T> =
   | Signal<T>
-  | (Signal<T | undefined> & { readonly status: Signal<ResourceStatus> });
+  | (Signal<T | undefined> & {
+      readonly status: Signal<ResourceStatus>;
+      /** Read when `status` is `'error'`; the replica's `error()` then carries it. */
+      readonly error?: Signal<unknown>;
+    });
 
 /** Per owned store, the frontier its state was folded to (see {@link WorkerHost.frontiers}). */
 export type WorkerHostFrontiers<K extends PropertyKey = string> = {
@@ -126,14 +131,18 @@ export type WorkerHost<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
    * the honest settle point before applying a routed write (phase 4). No-op when nothing is pending.
    */
   flush(): void;
-  /** Stop every owned opLog and drop all connections. */
+  /**
+   * Stop every owned opLog and disconnect every port: the host stops answering, and each running
+   * task's signal aborts (its caller rejects with an `AbortError`).
+   */
   dispose(): void;
 };
 
 type Connection = {
   readonly port: WorkerPortLike;
   clientId: string | null;
-  readonly stores: Set<string>;
+  // per store key, the subscribers on this connection (a replica id, or the client id)
+  readonly stores: Map<string, Set<string>>;
   readonly taskRuns: Map<number, AbortController>;
 };
 
@@ -226,15 +235,12 @@ export function createWorkerHost<
   const publishedKeys = Object.keys(publishedEntries);
 
   const subtrees = new Map<string, Subtree>();
-  const connections = new Set<Connection>();
-  const publishedStatus = new Map<
-    string,
-    () => 'idle' | 'loading' | 'reloading' | 'resolved' | 'error'
-  >();
+  const connections = new Map<Connection, () => void>();
+  const publishedStatus = new Map<string, () => WorkerEnvelope>();
   const statusWatches: { destroy(): void }[] = [];
 
   const fanout = (store: string, message: WorkerEnvelope) => {
-    for (const conn of Array.from(connections))
+    for (const conn of Array.from(connections.keys()))
       if (conn.stores.has(store)) conn.port.postMessage(message);
   };
 
@@ -308,8 +314,22 @@ export function createWorkerHost<
         : (entry as PublishedSource<any>);
     observe(key, src as Signal<unknown>, false);
     const statusSig = (src as { status?: Signal<ResourceStatus> }).status;
+    const errorSig = (src as { error?: Signal<unknown> }).error;
+    const statusMessage = (s: ResourceStatus): WorkerEnvelope => {
+      const status = toRemoteStatus(s);
+      const error =
+        status === 'error' && errorSig ? untracked(errorSig) : undefined;
+      return error === undefined
+        ? { type: 'store:status', store: key, status }
+        : {
+            type: 'store:status',
+            store: key,
+            status,
+            error: serializeError(error),
+          };
+    };
     if (statusSig) {
-      publishedStatus.set(key, () => toRemoteStatus(untracked(statusSig)));
+      publishedStatus.set(key, () => statusMessage(untracked(statusSig)));
       let scheduled = false;
       let last: ResourceStatus | null = null;
       const w = createWatch(
@@ -317,11 +337,7 @@ export function createWorkerHost<
           const s = statusSig();
           if (s === last) return;
           last = s;
-          fanout(key, {
-            type: 'store:status',
-            store: key,
-            status: toRemoteStatus(s),
-          });
+          fanout(key, statusMessage(s));
         },
         (watch) => {
           if (scheduled) return;
@@ -352,7 +368,20 @@ export function createWorkerHost<
         (value) => {
           if (ac.signal.aborted)
             conn.port.postMessage({ type: 'task:aborted', runId });
-          else conn.port.postMessage({ type: 'task:ok', runId, value });
+          else
+            try {
+              conn.port.postMessage(
+                { type: 'task:ok', runId, value },
+                takeTransferables(value),
+              );
+            } catch (err) {
+              // a result the port cannot send (not cloneable) still settles the caller
+              conn.port.postMessage({
+                type: 'task:error',
+                runId,
+                error: serializeError(err),
+              });
+            }
         },
         (err) => {
           if (ac.signal.aborted)
@@ -387,7 +416,9 @@ export function createWorkerHost<
       case 'store:subscribe': {
         const sub = subtrees.get(msg.store);
         if (!sub) return;
-        conn.stores.add(msg.store);
+        const subscribers = conn.stores.get(msg.store) ?? new Set<string>();
+        subscribers.add(msg.subscriber ?? msg.clientId);
+        conn.stores.set(msg.store, subscribers);
         if (!sub.writable) flushOwned(); // a derivation's checkpoint never runs ahead of its frontier
         sub.sync.flush(); // settle any pending owner change into the register state first
         const checkpoint = sub.sync.snapshot();
@@ -400,16 +431,13 @@ export function createWorkerHost<
           applied: sub.sync.appliedFrontier(),
         });
         const currentStatus = publishedStatus.get(msg.store);
-        if (currentStatus)
-          conn.port.postMessage({
-            type: 'store:status',
-            store: msg.store,
-            status: currentStatus(),
-          });
+        if (currentStatus) conn.port.postMessage(currentStatus());
         return;
       }
       case 'store:unsubscribe': {
-        conn.stores.delete(msg.store);
+        const subscribers = conn.stores.get(msg.store);
+        subscribers?.delete(msg.subscriber ?? msg.clientId);
+        if (subscribers?.size === 0) conn.stores.delete(msg.store);
         return;
       }
       case 'task:run': {
@@ -454,17 +482,18 @@ export function createWorkerHost<
     const conn: Connection = {
       port,
       clientId: null,
-      stores: new Set(),
+      stores: new Map(),
       taskRuns: new Map(),
     };
-    connections.add(conn);
-    port.onmessage = (ev) => handle(conn, ev.data as WorkerEnvelope);
-    return () => {
-      connections.delete(conn);
+    const disconnect = (): void => {
+      if (!connections.delete(conn)) return;
       port.onmessage = null;
       for (const ac of conn.taskRuns.values()) ac.abort();
       conn.taskRuns.clear();
     };
+    connections.set(conn, disconnect);
+    port.onmessage = (ev) => handle(conn, ev.data as WorkerEnvelope);
+    return disconnect;
   };
 
   const defaultPort: WorkerPortLike | undefined =
@@ -488,7 +517,7 @@ export function createWorkerHost<
     dispose() {
       for (const { sync } of subtrees.values()) sync.destroy();
       for (const w of statusWatches) w.destroy();
-      connections.clear();
+      for (const disconnect of Array.from(connections.values())) disconnect();
     },
   };
 }

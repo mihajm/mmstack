@@ -61,6 +61,43 @@ export function droppingPort(
 }
 
 /**
+ * A worker link whose delivery is in the spec's hands: each side's `postMessage` queues a cloned
+ * frame, and only `deliver` moves one, so a frame can be made to land in a chosen task.
+ */
+export function manualLink() {
+  const up: WorkerEnvelope[] = [];
+  const down: WorkerEnvelope[] = [];
+  const client: WorkerPortLike = {
+    onmessage: null,
+    postMessage: (m) => void up.push(structuredClone(m) as WorkerEnvelope),
+  };
+  const host: WorkerPortLike = {
+    onmessage: null,
+    postMessage: (m) => void down.push(structuredClone(m) as WorkerEnvelope),
+  };
+  const deliver = (dir: 'up' | 'down'): WorkerEnvelope | undefined => {
+    const data = (dir === 'up' ? up : down).shift();
+    if (data !== undefined)
+      (dir === 'up' ? host : client).onmessage?.({ data });
+    return data;
+  };
+  const task = () => new Promise<void>((r) => setTimeout(r));
+  const pump = async (): Promise<void> => {
+    while (up.length > 0 || down.length > 0) {
+      if (up.length > 0) {
+        deliver('up');
+        await task();
+      }
+      if (down.length > 0) {
+        deliver('down');
+        await task();
+      }
+    }
+  };
+  return { client, host, up, down, deliver, pump, task };
+}
+
+/**
  * Deterministic in-process test harness for the worker protocol. The problem it solves: a real
  * cross-thread mirror has TWO async sources — port delivery and the host opLog's microtask
  * emission — so `setTimeout`-and-hope tests flake. Here, transport is a pair of CONTROLLABLE fake

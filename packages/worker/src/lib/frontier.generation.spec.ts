@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
+import { crashWorker } from '../testing/crash';
 
 // Frontiers compare only within ONE owner generation. A replacement owner seeded from the VALUE
 // (not the registers) starts a fresh per-origin history; the replica must drop the dead owner's
@@ -40,8 +41,7 @@ function makeHost(value: Room) {
 describe('frontier generations', () => {
   it('a fresh owner: not current between the old owner’s death and the new checkpoint, current for the new owner’s first result', async () => {
     let current = makeHost({ cells: { a: 1, b: 0 } });
-    // a crashable port: connectWorker wires `onerror` to its crash + auto-restart path
-    let crash = (): void => undefined;
+    // a worker that dies after its handshake: the connection is dropped and respawned
     const spawn = (): WorkerPortLike => {
       const { port1, port2 } = new MessageChannel();
       current.host.connect(port2 as unknown as WorkerPortLike);
@@ -56,7 +56,6 @@ describe('frontier generations', () => {
         onerror: null as (() => void) | null,
         close: () => port1.close(),
       };
-      crash = () => port.onerror?.();
       return port;
     };
     const injector = TestBed.inject(Injector);
@@ -95,7 +94,7 @@ describe('frontier generations', () => {
     const seed = structuredClone(untracked(current.room));
     hostA.dispose();
     current = makeHost(seed);
-    crash();
+    crashWorker(worker);
     // between A's death and B's checkpoint: the held result is A's, nothing is comparable
     expect(check.value()?.of.instance).toBe(hostA.hostId);
     expect(doc.applied().instance).toBe('');

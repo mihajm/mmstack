@@ -13,7 +13,7 @@ import {
   type ValueEqualityFn,
 } from '@angular/core';
 import { injectTransitionScope } from '@mmstack/primitives/core';
-import { WorkerAbortError, type WorkerRef } from './connect-worker';
+import type { WorkerRef } from './connect-worker';
 
 /** Returned from a paused `params` fn to HOLD (keep the current value/status, run nothing). */
 export const PAUSED: unique symbol = Symbol('@mmstack/worker:PAUSED');
@@ -22,7 +22,8 @@ export type WorkerRequestContext = { readonly paused: typeof PAUSED };
 
 /**
  * Reactive input producer. Reads signals to derive the task input; return `undefined` to disable
- * (idle, no run), or `ctx.paused` to hold. Re-runs when the returned input changes (by `Object.is`).
+ * (status `'idle'`, the in-flight run is aborted, the value resets to `defaultValue`), or
+ * `ctx.paused` to hold. Re-runs when the returned input changes (by `Object.is`).
  */
 export type WorkerParamsFn<TInput> = (
   ctx: WorkerRequestContext,
@@ -34,9 +35,10 @@ export type WorkerResourceOptions<TResult> = {
   readonly equal?: ValueEqualityFn<TResult>;
   readonly defaultValue?: TResult;
   /**
-   * Hold the previous value through a re-run (status `'reloading'`) instead of clearing it. Default
-   * TRUE — a `workerResource` is an async derivation, not a fetch; flashing empty mid-recompute is
-   * rarely wanted.
+   * Hold the previous value through a re-run (status `'reloading'`) instead of resetting it to
+   * `defaultValue`, or `undefined` without one (status `'loading'`). Default TRUE — a
+   * `workerResource` is an async derivation, not a fetch; flashing empty mid-recompute is rarely
+   * wanted.
    */
   readonly keepPrevious?: boolean;
   /** Register into the nearest transition scope: `'indicator'` drives pending, `'suspend'` also gates first paint. */
@@ -116,7 +118,11 @@ function build<TInput, TResult>(
     inFlight = ac;
     lastInput = input;
     hasRun = true;
-    status.set(keepPrevious && value() !== undefined ? 'reloading' : 'loading');
+    if (keepPrevious && value() !== undefined) status.set('reloading');
+    else {
+      value.set(options.defaultValue);
+      status.set('loading');
+    }
     error.set(undefined);
 
     runTask(input, ac.signal).then(
@@ -128,12 +134,9 @@ function build<TInput, TResult>(
       },
       (err) => {
         if (inFlight === ac) inFlight = null;
+        // every abort this resource starts bumps the epoch first, so an abort that lands here came
+        // from elsewhere (the worker connection went away, or the task threw one) and settles as error
         if (myEpoch !== epoch) return;
-        if (
-          err instanceof WorkerAbortError ||
-          (err as { name?: string })?.name === 'AbortError'
-        )
-          return;
         error.set(err);
         status.set('error');
       },
@@ -142,10 +145,21 @@ function build<TInput, TResult>(
 
   const input = computed(() => params({ paused: PAUSED }));
 
+  const disable = (): void => {
+    epoch++;
+    inFlight?.abort();
+    inFlight = null;
+    lastInput = undefined;
+    hasRun = false;
+    value.set(options.defaultValue);
+    error.set(undefined);
+    status.set('idle');
+  };
+
   const ref = effect(() => {
     const i = input();
     if (isServer || i === PAUSED) return;
-    if (i === undefined) return;
+    if (i === undefined) return untracked(disable);
     if (Object.is(i, lastInput) && hasRun && untracked(status) !== 'error')
       return;
     untracked(() => start(i as TInput));

@@ -26,6 +26,7 @@ import {
 } from '@mmstack/primitives/core';
 import {
   deserializeError,
+  generateId,
   UNKNOWN_FRONTIER,
   type IsWritableKey,
   type StoreFrontier,
@@ -298,6 +299,7 @@ function build<T extends object>(
             error.set(undefined);
             status.set(hasSnapshot ? 'reloading' : 'loading');
             return;
+          case 'idle':
           case 'resolved':
             error.set(undefined);
             if (hasSnapshot) status.set('resolved');
@@ -309,22 +311,23 @@ function build<T extends object>(
     }
   };
 
-  const subscribe = (): void => {
-    if (hasSnapshot) status.set('reloading');
+  const subscriber = generateId();
+  const sendSubscribe = (): void =>
     worker._send({
       type: 'store:subscribe',
       store: key,
       clientId: worker.clientId,
+      subscriber,
     });
+
+  const subscribe = (): void => {
+    if (hasSnapshot) status.set('reloading');
+    sendSubscribe();
   };
 
   const resync = (): void => {
     status.set('reloading');
-    worker._send({
-      type: 'store:subscribe',
-      store: key,
-      clientId: worker.clientId,
-    });
+    sendSubscribe();
   };
 
   const unsub = worker._subscribe(onStoreMessage);
@@ -387,6 +390,7 @@ function build<T extends object>(
         type: 'store:unsubscribe',
         store: key,
         clientId: worker.clientId,
+        subscriber,
       });
     },
   };

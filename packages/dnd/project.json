@@ -32,7 +32,8 @@
     "test": {
       "executor": "@nx/angular:unit-test",
       "options": {
-        "exclude": ["**/*.browser.spec.ts"]
+        "exclude": ["**/*.browser.spec.ts"],
+        "runnerConfig": "packages/dnd/vitest.config.mts"
       }
     },
     "test-browser": {

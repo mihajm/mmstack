@@ -164,3 +164,10 @@ describe('findPath', () => {
     );
   });
 });
+
+describe('findPath contract', () => {
+  it('a route declared with outlet primary maps like an unnamed one', () => {
+    const r: Route = { path: 'a', outlet: 'primary' };
+    expect(findPath([r], r)).toBe('/a');
+  });
+});

@@ -119,10 +119,11 @@ export function createBreadcrumb(
       link,
     };
 
+    // `skipBreadcrumb` opts a route out of auto-generation only; a registered crumb always shows.
     store.register(
       createInternalBreadcrumb(
         bc,
-        computed(() => route.data?.['skipBreadcrumb'] !== true),
+        computed(() => true),
       ),
     );
 

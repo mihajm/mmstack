@@ -12,6 +12,7 @@ import {
   NavigationEnd,
   NavigationError,
   NavigationSkipped,
+  NavigationSkippedCode,
   NavigationStart,
   Router,
 } from '@angular/router';
@@ -46,7 +47,10 @@ function snapshotBackedResource<T>(snapshot: Signal<ResourceSnapshot<T>>) {
   };
 }
 
-function setup<T>(initial: ResourceSnapshot<T>) {
+function setup<T>(
+  initial: ResourceSnapshot<T>,
+  reload: () => boolean = () => true,
+) {
   const events = new Subject<unknown>();
   TestBed.configureTestingModule({
     providers: [{ provide: Router, useValue: { events } }],
@@ -54,7 +58,7 @@ function setup<T>(initial: ResourceSnapshot<T>) {
   const snapshot = signal<ResourceSnapshot<T>>(initial);
   const source = {
     ...snapshotBackedResource(snapshot),
-    reload: () => true,
+    reload,
   } as unknown as ResourceRef<T>;
   const held = TestBed.runInInjectionContext(() =>
     holdThroughNavigation(source),
@@ -113,7 +117,14 @@ describe('holdThroughNavigation', () => {
     events.next(new NavigationStart(1, '/x'));
     snapshot.set(resolved('b'));
     expect(held.value()).toBe('a');
-    events.next(new NavigationSkipped(1, '/x', undefined as never));
+    events.next(
+      new NavigationSkipped(
+        1,
+        '/x',
+        '',
+        NavigationSkippedCode.IgnoredSameUrlNavigation,
+      ),
+    );
     expect(held.value()).toBe('b');
   });
 
@@ -238,5 +249,144 @@ describe('holdThroughNavigation', () => {
       snapshot.set(resolved('d'));
       expect(held.value()).toBe('d');
     });
+  });
+});
+
+const start = (id: number) => new NavigationStart(id, '/x');
+const end = (id: number) => new NavigationEnd(id, '/x', '/x');
+const cancel = (id: number, code: NavigationCancellationCode) =>
+  new NavigationCancel(id, '/x', '', code);
+
+describe('holdThroughNavigation contract', () => {
+  it('passes a load through before the first navigation', () => {
+    const { snapshot, held } = setup(resolved('a'));
+    expect(held.value()).toBe('a');
+    snapshot.set(loading('a'));
+    expect(held.isLoading()).toBe(true);
+  });
+
+  it('a redirect chain first read mid-chain still shows the pre-navigation state', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    snapshot.set(loading('partial'));
+    events.next(cancel(1, NavigationCancellationCode.Redirect));
+    events.next(start(2));
+    expect(held.value()).toBe('a');
+    expect(held.isLoading()).toBe(false);
+  });
+
+  it('a real NavigationSkipped after a superseded cancel reveals the new state', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    events.next(
+      cancel(1, NavigationCancellationCode.SupersededByNewNavigation),
+    );
+    snapshot.set(resolved('b'));
+    expect(held.value()).toBe('a');
+    events.next(
+      new NavigationSkipped(
+        2,
+        '/x',
+        '',
+        NavigationSkippedCode.IgnoredSameUrlNavigation,
+      ),
+    );
+    expect(held.value()).toBe('b');
+  });
+
+  it('a guard-rejected cancel tracks live again once the rollback settles', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    snapshot.set(loading('partial'));
+    events.next(cancel(1, NavigationCancellationCode.GuardRejected));
+    snapshot.set(resolved('a'));
+    expect(held.value()).toBe('a');
+    snapshot.set(resolved('b'));
+    expect(held.value()).toBe('b');
+  });
+
+  it('a superseded cancel stays frozen until the next navigation', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    snapshot.set(loading('partial'));
+    expect(held.value()).toBe('a');
+    events.next(
+      cancel(1, NavigationCancellationCode.SupersededByNewNavigation),
+    );
+    snapshot.set(resolved('mid'));
+    expect(held.value()).toBe('a');
+  });
+
+  it('a redirect cancel stays frozen until the next navigation', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    snapshot.set(loading('partial'));
+    expect(held.value()).toBe('a');
+    events.next(cancel(1, NavigationCancellationCode.Redirect));
+    snapshot.set(resolved('mid'));
+    expect(held.value()).toBe('a');
+  });
+
+  it('after a rollback completes its cycle, a later reload shows its indicator', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    events.next(cancel(1, NavigationCancellationCode.GuardRejected));
+    snapshot.set(loading('a'));
+    expect(held.isLoading()).toBe(false);
+    snapshot.set(resolved('a'));
+    expect(held.value()).toBe('a');
+    snapshot.set(loading('a'));
+    expect(held.isLoading()).toBe(true);
+  });
+
+  it('a load that finished before NavigationEnd does not count: the first refetch after it is held', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    snapshot.set(loading('a'));
+    expect(held.isLoading()).toBe(false);
+    snapshot.set(resolved('b'));
+    events.next(end(1));
+    expect(held.value()).toBe('b');
+    snapshot.set(loading('b'));
+    expect(held.isLoading()).toBe(false);
+  });
+
+  it('once the cycle completed, every later load passes through', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    events.next(end(1));
+    snapshot.set(loading('a'));
+    expect(held.value()).toBe('a');
+    snapshot.set(resolved('b'));
+    expect(held.value()).toBe('b');
+    snapshot.set(loading('b'));
+    expect(held.isLoading()).toBe(true);
+    snapshot.set(loading('x'));
+    expect(held.value()).toBe('x');
+    snapshot.set(resolved('c'));
+    expect(held.value()).toBe('c');
+    snapshot.set(loading('c'));
+    expect(held.isLoading()).toBe(true);
+  });
+
+  it('holds through every change of the cycle while it is still loading', () => {
+    const { events, snapshot, held } = setup(resolved('a'));
+    events.next(start(1));
+    events.next(end(1));
+    snapshot.set(loading(undefined as unknown as string));
+    expect(held.value()).toBe('a');
+    snapshot.set({
+      status: 'reloading',
+      value: undefined as unknown as string,
+    });
+    expect(held.isLoading()).toBe(false);
+    expect(held.value()).toBe('a');
+  });
+
+  it('reload() is delegated to the source', () => {
+    const reload = vi.fn(() => true);
+    const { held } = setup(resolved('a'), reload);
+    expect(held.reload()).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

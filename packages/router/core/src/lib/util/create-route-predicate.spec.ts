@@ -138,6 +138,7 @@ describe('createRoutePredicate', () => {
       expect(predicateEnd('/a/x/y/z')).toBe(true);
       const predicateStart = createRoutePredicate('**/b');
       expect(predicateStart('/x/y/z/b')).toBe(true);
+      expect(predicateStart('/a/x/b')).toBe(true);
     });
 
     it('config path consisting only of ** should match anything', () => {

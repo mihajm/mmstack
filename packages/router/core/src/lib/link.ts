@@ -1,6 +1,5 @@
 import {
   booleanAttribute,
-  computed,
   DestroyRef,
   Directive,
   effect,
@@ -345,21 +344,23 @@ export class Link implements OnChanges {
 
   readonly preloading = output<void>();
 
-  private readonly urlTree = computed(() => {
-    return inputToUrlTree(
-      this.router,
-      this.mmLink(),
-      this.relativeTo(),
-      this.queryParams(),
-      this.fragment(),
-      this.queryParamsHandling(),
-      this.routerLink?.urlTree,
+  /**
+   * Built on each read: RouterLink's own tree depends on router state (merged or preserved query,
+   * preserved fragment) that no signal tracks, so a cached tree goes stale after a navigation.
+   */
+  private urlTree(): UrlTree | null {
+    return untracked(() =>
+      inputToUrlTree(
+        this.router,
+        this.mmLink(),
+        this.relativeTo(),
+        this.queryParams(),
+        this.fragment(),
+        this.queryParamsHandling(),
+        this.routerLink?.urlTree,
+      ),
     );
-  });
-
-  private readonly fullPath = computed(() => {
-    return treeToSerializedUrl(this.router, this.urlTree());
-  });
+  }
 
   private suppressNextClick = false;
 
@@ -429,7 +430,7 @@ export class Link implements OnChanges {
   }
 
   private requestPreload() {
-    const fp = untracked(this.fullPath);
+    const fp = treeToSerializedUrl(this.router, this.urlTree());
     if (!this.routerLink || !fp) return;
     this.req.startPreload(fp, untracked(this.preload));
     this.preloading.emit();
@@ -437,7 +438,7 @@ export class Link implements OnChanges {
 
   // Mirrors RouterLink.onClick: would this event trigger an SPA navigation?
   private isSpaNavigation(event: MouseEvent): boolean {
-    if (!untracked(this.urlTree)) return false;
+    if (!this.urlTree()) return false;
 
     if (!this.isAnchorElement) return true;
 

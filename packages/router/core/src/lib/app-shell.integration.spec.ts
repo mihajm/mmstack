@@ -184,6 +184,8 @@ describe('app-shell cross-feature integration', () => {
     const orgReq = http.expectOne('/api/orgs/1');
     const userReq = http.expectOne('/api/users/5');
     expect(container.querySelector('route-home')).not.toBeNull();
+    // breadcrumbs flush at NavigationEnd and lead the swap
+    expect(crumbLabels(container)).toEqual(['Org 1', 'User 5']);
 
     orgReq.flush({ name: 'Acme' });
     userReq.flush({ name: 'Cara' });

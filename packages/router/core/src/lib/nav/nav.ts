@@ -1,9 +1,13 @@
-import { computed, isSignal, type Signal } from '@angular/core';
+import { computed, inject, isSignal, type Signal } from '@angular/core';
 import {
   type ActivatedRouteSnapshot,
   createUrlTreeFromSnapshot,
   type IsActiveMatchOptions,
+  PRIMARY_OUTLET,
+  type QueryParamsHandling,
+  ROUTER_CONFIGURATION,
   type Router,
+  type UrlSegmentGroup,
   UrlTree,
 } from '@angular/router';
 
@@ -28,6 +32,10 @@ export type CreateNavItem<TMeta = Record<string, unknown>> = {
    * - `'a'` / `'a/b'` / `['a', 'b']` — relative segments, resolve to `${mount}/a` etc.
    * - `'/foo'` / `['/foo', 'bar']` — absolute, leading-slash escape hatch.
    * - A pre-built `UrlTree` is passed through unchanged.
+   *
+   * Strings keep their matrix params (`'a;view=grid'`) and named-outlet groups. Every form
+   * except a pre-built `UrlTree` follows the router's `defaultQueryParamsHandling`
+   * (`withRouterConfig`); with `'merge'` or `'preserve'` the link follows the current query.
    *
    * Omit (or return `null`) for a pure grouping header — `active` will then fall through
    * to the children-active check.
@@ -117,30 +125,74 @@ function isAbsoluteCommandArray(commands: readonly unknown[]): boolean {
   );
 }
 
+/** Commands for a parsed group: segments keep their matrix params. */
+function segmentCommands(group: UrlSegmentGroup | undefined): unknown[] {
+  if (!group) return [];
+  return group.segments.flatMap((s) =>
+    Object.keys(s.parameters).length > 0 ? [s.path, s.parameters] : [s.path],
+  );
+}
+
+/** A relative string as commands, so matrix params and named outlets survive. */
+function relativeStringCommands(parsed: UrlTree): unknown[] {
+  const groups = parsed.root.children;
+  const named = Object.keys(groups).filter((k) => k !== PRIMARY_OUTLET);
+  const primary = segmentCommands(groups[PRIMARY_OUTLET]);
+  if (named.length === 0) return primary;
+  const outlets: Record<string, unknown[]> = {};
+  if (primary.length > 0) outlets[PRIMARY_OUTLET] = primary;
+  for (const name of named) outlets[name] = segmentCommands(groups[name]);
+  return [{ outlets }];
+}
+
 function resolveLinkTree(
   input: CreateNavItem['link'],
   router: Router,
   relativeTo: ActivatedRouteSnapshot,
+  handling: QueryParamsHandling | undefined,
 ): UrlTree | null {
   const raw = typeof input === 'function' ? input() : input;
   if (raw === undefined || raw === null) return null;
   if (raw instanceof UrlTree) return raw;
+  return withQueryParamsHandling(
+    buildLinkTree(raw, router, relativeTo),
+    handling,
+    router,
+  );
+}
 
+function buildLinkTree(
+  raw: string | any[],
+  router: Router,
+  relativeTo: ActivatedRouteSnapshot,
+): UrlTree {
   if (typeof raw === 'string') {
     if (raw.startsWith('/')) return router.parseUrl(raw);
     const parsed = router.parseUrl('/' + raw);
-    const primary = parsed.root.children['primary'];
-    const segments = primary ? primary.segments.map((s) => s.path) : [];
     return createUrlTreeFromSnapshot(
       relativeTo,
-      segments,
+      relativeStringCommands(parsed),
       parsed.queryParams,
       parsed.fragment,
     );
   }
 
-  if (isAbsoluteCommandArray(raw)) return router.createUrlTree(raw);
+  if (isAbsoluteCommandArray(raw))
+    return router.createUrlTree(raw, { queryParamsHandling: '' });
   return createUrlTreeFromSnapshot(relativeTo, raw);
+}
+
+/** Same semantics as `Router.createUrlTree`, applied to every link form. */
+function withQueryParamsHandling(
+  tree: UrlTree,
+  handling: QueryParamsHandling | undefined,
+  router: Router,
+): UrlTree {
+  if (handling !== 'merge' && handling !== 'preserve') return tree;
+  const current = router.parseUrl(router.url).queryParams;
+  const queryParams =
+    handling === 'merge' ? { ...current, ...tree.queryParams } : current;
+  return new UrlTree(tree.root, queryParams, tree.fragment);
 }
 
 function resolveMeta<TMeta>(input: CreateNavItem<TMeta>['meta']): TMeta {
@@ -162,9 +214,14 @@ export function createInternalNavItem<TMeta = Record<string, unknown>>(
   const label = wrap(input.label);
   const ariaLabel = input.ariaLabel ? wrap(input.ariaLabel) : label;
 
-  const linkTree = computed(() =>
-    resolveLinkTree(input.link, router, relativeTo),
-  );
+  const handling = inject(ROUTER_CONFIGURATION, {
+    optional: true,
+  })?.defaultQueryParamsHandling;
+  const tracksQuery = handling === 'merge' || handling === 'preserve';
+  const linkTree = computed(() => {
+    if (tracksQuery) trackNavigation();
+    return resolveLinkTree(input.link, router, relativeTo, handling);
+  });
   const link: Signal<string | null> = computed(() => {
     const tree = linkTree();
     return tree ? router.serializeUrl(tree) : null;

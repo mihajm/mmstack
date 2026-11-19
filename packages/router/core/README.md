@@ -392,6 +392,8 @@ export const appRoutes: Routes = [
 ];
 ```
 
+String links keep matrix params (`'a;view=grid'`) and named-outlet groups. Every link form except a pre-built `UrlTree` follows the router's `defaultQueryParamsHandling` (set with `withRouterConfig`), so with `'merge'` or `'preserve'` the links follow the current query.
+
 `NavItem.active` is computed against the current URL with `subsetMatchOptions` defaults (prefix-match paths, subset query params, ignore matrix/fragment). Override per-item with `activeMatch: Partial<IsActiveMatchOptions>` or globally with `provideNavConfig({ activeMatch })`.
 
 #### Link resolution rules
@@ -504,6 +506,20 @@ provideNavConfig({
 ```
 
 Shadowing follows the usual deepest-wins rule — any active route that calls `createNavItems` (including `createNavItems([])` to render an explicitly empty menu) replaces the defaults for that scope.
+
+Defaults are built once per scope, untracked, and cached: a signal read inside a defaults factory (or inside a `provideNavConfig` factory) is read once and never again. Put state that changes on the items themselves, where every field is reactive:
+
+```typescript
+provideNavConfig({
+  defaults: () => {
+    const auth = inject(AuthStore);
+    return [
+      { label: 'Home', link: '/' },
+      { label: 'Admin', link: '/admin', hidden: () => auth.role() !== 'admin' },
+    ];
+  },
+}),
+```
 
 #### Typed metadata
 
@@ -658,6 +674,13 @@ Behaviour:
 - **Interruptions re-target the hold** — navigating again before the incoming route settles destroys the half-loaded view; the stable view stays visible until the new destination settles.
 - **Per-view isolation** — the swap waits on the _incoming_ view's resources only, so long-running background work (e.g. a `keepPrevious` poll) on the outgoing view can't delay it. Routes that opt into [route-level data](#route-level-data) get their own scope automatically (full isolation); others share the outlet's scope, with the swap attributed to the incoming view.
 - **`data: { immediateTransition: true }`** on a route opts it out of the hold — it swaps in immediately, even while loading (handy for routes that should show their own skeleton).
+- **`withExperimentalAutoCleanupInjectors()`** needs `provideTransitionRouteReuseStrategy()` beside it. With it, the injector of a held route stays alive until the swap, and the router destroys it on its next cleanup pass. Without it, the router destroys that injector at `NavigationEnd` and the outlet swaps early; in dev mode a console warning names the fix. An app with its own reuse strategy passes it in, and every other decision is forwarded to it. A later `{ provide: RouteReuseStrategy, ... }` of your own replaces this one.
+
+  ```typescript
+  provideRouter(routes, withExperimentalAutoCleanupInjectors()),
+  provideTransitionRouteReuseStrategy(),
+  // or: provideTransitionRouteReuseStrategy(() => new MyReuseStrategy()),
+  ```
 
 #### What a staged view may do
 
@@ -938,6 +961,7 @@ Behaviour:
 - **On success or skip** (`NavigationEnd` / `NavigationSkipped`) it reveals — **settle-aware**: a navigation's refetch typically starts just _after_ `NavigationEnd` (live params tick on it), so the last settled snapshot is held through that first load cycle and revealed when it lands. Once the cycle completes, loads pass through live again (a later `reload()`'s indicator shows normally) until the next navigation.
 - **On a true rollback** (`NavigationError`, or a `NavigationCancel` that isn't a redirect / superseded-by-a-new-navigation) it holds the pre-navigation snapshot until the resource stops loading — so a cancelled refetch settling back to the route you stayed on reveals cleanly, never the would-be state of the route you didn't reach.
 - **Redirect / superseded cancels** stay frozen — a new navigation is already taking over and drives the next state, with no flicker in between.
+- **A load that completes before `NavigationEnd`** belongs to the navigation, not to the first load cycle after it: the first load after `NavigationEnd` is still held, even when it is a user's `reload()`.
 
 The return value is a read-only `Resource` (`value()`, `status()`, `error()`, `isLoading()`, `hasValue()`, `snapshot()`) plus `reload()`, so it's a drop-in for templates and anywhere a `Resource` is read. It composes with route-level data — `holdThroughNavigation(injectRouteData(USER))` gives a route's data flash-free param navigation.
 

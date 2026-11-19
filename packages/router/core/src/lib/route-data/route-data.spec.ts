@@ -158,6 +158,7 @@ describe('route-data', () => {
     await router.navigateByUrl('/users/7');
     await flush(fixture);
     expect(slotData?.id()).toBe('7');
+    expect(slotData?.typo()).toBe('');
     expect(err).not.toHaveBeenCalled();
     err.mockRestore();
   });

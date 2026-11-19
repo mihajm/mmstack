@@ -191,3 +191,56 @@ describe('lazy-route-internals (private-slot pin)', () => {
     expect(hasLazyState(featureRoute(router))).toBe(false);
   });
 });
+
+describe('lazy-route-internals contract', () => {
+  it('destroyLazyInjectors reaches eager children and nested lazy modules of the loaded subtree', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([
+          {
+            path: 'nest',
+            loadChildren: () =>
+              Promise.resolve([
+                {
+                  path: 'p',
+                  children: [
+                    {
+                      path: 'c',
+                      component: LazyChild,
+                      providers: [ScopedService],
+                    },
+                  ],
+                },
+                {
+                  path: 'm',
+                  loadChildren: () => Promise.resolve(LazyFeatureModule),
+                },
+              ] satisfies Route[]),
+          },
+        ]),
+        provideLocationMocks(),
+      ],
+    });
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/nest/p/c');
+    await router.navigateByUrl('/nest/m');
+    const nest = router.config[0];
+    const loaded = loadedChildren(nest) as Route[];
+    const child = loaded[0].children?.[0] as Record<string, unknown>;
+    const childInjector = child['_injector'] as { destroyed: boolean };
+    const moduleInjector = loadedInjector(loaded[1]);
+    expect(childInjector).toBeDefined();
+    expect(moduleInjector).toBeDefined();
+
+    destroyLazyInjectors(nest);
+    expect(childInjector.destroyed).toBe(true);
+    expect(moduleInjector?.destroyed).toBe(true);
+  });
+
+  it('findMarkedRoute finds a marked route under an eager parent', () => {
+    const config: Route[] = [
+      { path: 'p', children: [{ path: 'x', data: { [MARKER]: 'eager' } }] },
+    ];
+    expect(findMarkedRoute(config, MARKER, 'eager')?.route.path).toBe('x');
+  });
+});

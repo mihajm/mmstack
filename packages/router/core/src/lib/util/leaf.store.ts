@@ -1,6 +1,7 @@
 import { computed, inject, Injectable, type Signal } from '@angular/core';
 import {
   type ActivatedRouteSnapshot,
+  PRIMARY_OUTLET,
   Router,
   type RouterStateSnapshot,
 } from '@angular/router';
@@ -72,8 +73,7 @@ function leafRoutes(): Signal<ResolvedLeafRoute[]> {
       if (existingIdx >= 0) routes[existingIdx] = entry;
       else routes.push(entry);
 
-      route =
-        route.children?.find((c) => c.outlet === 'primary') ?? route.firstChild;
+      route = route.children.find((c) => c.outlet === PRIMARY_OUTLET) ?? null;
     }
 
     return routes;

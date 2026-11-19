@@ -30,6 +30,9 @@ export type NavConfig<TMeta = Record<string, unknown>> = {
    *
    * A route that wants to render an *empty* nav explicitly should register
    * `createNavItems([])`, which shadows these defaults via the normal deepest-wins rule.
+   *
+   * Defaults are built once per scope, untracked, and cached, so a signal read while building
+   * them is read once. Item fields (`label`, `hidden`, `disabled`, ...) stay reactive.
    */
   defaults?:
     | NavDefaultsForScope<TMeta>
@@ -68,12 +71,16 @@ const token = new InjectionToken<NavConfig>('@mmstack/router-core:nav-config');
  *
  * @example
  * ```ts
- * // Factory form — read defaults from a service
+ * // Defaults are built once per scope, untracked, and cached. Put changing state on the
+ * // items, where every field is reactive:
  * provideNavConfig(() => {
- *   const role = inject(AuthStore).role();
+ *   const auth = inject(AuthStore);
  *   return {
  *     defaults: {
- *       main: role === 'admin' ? adminNav : guestNav,
+ *       main: [
+ *         { label: 'Home', link: '/' },
+ *         { label: 'Admin', link: '/admin', hidden: () => auth.role() !== 'admin' },
+ *       ],
  *     },
  *   };
  * });

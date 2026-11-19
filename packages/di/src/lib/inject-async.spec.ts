@@ -1,10 +1,13 @@
 import {
   Component,
+  createEnvironmentInjector,
+  EnvironmentInjector,
   inject,
   Injectable,
   InjectionToken,
   Injector,
   PLATFORM_ID,
+  runInInjectionContext,
   type OnDestroy,
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
@@ -252,6 +255,54 @@ describe('injectAsync', () => {
     expect(await get()).toBeInstanceOf(BareService);
   });
 
+  describe('providedWith lifetime (Injector form)', () => {
+    const setup = () => {
+      const counter = { destroyed: 0 };
+
+      @Injectable()
+      class ScopedService implements OnDestroy {
+        ngOnDestroy() {
+          counter.destroyed++;
+        }
+      }
+
+      const root = TestBed.inject(EnvironmentInjector);
+      const callSite = createEnvironmentInjector([], root);
+      const target = createEnvironmentInjector([], root);
+
+      const get = runInInjectionContext(callSite, () =>
+        injectAsync(() => Promise.resolve(ScopedService), {
+          providedWith: target,
+        }),
+      );
+
+      return { counter, callSite, target, get };
+    };
+
+    it('destroys the auto-provided instance with the target injector', async () => {
+      const { counter, callSite, target, get } = setup();
+      await get();
+
+      target.destroy();
+      expect(counter.destroyed).toBe(1);
+
+      callSite.destroy();
+      expect(counter.destroyed).toBe(1);
+    });
+
+    it('keeps the auto-provided instance alive when only the call site is destroyed', async () => {
+      const { counter, callSite, target, get } = setup();
+      const instance = await get();
+
+      callSite.destroy();
+      expect(counter.destroyed).toBe(0);
+      expect(await get()).toBe(instance);
+
+      target.destroy();
+      expect(counter.destroyed).toBe(1);
+    });
+  });
+
   it('resolves against an injector passed via providedWith (InjectionToken form)', async () => {
     @Injectable()
     class BareService {}
@@ -342,6 +393,213 @@ describe('injectAsync', () => {
 
       await new Promise((r) => setTimeout(r, 20));
       expect(loads).toBe(1);
+    });
+  });
+
+  describe('prefetch with requestIdleCallback', () => {
+    let idleCallbacks: Array<() => void> = [];
+
+    // a busy browser: idle never comes on its own, only a deadline fires the callback
+    const stubBusyBrowser = () => {
+      idleCallbacks = [];
+      vi.stubGlobal(
+        'requestIdleCallback',
+        (cb: () => void, opts?: { timeout?: number }) => {
+          idleCallbacks.push(cb);
+          if (opts?.timeout !== undefined) setTimeout(cb, opts.timeout);
+          return idleCallbacks.length;
+        },
+      );
+    };
+
+    const goIdle = () => idleCallbacks.splice(0).forEach((cb) => cb());
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    const countLoads = (prefetch: 'idle' | number) => {
+      @Injectable({ providedIn: 'root' })
+      class Prefetched {}
+
+      const counter = { loads: 0 };
+      TestBed.runInInjectionContext(() =>
+        injectAsync(
+          () => {
+            counter.loads++;
+            return Promise.resolve(Prefetched);
+          },
+          { prefetch },
+        ),
+      );
+      return counter;
+    };
+
+    it("'idle' waits for the browser to go idle, then loads", async () => {
+      stubBusyBrowser();
+      const counter = countLoads('idle');
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(counter.loads).toBe(0);
+
+      goIdle();
+      await new Promise((r) => setTimeout(r));
+      expect(counter.loads).toBe(1);
+    });
+
+    it('a numeric deadline loads by the deadline even if the browser never goes idle', async () => {
+      stubBusyBrowser();
+      const counter = countLoads(30);
+
+      await new Promise((r) => setTimeout(r, 60));
+      expect(counter.loads).toBe(1);
+    });
+
+    it('a numeric deadline loads early when the browser goes idle first', async () => {
+      stubBusyBrowser();
+      const counter = countLoads(10_000);
+
+      goIdle();
+      await new Promise((r) => setTimeout(r));
+      expect(counter.loads).toBe(1);
+    });
+  });
+
+  describe('prefetch and the network connection', () => {
+    const withConnection = async (
+      connection: unknown,
+      run: () => Promise<void>,
+    ) => {
+      const nav = globalThis.navigator as { connection?: unknown };
+      const original = nav.connection;
+      Object.defineProperty(nav, 'connection', {
+        value: connection,
+        configurable: true,
+      });
+      try {
+        await run();
+      } finally {
+        Object.defineProperty(nav, 'connection', {
+          value: original,
+          configurable: true,
+        });
+      }
+    };
+
+    it.each([
+      [{ effectiveType: '4g', saveData: false }, 1],
+      [{ effectiveType: '4g' }, 1],
+      [{ effectiveType: '3g', saveData: false }, 1],
+      [{ effectiveType: '2g' }, 0],
+      [{ effectiveType: 'slow-2g' }, 0],
+      [{ effectiveType: '4g', saveData: true }, 0],
+    ])('connection %o prefetches %i time(s)', (connection, expected) =>
+      withConnection(connection, async () => {
+        @Injectable({ providedIn: 'root' })
+        class Prefetched {}
+
+        let loads = 0;
+        TestBed.runInInjectionContext(() =>
+          injectAsync(
+            () => {
+              loads++;
+              return Promise.resolve(Prefetched);
+            },
+            { prefetch: () => Promise.resolve() },
+          ),
+        );
+
+        await new Promise((r) => setTimeout(r));
+        expect(loads).toBe(expected);
+      }),
+    );
+  });
+
+  describe('prefetch failures', () => {
+    type Listener = (reason: unknown) => void;
+    const nodeProcess = (
+      globalThis as unknown as {
+        process: {
+          on(event: 'unhandledRejection', fn: Listener): void;
+          off(event: 'unhandledRejection', fn: Listener): void;
+        };
+      }
+    ).process;
+
+    const captureUnhandled = () => {
+      const seen: unknown[] = [];
+      const onUnhandled: Listener = (reason) => seen.push(reason);
+      nodeProcess.on('unhandledRejection', onUnhandled);
+      return {
+        seen,
+        stop: () => nodeProcess.off('unhandledRejection', onUnhandled),
+      };
+    };
+
+    const settle = () => new Promise((r) => setTimeout(r, 10));
+
+    it('a failed prefetch leaves no unhandled rejection, an explicit call still rejects', async () => {
+      const unhandled = captureUnhandled();
+      try {
+        const get = TestBed.runInInjectionContext(() =>
+          injectAsync(() => Promise.reject(new Error('chunk failed')), {
+            prefetch: () => Promise.resolve(),
+          }),
+        );
+
+        await settle();
+        expect(unhandled.seen).toEqual([]);
+        await expect(get()).rejects.toThrow('chunk failed');
+      } finally {
+        unhandled.stop();
+      }
+    });
+
+    it('a prefetch of an unprovided InjectionToken leaves no unhandled rejection', async () => {
+      const TOKEN = new InjectionToken<string>('Unprovided');
+      const unhandled = captureUnhandled();
+      try {
+        const get = TestBed.runInInjectionContext(() =>
+          injectAsync(() => Promise.resolve(TOKEN), {
+            prefetch: () => Promise.resolve(),
+          }),
+        );
+
+        await settle();
+        expect(unhandled.seen).toEqual([]);
+        await expect(get()).rejects.toThrow(/no provider/i);
+      } finally {
+        unhandled.stop();
+      }
+    });
+
+    it('a prefetch that lands after the host is destroyed leaves no unhandled rejection', async () => {
+      @Injectable()
+      class LateService {}
+
+      let resolveLoad!: (token: typeof LateService) => void;
+
+      @Component({ template: '' })
+      class HostComponent {
+        readonly get = injectAsync(
+          () => new Promise<typeof LateService>((r) => (resolveLoad = r)),
+          { prefetch: () => Promise.resolve() },
+        );
+      }
+
+      const unhandled = captureUnhandled();
+      try {
+        const fixture = TestBed.createComponent(HostComponent);
+        const get = fixture.componentInstance.get;
+        await settle();
+
+        fixture.destroy();
+        resolveLoad(LateService);
+
+        await settle();
+        expect(unhandled.seen).toEqual([]);
+        await expect(get()).rejects.toThrow(/destroyed/i);
+      } finally {
+        unhandled.stop();
+      }
     });
   });
 

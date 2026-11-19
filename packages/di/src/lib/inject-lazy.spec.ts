@@ -1,10 +1,13 @@
 import {
   Component,
   computed,
+  createEnvironmentInjector,
   Directive,
+  EnvironmentInjector,
   HostAttributeToken,
   Injectable,
   InjectionToken,
+  runInInjectionContext,
   signal,
   type Signal,
 } from '@angular/core';
@@ -105,6 +108,23 @@ describe('injectLazy', () => {
 
     expect(dir.getRole()).toBe('button');
     expect(dir.getRole()).toBe('button'); // cached
+  });
+
+  it('keeps returning the cached value after its injector is destroyed', () => {
+    @Injectable()
+    class Service {}
+
+    const env = createEnvironmentInjector(
+      [Service],
+      TestBed.inject(EnvironmentInjector),
+    );
+    const get = runInInjectionContext(env, () => injectLazy(Service));
+
+    const first = get();
+    env.destroy();
+
+    expect(() => get()).not.toThrow();
+    expect(get()).toBe(first);
   });
 
   it('should correctly handle reactive contexts', () => {

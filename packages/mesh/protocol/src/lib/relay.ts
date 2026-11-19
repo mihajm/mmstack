@@ -125,8 +125,10 @@ export type RelayOptions = {
   readonly policy?: OpPolicy;
   /**
    * How far a tripwire ejection reaches. `'writer'` (the default) blacklists the writer in that
-   * room for the relay's lifetime: every connection it holds is closed and every later hello
-   * is refused `'unauthorized'`. `'connection'` closes only the offending connection.
+   * room for as long as the room stays loaded: every connection it holds is closed and every later
+   * hello is refused `'unauthorized'`. The blacklist is not persisted (`unload` drops it); a durable
+   * ban belongs at authentication, fed by {@link RelayOptions.onViolation}. `'connection'` closes
+   * only the offending connection.
    * Neither scope prevents flooding: adapters must enforce ingress and connection limits,
    * with principal-level budgets that survive reconnects, even when every connection is authenticated.
    */
@@ -168,11 +170,6 @@ export type RelayOptions = {
     env: SeqEnvelope,
     state: RoomState,
   ) => void | Promise<void>;
-  /**
-   * The durability promise for `env` rejected: this room is now stalled and answers nothing
-   * further. Fires once, for the envelope that failed. Report it and restart the process —
-   * there is no in-place recovery, by design.
-   */
   /**
    * The persistence egress for the rows of the room's logical sequence that are not envelopes: a
    * cut (the whole generation record) and a journaled refusal. Same contract as
@@ -216,6 +213,11 @@ export type RelayOptions = {
     row: RelayRow,
     cause: unknown,
   ) => void;
+  /**
+   * The durability promise for `env` rejected: this room is now stalled and answers nothing
+   * further. Fires once, for the envelope that failed. Report it and restart the process —
+   * there is no in-place recovery, by design.
+   */
   readonly onDurabilityFailed?: (
     room: string,
     env: SeqEnvelope,
@@ -482,7 +484,14 @@ const createRelease = (
   return {
     submit: (run, done, held) => {
       if (!stalled && !draining && queue.length === 0 && done === undefined) {
-        run();
+        // a socket may re-enter the relay from inside `run`: that release queues behind this one
+        draining = true;
+        try {
+          run();
+        } finally {
+          draining = false;
+          if (queue.length > 0) void drain();
+        }
         return;
       }
       queue.push({ run, done, held });
@@ -643,6 +652,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       room &&
       room.members.size === 0 &&
       room.seq === 0 &&
+      room.schemaVersion === 0 &&
       room.ejected.size === 0
     ) {
       rooms.delete(name);
@@ -656,6 +666,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   };
 
   const drop = (name: string, room: Room, member: Member): void => {
+    detach(name, room, member);
+    left(name, room);
+  };
+  const detach = (name: string, room: Room, member: Member): void => {
     room.members.delete(member);
     dropPresence(name, room, member);
     broadcast(room, {
@@ -665,7 +679,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       gone: true,
     });
     member.socket.close?.();
-    left(name, room);
   };
   /** A member left: the census may now be unanimous. */
   const left = (name: string, room: Room): void => {
@@ -690,9 +703,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     if (ejection === 'writer') {
       room.ejected.add(writer);
       broadcast(room, notice);
+      // every connection goes before the census runs, so a cut never re-welcomes one of them
       for (const held of [...room.members]) {
-        if (held.ctx.writer === writer) drop(name, room, held);
+        if (held.ctx.writer === writer) detach(name, room, held);
       }
+      left(name, room);
       return;
     }
     // Only the offender learns of the ejection: the same writer's other connections would read
@@ -1135,7 +1150,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       return {
         disconnect,
         receive: (msg) => {
-          const room = roomOf(msg.room);
+          // only a hello opens a room: anything else for a room the relay does not hold is dropped
+          const room =
+            msg.t === 'hello' ? roomOf(msg.room) : rooms.get(msg.room);
+          if (!room) return;
 
           if (msg.t === 'hello') {
             if (room.ejected.has(ctx.writer) || joined.get(msg.room)?.ejected) {
@@ -1254,7 +1272,14 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           }
 
           const member = joined.get(msg.room);
-          if (!member || member.ejected || room.ejected.has(ctx.writer)) return;
+          // a connection displaced by a same-origin hello is still in its own `joined` map
+          if (
+            !member ||
+            member.ejected ||
+            !room.members.has(member) ||
+            room.ejected.has(ctx.writer)
+          )
+            return;
 
           if (msg.t === 'signal') {
             for (const target of room.members) {
@@ -1314,19 +1339,26 @@ export function createRelay(opt: RelayOptions = {}): Relay {
 
           const env = msg.env;
           const malformed = validateEnvelope(env);
+          // not an object at all: nothing to read a version off
           const violation: PolicyViolation | null =
-            env.policyVersion !== policyVersion ||
-            env.proto !== MESH_PROTO_VERSION
-              ? { writer: ctx.writer, reason: 'proto' }
-              : malformed !== null
-                ? { writer: ctx.writer, reason: 'malformed', detail: malformed }
-                : env.ops.length > maxOps
-                  ? { writer: ctx.writer, reason: 'ops-limit' }
-                  : overRate(room, ctx.writer)
-                    ? { writer: ctx.writer, reason: 'rate' }
-                    : env.writer !== ctx.writer
-                      ? { writer: ctx.writer, reason: 'writer-mismatch' }
-                      : null;
+            malformed === 'envelope'
+              ? { writer: ctx.writer, reason: 'malformed', detail: malformed }
+              : env.policyVersion !== policyVersion ||
+                  env.proto !== MESH_PROTO_VERSION
+                ? { writer: ctx.writer, reason: 'proto' }
+                : malformed !== null
+                  ? {
+                      writer: ctx.writer,
+                      reason: 'malformed',
+                      detail: malformed,
+                    }
+                  : env.ops.length > maxOps
+                    ? { writer: ctx.writer, reason: 'ops-limit' }
+                    : overRate(room, ctx.writer)
+                      ? { writer: ctx.writer, reason: 'rate' }
+                      : env.writer !== ctx.writer
+                        ? { writer: ctx.writer, reason: 'writer-mismatch' }
+                        : null;
           if (violation) {
             eject(msg.room, room, member, violation);
             return;

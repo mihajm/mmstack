@@ -95,12 +95,14 @@ Validation is a pure, versioned function, run the same way on the client (before
 on the relay (before it accepts). Because an honest client never emits an invalid op, any
 invalid op the relay sees is a broken or hostile peer, so the relay ejects the offender rather
 than trying to repair the stream. How far that reaches is the relay's `ejection` option:
-`'writer'` (the default) blacklists the writer in that room for the relay's lifetime, closing
-every connection it holds and refusing every later hello; `'connection'` closes only the
+`'writer'` (the default) blacklists the writer in that room for as long as the room stays loaded,
+closing every connection it holds and refusing every later hello; `'connection'` closes only the
 offending connection, leaves the writer's other connections live, and admits a fresh,
 re-authenticated one. Use `'connection'` so one bug in one tab cannot lock a human out until
 a restart. Authentication alone does not prevent abuse: a hostile authenticated writer can
-obtain fresh connections after each ejection.
+obtain fresh connections after each ejection. The blacklist is not persisted: `unload` drops it
+with the room and `hydrate` does not restore it. A durable ban belongs at authentication, fed by
+`onViolation`.
 
 Neither ejection scope provides denial-of-service protection. The adapter must limit connection
 attempts, concurrent connections, payload sizes, and incoming messages of every type before
@@ -125,8 +127,8 @@ const policy = pathPrefixAcl([
 ```
 
 `pathPrefixAcl` grants write access by path prefix, and can discriminate by principal, so an
-agent peer can be given a narrower surface than a human. It is deny-by-default once any rule
-matches a path. For richer rules, write your own `OpPolicy` with `canWrite` and `validate`.
+agent peer can be given a narrower surface than a human. It denies every path that no rule
+grants. For richer rules, write your own `OpPolicy` with `canWrite` and `validate`.
 Schema-aware validation (deriving a policy from your data model) composes on top and stays in
 your codebase, not here.
 

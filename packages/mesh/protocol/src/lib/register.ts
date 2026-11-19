@@ -78,7 +78,11 @@ export type RegisterStore = {
   ingest(env: OpEnvelope): void;
   /** Serializable register state for a welcome snapshot or a persistence checkpoint. */
   checkpoint(): RegisterCheckpoint[];
-  /** Merge checkpointed register state in (idempotent): the hydrate path. */
+  /**
+   * Load checkpointed register state into an empty store: a fresh store on hydrate, or one just
+   * {@link RegisterStore.reset} for a cut. Loading into a store that already holds state has no
+   * contract.
+   */
   load(registers: readonly RegisterCheckpoint[]): void;
   /**
    * Effect-preserving garbage collection `settled[o]` is the stamp of origin `o`'s last contiguously admitted version: nothing new

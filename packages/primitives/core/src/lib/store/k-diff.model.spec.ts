@@ -3007,7 +3007,7 @@ describe('(c′) precondition — a length-keeping remove + insert is a replacem
     expect(expectConverged(r)).toEqual([a, a]);
   });
 
-  it('[PIN K4′ same-id replacements] base [c,d]; W0 removes d and inserts a fresh d′ at 1 ⇒ [c,d′]; W1 removes c and inserts a fresh c′ at 0 ⇒ [c′,d]; the id bag is the base\'s, yet neither array is a permutation of it ⇒ per slot [c′,d′]: no writer\'s array, legitimately (an id-bag (c′) precondition admitted this: fast-check seed 1312222793)', () => {
+  it("[PIN K4′ same-id replacements] base [c,d]; W0 removes d and inserts a fresh d′ at 1 ⇒ [c,d′]; W1 removes c and inserts a fresh c′ at 0 ⇒ [c′,d]; the id bag is the base's, yet neither array is a permutation of it ⇒ per slot [c′,d′]: no writer's array, legitimately (an id-bag (c′) precondition admitted this: fast-check seed 1312222793)", () => {
     const c = { id: 'c', t: 'C', n: 1 };
     const d = { id: 'd', t: 'A', n: 0 };
     const c2 = { id: 'c', t: 'w0', n: 2 };

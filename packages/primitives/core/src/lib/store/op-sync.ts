@@ -851,8 +851,9 @@ export type ConvergingApply = {
    * local store must apply: plain `set`/`delete` ops (never `clear`), `[]` when no fold
    * winner changed. Pass `local: true` for envelopes this peer emitted itself: registered,
    * nothing returned, unless `reconcile: true` is also set, which registers the op locally AND
-   * returns the fold delta (a fork commit lands as a concurrent sibling, so the store must move to
-   * the fold winner rather than the raw committed value). There is no stamp gate: a delayed or
+   * returns the fold delta. Every emission that lands as a peer receives it uses it (a fork commit,
+   * any `emitOps`, a restored outbox): the store moves by the fold delta rather than showing the
+   * raw ops. There is no stamp gate: a delayed or
    * concurrent op always folds, and garbage collection (`settle`) only ever removes what such an
    * op cannot observe.
    */
@@ -1639,8 +1640,8 @@ export type OpSync<T = unknown> = {
   /**
    * Locally-emitted envelopes, ready for a transport. The second argument
    * ({@link EmitContext}) carries the store root the envelope's ops produced, captured when it
-   * was minted (before any fork-commit reconcile, and kept for an envelope whose delivery was
-   * deferred); it is never part of the envelope.
+   * was minted (before any reconcile to the fold result, and kept for an envelope whose delivery
+   * was deferred); it is never part of the envelope.
    */
   subscribe(cb: (env: OpEnvelope, ctx?: EmitContext) => void): () => void;
   /** Converging apply of a remote envelope (echo-free; own-origin envelopes are ignored). */
@@ -1648,9 +1649,18 @@ export type OpSync<T = unknown> = {
   /** Synchronously emit any pending local delta now. */
   flush(): void;
   /**
-   * Apply raw ops to the store and emit them as ONE envelope, stamped like any local write: cites
-   * and epochs from the current registers (`bump`: as an authority override), expansion clears
-   * included. For re-writing a recorded intent as a new write.
+   * Emit raw ops as ONE envelope, stamped like any local write: cites and epochs from the current
+   * registers (`bump`: as an authority override), expansion clears included. For re-writing a
+   * recorded intent as a new write. The store then shows what the registers hold after the write,
+   * as a peer receiving the envelope does. An op the registers do not let through leaves the store
+   * as it was: a child under a parent that was deleted or is no longer a record, anywhere; inside a
+   * {@link commitScope} with a stale frontier, also a write that loses to a concurrent one it did
+   * not observe (a lower value under a custom max-style fold, a bumped write). Outside a scope the
+   * write cites what the registers hold, so it supersedes them and lands. A write that changes no
+   * fold result keeps the very root object. When the
+   * store agreed with its registers before the write (a seeded or hydrated store), it agrees after;
+   * a value no register knows (an unseeded base) stays. The {@link EmitContext} root is the raw
+   * result, the ops applied to the store as it was.
    */
   emitOps(ops: readonly StoreOp[], opt?: { readonly bump?: boolean }): void;
   /**
@@ -1671,7 +1681,9 @@ export type OpSync<T = unknown> = {
    * Run `fn` and stamp the writes it makes against `frontier` rather than the current register
    * state, so they cite only the siblings observed as of that frontier. A write against a stale
    * frontier lands as a concurrent sibling (the fold decides) instead of superseding writes it
-   * never saw. Scoped and synchronous, like {@link override}.
+   * never saw. Scoped and synchronous, like {@link override}. When `commitScope` returns, the store
+   * shows the fold result, as every peer does; reads inside `fn` see the raw writes until the scope
+   * flushes (`flush()`, `captureFrontier()` or an `emitOps` inside `fn` reconcile mid-scope).
    */
   commitScope(frontier: DotFrontier, fn: () => void): void;
   /**
@@ -1714,7 +1726,8 @@ export type OpSync<T = unknown> = {
   hydrate(state: OpSyncCheckpoint<T>, pending?: readonly OpEnvelope[]): void;
   /**
    * Re-inject a persisted local outbox on boot, WITHOUT minting new versions: each envelope is
-   * applied to the store (echo-free), registered as a local winner, and handed to subscribers so a
+   * registered as a local write, the store shows what the registers then hold (echo-free, as a
+   * receiver of the envelope would show it), and it is handed to subscribers so a
    * transport can resend the unacknowledged tail VERBATIM under its recorded origin (idempotent at
    * receivers). Envelopes are accepted regardless of origin; their versions track per recorded
    * origin. `highWater` is that origin's emit high-water (>= every `env.version`, including any acked
@@ -1722,8 +1735,8 @@ export type OpSync<T = unknown> = {
    * have sequenced. This instance mints on its OWN origin: pass a fresh per-boot origin and new
    * writes start clean, so two clones of one outbox resend an identical tail (a duplicate) yet their
    * new writes land on distinct origins and never collide. Call on a FRESH instance, before any
-   * `receive`/`hydrate` — restoring onto already-ingested remote winners would wrongly let a stale
-   * local op override them.
+   * `receive`/`hydrate`: a restored envelope keeps the cites it was written with, so against
+   * registers that have moved on the fold decides what shows, and it may show nothing.
    */
   restore(
     envs: readonly OpEnvelope[],
@@ -1828,11 +1841,21 @@ export function opSync<T extends object>(
     }
   };
 
-  /** `root`: the store value these ops produced, captured now (before a fork-commit reconcile). */
-  const emitLocal = (ops: readonly StoreOp[], root: unknown): void => {
-    const ctx: EmitContext = { root, raws: ops, bump: bumping };
+  /**
+   * `root`: the store value these ops produced, captured now (before any reconcile). `before`: the
+   * store value before the write, by identity. A `peer` write, or any write under a frontier, lands
+   * as a peer receives it: the store ends at `before` moved by the deltas the registers return,
+   * never at the raw result.
+   */
+  const emitLocal = (
+    ops: readonly StoreOp[],
+    root: unknown,
+    before?: unknown,
+    peer = false,
+  ): void => {
+    const bump = bumping;
     const frontier = scopeFrontier;
-    const stamped = conv.stamp(ops, { bump: bumping, frontier });
+    const stamped = conv.stamp(ops, { bump, frontier });
     if (isDevMode()) lintWireValues(stamped);
     const nextVersion = (versions.get(origin) ?? 0) + 1;
     const env: OpEnvelope = {
@@ -1847,14 +1870,23 @@ export function opSync<T extends object>(
     };
     versions.set(origin, nextVersion);
     lastStamp = env.hlc;
-    if (frontier) {
-      // a fork commit: its ops are concurrent siblings (they cite only the fork-time frontier), so
-      // move the store to the fold winner rather than leaving the raw committed value in place
+    let from = before;
+    let shown = root;
+    if (peer || frontier) {
+      // a scoped emission with no carried value (a seed inside a scope) moves from the store as is
+      from ??= untracked(source);
+      // the write may lose its fold (a stale frontier, a custom fold, a parent that no longer
+      // shows): the store shows what the registers hold, in one echo-free set
       const reconciled = conv.ingest(env, { local: true, reconcile: true });
-      if (reconciled.length) log.apply(reconciled);
+      shown = applyOps(from, reconciled);
+      log.apply([{ kind: 'set', path: [], next: shown }]);
     } else {
       conv.ingest(env, { local: true });
     }
+    const ctx: EmitContext =
+      from === undefined
+        ? { root, shown, raws: ops, bump }
+        : { root, from, shown, raws: ops, bump };
     recentLocal.push(env);
     if (recentLocal.length > RECENT_LOCAL_CAP) recentLocal.shift();
     // mid-receive, or a drain still owed → queue (frozen stamp verbatim) instead of emitting now
@@ -1867,7 +1899,7 @@ export function opSync<T extends object>(
   };
 
   const unsub = log.subscribe((batch, ctx) =>
-    emitLocal(batch.ops, ctx?.root ?? untracked(source)),
+    emitLocal(batch.ops, ctx?.root ?? untracked(source), ctx?.from),
   );
 
   // fires on the tick after `scheduleDrain`: emits frozen local envelopes outside any receive frame
@@ -1928,11 +1960,11 @@ export function opSync<T extends object>(
     },
     emitOps: (ops, o) => {
       log.flush(); // earlier pending writes emit first, on their own
-      log.apply(ops); // the store shows the write, echo-free
+      const pre = untracked(source);
       const was = bumping;
       bumping = was || !!o?.bump;
       try {
-        emitLocal(ops, untracked(source));
+        emitLocal(ops, applyOps(pre, ops), pre, true);
       } finally {
         bumping = was;
       }
@@ -2054,8 +2086,10 @@ export function opSync<T extends object>(
       let tailOrigin: string | undefined;
       for (const env of envs) {
         clock.observe(env.hlc); // keep the clock ≥ restored stamps before any future mint
-        log.apply(env.ops); // reflect the offline edit in the store, echo-free
-        conv.ingest(env, { local: true }); // register as a local winner (survives a reconnect merge)
+        // register it as a local write (survives a reconnect merge) and show what the registers
+        // hold, as a receiver would: one echo-free set per envelope
+        const deltas = conv.ingest(env, { local: true, reconcile: true });
+        if (deltas.length) log.apply(deltas);
         recentLocal.push(env);
         if (recentLocal.length > RECENT_LOCAL_CAP) recentLocal.shift();
         versions.set(
@@ -2089,7 +2123,12 @@ export function opSync<T extends object>(
  * stays a concurrent sibling and the configured fold decides between them, rather than the commit
  * overwriting a write it never saw. `rebase()` re-observes the base (a following commit then
  * supersedes what is visible now, the reviewed-and-apply step). `discard()` drops the staged edits
- * and re-observes the base as well. Pass the same `store` and `sync`
+ * and re-observes the base as well. A commit replaces the committer's OWN earlier write at the same
+ * path even when the fork did not observe it (one live write per writer per path); writes by other
+ * writers stay concurrent. After `commit()` the base shows what the registers hold, the same value
+ * every peer shows (a store that agreed with its registers, seeded or hydrated, agrees after; a
+ * value no register knows stays); a synchronous read inside the commit sees the raw staged value
+ * until the commit's scope flushes. Pass the same `store` and `sync`
  * that are wired together; the fork is a plain {@link Fork} otherwise, so `forkStore` itself stays
  * sync-agnostic.
  */

@@ -10,6 +10,7 @@ import {
 } from '../testing/harness';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
+import { crashWorker } from '../testing/crash';
 
 const tick = async () => {
   for (let i = 0; i < 6; i++) await new Promise<void>((r) => setTimeout(r, 1));
@@ -46,10 +47,19 @@ describe('workerStore — version-gap recovery', () => {
     const injector = TestBed.inject(Injector);
     // drop the owner envelope that would carry version 2 (no client writes here, so version is the
     // host origin's; the client detects the gap and resyncs)
-    const port = droppingPort(
-      port1 as unknown as WorkerPortLike,
-      (msg) => msg.type === 'store:sync' && msg.env.version === 2,
-    );
+    let dropped = 0;
+    const port = droppingPort(port1 as unknown as WorkerPortLike, (msg) => {
+      const hit = msg.type === 'store:sync' && msg.env.version === 2;
+      if (hit) dropped++;
+      return hit;
+    });
+    const subscribes: unknown[] = [];
+    const post = port.postMessage;
+    port.postMessage = (m, t) => {
+      if ((m as { type?: string }).type === 'store:subscribe')
+        subscribes.push(m);
+      post(m, t);
+    };
     const worker = TestBed.runInInjectionContext(() =>
       connectWorker(() => port, { injector }),
     );
@@ -62,10 +72,14 @@ describe('workerStore — version-gap recovery', () => {
     await tick();
     owned.user.age.set(50); // v2 — DROPPED by the port
     await tick();
+    expect(dropped).toBe(1);
+    expect(replica.store.user.age()).toBe(36); // the replica really missed it
     owned.tags.set(['A', 'B']); // v3 — gap detected → resync
     await tick();
     await tick();
 
+    // the gap was detected and recovered by a second subscribe
+    expect(subscribes).toHaveLength(2);
     // the fresh snapshot carries everything, including the dropped v2 change
     expect(replica.value()).toEqual(owned());
     expect(replica.store.user.age()).toBe(50);
@@ -106,12 +120,21 @@ describe('connectWorker — crash / restart', () => {
       return port;
     };
     const worker = TestBed.runInInjectionContext(() =>
-      connectWorker(spawn, { injector, restartDelay: () => 0 }),
+      connectWorker(spawn, {
+        injector,
+        restartDelay: () => 0,
+        onError: () => undefined,
+      }),
     );
     const replica = TestBed.runInInjectionContext(() =>
       workerStore<Model>(worker, 'app', { injector }),
     );
-    return { owned, worker, replica, crash: () => port!.crash() };
+    // a worker that dies after its handshake: the port stops, and the connection is dropped
+    const crash = () => {
+      port!.crash();
+      crashWorker(worker);
+    };
+    return { owned, worker, replica, crash };
   }
 
   it('respawns after a crash and re-hydrates to the current owner value', async () => {
@@ -175,7 +198,7 @@ describe('connectWorker — crash / restart', () => {
     await expect(pending).rejects.toHaveProperty('name', 'AbortError');
   });
 
-  it('terminates the old worker when it respawns (no orphaned thread)', async () => {
+  it('terminates a worker that failed to start when it respawns (no orphaned thread)', async () => {
     const owned = store<Model>(initial(), createStoreContext());
     const host = createWorkerHost({ stores: { app: owned } });
     const injector = TestBed.inject(Injector);
@@ -193,8 +216,7 @@ describe('connectWorker — crash / restart', () => {
     const worker = TestBed.runInInjectionContext(() =>
       connectWorker(spawn, { injector, restartDelay: () => 0 }),
     );
-    await tick();
-    ports[0].crash();
+    ports[0].crash(); // before its ready arrives: a startup failure
     await waitFor(() => terminated.includes(0) && ports.length > 1);
 
     expect(terminated).toContain(0); // the original worker was terminated on respawn

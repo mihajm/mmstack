@@ -20,13 +20,14 @@ import {
 import { describe, expect, it } from 'vitest';
 import { connectWorker, type WorkerRef } from './connect-worker';
 import { workerStore, type WorkerStoreRef } from './worker-store';
+import { crashWorker } from '../testing/crash';
 
 // M3: the frontier predicate on the REAL host + replicas, over hand-driven FIFO channels (one up and
 // one down queue per replica: the postMessage contract) so the schedule is a seeded choice of which
 // channel delivers next. The oracle tracks applied op SETS (dots `origin#version`) and the owner
 // GENERATION each set belongs to, from the traffic alone; the SUT is
 // `storeFrontierEquals(owner frontier at a derivation, replica.applied())`. Mid-run the owner host
-// is replaced by a fresh one seeded from the VALUE (no registers): every worker port crashes, each
+// is replaced by a fresh one seeded from the VALUE (no registers): every connection is dropped, each
 // replica reconnects and rehydrates into the new generation.
 
 const SEEDS = 200;
@@ -183,7 +184,7 @@ function world(seed: number) {
     ch.target.onmessage?.({ data: q.msg });
   };
 
-  /** Replace the owner by a fresh host seeded from the current VALUE; every worker port crashes. */
+  /** Replace the owner by a fresh host seeded from the current VALUE; every connection is dropped. */
   const replaceOwner = async () => {
     const old = g;
     g = makeGen(structuredClone(untracked(old.owned)));
@@ -192,7 +193,7 @@ function world(seed: number) {
       rep.gen = null;
       rep.set = new Set();
       rep.postsSinceCrash = new Set();
-      rep.client.onerror?.();
+      crashWorker(rep.worker);
     }
     for (let i = 0; i < 3; i++)
       await new Promise<void>((res) => setTimeout(res, 0)); // respawn

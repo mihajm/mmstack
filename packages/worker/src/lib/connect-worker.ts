@@ -2,6 +2,7 @@ import {
   DestroyRef,
   inject,
   Injector,
+  isDevMode,
   PLATFORM_ID,
   runInInjectionContext,
   signal,
@@ -37,7 +38,10 @@ export class WorkerAbortError extends Error {
   }
 }
 
-/** Thrown into pending tasks/writes when the worker crashes. `name` is `'WorkerCrashedError'`. */
+/**
+ * Thrown into pending tasks/writes when the worker fails to start, and into calls made while it is
+ * down or on the server. `name` is `'WorkerCrashedError'`.
+ */
 export class WorkerCrashedError extends Error {
   constructor(message = 'The worker crashed') {
     super(message);
@@ -47,10 +51,20 @@ export class WorkerCrashedError extends Error {
 
 export type ConnectWorkerOptions = {
   readonly injector?: Injector;
-  /** `'auto'` (default) respawns on crash; `'manual'` surfaces disconnect and stops. */
+  /**
+   * What happens when the worker fails to start (an `error` event before its `ready` handshake):
+   * `'auto'` (default) respawns with backoff; `'manual'` surfaces the disconnect and stops.
+   */
   readonly restart?: 'auto' | 'manual';
   /** Backoff before respawn attempt `n` (0-based). Default exponential 1s→30s. */
   readonly restartDelay?: (attempt: number) => number;
+  /**
+   * Receives what the worker port reports once the worker is up: an `error` event after the
+   * `ready` handshake (an uncaught exception inside the worker, which keeps running) and any
+   * `messageerror` (a message that could not be deserialized). The connection and every replica
+   * keep their state; nothing restarts. Without it, dev mode logs a warning.
+   */
+  readonly onError?: (e: unknown) => void;
 };
 
 export type WorkerRef<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
@@ -83,8 +97,9 @@ export type WorkerRef<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
  * — typically `() => new Worker(new URL('./my.worker', import.meta.url), { type: 'module' })` (the
  * URL literal must live in APP code so the bundler emits the worker chunk). Performs the hello/ready
  * handshake, exposes `connected`/`manifest`, routes named-task runs, and (via internal seams)
- * carries the store-replication traffic for {@link workerStore}. On crash it respawns with backoff
- * when `restart: 'auto'`.
+ * carries the store-replication traffic for {@link workerStore}. A worker that fails to start (an
+ * `error` event before `ready`) is respawned with backoff when `restart: 'auto'`. Once the worker
+ * is up, port errors go to `onError` and the connection keeps its state.
  */
 export function connectWorker<H = WorkerSchema>(
   spawn: () => WorkerPortLike,
@@ -113,12 +128,14 @@ function build(
   const readyHooks = new Set<() => void>();
   const disconnectHooks = new Set<() => void>();
   const restart = opt?.restart ?? 'auto';
+  const onError = opt?.onError;
   const restartDelay =
     opt?.restartDelay ?? ((n: number) => Math.min(30_000, 1000 * 2 ** n));
   let attempt = 0;
   let runIdSeq = 0;
   let destroyed = false;
   let crashed = false;
+  let handshaken = false; // the current port has answered `ready`
   let port: WorkerPortLike = null as unknown as WorkerPortLike;
 
   const send = (msg: WorkerEnvelope, transfer?: Transferable[]): void => {
@@ -130,6 +147,7 @@ function build(
       case 'ready':
         attempt = 0;
         crashed = false;
+        handshaken = true;
         manifest.set({
           hostId: msg.hostId,
           stores: msg.stores,
@@ -155,9 +173,15 @@ function build(
         }
         return;
       }
-      case 'task:aborted':
-        taskPending.delete(msg.runId);
+      case 'task:aborted': {
+        // a client abort already settled and removed its entry; one still here was aborted by the host
+        const p = taskPending.get(msg.runId);
+        if (p) {
+          taskPending.delete(msg.runId);
+          p.reject(new WorkerAbortError('the worker aborted the task'));
+        }
         return;
+      }
       default:
         for (const h of storeHandlers) h(msg);
     }
@@ -177,17 +201,38 @@ function build(
     }, delay);
   };
 
+  const report = (e: unknown): void => {
+    if (onError) onError(e);
+    else if (isDevMode())
+      console.warn(
+        '[@mmstack/worker] the worker reported an error; the connection and its state are kept. Pass `onError` to connectWorker to handle it.',
+        e,
+      );
+  };
+
   const openPort = (): void => {
     if (port) closePort(port);
-    port = spawn();
-    port.onmessage = (ev) => onMessage(ev.data as WorkerEnvelope);
-    // crash detection via property setters, not addEventListener (perturbs node MessagePort delivery)
-    const evt = port as unknown as {
+    handshaken = false;
+    const current = spawn();
+    port = current;
+    current.onmessage = (ev) => onMessage(ev.data as WorkerEnvelope);
+    // property setters, not addEventListener (perturbs node MessagePort delivery)
+    const evt = current as unknown as {
       onerror?: ((e?: unknown) => void) | null;
       onmessageerror?: ((e?: unknown) => void) | null;
     };
-    if ('onerror' in evt) evt.onerror = handleCrash;
-    if ('onmessageerror' in evt) evt.onmessageerror = handleCrash;
+    // before `ready` an error is a startup failure (script load, syntax, top-level throw) and takes
+    // the crash path; after it the worker keeps running, and a restart would reset its owned state
+    if ('onerror' in evt)
+      evt.onerror = (e) => {
+        if (destroyed || port !== current) return;
+        if (handshaken) report(e);
+        else handleCrash();
+      };
+    if ('onmessageerror' in evt)
+      evt.onmessageerror = (e) => {
+        if (!destroyed && port === current) report(e);
+      };
     send({ type: 'hello', proto: 1, clientId });
   };
 
@@ -205,7 +250,7 @@ function build(
     if (port) closePort(port);
   };
 
-  return {
+  const ref: WorkerRef = {
     connected,
     manifest,
     clientId,
@@ -223,25 +268,41 @@ function build(
           new WorkerAbortError('worker connection destroyed'),
         );
       if (crashed)
-        return Promise.reject(new WorkerCrashedError('worker is restarting'));
-      if (o?.signal?.aborted) return Promise.reject(new WorkerAbortError());
+        return Promise.reject(
+          new WorkerCrashedError(
+            restart === 'manual'
+              ? 'worker failed to start'
+              : 'worker is restarting',
+          ),
+        );
+      const signal = o?.signal;
+      if (signal?.aborted) return Promise.reject(new WorkerAbortError());
       const runId = ++runIdSeq;
       return new Promise<unknown>((resolve, reject) => {
-        taskPending.set(runId, { resolve, reject });
+        const onAbort = (): void => {
+          if (!taskPending.has(runId)) return;
+          taskPending.delete(runId);
+          send({ type: 'task:abort', runId });
+          reject(new WorkerAbortError());
+        };
+        // a long-lived signal shared by many runs must not keep a listener per settled run
+        const settled = (): void =>
+          signal?.removeEventListener('abort', onAbort);
+        taskPending.set(runId, {
+          resolve: (v) => {
+            settled();
+            resolve(v);
+          },
+          reject: (e) => {
+            settled();
+            reject(e);
+          },
+        });
         send(
           { type: 'task:run', runId, task, input },
           o?.transfer ?? takeTransferables(input),
         );
-        o?.signal?.addEventListener(
-          'abort',
-          () => {
-            if (!taskPending.has(runId)) return;
-            taskPending.delete(runId);
-            send({ type: 'task:abort', runId });
-            reject(new WorkerAbortError());
-          },
-          { once: true },
-        );
+        signal?.addEventListener('abort', onAbort, { once: true });
       });
     },
     destroy: teardown,
@@ -259,4 +320,8 @@ function build(
       return () => disconnectHooks.delete(fn);
     },
   };
+  // untyped and non-enumerable: drops the connection the way a failed start does, for specs that
+  // need a lost connection after `ready` (no port event leads there)
+  Object.defineProperty(ref, '_crash', { value: handleCrash });
+  return ref;
 }

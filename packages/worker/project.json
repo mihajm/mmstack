@@ -23,7 +23,23 @@
       "defaultConfiguration": "production"
     },
     "test": {
-      "executor": "@nx/angular:unit-test"
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.spec.ts", "**/*.test.ts"],
+        "exclude": ["**/*.browser.spec.ts"]
+      }
+    },
+    "test-browser": {
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.browser.spec.ts"],
+        "browsers": ["chromiumHeadless"],
+        "runnerConfig": "packages/worker/vitest-browser.config.mts"
+      },
+      "configurations": {
+        "webkit": { "browsers": ["webkitHeadless"] },
+        "firefox": { "browsers": ["firefoxHeadless"] }
+      }
     },
     "mutate": {
       "executor": "./tools/stryker:mutate"

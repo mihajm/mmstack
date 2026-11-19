@@ -38,7 +38,14 @@ export type WorkerEnvelope =
   | { type: 'task:ok'; runId: number; value: unknown }
   | { type: 'task:error'; runId: number; error: SerializedError }
   | { type: 'task:aborted'; runId: number }
-  | { type: 'store:subscribe'; store: string; clientId: string }
+  // `subscriber` names one replica on the connection (several replicas of one key may share a
+  // connection); absent, the subscription is keyed by `clientId`
+  | {
+      type: 'store:subscribe';
+      store: string;
+      clientId: string;
+      subscriber?: string;
+    }
   // The owner ships its opSync checkpoint (root + register state + watermark) on subscribe/resync,
   // so a joining replica hydrates through its own fold rather than adopting a bare value.
   | {
@@ -53,7 +60,12 @@ export type WorkerEnvelope =
   // routed write flows client -> host. The host relays each applied envelope to every subscriber
   // (including the sender, whose replica reads its own echo as the acknowledgement).
   | { type: 'store:sync'; store: string; env: OpEnvelope }
-  | { type: 'store:unsubscribe'; store: string; clientId: string }
+  | {
+      type: 'store:unsubscribe';
+      store: string;
+      clientId: string;
+      subscriber?: string;
+    }
   | {
       type: 'store:status';
       store: string;

@@ -17,7 +17,7 @@ Built on the store op-log from [`@mmstack/primitives`](https://www.npmjs.com/pac
 - **The resource surface you already know.** `workerResource` runs a function off-main and exposes `value` / `status` / `error` / `isLoading`, so it drops into `latest()` / `use()` and Suspense boundaries with no adapter.
 - **Typed from the worker's contract.** `connectWorker<typeof host>()` infers store keys, value types, task signatures, and whether a subtree is writable, all from the worker you wrote.
 - **SSR safe.** On the server nothing spawns. Replicas render their default value and resolve once the worker connects in the browser.
-- **Resilient.** Lost batches re-hydrate from a fresh snapshot. A crashed worker respawns with backoff and re-subscribes. Pending writes reject so you can retry.
+- **Resilient.** Lost batches re-hydrate from a fresh snapshot. A worker that fails to start respawns with backoff and re-subscribes. An error inside a running worker is reported, and the worker keeps its state.
 
 ## Install
 
@@ -235,20 +235,20 @@ The task named in `{ worker, task }` is a function you exposed on the host with 
 
 ### Options
 
-- `params`: `(ctx) => Input | undefined | ctx.paused`. Return `undefined` to disable (idle), or `ctx.paused` (the `PAUSED` symbol) to hold the current value and status.
+- `params`: `(ctx) => Input | undefined | ctx.paused`. Return `undefined` to disable: status becomes `'idle'`, the in-flight run is aborted (its result never lands), and the value resets to `defaultValue`. Return `ctx.paused` (the `PAUSED` symbol) to hold the current value and status.
 - `worker` and `task`: the connected worker and the name of the task to run.
-- `keepPrevious` (default `true`): hold the previous value through a re-run (`status` becomes `'reloading'`).
+- `keepPrevious` (default `true`): hold the previous value through a re-run (`status` becomes `'reloading'`). With `false` a re-run resets the value to `defaultValue` (`undefined` when none is given) and `status` becomes `'loading'`.
 - `equal`: a result equality function; an equal result emits no notification.
 - `register`: `'indicator'` or `'suspend'` to join a transition scope.
 
 ## `workerStore`: a live replica plus routed writes
 
-`workerStore` mirrors a worker-owned store to the main thread. The replica is a real, read-only `SignalStore` with per-leaf reads.
+`workerStore` mirrors a worker-owned store to the main thread. For an owned key the replica is a real `WritableSignalStore` with per-leaf reads; a published key gives a read-only `SignalStore`.
 
 ```ts
 const todos = workerStore(this.worker, 'todos');
 
-todos.store; //       SignalStore<Todo[]>, read deeply like any store
+todos.store; //       WritableSignalStore<Todo[]>, read deeply like any store
 todos.value(); //     Signal<Todo[] | undefined>, undefined before hydration
 todos.status(); //    'loading' until the first snapshot, then 'resolved'
 todos.hasValue();
@@ -256,7 +256,7 @@ todos.connected; //   the worker connection's liveness
 todos.applied(); //   StoreFrontier: owner generation + highest stamp folded in per origin
 ```
 
-You cannot set a leaf locally (that would diverge from the owner). To change owned state, route a write. `workerStore(worker, key, { emit: { added } })` chooses per path how an added container is emitted. Make a collection leafy so that two replicas creating it at once both keep their entries, and keep each entry `'whole'` so it arrives as one atomic `set` (see `DiffOpsOptions` in `@mmstack/primitives`):
+A leaf set on `todos.store` applies optimistically and routes to the owner, so `persist` and `meshSync` can attach to the store. Use `write()` when you want a promise that resolves once the owner confirms. `workerStore(worker, key, { emit: { added } })` chooses per path how an added container is emitted. Make a collection leafy so that two replicas creating it at once both keep their entries, and keep each entry `'whole'` so it arrives as one atomic `set` (see `DiffOpsOptions` in `@mmstack/primitives`):
 
 ```ts
 await todos.write((draft) => {
@@ -296,7 +296,7 @@ visible.status(); // 'reloading' while the worker recomputes, 'resolved' when it
 visible.value(); // the last result, held during recompute
 ```
 
-Register it with `{ register: 'indicator' }` and a boundary above reflects the worker's pending state. `write()` on a published subtree is a compile error (and rejects at runtime if you reach past the types).
+Register it with `{ register: 'indicator' }` and a boundary above reflects the worker's pending state. A failed computation reaches the replica as status `'error'`, and when the source has an `error` signal (a `latest()` does) `visible.error()` is that error. `write()` on a published subtree is a compile error (and rejects at runtime if you reach past the types).
 
 To tell whether a published result describes the document a client is showing, let the derivation carry the frontier it was computed against and compare it with the replica's own. A `published` entry may be a factory, called once with the host's `frontiers` (one `Signal<StoreFrontier>` per owned store, updated in the same step as the store). A `StoreFrontier` is the owner generation (`instance`, the host id) plus the highest stamp applied per origin. The client compares with `storeFrontierEquals`: equal means the same owner generation and the same applied op set, so the same state; a replica with an unacknowledged own write, or missing an op, reads as not equal until both sides catch up. Frontiers never compare across owner generations: after a disconnect the replica holds no generation until the next checkpoint, and a replacement worker starts a new one. Owned stores emit before any published derivation, so a shipped result never runs ahead of the frontier it carries. A replica counts its own write once it is stamped: inside `write()` at once, a direct `store` write at the next microtask.
 
@@ -321,7 +321,7 @@ const current = computed(() => {
 
 ## Transferables
 
-For large binary payloads, `transfer` moves an `ArrayBuffer` into the worker instead of cloning it (zero copy, detached at the sender). It applies to a task's input:
+For large binary payloads, `transfer` moves an `ArrayBuffer` into the worker instead of cloning it (zero copy, detached at the sender). It applies to a task's input, and a task can return a `transfer()`-marked value to move its output back:
 
 ```ts
 import { transfer } from '@mmstack/worker';
@@ -337,7 +337,8 @@ workerResource(() => transfer({ buffer }, [buffer]), {
 
 - **Lost message.** If a replica sees a version gap it re-subscribes, holds the stale value as `'reloading'`, and re-hydrates from a fresh snapshot.
 - **Duplicate message.** Batches are applied by monotonic version, so a duplicate is dropped.
-- **Crash.** With `restart: 'auto'` (the default) a crashed worker respawns with exponential backoff, re-handshakes, and every live replica re-subscribes. Pending writes reject with `WorkerCrashedError`, so the caller (who still has the value and the recipe) can retry. Pass `restart: 'manual'` to surface the disconnect instead.
+- **A worker that fails to start.** An `error` event before the handshake (a script that does not load, a top-level throw) is a startup failure. With `restart: 'auto'` (the default) the worker respawns with exponential backoff, re-handshakes, and every live replica re-subscribes. Pending tasks reject with `WorkerCrashedError`. Pass `restart: 'manual'` to surface the disconnect instead.
+- **An error in a running worker.** After the handshake an uncaught error inside the worker does not restart it: the worker keeps running and keeps its owned state. The error goes to `connectWorker(spawn, { onError })`, or to a dev-mode warning when there is no `onError`. A `messageerror` (a message that could not be read) is reported the same way and never restarts; a lost store message is recovered as above.
 
 ## How it works
 

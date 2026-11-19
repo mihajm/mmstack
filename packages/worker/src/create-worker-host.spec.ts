@@ -232,17 +232,30 @@ describe('createWorkerHost — handshake + store mirror (deterministic harness)'
     const app = appStore();
     const mesh = createTestMesh({ stores: { app } });
     const c = mesh.addClient();
+    const control = mesh.addClient();
+    control.subscribe('app');
+    await mesh.settle();
+    let fired = 0;
     mesh.setFault({
-      drop: ({ to, data }) => to === 'host' && data.type === 'store:subscribe',
+      drop: ({ to, data }) => {
+        const hit = to === 'host' && data.type === 'store:subscribe';
+        if (hit) fired++;
+        return hit;
+      },
     });
 
     c.subscribe('app');
+    c.hello();
     await mesh.settle();
     app.count.set(1);
     await mesh.settle();
 
+    expect(fired).toBe(1);
     expect(c.ofType('store:checkpoint')).toHaveLength(0);
     expect(c.ofType('store:sync')).toHaveLength(0);
+    // the fault drops only what it matches: other traffic still flows under it
+    expect(c.ofType('ready')).toHaveLength(1);
+    expect(control.ofType('store:sync')).toHaveLength(1);
   });
 
   it('workerStoreContext returns one shared context per worker (module singleton)', () => {

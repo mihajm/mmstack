@@ -156,7 +156,7 @@ export function checkEnvelope(
 /**
  * S3-key-policy-style path ACL: each rule grants a principal predicate write access to one
  * path prefix (`'*'` matches a single segment; a rule for `[]` grants the whole store).
- * Composes into `OpPolicy.canWrite`; deny-by-default once any rule exists for a writer.
+ * Composes into `OpPolicy.canWrite`. It denies every path that no rule grants.
  */
 export type PathAclRule = {
   readonly prefix: readonly (Key | '*')[];

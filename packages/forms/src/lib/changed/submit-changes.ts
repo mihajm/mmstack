@@ -1,11 +1,8 @@
 import { untracked } from '@angular/core';
-import {
-  type FieldState,
-  type FieldTree,
-  submit,
-} from '@angular/forms/signals';
-import { rebaseline, reconcile } from './changed';
+import { type FieldTree, submit } from '@angular/forms/signals';
+import { CHANGED, rebaseline, reconcile } from './changed';
 import { collectChanged, type DeepPartial } from './changed-values';
+import { isRecord } from './value-diff';
 
 /**
  * The server-error shape Angular's `submit()` accepts from an action (`TreeValidationResult`
@@ -99,7 +96,7 @@ export function submitChanges<T, TResult>(
           payloadMode === 'full'
             ? {
                 value: untracked(() => tree().value()) as unknown,
-                paths: [''],
+                paths: [[]],
               }
             : collectChanged(tree);
 
@@ -114,10 +111,12 @@ export function submitChanges<T, TResult>(
         }
 
         untracked(() => {
-          for (const path of snapshot.paths) {
-            const state = stateAt(tree as FieldTree<unknown>, path);
-            if (state) rebaseline(state, sliceAt(snapshot.value, path));
-          }
+          for (const path of snapshot.paths)
+            rebaselineUnit(
+              tree as FieldTree<unknown>,
+              path,
+              sliceAt(snapshot.value, path),
+            );
         });
 
         if (onSuccess === 'reconcile') reconcile(tree, result as unknown as T);
@@ -126,26 +125,40 @@ export function submitChanges<T, TResult>(
     });
 }
 
-/** Resolves the field state at a dot path (array indices as segments); '' is the root. */
-function stateAt(
+/**
+ * Re-baselines a sent unit to its sent value and patches that value into every ancestor's
+ * baseline, so a later reset or diff of an ancestor agrees with what was saved. A unit with no
+ * field node (an optional key cleared to `undefined`) is recorded through its ancestors alone.
+ */
+function rebaselineUnit(
   tree: FieldTree<unknown>,
-  path: string,
-): FieldState<unknown> | undefined {
-  if (!path) return tree();
+  path: readonly string[],
+  sent: unknown,
+): void {
   let node: unknown = tree;
-  for (const seg of path.split('.')) {
-    node = (node as Record<string, unknown> | undefined)?.[seg];
-    if (node === undefined) return undefined;
+  for (let i = 0; i < path.length; i++) {
+    const entry = (node as FieldTree<unknown>)().metadata(CHANGED);
+    entry?.commit(patchAt(untracked(entry.initial), path.slice(i), sent));
+    node = (node as Record<string, unknown>)[path[i]];
+    if (node === undefined) return;
   }
-  return (node as FieldTree<unknown>)();
+  rebaseline((node as FieldTree<unknown>)(), sent);
 }
 
-/** Reads the payload slice at a dot path; '' is the whole payload. */
-function sliceAt(value: unknown, path: string): unknown {
-  if (!path) return value;
+function patchAt(
+  base: unknown,
+  path: readonly string[],
+  value: unknown,
+): unknown {
+  if (!path.length) return value;
+  const [key, ...rest] = path;
+  const rec = isRecord(base) ? base : {};
+  return { ...rec, [key]: patchAt(rec[key], rest, value) };
+}
+
+/** Reads the payload slice at a key path; `[]` is the whole payload. */
+function sliceAt(value: unknown, path: readonly string[]): unknown {
   let out: unknown = value;
-  for (const seg of path.split('.')) {
-    out = (out as Record<string, unknown> | undefined)?.[seg];
-  }
+  for (const seg of path) out = (out as Record<string, unknown>)[seg];
   return out;
 }

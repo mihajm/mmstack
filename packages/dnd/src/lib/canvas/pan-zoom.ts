@@ -7,7 +7,11 @@ import {
   type Signal,
   inject,
 } from '@angular/core';
-import { pointerDrag, isServer } from '@mmstack/primitives';
+import {
+  pointerDrag,
+  isServer,
+  type PointerDragState,
+} from '@mmstack/primitives';
 
 import { resolveElement, resolveSignal } from '../internal/resolve';
 import type { DragHandleLike, Resolvable } from '../internal/types';
@@ -80,25 +84,28 @@ export function panZoom(
     zoomSpeed = Math.LN2 * 0.002,
   } = opts;
 
-  const pan = pointerDrag({ target: elSig, buttons: panButtons });
-  const panning = computed(
-    () => pan.unthrottled().active && !(disabled?.() ?? false),
-  );
-
   let baseT: { x: number; y: number } | null = null;
-  let pressIgnored = false;
-  effect(() => {
-    const d = pan.unthrottled();
-    if (d.pointerId === null) pressIgnored = false;
-    if (d.pointerId !== null && baseT === null && !pressIgnored) {
-      if (untracked(() => disabled?.() ?? false)) {
-        pressIgnored = true;
+  // disabled at press → the whole gesture stays inert, `panning` included
+  const pressIgnored = signal(false);
+
+  // onChange sees every transition, including a move and release in one
+  // frame, and a release while disabled still ends the gesture.
+  const step = (d: PointerDragState): void => {
+    if (d.pointerId === null) {
+      pressIgnored.set(false);
+      baseT = null;
+      return;
+    }
+    const isDisabled = disabled?.() ?? false;
+    if (baseT === null && !pressIgnored()) {
+      if (isDisabled) {
+        pressIgnored.set(true);
         return;
       }
-      const t = untracked(transform);
+      const t = transform();
       baseT = { x: t.x, y: t.y };
     }
-    if (pressIgnored || (disabled?.() ?? false)) return;
+    if (pressIgnored() || isDisabled) return;
     if (d.active && baseT) {
       const b = baseT;
       transform.update((t) => ({
@@ -107,8 +114,17 @@ export function panZoom(
         y: b.y + d.delta.y,
       }));
     }
-    if (d.pointerId === null && baseT !== null) baseT = null;
+  };
+
+  const pan = pointerDrag({
+    target: elSig,
+    buttons: panButtons,
+    onChange: step,
   });
+  const panning = computed(
+    () =>
+      pan.unthrottled().active && !pressIgnored() && !(disabled?.() ?? false),
+  );
 
   if (wheelZoom) {
     effect((cleanup) => {

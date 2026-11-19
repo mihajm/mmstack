@@ -105,8 +105,10 @@ export type SortableGroup<T = unknown> = {
   /**
    * The member whose container contains the viewport point, or `null`. On
    * overlap the **geometrically innermost** (smallest containing rect) wins, so
-   * a container nested inside another resolves correctly at any depth. `accept`
-   * filters candidates (e.g. cycle guard) — the innermost *accepted* one wins.
+   * a container nested inside another resolves correctly at any depth. Two
+   * containing rects of equal area resolve to the member registered later (a
+   * nested list registers after its parent). `accept` filters candidates (e.g.
+   * cycle guard) — the innermost *accepted* one wins.
    */
   targetAt(
     x: number,

@@ -31,13 +31,32 @@
     },
     "test": {
       "executor": "@nx/angular:unit-test",
-      "options": {}
+      "options": {
+        "exclude": ["**/*.browser.spec.ts"]
+      }
+    },
+    "test-browser": {
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.browser.spec.ts"],
+        "browsers": ["chromiumHeadless"]
+      },
+      "configurations": {
+        "webkit": { "browsers": ["webkitHeadless"] },
+        "firefox": { "browsers": ["firefoxHeadless"] }
+      }
     },
     "mutate": {
-      "executor": "./tools/stryker:mutate"
+      "executor": "./tools/stryker:mutate",
+      "options": {
+        "exclude": ["packages/dnd/src/lib/testing/**"]
+      }
     },
     "mutate-report": {
-      "executor": "./tools/stryker:mutate-report"
+      "executor": "./tools/stryker:mutate-report",
+      "options": {
+        "exclude": ["packages/dnd/src/lib/testing/**"]
+      }
     }
   }
 }

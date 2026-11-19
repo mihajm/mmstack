@@ -1,12 +1,22 @@
-import { ElementRef, PLATFORM_ID, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  Injector,
+  PLATFORM_ID,
+  signal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { trackRuns } from '../testing/reactivity';
 import { makeDragSession } from '../testing/drag-session';
-import type { draggable as PDDraggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+import {
+  monitorForElements,
+  type draggable as PDDraggable,
+} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+import { setCustomNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/utils/set-custom-native-drag-preview';
 
-import { draggable } from './draggable';
+import { Draggable, draggable } from './draggable';
 import { DndPointerEngine } from './pointer-engine';
-import { unboxData } from '../internal/payload';
+import { boxData, unboxData } from '../internal/payload';
 import { provideDnd, type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession } from '../session';
 import type { DropEvent } from '../internal/types';
@@ -24,6 +34,11 @@ vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   dropTargetForElements: vi.fn(() => () => undefined),
   monitorForElements: vi.fn(() => () => undefined),
 }));
+
+vi.mock(
+  '@atlaskit/pragmatic-drag-and-drop/utils/set-custom-native-drag-preview',
+  () => ({ setCustomNativeDragPreview: vi.fn() }),
+);
 
 const stubHitbox: HitboxPlugin = {
   attachClosestEdge: (data) => data,
@@ -619,5 +634,271 @@ describe('draggable — pointer engine', () => {
     element.dispatchEvent(pe('pointerup', 30, 10));
     TestBed.tick();
     expect(document.body.contains(container as HTMLElement)).toBe(false); // removed
+  });
+
+  it('one drag at a time: a second concurrent press is refused and the first drag drops intact', () => {
+    TestBed.resetTestingModule();
+    const make = (id: string) => {
+      const el = document.createElement('div');
+      document.body.appendChild(el);
+      const starts = vi.fn();
+      const drops = vi.fn();
+      const injector = Injector.create({
+        providers: [{ provide: ElementRef, useValue: new ElementRef(el) }],
+        parent: TestBed.inject(Injector),
+      });
+      const ref = draggable<{ id: string }>({
+        data: { id },
+        engine: 'pointer',
+        injector,
+        onDragStart: starts,
+        onDrop: drops,
+      });
+      return { el, ref, starts, drops };
+    };
+    const a = make('a');
+    const b = make('b');
+    const session = TestBed.inject(DndSession).session;
+    a.el.dispatchEvent(pe('pointerdown', 0, 0, 1));
+    a.el.dispatchEvent(pe('pointermove', 20, 0, 1));
+    b.el.dispatchEvent(pe('pointerdown', 0, 0, 2));
+    b.el.dispatchEvent(pe('pointermove', 40, 0, 2));
+    expect(b.starts).not.toHaveBeenCalled();
+    expect(b.el.style.transform).toBe('');
+    expect(unboxData(session()?.sourceData ?? {})).toEqual({ id: 'a' });
+    expect(session()?.pointer).toEqual({ x: 20, y: 0 });
+    b.el.dispatchEvent(pe('pointerup', 40, 0, 2));
+    expect(b.drops).not.toHaveBeenCalled();
+    expect(a.ref.dragging()).toBe(true);
+    a.el.dispatchEvent(pe('pointermove', 25, 0, 1));
+    expect(session()?.pointer).toEqual({ x: 25, y: 0 });
+    a.el.dispatchEvent(pe('pointerup', 25, 0, 1));
+    expect(a.drops).toHaveBeenCalledTimes(1);
+    expect(a.drops.mock.calls[0][0].data).toEqual({ id: 'a' });
+    expect(session()).toBeNull();
+  });
+});
+
+describe('draggable: pointer-engine contract', () => {
+  function pointer(opts: Record<string, unknown> = {}) {
+    const element = document.createElement('div');
+    const handle = document.createElement('span');
+    element.appendChild(handle);
+    document.body.appendChild(element);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    const session = TestBed.inject(DndSession).session;
+    const ref = TestBed.runInInjectionContext(() =>
+      draggable<{ id: string }>({
+        data: { id: 'x' },
+        engine: 'pointer',
+        ...(opts as object),
+      } as never),
+    );
+    TestBed.tick();
+    return { element, handle, session, ref };
+  }
+
+  it('activates at the documented 5px, reporting data, kind and the host', () => {
+    const start = vi.fn();
+    const drops: DropEvent<{ id: string }>[] = [];
+    const { element, session } = pointer({
+      onDragStart: start,
+      onDrop: (e: DropEvent<{ id: string }>) => drops.push(e),
+    });
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 4, 0));
+    expect(session()).toBeNull();
+    element.dispatchEvent(pe('pointermove', 6, 0));
+    expect(unboxData(session()?.sourceData ?? {})).toEqual({ id: 'x' });
+    expect(session()?.kind).toBe('transfer');
+    expect(start).toHaveBeenCalledWith({
+      data: { id: 'x' },
+      meta: {},
+      element,
+    });
+    element.dispatchEvent(pe('pointerup', 6, 0));
+    expect(drops[0].location.previous).toEqual([]);
+  });
+
+  it('a dragHandle scopes where the drag can start', () => {
+    const handle = document.createElement('span');
+    const { element, session } = pointer({ dragHandle: () => handle });
+    element.appendChild(handle);
+    element.dispatchEvent(pe('pointerdown', 0, 0));
+    element.dispatchEvent(pe('pointermove', 20, 0));
+    expect(session()).toBeNull();
+    element.dispatchEvent(pe('pointerup', 20, 0));
+    handle.dispatchEvent(pe('pointerdown', 0, 0, 2));
+    handle.dispatchEvent(pe('pointermove', 20, 0, 2));
+    expect(session()?.sourceEl).toBe(element);
+    handle.dispatchEvent(pe('pointerup', 20, 0, 2));
+  });
+
+  it('a preview getter renders into the pointer container; a null preview moves the element', () => {
+    let rendered: HTMLElement | undefined;
+    const withPreview = pointer({
+      preview: () => ({ render: (c: HTMLElement) => void (rendered = c) }),
+    });
+    withPreview.element.dispatchEvent(pe('pointerdown', 0, 0));
+    withPreview.element.dispatchEvent(pe('pointermove', 20, 0));
+    expect(rendered?.style.position).toBe('fixed');
+    expect(withPreview.element.style.transform).toBe('');
+    withPreview.element.dispatchEvent(pe('pointerup', 20, 0));
+
+    const none = pointer({ preview: () => null });
+    none.element.dispatchEvent(pe('pointerdown', 0, 0));
+    expect(() =>
+      none.element.dispatchEvent(pe('pointermove', 20, 0)),
+    ).not.toThrow();
+    expect(none.session()?.sourceEl).toBe(none.element);
+    expect(none.element.style.transform).toContain('translate(20px');
+  });
+});
+
+describe('draggable: native-engine contract', () => {
+  beforeEach(() => {
+    draggableMock.mockReset();
+    cleanupMock.mockReset();
+    vi.mocked(monitorForElements).mockClear();
+    vi.mocked(setCustomNativeDragPreview).mockClear();
+  });
+
+  function native(opts: Record<string, unknown> = {}) {
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+    });
+    const ref = TestBed.runInInjectionContext(() =>
+      draggable<{ id: string }>({
+        data: { id: 'x' },
+        ...(opts as object),
+      } as never),
+    );
+    TestBed.tick();
+    const config = () =>
+      draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig;
+    return { element, ref, config };
+  }
+
+  it('attaches the session monitor on its own and unregisters on destroy', () => {
+    const { element, ref } = native();
+    expect(monitorForElements).toHaveBeenCalledTimes(1);
+    const monitorCfg = vi.mocked(monitorForElements).mock.calls[0][0];
+    monitorCfg.onDragStart?.({
+      source: { element, dragHandle: null, data: boxData({ id: 'x' }) },
+      location: {
+        initial: {},
+        current: { input: {}, dropTargets: [] },
+        previous: { dropTargets: [] },
+      },
+    } as never);
+    expect(ref.dragging()).toBe(true);
+    TestBed.resetTestingModule();
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a getter dragHandle registers the resolved element', () => {
+    const handle = document.createElement('span');
+    const { config } = native({ dragHandle: () => handle });
+    expect(config().dragHandle).toBe(handle);
+  });
+
+  it('hooks without callbacks do not throw', () => {
+    const { config, element } = native();
+    const args = {
+      source: { element, dragHandle: null, data: boxData({ id: 'x' }) },
+      location: {
+        initial: {},
+        current: { input: {}, dropTargets: [] },
+        previous: { dropTargets: [] },
+      },
+    } as never;
+    expect(() => {
+      config().onDragStart?.(args);
+      config().onDrop?.(args);
+    }).not.toThrow();
+  });
+
+  it('a preview registers a custom native preview with the drag image setter; null registers nothing', () => {
+    const set = vi.fn();
+    const withPreview = native({ preview: { render: () => undefined } });
+    withPreview
+      .config()
+      .onGenerateDragPreview?.({ nativeSetDragImage: set } as never);
+    expect(setCustomNativeDragPreview).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(setCustomNativeDragPreview).mock.calls[0][0].nativeSetDragImage,
+    ).toBe(set);
+    const none = native({ preview: () => null });
+    expect(() =>
+      none
+        .config()
+        .onGenerateDragPreview?.({ nativeSetDragImage: set } as never),
+    ).not.toThrow();
+    expect(setCustomNativeDragPreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Draggable directive', () => {
+  const TAG: symbol = Symbol('tag');
+  @Component({
+    selector: 'mm-drag-host',
+    imports: [Draggable],
+    template: `<div
+      mmDraggable
+      [data]="{ id: 'x' }"
+      [meta]="meta()"
+      [canDrag]="canDrag()"
+      [preview]="preview()"
+      (dragStart)="starts.push($event)"
+      (dropped)="drops.push($event)"
+    ></div>`,
+  })
+  class Host {
+    readonly meta = signal<Record<symbol, unknown> | undefined>(undefined);
+    readonly canDrag = signal<(() => boolean) | undefined>(undefined);
+    readonly preview = signal<{ render: () => void } | undefined>(undefined);
+    readonly starts: { meta: unknown }[] = [];
+    readonly drops: unknown[] = [];
+  }
+
+  it('wires meta, canDrag, preview and both outputs', () => {
+    draggableMock.mockReset();
+    vi.mocked(setCustomNativeDragPreview).mockClear();
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    const cfg = () => draggableMock.mock.calls.at(-1)?.[0] as DraggableConfig;
+    const el = fixture.nativeElement.firstElementChild as HTMLElement;
+    const args = {
+      source: { element: el, dragHandle: null, data: boxData({ id: 'x' }) },
+      location: {
+        initial: {},
+        current: { input: {}, dropTargets: [] },
+        previous: { dropTargets: [] },
+      },
+    } as never;
+    const h = fixture.componentInstance;
+    expect(cfg().canDrag?.({} as never)).toBe(true);
+    cfg().onDragStart?.(args);
+    expect(h.starts[0].meta).toEqual({});
+    cfg().onDrop?.(args);
+    expect(h.drops).toHaveLength(1);
+    h.meta.set({ [TAG]: 1 });
+    h.canDrag.set(() => false);
+    h.preview.set({ render: () => undefined });
+    fixture.detectChanges();
+    const initial = cfg().getInitialData?.({} as never) as Record<
+      symbol,
+      unknown
+    >;
+    expect(initial[TAG]).toBe(1);
+    expect(cfg().canDrag?.({} as never)).toBe(false);
+    cfg().onGenerateDragPreview?.({ nativeSetDragImage: vi.fn() } as never);
+    expect(setCustomNativeDragPreview).toHaveBeenCalledTimes(1);
   });
 });

@@ -115,7 +115,13 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
    * model, rendered from {@link PlacementGridController.targetMask}.
    */
   readonly compact?: 'vertical' | 'none';
-  /** Extra placement validity on top of the built-in overlap/bounds check. */
+  /**
+   * Extra placement validity on top of the built-in overlap/bounds check,
+   * consulted for every placement change: a move gets the item and the
+   * candidate cell, a resize (pointer or keyboard) gets the item with its
+   * candidate `w` / `h` at its own cell, an arrival gets the arriving item.
+   * A refused frame keeps the last allowed preview; the drop asks again.
+   */
   readonly canPlace?: (
     item: T,
     x: number,
@@ -128,7 +134,10 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
   readonly canReceive?: (item: T) => boolean;
   /** Arrow keys move the focused item one cell; Shift+arrows resize. @default true */
   readonly keyboard?: boolean;
-  /** Screen-reader message after a keyboard move/resize, `false` to disable. */
+  /**
+   * Screen-reader message after a keyboard move/resize, `false` to disable.
+   * The default reads `Moved to column N, row M` (1-based).
+   */
   readonly announcePlace?:
     | false
     | ((event: {
@@ -140,7 +149,10 @@ export type PlacementGridOptions<T extends GridPlacement, K> = {
       }) => string);
   /** Sibling glide during the drag preview, or `false` for instant. */
   readonly animation?: ReorderableAnimation | false;
-  /** Opt-in edge auto-scroll (both axes) while dragging. */
+  /**
+   * Opt-in edge auto-scroll (both axes) while dragging. `edge` (px from the
+   * edge where scrolling starts) defaults to 48, `speed` (px per frame) to 16.
+   */
   readonly autoScroll?:
     | {
         edge?: number;
@@ -214,10 +226,14 @@ export type PlacementGridController<
   readonly projectedCell: Signal<{ x: number; y: number } | null>;
   /**
    * The active move's pointer is outside the grid, so releasing now cancels
-   * the move: the preview shows the original layout and the source is not
-   * written. The test uses the grid box as it was at drag start (shifted by
-   * auto-scroll), not the box the preview grows or shrinks to, so it depends
-   * on the pointer position alone. Always `false` when idle and during a resize.
+   * the move: the preview shows the drag-start layout and the source is not
+   * written. One exception: a drag that has hovered another member of the
+   * grid's group keeps that member as its target over empty space
+   * ({@link crossTarget} stays `true`), so a release there still transfers the
+   * item; back over the grid the transfer is off again. The test uses the
+   * grid box as it was at drag start (shifted by auto-scroll), not the box
+   * the preview grows or shrinks to, so it depends on the pointer position
+   * alone. Always `false` when idle and during a resize.
    */
   readonly dropOutside: Signal<boolean>;
   /**
@@ -275,7 +291,8 @@ export type PlacementGridController<
   move(point: { x: number; y: number }): void;
   /**
    * @internal end the drag, committing the preview (or a cross-container
-   * transfer); a move released outside the grid commits nothing.
+   * transfer); a move released outside the grid and every group member
+   * commits nothing, unless it last hovered a member (see `dropOutside`).
    */
   end(): void;
   cancel(): void;
@@ -415,6 +432,8 @@ export function placementGrid<T extends GridPlacement, K>(
     target: SortableGroupMember<T>;
     anchor: ListAnchor<unknown> | null;
   } | null = null;
+  // Each member is measured once per drag: lists change between drags.
+  const measureCache = new Map<SortableGroupMember<T>, MemberMeasure>();
 
   /** Could the item at position `idx` (`-1`: not in `items`) take this rect, nobody moving? */
   const fitsAt = (
@@ -473,8 +492,7 @@ export function placementGrid<T extends GridPlacement, K>(
           return prev.value;
         }
         if (
-          compact === 'none' &&
-          !fitsAt(dragStartItems, dragStartIdx, it.x, it.y, w, h)
+          !placeGate({ ...it, w, h }, dragStartIdx, it.x, it.y, dragStartItems)
         ) {
           return prev?.value ?? null;
         }
@@ -646,6 +664,7 @@ export function placementGrid<T extends GridPlacement, K>(
 
   const resetDragState = () => {
     hover = null;
+    measureCache.clear();
     activeKey.set(null);
     startRows.set(0);
     pointerX.set(0);
@@ -767,7 +786,6 @@ export function placementGrid<T extends GridPlacement, K>(
     if (group) for (const m of group.members()) m.refreshBounds();
   };
 
-  const measureCache = new Map<SortableGroupMember<T>, MemberMeasure>();
   const ensureMeasured = (m: SortableGroupMember<T>) => {
     let r = measureCache.get(m);
     if (!r) {
@@ -919,12 +937,10 @@ export function placementGrid<T extends GridPlacement, K>(
     p: { x: number; y: number },
     resize: boolean,
   ): readonly T[] | null => {
-    if (resize) {
-      if (compact === 'none' && !fitsAt(live, idx, item.x, item.y, p.x, p.y)) {
-        return null;
-      }
-    } else if (!placeGate(item, idx, p.x, p.y, live)) return null;
-    return step(live, idx, p, resize);
+    const ok = resize
+      ? placeGate({ ...item, w: p.x, h: p.y }, idx, item.x, item.y, live)
+      : placeGate(item, idx, p.x, p.y, live);
+    return ok ? step(live, idx, p, resize) : null;
   };
 
   const findFirstFit = (
@@ -1112,8 +1128,10 @@ export function placementGrid<T extends GridPlacement, K>(
       const nw = Math.max(1, Math.min(it.w + dw, c - it.x));
       const nh = Math.max(1, it.h + dh);
       if (nw === it.w && nh === it.h) return false;
+      if (!placeGate({ ...it, w: nw, h: nh }, idx, it.x, it.y, arr)) {
+        return false;
+      }
       if (compact === 'none') {
-        if (!fitsAt(arr, idx, it.x, it.y, nw, nh)) return false;
         source.set(step(arr, idx, { x: nw, y: nh }, true) as T[]);
         options.onResize?.({
           item: it,
@@ -1163,6 +1181,8 @@ export function placementGrid<T extends GridPlacement, K>(
     indexOf: (h) => liveIndex(h),
     setContainer: (el) => {
       container = el;
+      // a container recreated after dispose (`@if`) rejoins; register is idempotent
+      if (el) group?.register(self);
     },
     setScrollDelta: (x, y) => {
       scrollX.set(x);

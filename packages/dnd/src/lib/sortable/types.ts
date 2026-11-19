@@ -24,6 +24,10 @@ export type ReorderableAxis = Axis | 'wrap';
  * The during-drag reflow glide — how siblings ease as they move aside to open
  * the gap. NOT a drop animation: on drop the commit is instant. Non-overshoot on
  * purpose — an overshoot spring wobbles when the insert re-targets on a fast drag.
+ *
+ * The native engine moves no rows during a drag, so there the same duration and
+ * easing drive a glide after each commit instead: every row that moved slides
+ * from its old position to its new one (a drop or a keyboard move).
  */
 export type ReorderableAnimation = {
   /** ms. @default 200 */
@@ -232,6 +236,12 @@ export type ReorderableItemState<K = unknown> = {
   readonly transformX: Signal<number>;
   readonly transformY: Signal<number>;
   readonly transformCss: Signal<string>;
+  /**
+   * The row's inline `transition`. The pointer engine owns it: the reflow glide
+   * while the row's list takes part in a drag, `none` at rest, so a drop's
+   * transform reset never animates. Put your own transitions (a hover fade) on
+   * a child element.
+   */
   readonly transitionCss: Signal<string>;
 };
 
@@ -267,6 +277,8 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
    * opaque per-occurrence handle once it did (see `handles` in `@mmstack/primitives`).
    */
   readonly indexMap: Signal<ReadonlyMap<Handle<K>, number>>;
+  /** @internal whether every item has a registered row element; reactive. */
+  readonly rowsRendered: Signal<boolean>;
   /** @internal the occurrence `item` is (reference first, else key); reactive. */
   handleOf(item: T): Handle<K> | undefined;
   /** @internal the occurrence at `index`; reactive. */
@@ -362,8 +374,18 @@ export type ReorderableController<T, K = unknown> = SortableGroupMember<T> & {
   elementFor(handle: Handle<K>): HTMLElement | undefined;
   /** @internal the container element, for cross-list bounds. */
   setContainer(el: HTMLElement | null): void;
-  /** Pure drag-start from a measured geometry. Unit-testable without DOM. */
-  begin(handle: Handle<K>, geometry: DragGeometry, startMain: number): void;
+  /**
+   * Pure drag-start from a measured geometry. Unit-testable without DOM.
+   * `startMain` / `startCross` are the pointer's start along the list's flow
+   * axis and across it (the cross start anchors the free 2D follow of a grouped
+   * or wrap list).
+   */
+  begin(
+    handle: Handle<K>,
+    geometry: DragGeometry,
+    startMain: number,
+    startCross?: number,
+  ): void;
   /** @internal DOM edge: measure from the registry, then {@link begin}. */
   beginGesture(handle: Handle<K>, start: { x: number; y: number }): void;
   /** @internal feed a pointer move (viewport coords). */

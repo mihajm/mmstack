@@ -1,6 +1,15 @@
-import { ElementRef, PLATFORM_ID } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  Injector,
+  PLATFORM_ID,
+  viewChild,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { dropTargetForElements as PDDropTarget } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+import {
+  monitorForElements,
+  type dropTargetForElements as PDDropTarget,
+} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { signal } from '@angular/core';
 import type { Edge } from '../internal/types';
@@ -8,9 +17,9 @@ import { trackRuns } from '../testing/reactivity';
 import { makeDragSession } from '../testing/drag-session';
 
 import { boxData, unboxData } from '../internal/payload';
-import { provideDnd, ɵclearWarnedPlugins, type HitboxPlugin } from '../provide';
+import { provideDnd, type HitboxPlugin } from '../provide';
 import { DndSession, type DragSession, type DropTargetHit } from '../session';
-import { dropTarget } from './drop-target';
+import { DropTarget, dropTarget } from './drop-target';
 import { DndPointerEngine } from './pointer-engine';
 import type { DropEvent, DropTargetEvent } from '../internal/types';
 
@@ -26,10 +35,8 @@ class StubPointerEngine extends DndPointerEngine {
 const dropTargetMock = vi.fn();
 
 vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
-  dropTargetForElements: (config: DropTargetConfig) => {
-    dropTargetMock(config);
-    return () => undefined;
-  },
+  dropTargetForElements: (config: DropTargetConfig) =>
+    dropTargetMock(config) ?? (() => undefined),
   draggable: vi.fn(() => () => undefined),
   monitorForElements: vi.fn(() => () => undefined),
 }));
@@ -84,7 +91,6 @@ function makeSession(
 describe('dropTarget — derived state', () => {
   beforeEach(() => {
     dropTargetMock.mockReset();
-    ɵclearWarnedPlugins();
   });
 
   it('derives isDragOver / isInnermost from the innermost-first stack', () => {
@@ -244,7 +250,6 @@ describe('dropTarget — registration hooks (read lazily)', () => {
 describe('dropTarget — callbacks & reactivity', () => {
   beforeEach(() => {
     dropTargetMock.mockReset();
-    ɵclearWarnedPlugins();
   });
 
   function build(
@@ -489,14 +494,15 @@ describe('dropTarget — pointer engine', () => {
     const { ref, engine } = setupPointerEdges();
     expect(ref.closestEdge()).toBeNull(); // idle
 
-    engine.begin(pointerSource(), 0, 10); // upper half → top
+    const src = pointerSource();
+    engine.begin(src, 0, 10); // upper half → top
     expect(ref.isDragOver()).toBe(true);
     expect(ref.closestEdge()).toBe('top');
 
-    engine.move(pointerSource(), 0, 90); // lower half → bottom
+    engine.move(src, 0, 90); // lower half → bottom
     expect(ref.closestEdge()).toBe('bottom');
 
-    engine.cancel();
+    engine.cancel(src);
     expect(ref.closestEdge()).toBeNull(); // cleared with the session
   });
 
@@ -504,8 +510,9 @@ describe('dropTarget — pointer engine', () => {
     const drops: (Edge | null)[] = [];
     const { engine } = setupPointerEdges((e) => drops.push(e.edge));
 
-    engine.begin(pointerSource(), 0, 90); // bottom
-    engine.end();
+    const src = pointerSource();
+    engine.begin(src, 0, 90); // bottom
+    engine.end(src);
     expect(drops).toEqual(['bottom']);
   });
 
@@ -515,21 +522,456 @@ describe('dropTarget — pointer engine', () => {
     const edgeRuns = trackRuns(() => ref.closestEdge());
     TestBed.tick();
 
-    engine.begin(pointerSource(), 0, 10); // top
+    const src = pointerSource();
+    engine.begin(src, 0, 10); // top
     TestBed.tick();
     const [over0, edge0] = [overRuns(), edgeRuns()];
 
-    engine.move(pointerSource(), 0, 90); // top → bottom
+    engine.move(src, 0, 90); // top → bottom
     TestBed.tick();
     expect(edgeRuns()).toBe(edge0 + 1);
     expect(overRuns()).toBe(over0); // membership stable across the flip
 
     const edge1 = edgeRuns();
-    engine.move(pointerSource(), 0, 95); // bottom → bottom (same edge)
+    engine.move(src, 0, 95); // bottom → bottom (same edge)
     TestBed.tick();
     expect(edgeRuns()).toBe(edge1); // token unchanged → no recompute
     expect(overRuns()).toBe(over0);
 
-    engine.cancel();
+    engine.cancel(src);
+  });
+});
+
+describe('dropTarget: pointer-engine contract', () => {
+  beforeEach(() => {
+    dropTargetMock.mockReset();
+  });
+
+  const tagHitbox = (tag: string): HitboxPlugin => ({
+    attachClosestEdge: (data, { element }) => ({
+      ...data,
+      __edge: (element as HTMLElement).dataset['edge'] ?? tag,
+    }),
+    extractClosestEdge: (data) =>
+      ((data as { __edge?: Edge }).__edge ?? null) as Edge | null,
+  });
+
+  function scope(providers: unknown[] = []) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: DndPointerEngine, useClass: StubPointerEngine },
+        ...(providers as never[]),
+      ],
+    });
+    const engine = TestBed.inject(DndPointerEngine) as StubPointerEngine;
+    const session = TestBed.inject(DndSession).session;
+    const make = (opts: Record<string, unknown> = {}) => {
+      const element = document.createElement('div');
+      const injector = Injector.create({
+        providers: [{ provide: ElementRef, useValue: new ElementRef(element) }],
+        parent: TestBed.inject(Injector),
+      });
+      const ref = dropTarget<Card, unknown>({
+        accepts: isCard,
+        engine: 'pointer',
+        injector,
+        ...(opts as object),
+      } as never);
+      return { element, ref, injector };
+    };
+    const source = (id = 'a') => ({
+      el: document.createElement('div'),
+      data: boxData<Card>({ id }),
+      kind: 'transfer' as const,
+    });
+    return { engine, session, make, source };
+  }
+
+  it('surfaces its own data on the hit and the drop, with the host as element', () => {
+    const { engine, session, make, source } = scope();
+    const drops: DropEvent<Card>[] = [];
+    const t = make({
+      data: { slot: 1 },
+      onDrop: (e: DropEvent<Card>) => drops.push(e),
+    });
+    engine.stack = [t.element];
+    const s = source();
+    engine.begin(s, 0, 0);
+    expect(unboxData(session()?.targets[0].data ?? {})).toEqual({ slot: 1 });
+    engine.end(s);
+    expect(drops[0].data).toEqual({ id: 'a' });
+    expect(drops[0].location.current[0].element).toBe(t.element);
+    expect(drops[0].location.current[0].data).toEqual({ slot: 1 });
+    expect(drops[0].location.previous).toEqual([]);
+  });
+
+  it('a disabled target or a canDrop veto is not hit and gets no drop', () => {
+    const { engine, session, make, source } = scope();
+    const onDrop = vi.fn();
+    const off = make({ disabled: true, onDrop });
+    const veto = make({
+      canDrop: ({ source: x }: { source: { data: Card } }) => x.data.id !== 'c',
+      onDrop,
+    });
+    engine.stack = [off.element, veto.element];
+    const s = source('c');
+    engine.begin(s, 0, 0);
+    expect(session()?.targets).toEqual([]);
+    engine.end(s);
+    expect(onDrop).not.toHaveBeenCalled();
+    const ok = source('a');
+    engine.begin(ok, 0, 0);
+    expect(session()?.targets.map((h) => h.element)).toEqual([veto.element]);
+    engine.cancel(ok);
+  });
+
+  it('forwards enter and leave once, with the source data and the host element', () => {
+    const { engine, make, source } = scope();
+    const enter = vi.fn();
+    const leave = vi.fn();
+    const t = make({ onDragEnter: enter, onDragLeave: leave });
+    engine.stack = [t.element];
+    const s = source();
+    engine.begin(s, 0, 0);
+    engine.move(s, 1, 1);
+    expect(enter).toHaveBeenCalledTimes(1);
+    expect(enter.mock.calls[0][0].source.data).toEqual({ id: 'a' });
+    expect(enter.mock.calls[0][0].self.element).toBe(t.element);
+    engine.stack = [];
+    engine.move(s, 2, 2);
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave.mock.calls[0][0].source.data).toEqual({ id: 'a' });
+    expect(leave.mock.calls[0][0].self.element).toBe(t.element);
+    engine.cancel(s);
+  });
+
+  it('each nested target reports the edge from its own hit', () => {
+    const { engine, make, source } = scope([
+      provideDnd({ plugins: { hitbox: tagHitbox('x') } }),
+    ]);
+    const edges: Record<string, Edge | null> = {};
+    const outer = make({
+      edges: ['top', 'bottom'],
+      onDrop: (e: DropEvent<Card>) => (edges['outer'] = e.edge),
+    });
+    const inner = make({
+      edges: ['top', 'bottom'],
+      onDrop: (e: DropEvent<Card>) => (edges['inner'] = e.edge),
+    });
+    outer.element.dataset['edge'] = 'bottom';
+    inner.element.dataset['edge'] = 'top';
+    engine.stack = [inner.element, outer.element];
+    const s = source();
+    engine.begin(s, 0, 0);
+    engine.end(s);
+    expect(edges).toEqual({ inner: 'top', outer: 'bottom' });
+  });
+
+  it.each([
+    ['edges without a hitbox', [], { edges: ['top'] }],
+    [
+      'a hitbox without edges',
+      [provideDnd({ plugins: { hitbox: tagHitbox('top') } })],
+      {},
+    ],
+    [
+      'edges resolving to undefined',
+      [provideDnd({ plugins: { hitbox: tagHitbox('top') } })],
+      { edges: signal(undefined) },
+    ],
+  ] as const)('with %s: hit, null edge, no throw', (_, providers, opts) => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { engine, make, source } = scope([...providers]);
+    const drops: DropEvent<Card>[] = [];
+    const t = make({ ...opts, onDrop: (e: DropEvent<Card>) => drops.push(e) });
+    engine.stack = [t.element];
+    const s = source();
+    expect(() => engine.begin(s, 0, 0)).not.toThrow();
+    expect(t.ref.isDragOver()).toBe(true);
+    expect(t.ref.closestEdge()).toBeNull();
+    engine.end(s);
+    expect(drops).toHaveLength(1);
+    expect(drops[0].edge).toBeNull();
+    spy.mockRestore();
+  });
+
+  it('a target without onDrop does not stop its neighbor from dropping', () => {
+    const { engine, make, source } = scope();
+    const onDrop = vi.fn();
+    const silent = make();
+    const loud = make({ onDrop });
+    engine.stack = [silent.element, loud.element];
+    const s = source();
+    engine.begin(s, 0, 0);
+    expect(() => engine.end(s)).not.toThrow();
+    expect(onDrop).toHaveBeenCalledTimes(1);
+    expect(engine.dragging()).toBe(false);
+  });
+
+  it('a destroyed target is no longer hit', () => {
+    const { engine, session, make, source } = scope();
+    const t = make();
+    t.injector.destroy();
+    engine.stack = [t.element];
+    const s = source();
+    engine.begin(s, 0, 0);
+    expect(session()?.targets).toEqual([]);
+    engine.cancel(s);
+  });
+
+  it('dragOverData is undefined while the stack holds another element', () => {
+    const { session, make } = scope();
+    const t = make();
+    session.set(
+      makeDragSession({
+        targets: [{ element: document.createElement('div'), data: {} }],
+        sourceData: boxData<Card>({ id: 'a' }),
+        engine: 'pointer',
+      }),
+    );
+    expect(t.ref.dragOverData()).toBeUndefined();
+    expect(t.ref.isDragOver()).toBe(false);
+  });
+
+  it('the server ref is never innermost', () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const ref = TestBed.runInInjectionContext(() =>
+      dropTarget<Card>({ accepts: isCard }),
+    );
+    expect(ref.isInnermost()).toBe(false);
+    expect(ref.dragOverData()).toBeUndefined();
+    expect(ref.closestEdge()).toBeNull();
+  });
+});
+
+describe('dropTarget: native-engine contract', () => {
+  beforeEach(() => {
+    dropTargetMock.mockReset();
+    vi.mocked(monitorForElements).mockClear();
+  });
+
+  function native(
+    opts: Record<string, unknown> = {},
+    providers: unknown[] = [],
+  ) {
+    const element = document.createElement('div');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ElementRef, useValue: new ElementRef(element) },
+        ...(providers as never[]),
+      ],
+    });
+    const cleanup = vi.fn();
+    dropTargetMock.mockReturnValueOnce(cleanup);
+    const ref = TestBed.runInInjectionContext(() =>
+      dropTarget<Card, unknown>({
+        accepts: isCard,
+        ...(opts as object),
+      } as never),
+    );
+    const config = dropTargetMock.mock.calls.at(-1)?.[0] as DropTargetConfig;
+    return { element, ref, config, cleanup };
+  }
+  const src = (id = 'a') => ({
+    element: document.createElement('div'),
+    dragHandle: null,
+    data: boxData<Card>({ id }),
+  });
+  const self = (el: Element, data: Record<string | symbol, unknown> = {}) => ({
+    element: el,
+    data,
+    dropEffect: 'move' as const,
+    isActiveDueToStickiness: false,
+  });
+  const loc = () => ({
+    initial: {} as never,
+    current: { input: {} as never, dropTargets: [] },
+    previous: { dropTargets: [] },
+  });
+  const input = { clientX: 1, clientY: 2 } as never;
+
+  it('attaches the session monitor on its own and unregisters on destroy', () => {
+    const { cleanup } = native();
+    expect(monitorForElements).toHaveBeenCalledTimes(1);
+    expect(cleanup).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('getData with a hitbox but no edges returns its own data untouched', () => {
+    const attach = vi.fn((d) => d);
+    const { config, element } = native({ data: { slot: 3 } }, [
+      provideDnd({
+        plugins: {
+          hitbox: { attachClosestEdge: attach, extractClosestEdge: () => null },
+        },
+      }),
+    ]);
+    const d = config.getData?.({
+      input,
+      element,
+      dragHandle: null,
+      source: src(),
+    } as never);
+    expect(unboxData(d ?? {})).toEqual({ slot: 3 });
+    expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('getData passes element, input and the allowed edges to the hitbox', () => {
+    const attach = vi.fn((d) => d);
+    const { config, element } = native({ edges: ['top'] }, [
+      provideDnd({
+        plugins: {
+          hitbox: { attachClosestEdge: attach, extractClosestEdge: () => null },
+        },
+      }),
+    ]);
+    config.getData?.({
+      input,
+      element,
+      dragHandle: null,
+      source: src(),
+    } as never);
+    expect(attach).toHaveBeenCalledWith(expect.anything(), {
+      element,
+      input,
+      allowedEdges: ['top'],
+    });
+  });
+
+  it('canDrop hands the unboxed source to the predicate', () => {
+    const { config, element } = native({
+      canDrop: ({ source }: { source: { data: Card } }) =>
+        source.data.id !== 'a',
+    });
+    expect(
+      config.canDrop?.({ source: src('a'), input, element } as never),
+    ).toBe(false);
+    expect(
+      config.canDrop?.({ source: src('b'), input, element } as never),
+    ).toBe(true);
+  });
+
+  it('enter and leave carry the source data; rejected sources and missing callbacks are quiet', () => {
+    const enters: unknown[] = [];
+    const leaves: unknown[] = [];
+    const { config, element } = native({
+      onDragEnter: (e: { source: { data: Card } }) =>
+        enters.push(e.source.data),
+      onDragLeave: (e: { source: { data: Card } }) =>
+        leaves.push(e.source.data),
+    });
+    const args = (s: ReturnType<typeof src>) =>
+      ({ source: s, self: self(element), location: loc() }) as never;
+    const rejected = { ...src(), data: boxData('nope') };
+    config.onDragEnter?.(args(rejected));
+    config.onDragEnter?.(args(src()));
+    config.onDragLeave?.(args(src()));
+    expect(enters).toEqual([{ id: 'a' }]);
+    expect(leaves).toEqual([{ id: 'a' }]);
+    const bare = native();
+    expect(() => {
+      bare.config.onDragEnter?.(args(src()));
+      bare.config.onDragLeave?.(args(src()));
+      bare.config.onDrop?.(args(src()));
+    }).not.toThrow();
+  });
+
+  it.each([
+    ['hitbox and edges report the edge', { edges: ['top'] }, true, 'top'],
+    ['edges without a hitbox give null', { edges: ['top'] }, false, null],
+    ['a hitbox without edges gives null', {}, true, null],
+  ] as const)('drop: %s', (_, opts, withHitbox, want) => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const drops: DropEvent<Card>[] = [];
+    const { config, element } = native(
+      { ...opts, onDrop: (e: DropEvent<Card>) => drops.push(e) },
+      withHitbox ? [provideDnd({ plugins: { hitbox: stubHitbox } })] : [],
+    );
+    config.onDrop?.({
+      source: src(),
+      self: self(element),
+      location: loc(),
+    } as never);
+    expect(drops[0].edge).toBe(want);
+    spy.mockRestore();
+  });
+});
+
+describe('DropTarget directive', () => {
+  @Component({
+    selector: 'mm-drop-host',
+    imports: [DropTarget],
+    template: `<div
+      mmDropTarget
+      [accepts]="isCard"
+      [canDrop]="veto()"
+      (dragEnter)="enters.push($event)"
+      (dragLeave)="leaves.push($event)"
+      (dropped)="drops.push($event)"
+      #t="mmDropTarget"
+    ></div>`,
+  })
+  class Host {
+    readonly isCard = isCard;
+    readonly veto = signal<(() => boolean) | undefined>(undefined);
+    readonly enters: unknown[] = [];
+    readonly leaves: unknown[] = [];
+    readonly drops: unknown[] = [];
+    readonly t = viewChild.required<DropTarget<Card>>('t');
+  }
+
+  it('defaults, accepts, canDrop and outputs', () => {
+    dropTargetMock.mockReset();
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    const config = dropTargetMock.mock.calls.at(-1)?.[0] as DropTargetConfig;
+    const el = fixture.nativeElement.firstElementChild as HTMLElement;
+    const source = {
+      element: document.createElement('div'),
+      dragHandle: null,
+      data: boxData<Card>({ id: 'a' }),
+    };
+    const args = { source, input: {} as never, element: el } as never;
+    expect(config.getIsSticky?.(args)).toBe(false);
+    expect(config.getDropEffect?.(args)).toBe('move');
+    expect(config.canDrop?.(args)).toBe(true);
+    fixture.componentInstance.veto.set(() => false);
+    fixture.detectChanges();
+    expect(config.canDrop?.(args)).toBe(false);
+    const ev = {
+      source,
+      self: {
+        element: el,
+        data: {},
+        dropEffect: 'move',
+        isActiveDueToStickiness: false,
+      },
+      location: {
+        initial: {},
+        current: { input: {}, dropTargets: [] },
+        previous: { dropTargets: [] },
+      },
+    } as never;
+    config.onDragEnter?.(ev);
+    config.onDragLeave?.(ev);
+    config.onDrop?.(ev);
+    const h = fixture.componentInstance;
+    expect([h.enters.length, h.leaves.length, h.drops.length]).toEqual([
+      1, 1, 1,
+    ]);
+    TestBed.inject(DndSession).session.set(
+      makeDragSession({
+        targets: [{ element: el, data: {} }],
+        sourceData: boxData<Card>({ id: 'a' }),
+      }),
+    );
+    expect(h.t().dragOverData()).toEqual({ id: 'a' });
   });
 });

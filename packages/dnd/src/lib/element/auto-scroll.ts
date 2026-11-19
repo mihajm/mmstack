@@ -25,6 +25,8 @@ export type AutoScrollOptions = {
  * Enables auto-scrolling of a container while dragging near its edges. Requires
  * the auto-scroll plugin (install `@atlaskit/pragmatic-drag-and-drop-auto-scroll`
  * and register `autoScrollForElements` via {@link provideDnd}, or pass it here).
+ * The first-party `edgeAutoScroll` needs a live pointer, which this function
+ * does not pass, so with it registered `autoScroll()` and `mmAutoScroll` do nothing.
  *
  * @example
  * ```ts
@@ -63,7 +65,11 @@ export function autoScroll(opts: AutoScrollOptions = {}): void {
   });
 }
 
-/** Directive form of {@link autoScroll}: `<div mmAutoScroll style="overflow:auto">`. */
+/**
+ * Directive form of {@link autoScroll}: `<div mmAutoScroll style="overflow:auto">`.
+ * Needs a monitor-driven plugin such as pragmatic's `autoScrollForElements`;
+ * `edgeAutoScroll` does nothing here.
+ */
 @Directive({
   selector: '[mmAutoScroll]',
   exportAs: 'mmAutoScroll',

@@ -386,6 +386,7 @@ export class PlacementGridItem<T extends GridPlacement, K = unknown> {
 /**
  * A resize grip inside an item: `<div mmPlacementGridResizeHandle="se">`.
  * The container's gesture arbitrates to a resize when the press lands here.
+ * A bare `mmPlacementGridResizeHandle` is an `'se'` grip.
  */
 @Directive({
   selector: '[mmPlacementGridResizeHandle]',
@@ -396,7 +397,11 @@ export class PlacementGridItem<T extends GridPlacement, K = unknown> {
   },
 })
 export class PlacementGridResizeHandle {
-  readonly direction = input<PlacementResizeDirection>('se', {
+  readonly direction = input<
+    PlacementResizeDirection,
+    PlacementResizeDirection | ''
+  >('se', {
     alias: 'mmPlacementGridResizeHandle',
+    transform: (v) => v || 'se',
   });
 }

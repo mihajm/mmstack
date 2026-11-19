@@ -4,6 +4,7 @@ import {
   gridCollides,
   gridRows,
   moveGridItem,
+  placeGridItem,
   resizeGridItem,
   validTargets,
   type GridPlacement,
@@ -228,5 +229,102 @@ describe('grid layout — gridRows', () => {
   it('reports the max bottom edge, 0 when empty', () => {
     expect(gridRows([])).toBe(0);
     expect(gridRows([it_('a', 0, 0), it_('b', 2, 3, 2, 4)])).toBe(7);
+  });
+});
+
+describe('grid layout: reflow order and convergence', () => {
+  it('a push that lands on a later item keeps pushing until nothing overlaps', () => {
+    const items = [
+      it_('0', 1, 5, 2, 2),
+      it_('1', 2, 7, 2, 1),
+      it_('2', 3, 6, 1, 1),
+      it_('3', 0, 2, 2, 1),
+      it_('4', 0, 4, 2, 1),
+    ];
+    const out = resizeGridItem(items, key, '3', 4, 5, 4);
+    expect(overlapFree(out)).toBe(true);
+  });
+
+  it('a move resolves the moved item first, then pushes the rest in top-to-bottom order', () => {
+    const items = [
+      it_('0', 0, 4, 2, 3),
+      it_('1', 0, 1, 2, 2),
+      it_('2', 0, 0, 3, 1),
+      it_('3', 0, 7, 2, 2),
+    ];
+    const out = moveGridItem(items, key, '3', 0, 1, 4);
+    expect(byId(out, '3')?.y).toBe(1);
+    expect(byId(out, '1')?.y).toBe(3);
+    expect(byId(out, '0')?.y).toBe(5);
+  });
+
+  it('move and resize never leave an overlap (seeded fuzz over 1-3 wide items)', () => {
+    const rand = rng(7);
+    const COLS = 6;
+    for (let round = 0; round < 300; round++) {
+      let items: Item[] = [];
+      for (let i = 0; i < 6; i++) {
+        const w = 1 + Math.floor(rand() * 3);
+        const h = 1 + Math.floor(rand() * 3);
+        items.push(
+          it_(String(i), Math.floor(rand() * (COLS - w + 1)), 0, w, h),
+        );
+        items = compactGrid(
+          items.map((it, j) => (j === i ? { ...it, y: 20 } : it)),
+          key,
+        ) as Item[];
+      }
+      expect(overlapFree(items)).toBe(true);
+      const pick = items[Math.floor(rand() * items.length)];
+      const x = Math.floor(rand() * COLS);
+      const y = Math.floor(rand() * 6);
+      const moved = moveGridItem(items, key, pick.id, x, y, COLS);
+      expect(overlapFree(moved)).toBe(true);
+      const resized = resizeGridItem(
+        items,
+        key,
+        pick.id,
+        1 + Math.floor(rand() * 4),
+        1 + Math.floor(rand() * 4),
+        COLS,
+      );
+      expect(overlapFree(resized)).toBe(true);
+    }
+  });
+});
+
+describe('grid layout: placeGridItem', () => {
+  it('holds the placed item at its cell and pushes its occupant down', () => {
+    const out = placeGridItem([it_('a', 0, 0), it_('x', 0, 0)], key, 'x');
+    expect(byId(out, 'x')).toMatchObject({ x: 0, y: 0 });
+    expect(byId(out, 'a')?.y).toBe(2);
+  });
+
+  it('returns the same array when nothing overlaps or the key is unknown', () => {
+    const settled = [it_('a', 0, 0), it_('b', 2, 0), it_('k', 0, 2)];
+    expect(placeGridItem(settled, key, 'k')).toBe(settled);
+    const floating = [it_('a', 0, 5)];
+    expect(placeGridItem(floating, key, 'zzz')).toBe(floating);
+  });
+});
+
+describe('grid layout: resize and validity edge cases', () => {
+  it('resizeGridItem clamps against the resized item, and is a same-reference no-op for an unknown key', () => {
+    const items = [it_('a', 0, 0), it_('b', 2, 0)];
+    expect(byId(resizeGridItem(items, key, 'b', 99, 2, 4), 'b')?.w).toBe(2);
+    expect(resizeGridItem(items, key, 'zzz', 1, 1, 4)).toBe(items);
+  });
+
+  it('canPlaceAt rejects a negative row and empty spans, and accepts 1x1 rects', () => {
+    const items = [it_('a', 0, 0)];
+    expect(canPlaceAt(items, key, 'a', 2, -1, 2, 2, 4)).toBe(false);
+    expect(canPlaceAt(items, key, 'b', 2, 0, 0, 1, 4)).toBe(false);
+    expect(canPlaceAt(items, key, 'b', 2, 0, 1, 0, 4)).toBe(false);
+    expect(canPlaceAt([], key, 'a', 0, 0, 1, 1, 4)).toBe(true);
+  });
+
+  it('validTargets of a 1x1 item on an empty board accepts every origin', () => {
+    const mask = validTargets([it_('a', 0, 0, 1, 1)], key, 'a', 4, 3);
+    expect([...mask]).toEqual(new Array(12).fill(1));
   });
 });

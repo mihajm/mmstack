@@ -466,3 +466,60 @@ describe('reorderable — list ↔ wrap grid in one group', () => {
     }
   });
 });
+
+@Component({
+  selector: 'mm-wrap-default-engine-host',
+  imports: [Reorderable, ReorderableItem],
+  template: `
+    <ul [mmReorderable]="list" data-container>
+      @for (t of list.items(); track t.id) {
+        <li [mmReorderableItem]="t">{{ t.label }}</li>
+      }
+    </ul>
+  `,
+})
+class WrapDefaultEngineHost {
+  readonly data = signal<Tile[]>(
+    ['A', 'B', 'C', 'D', 'E', 'F'].map((label, i) => ({ id: i + 1, label })),
+  );
+  // no engine: the default is native, but wrap always runs the pointer engine
+  readonly list = reorderable(this.data, { key: (t) => t.id, axis: 'wrap' });
+}
+
+describe("reorderable — `axis: 'wrap'` without `engine: 'pointer'`", () => {
+  it('runs the pointer engine: a drag lands at the pointed slot, not at index 0', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const rectSpy = mockWrapRects();
+    try {
+      const fixture = TestBed.createComponent(WrapDefaultEngineHost);
+      fixture.detectChanges();
+      TestBed.tick();
+      fixture.detectChanges();
+      const host = fixture.componentInstance;
+      expect(host.list.engine).toBe('pointer');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain("'wrap'");
+
+      const items = Array.from(
+        fixture.nativeElement.querySelectorAll('li'),
+      ) as HTMLElement[];
+      items[0].dispatchEvent(pe('pointerdown', 20, 20));
+      items[0].dispatchEvent(pe('pointermove', 60, 60));
+      TestBed.tick();
+      expect(host.list.insertIndex()).toBe(4);
+      items[0].dispatchEvent(pe('pointerup', 60, 60));
+      TestBed.tick();
+      expect(host.data().map((t) => t.label)).toEqual([
+        'B',
+        'C',
+        'D',
+        'E',
+        'A',
+        'F',
+      ]);
+    } finally {
+      rectSpy.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});

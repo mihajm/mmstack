@@ -189,3 +189,54 @@ describe('sortableGroup — active cross-list drag state', () => {
     expect(i.activeFootprint()).toBe(0);
   });
 });
+
+describe('sortableGroup — contracts at the edges', () => {
+  it('unregistering a non-member evicts nobody', () => {
+    const g = sortableGroup();
+    const a = member(null);
+    const b = member(null);
+    g.register(a);
+    g.register(b);
+    g.unregister(member(null));
+    g.unregister(a);
+    g.unregister(a);
+    expect(g.members()).toEqual([b]);
+  });
+
+  it('two containing rects of equal area resolve to the later registration', () => {
+    const g = sortableGroup();
+    const box = { top: 0, left: 0, width: 100, height: 100 };
+    const parent = member(box);
+    const child = member({ ...box });
+    g.register(parent);
+    g.register(child);
+    expect(g.targetAt(50, 50)).toBe(child);
+  });
+
+  it('setActive mirrors the live pointer, defaulting a missing one to 0', () => {
+    const g = sortableGroup();
+    const gi = getGroupInternals(g);
+    const a = member(null);
+    const b = member(null);
+    gi.setActive({
+      source: a,
+      target: b,
+      sourceIndex: 0,
+      insertIndex: 0,
+      footprint: 0,
+      x: 12,
+      y: 34,
+    });
+    expect(gi.activeX()).toBe(12);
+    expect(gi.activeY()).toBe(34);
+    gi.setActive({
+      source: a,
+      target: b,
+      sourceIndex: 0,
+      insertIndex: 0,
+      footprint: 0,
+    });
+    expect(gi.activeX()).toBe(0);
+    expect(gi.activeY()).toBe(0);
+  });
+});

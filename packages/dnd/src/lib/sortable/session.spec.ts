@@ -170,7 +170,7 @@ describe('sortableSession', () => {
     expect(session.isSource(signal(0))()).toBe(false);
   });
 
-  it('linear collision never depends on the cross-axis pointer (no wasted recompute)', () => {
+  it('an off-axis pointer move never renotifies a linear insert index', () => {
     const { session, pointerCross, begin, counter } = setup(injector);
     begin();
     const ins = counter(() => session.insertIndex());
@@ -179,7 +179,7 @@ describe('sortableSession', () => {
 
     pointerCross.set(500); // off-axis wiggle under a LINEAR drag
     TestBed.tick();
-    expect(ins.runs).toBe(0); // not even the linkedSignal source recomputed for it
+    expect(ins.runs).toBe(0); // readers of the insert index are not notified
     expect(session.insertIndex()).toBe(0);
   });
 });
@@ -268,5 +268,88 @@ describe('sortableSession — wrap geometry', () => {
     TestBed.tick();
     expect(session.insertIndex()).toBe(4);
     expect(session.displacementFor(signal(2))()).toBe(0);
+  });
+});
+
+describe('sortableSession — deadband, seeding and idle reads', () => {
+  const linear = (source: number): LinearDragGeometry => ({ ...GEOM, source });
+  function rig(deadband?: number) {
+    const geometry: WritableSignal<DragGeometry | null> = signal(null);
+    const pointer = signal(0);
+    const pointerCross = signal(0);
+    const active = signal(false);
+    const session = TestBed.runInInjectionContext(() =>
+      sortableSession({ geometry, pointer, pointerCross, active, deadband }),
+    );
+    const drag = (g: DragGeometry, at: number) => {
+      geometry.set(g);
+      pointer.set(at);
+      active.set(true);
+    };
+    const path = (...ps: number[]) =>
+      ps.map((p) => {
+        pointer.set(p);
+        return session.insertIndex();
+      });
+    return { geometry, pointer, pointerCross, active, session, drag, path };
+  }
+
+  it('the deadband delays a flip until the pointer clears the center by it', () => {
+    const { drag, path } = rig(4);
+    drag(linear(0), 10);
+    expect(path(33, 35)).toEqual([0, 1]);
+  });
+
+  it('each frame seeds from the last one: a held top insert stays inside the band', () => {
+    const { drag, path } = rig(4);
+    drag(linear(2), 50);
+    expect(path(30, 10, 5, 6)).toEqual([2, 1, 0, 0]);
+  });
+
+  it('a drag that restarts on the same geometry seeds from the source again', () => {
+    const { drag, active, session } = rig();
+    const g = linear(2);
+    drag(g, 50);
+    expect(session.insertIndex()).toBe(2);
+    active.set(false);
+    expect(session.insertIndex()).toBe(-1);
+    active.set(true);
+    expect(session.insertIndex()).toBe(2);
+  });
+
+  it('a re-measured geometry reseeds from its own source, not the last frame', () => {
+    const { drag, geometry, path } = rig();
+    drag(linear(0), 10);
+    expect(path(75)).toEqual([3]);
+    geometry.set(linear(0));
+    expect(path(60)).toEqual([2]);
+  });
+
+  it('an inactive session with geometry displaces nothing and slots every item at home', () => {
+    const { geometry, session } = rig();
+    geometry.set(linear(2));
+    expect(session.displacementFor(signal(0))()).toBe(0);
+    geometry.set({ ...WRAP_GEOM, source: 2 } as DragGeometry);
+    expect(session.slotFor(signal(0))()).toBe(0);
+    expect(session.slotFor(signal(2))()).toBe(2);
+  });
+
+  it('a linear drag to the top displaces every row before the source', () => {
+    const { drag, session } = rig();
+    drag(linear(2), 5);
+    expect(session.insertIndex()).toBe(0);
+    expect(session.displacementFor(signal(0))()).toBe(20);
+    expect(session.displacementFor(signal(1))()).toBe(20);
+  });
+
+  it('a wrap drag to slot 0 moves the source there and the first tile one on', () => {
+    const { geometry, pointer, pointerCross, active, session } = rig();
+    geometry.set({ ...WRAP_GEOM, source: 2 } as DragGeometry);
+    pointer.set(10);
+    pointerCross.set(10);
+    active.set(true);
+    expect(session.insertIndex()).toBe(0);
+    expect(session.slotFor(signal(0))()).toBe(1);
+    expect(session.slotFor(signal(2))()).toBe(0);
   });
 });

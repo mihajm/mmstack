@@ -16,6 +16,8 @@ const frame = (x: number, y: number, width = 40, height = 40): CanvasFrame => ({
   height,
 });
 
+type MoveGesture = Extract<CanvasGesture<string>, { kind: 'move' }>;
+
 function setup(injector: Injector, cfg: Partial<CanvasSessionConfig> = {}) {
   const gesture = signal<CanvasGesture<string> | null>(null);
   const pointerX = signal(0);
@@ -53,7 +55,7 @@ function setup(injector: Injector, cfg: Partial<CanvasSessionConfig> = {}) {
   });
 
   // a single item 'a' at (100, 100) 40×40; a snap sibling at (160, 100)
-  const beginMove = (opts: Partial<CanvasGesture<string>> = {}) => {
+  const beginMove = (opts: Partial<MoveGesture> = {}) => {
     pointerX.set(120);
     pointerY.set(120);
     gesture.set({
@@ -265,7 +267,6 @@ describe('canvasSession', () => {
         baseFrames: new Map([['a', frame(100, 100)]]),
         union: frame(100, 100),
         snapTargets: [],
-        containers: [],
         start: { x: 140, y: 140 },
         surfaceOrigin: { x: 0, y: 0 },
       });
@@ -333,7 +334,6 @@ describe('canvasSession', () => {
         baseFrames: new Map([['a', frame(100, 100)]]),
         union: frame(100, 100),
         snapTargets: [],
-        containers: [],
         start: { x: 150, y: 120 },
         surfaceOrigin: { x: 0, y: 0 },
         pivot: { x: 120, y: 120 },
@@ -362,7 +362,6 @@ describe('canvasSession', () => {
         baseFrames: new Map(),
         union: frame(0, 0, 0, 0),
         snapTargets: [],
-        containers: [],
         start: { x: 50, y: 50 },
         surfaceOrigin: { x: 0, y: 0 },
       });
@@ -426,5 +425,287 @@ describe('canvasSession', () => {
       s.scrollDeltaX.set(30); // 30 screen px of scroll at scale 2
       expect(s.session.overlayDeltaX()).toBe(15); // = 15 canvas px, not 30
     });
+  });
+});
+
+describe('canvasSession: per-kind signals and projections', () => {
+  let injector: Injector;
+  beforeEach(() => {
+    TestBed.runInInjectionContext(() => {
+      injector = TestBed.inject(Injector);
+    });
+  });
+
+  const resizeGesture = (
+    direction: 'se' | 'e',
+    union = frame(100, 100),
+    snapTargets: CanvasFrame[] = [],
+  ): CanvasGesture<string> => ({
+    kind: 'resize',
+    direction,
+    keys: ['a'],
+    baseFrames: new Map([['a', union]]),
+    union,
+    snapTargets,
+    start: { x: 140, y: 140 },
+    surfaceOrigin: { x: 0, y: 0 },
+  });
+
+  it('idle: every kind-specific signal is null and the pointer reads 0', () => {
+    const s = setup(injector);
+    s.pointerX.set(300);
+    s.pointerY.set(200);
+    expect(s.session.active()).toBe(false);
+    expect(s.session.canvasPointerX()).toBe(0);
+    expect(s.session.canvasPointerY()).toBe(0);
+    expect(s.session.resizeBox()).toBeNull();
+    expect(s.session.angle()).toBeNull();
+    expect(s.session.marqueeRect()).toBeNull();
+  });
+
+  it('a move exposes no resize box, angle or rubber band', () => {
+    const s = setup(injector);
+    s.beginMove();
+    s.pointerX.set(150);
+    expect(s.session.active()).toBe(true);
+    expect(s.session.kind()).toBe('move');
+    expect(s.session.resizeBox()).toBeNull();
+    expect(s.session.angle()).toBeNull();
+    expect(s.session.marqueeRect()).toBeNull();
+  });
+
+  it('a resize reports no hover container and no move delta', () => {
+    const s = setup(injector);
+    s.pointerX.set(140);
+    s.pointerY.set(140);
+    s.gesture.set(resizeGesture('se'));
+    s.pointerX.set(150);
+    expect(s.session.hoverContainer()).toBeNull();
+    expect(s.session.angle()).toBeNull();
+    expect(s.session.resizeBox()).toEqual(frame(100, 100, 50, 40));
+  });
+
+  it('works without a space: the identity transform applies', () => {
+    const gesture = signal<CanvasGesture<string> | null>(null);
+    const pointerX = signal(120);
+    const pointerY = signal(120);
+    const session = canvasSession<string>({
+      gesture,
+      pointerX,
+      pointerY,
+      modShift: signal(false),
+      modCtrl: signal(false),
+      modAlt: signal(false),
+      scrollDeltaX: signal(0),
+      scrollDeltaY: signal(0),
+      config: {
+        grid: () => undefined,
+        bounds: () => undefined,
+        snap: () => false,
+        snapThreshold: () => 6,
+        snapToCanvas: () => false,
+        lockAxisOnShift: () => false,
+        resizeMin: () => undefined,
+        resizeMax: () => undefined,
+        rotateSnap: () => undefined,
+      },
+    });
+    gesture.set({
+      kind: 'move',
+      keys: ['a'],
+      baseFrames: new Map([['a', frame(100, 100)]]),
+      union: frame(100, 100),
+      snapTargets: [],
+      containers: [],
+      start: { x: 120, y: 120 },
+      surfaceOrigin: { x: 0, y: 0 },
+    });
+    pointerX.set(133);
+    pointerY.set(127);
+    expect(session.overlayDeltaX()).toBe(13);
+    expect(session.overlayDeltaY()).toBe(7);
+  });
+
+  it('the canvas pointer subtracts the surface origin and the pan offset', () => {
+    const s = setup(injector);
+    s.space.set({ x: 30, y: 20, scale: 1 });
+    s.beginMove({ surfaceOrigin: { x: 10, y: 5 } });
+    s.pointerX.set(200);
+    s.pointerY.set(100);
+    expect(s.session.canvasPointerX()).toBe(160);
+    expect(s.session.canvasPointerY()).toBe(75);
+  });
+
+  it('the y axis divides by the scale and adds the scroll delta like x', () => {
+    const s = setup(injector);
+    s.space.set({ x: 0, y: 0, scale: 2 });
+    s.beginMove();
+    s.pointerX.set(240);
+    s.pointerY.set(280);
+    expect(s.session.overlayDeltaY()).toBe(20);
+    s.scrollDeltaY.set(20);
+    expect(s.session.overlayDeltaY()).toBe(30);
+  });
+
+  it('the snap threshold is screen px: at scale 2 a 4 canvas px gap does not snap (move and resize)', () => {
+    const s = setup(injector);
+    s.space.set({ x: 0, y: 0, scale: 2 });
+    s.beginMove({ snapTargets: [frame(160, 0, 40, 40)] });
+    s.pointerX.set(240);
+    s.pointerY.set(240);
+    s.pointerX.set(272); // +16 canvas: right edge 156, target left 160
+    expect(s.session.overlayDeltaX()).toBe(16);
+
+    s.gesture.set(null);
+    s.pointerX.set(280);
+    s.pointerY.set(280);
+    s.gesture.set(resizeGesture('e', frame(100, 100), [frame(160, 0, 40, 40)]));
+    s.pointerX.set(312);
+    expect(s.session.resizeBox()?.width).toBe(56);
+  });
+
+  it('Shift on a zero-height resize keeps a finite box (no aspect to hold)', () => {
+    const s = setup(injector);
+    s.pointerX.set(140);
+    s.pointerY.set(100);
+    s.gesture.set({
+      ...resizeGesture('se', frame(100, 100, 40, 0)),
+      start: { x: 140, y: 100 },
+    });
+    s.modShift.set(true);
+    s.pointerX.set(145);
+    s.pointerY.set(120);
+    expect(s.session.resizeBox()).toEqual(frame(100, 100, 45, 20));
+  });
+
+  it('a resize edge near a sibling exposes an x guide', () => {
+    const s = setup(injector);
+    s.pointerX.set(140);
+    s.pointerY.set(140);
+    s.gesture.set(resizeGesture('e', frame(100, 100), [frame(160, 300)]));
+    s.pointerX.set(158); // right edge 158 → snaps to 160
+    expect(s.session.resizeBox()?.width).toBe(60);
+    expect(s.session.guides()).toEqual([
+      { axis: 'x', position: 160, from: 100, to: 340 },
+    ]);
+  });
+});
+
+describe('canvasSession: guides and hover container', () => {
+  let injector: Injector;
+  beforeEach(() => {
+    TestBed.runInInjectionContext(() => {
+      injector = TestBed.inject(Injector);
+    });
+  });
+
+  it('a move with nothing to snap to never renotifies guides', () => {
+    const s = setup(injector);
+    s.beginMove();
+    const guides = s.counter(() => s.session.guides());
+    TestBed.tick();
+    guides.reset();
+    s.pointerX.set(150);
+    TestBed.tick();
+    s.pointerX.set(170);
+    TestBed.tick();
+    expect(guides.runs).toBe(0);
+  });
+
+  it('going from no guides to some exposes them', () => {
+    const s = setup(injector);
+    s.beginMove({ snapTargets: [frame(160, 0, 40, 40)] });
+    expect(s.session.guides()).toEqual([]);
+    s.pointerX.set(138);
+    expect(s.session.guides()).toEqual([
+      { axis: 'x', position: 160, from: 0, to: 140 },
+    ]);
+  });
+
+  // one transition per guide field: each change alone must reach the reader
+  it.each([
+    {
+      field: 'to',
+      targets: [frame(160, 0, 40, 40)],
+      first: { x: 138, y: 120 },
+      then: { x: 138, y: 130 },
+      before: { axis: 'x', position: 160, from: 0, to: 140 },
+      after: { axis: 'x', position: 160, from: 0, to: 150 },
+    },
+    {
+      field: 'from',
+      targets: [frame(160, 300, 40, 40)],
+      first: { x: 138, y: 120 },
+      then: { x: 138, y: 130 },
+      before: { axis: 'x', position: 160, from: 100, to: 340 },
+      after: { axis: 'x', position: 160, from: 110, to: 340 },
+    },
+    {
+      field: 'position',
+      targets: [frame(160, 0, 40, 40), frame(300, 0, 40, 40)],
+      first: { x: 138, y: 120 },
+      then: { x: 278, y: 120 },
+      before: { axis: 'x', position: 160, from: 0, to: 140 },
+      after: { axis: 'x', position: 300, from: 0, to: 140 },
+    },
+  ])('a change in $field alone updates the guide', (t) => {
+    const s = setup(injector);
+    s.beginMove({ snapTargets: t.targets });
+    s.pointerX.set(t.first.x);
+    s.pointerY.set(t.first.y);
+    expect(s.session.guides()).toEqual([t.before]);
+    s.pointerX.set(t.then.x);
+    s.pointerY.set(t.then.y);
+    expect(s.session.guides()).toEqual([t.after]);
+  });
+
+  it('a change in axis alone updates the guide', () => {
+    const s = setup(injector);
+    s.beginMove({
+      union: frame(0, 300),
+      baseFrames: new Map([['a', frame(0, 300)]]),
+      snapTargets: [frame(0, 0, 100, 100)],
+    });
+    expect(s.session.guides()).toEqual([
+      { axis: 'x', position: 0, from: 0, to: 340 },
+    ]);
+    s.pointerX.set(420);
+    s.pointerY.set(-180);
+    expect(s.session.guides()).toEqual([
+      { axis: 'y', position: 0, from: 0, to: 340 },
+    ]);
+  });
+
+  it.each([
+    {
+      name: 'area, not aspect, decides innermost',
+      containers: [
+        { key: 'outer', box: frame(0, 0, 400, 400) },
+        { key: 'inner', box: frame(0, 0, 300, 20) },
+      ],
+      expected: 'inner',
+    },
+    {
+      name: 'the smaller box wins whatever the order',
+      containers: [
+        { key: 'inner', box: frame(0, 0, 50, 50) },
+        { key: 'outer', box: frame(0, 0, 400, 400) },
+      ],
+      expected: 'inner',
+    },
+    {
+      name: 'identical boxes: the later registration wins',
+      containers: [
+        { key: 'parent', box: frame(0, 0, 100, 100) },
+        { key: 'child', box: frame(0, 0, 100, 100) },
+      ],
+      expected: 'child',
+    },
+  ])('hover container: $name', (t) => {
+    const s = setup(injector);
+    s.beginMove({ containers: t.containers });
+    s.pointerX.set(10);
+    s.pointerY.set(10);
+    expect(s.session.hoverContainer()).toBe(t.expected);
   });
 });

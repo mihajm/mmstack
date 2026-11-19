@@ -101,16 +101,22 @@ export class DndPointerEngine {
       : globalThis.document.elementsFromPoint(x, y);
   }
 
-  /** Begin a pointer drag: seed the session + fire enter for the initial targets. */
-  begin(source: PointerDragSource, x: number, y: number): void {
+  /**
+   * Begin a pointer drag: seed the session + fire enter for the initial
+   * targets. One drag at a time per scope: while a source is active another
+   * `begin` is refused and returns `false`.
+   */
+  begin(source: PointerDragSource, x: number, y: number): boolean {
+    if (this.source) return false;
     this.source = source;
     this._dragging.set(true);
     this.update(x, y);
+    return true;
   }
 
-  /** Feed a move: re-hit-test, diff enter/leave, update the session. */
-  move(_source: PointerDragSource, x: number, y: number): void {
-    if (!this.source) return; // move before begin → no-op
+  /** Feed a move: re-hit-test, diff enter/leave, update the session. Other sources are ignored. */
+  move(source: PointerDragSource, x: number, y: number): void {
+    if (this.source !== source) return;
     this.update(x, y);
   }
 
@@ -136,22 +142,23 @@ export class DndPointerEngine {
     });
   }
 
-  /** End the drag: fire drop on the current targets, return them, then clear. */
-  end(): readonly DropTargetHit[] {
+  /**
+   * End `source`'s drag: fire drop on the current targets, return them, then
+   * clear. A source that is not the active one gets `[]` and changes nothing.
+   */
+  end(source: PointerDragSource): readonly DropTargetHit[] {
+    if (this.source !== source) return [];
     const targets = this.dnd.session()?.targets ?? [];
-    const source = this.source;
-    if (source)
-      for (const t of targets)
-        this.entries.get(t.element)?.onDrop?.(source, targets);
+    for (const t of targets)
+      this.entries.get(t.element)?.onDrop?.(source, targets);
     this.reset();
     return targets;
   }
 
-  /** Abort without resolving a drop (fires leave for anything still over). */
-  cancel(): void {
-    const source = this.source;
-    if (source)
-      for (const el of this.over) this.entries.get(el)?.onDragLeave?.(source);
+  /** Abort `source`'s drag without a drop (fires leave for anything still over). */
+  cancel(source: PointerDragSource): void {
+    if (this.source !== source) return;
+    for (const el of this.over) this.entries.get(el)?.onDragLeave?.(source);
     this.reset();
   }
 

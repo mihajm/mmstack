@@ -10,7 +10,12 @@ import { makeDragSession } from './testing/drag-session';
 import type { monitorForElements as PDMonitor } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import { DndPointerEngine } from './element/pointer-engine';
-import { DndSession, injectDndActive, provideDndSession } from './session';
+import {
+  DndSession,
+  injectDndActive,
+  injectDndSession,
+  provideDndSession,
+} from './session';
 
 // Capture the config DndSession hands to pragmatic's monitor, typed against the
 // REAL pragmatic signature — a contract guard: if pragmatic changes the monitor
@@ -20,12 +25,14 @@ type MonitorEvent = Parameters<NonNullable<MonitorConfig['onDrag']>>[0];
 
 let monitorConfig: MonitorConfig | undefined;
 let monitorCalls = 0;
+let monitorCleanup = vi.fn();
 
 vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
   monitorForElements: (config: MonitorConfig) => {
     monitorConfig = config;
     monitorCalls++;
-    return () => undefined;
+    monitorCleanup = vi.fn();
+    return monitorCleanup;
   },
   draggable: vi.fn(() => () => undefined),
   dropTargetForElements: vi.fn(() => () => undefined),
@@ -455,5 +462,115 @@ describe('DndSession', () => {
     session.ensureNativeMonitor();
     expect(monitorConfig).toBeUndefined();
     expect(session.active()).toBe(false);
+  });
+});
+
+describe('DndSession contract', () => {
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    monitorConfig = undefined;
+  });
+
+  function native() {
+    const session = TestBed.inject(DndSession);
+    session.ensureNativeMonitor();
+    return { session, sourceEl: document.createElement('div') };
+  }
+
+  it('tags a native drag as a transfer', () => {
+    const { session, sourceEl } = native();
+    monitorConfig?.onDragStart?.(makeEvent({ sourceEl }));
+    expect(session.session()?.kind).toBe('transfer');
+  });
+
+  it('pointer follows a move along either axis', () => {
+    const { session, sourceEl } = native();
+    monitorConfig?.onDragStart?.(makeEvent({ sourceEl, x: 5, y: 5 }));
+    expect(session.pointer()).toEqual({ x: 5, y: 5 });
+    monitorConfig?.onDrag?.(makeEvent({ sourceEl, x: 5, y: 6 }));
+    expect(session.pointer()).toEqual({ x: 5, y: 6 });
+    monitorConfig?.onDrag?.(makeEvent({ sourceEl, x: 7, y: 6 }));
+    expect(session.pointer()).toEqual({ x: 7, y: 6 });
+  });
+
+  it('targets refresh when a data key appears or goes away', () => {
+    const { session, sourceEl } = native();
+    const element = document.createElement('div');
+    monitorConfig?.onDragStart?.(
+      makeEvent({ sourceEl, targets: [{ element, data: {} }] }),
+    );
+    expect(session.targets()[0].data).toEqual({});
+    monitorConfig?.onDrag?.(
+      makeEvent({ sourceEl, targets: [{ element, data: { edge: 'top' } }] }),
+    );
+    expect(session.targets()[0].data).toEqual({ edge: 'top' });
+    monitorConfig?.onDrag?.(
+      makeEvent({ sourceEl, targets: [{ element, data: {} }] }),
+    );
+    expect(session.targets()[0].data).toEqual({});
+  });
+
+  it('targets with unchanged data do not re-notify across frames', () => {
+    const { session, sourceEl } = native();
+    const element = document.createElement('div');
+    const frame = (x: number) =>
+      makeEvent({ sourceEl, x, targets: [{ element, data: { edge: 'top' } }] });
+    const runs = trackRuns(() => session.targets());
+    TestBed.tick();
+    monitorConfig?.onDragStart?.(frame(0));
+    TestBed.tick();
+    const after = runs();
+    for (let i = 1; i <= 4; i++) {
+      monitorConfig?.onDrag?.(frame(i));
+      TestBed.tick();
+    }
+    expect(runs()).toBe(after);
+  });
+
+  it('a pointer-only write keeping the targets array does not re-notify targets', () => {
+    const session = TestBed.inject(DndSession);
+    const element = document.createElement('div');
+    const s0 = makeDragSession({
+      targets: [{ element, data: { edge: 'top' } }],
+    });
+    session.session.set(s0);
+    const runs = trackRuns(() => session.targets());
+    TestBed.tick();
+    const after = runs();
+    for (let i = 1; i <= 4; i++) {
+      session.session.set({ ...s0, pointer: { x: i, y: i } });
+      TestBed.tick();
+    }
+    expect(runs()).toBe(after);
+  });
+
+  it('targetEls refresh when only a later element changes', () => {
+    const { session, sourceEl } = native();
+    const [a, b, c] = [0, 1, 2].map(() => document.createElement('div'));
+    const hit = (element: Element) => ({ element, data: {} });
+    monitorConfig?.onDragStart?.(
+      makeEvent({ sourceEl, targets: [hit(a), hit(b)] }),
+    );
+    expect(session.targetEls()[1]).toBe(b);
+    monitorConfig?.onDrag?.(makeEvent({ sourceEl, targets: [hit(a), hit(c)] }));
+    expect(session.targetEls()).toHaveLength(2);
+    expect(session.targetEls()[0]).toBe(a);
+    expect(session.targetEls()[1]).toBe(c);
+  });
+
+  it('releases the native monitor when its injector is destroyed', () => {
+    native();
+    const cleanup = monitorCleanup;
+    expect(cleanup).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('injectDndSession returns the writable session the readers derive from', () => {
+    const s = TestBed.runInInjectionContext(injectDndSession);
+    s.set(makeDragSession());
+    expect(TestBed.runInInjectionContext(injectDndActive)()).toBe(true);
+    s.set(null);
+    expect(TestBed.runInInjectionContext(injectDndActive)()).toBe(false);
   });
 });

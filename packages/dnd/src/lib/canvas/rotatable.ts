@@ -2,18 +2,20 @@ import {
   afterNextRender,
   computed,
   Directive,
-  effect,
   ElementRef,
   inject,
   Injector,
   input,
   runInInjectionContext,
   signal,
-  untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { pointerDrag, isServer } from '@mmstack/primitives';
+import {
+  pointerDrag,
+  isServer,
+  type PointerDragState,
+} from '@mmstack/primitives';
 
 import { resolveSignal } from '../internal/resolve';
 import type { Resolvable } from '../internal/types';
@@ -27,6 +29,7 @@ export type RotatableOptions = {
   snap?: number;
   snapAlways?: boolean;
   disabled?: Resolvable<boolean>;
+  /** Pixels before a rotation starts (vs a click). @default 2 */
   activationThreshold?: number;
   onRotateStart?: (e: { angle: number }) => void;
   onRotate?: (e: { angle: number }) => void;
@@ -57,31 +60,24 @@ export function rotatable(
   const centerSig = resolveSignal(opts.center);
   const disabled = opts.disabled ? resolveSignal(opts.disabled) : undefined;
 
-  const drag = pointerDrag({
-    target: host,
-    activationThreshold: opts.activationThreshold ?? 2,
-  });
-
-  const rotating = computed(
-    () => drag.unthrottled().active && !(disabled?.() ?? false),
-  );
-
   let center: Point | null = null;
-  let pressIgnored = false;
   let baseAngle = 0;
   let startPointer = 0;
+  // disabled at press → the whole gesture stays inert, `rotating` included
+  const pressIgnored = signal(false);
 
-  effect(() => {
-    const d = drag.unthrottled();
-    const isDisabled = untracked(() => disabled?.() ?? false);
+  // onChange sees every transition, including a move and release in one
+  // frame; it runs untracked, so options and callbacks never subscribe.
+  const step = (d: PointerDragState): void => {
+    const isDisabled = disabled?.() ?? false;
 
-    if (d.pointerId !== null && center === null && !pressIgnored) {
+    if (d.pointerId !== null && center === null && !pressIgnored()) {
       if (isDisabled) {
-        pressIgnored = true;
+        pressIgnored.set(true);
         return;
       }
-      center = untracked(() => centerSig());
-      baseAngle = untracked(angle);
+      center = centerSig();
+      baseAngle = angle();
       startPointer = angleOf(d.start, center);
       opts.onRotateStart?.({ angle: baseAngle });
     }
@@ -95,12 +91,23 @@ export function rotatable(
       opts.onRotate?.({ angle: next });
     }
 
-    if (d.pointerId === null) pressIgnored = false;
+    if (d.pointerId === null) pressIgnored.set(false);
     if (d.pointerId === null && center !== null) {
       center = null;
-      opts.onRotateEnd?.({ angle: untracked(angle) });
+      opts.onRotateEnd?.({ angle: angle() });
     }
+  };
+
+  const drag = pointerDrag({
+    target: host,
+    activationThreshold: opts.activationThreshold ?? 2,
+    onChange: step,
   });
+
+  const rotating = computed(
+    () =>
+      drag.unthrottled().active && !pressIgnored() && !(disabled?.() ?? false),
+  );
 
   return { rotating, angle: angle.asReadonly() };
 }

@@ -1,19 +1,32 @@
+import { isDevMode } from '@angular/core';
 import type { AutoScrollPlugin, Axis } from '@mmstack/dnd';
 
-/** Nearest ancestor (incl. `el`) that scrolls on `axis`; falls back to the page. */
+/**
+ * Nearest ancestor (incl. `el`) that scrolls on `axis`; falls back to the page.
+ * The body counts only when `html` clips its overflow: otherwise the body's
+ * overflow propagates to the viewport and the page scroller is the one to move.
+ */
 function scrollParentOf(el: HTMLElement, axis: Axis): HTMLElement {
   const overflow = axis === 'y' ? 'overflowY' : 'overflowX';
-  let node: HTMLElement | null = el;
-  while (node && node !== document.body && node !== document.documentElement) {
+  const scrolls = (node: HTMLElement): boolean => {
     const o = getComputedStyle(node)[overflow as 'overflowY'];
     const canScroll =
       axis === 'y'
         ? node.scrollHeight > node.clientHeight
         : node.scrollWidth > node.clientWidth;
-    if ((o === 'auto' || o === 'scroll') && canScroll) return node;
+    return (o === 'auto' || o === 'scroll') && canScroll;
+  };
+  const html = document.documentElement;
+  let node: HTMLElement | null = el;
+  while (node && node !== document.body && node !== html) {
+    if (scrolls(node)) return node;
     node = node.parentElement;
   }
-  return (document.scrollingElement as HTMLElement) ?? document.documentElement;
+  if (node === document.body) {
+    const ho = getComputedStyle(html)[overflow as 'overflowY'];
+    if (ho && ho !== 'visible' && scrolls(node)) return node;
+  }
+  return (document.scrollingElement as HTMLElement) ?? html;
 }
 
 /**
@@ -44,6 +57,16 @@ export type EdgeAutoScrollContext = {
   onScroll?: (delta: number) => void;
 };
 
+// A dev hint, not app state: once per page load is enough.
+let warnedNoPointer = false;
+function warnNoPointer(): void {
+  if (warnedNoPointer || !isDevMode()) return;
+  warnedNoPointer = true;
+  console.warn(
+    "edgeAutoScroll: called without a `pointer`, so it does nothing. The reorderable, placement grid and canvas engines pass one; `autoScroll()` / `mmAutoScroll` do not, so register pragmatic's `autoScrollForElements` for those.",
+  );
+}
+
 /**
  * A zero-dependency edge auto-scroll {@link AutoScrollPlugin}: while active, scroll
  * the nearest scroll parent when the pointer nears its leading/trailing edge. rAF-
@@ -58,7 +81,8 @@ export type EdgeAutoScrollContext = {
  *
  * It requires a pointer-fed context ({@link EdgeAutoScrollContext}), which the
  * reorderable engines supply; used without one (e.g. the bare `mmAutoScroll`
- * directive, which is meant for pragmatic's monitor-driven auto-scroll) it no-ops.
+ * directive, which is meant for pragmatic's monitor-driven auto-scroll) it no-ops,
+ * with a one-time warning in dev mode.
  *
  * Register via `provideDnd({ plugins: { autoScroll: edgeAutoScroll } })`.
  */
@@ -74,8 +98,11 @@ export const edgeAutoScroll: AutoScrollPlugin = (args) => {
     onScroll,
   } = args as EdgeAutoScrollContext & { element: Element };
 
-  if (!pointer || typeof requestAnimationFrame !== 'function')
+  if (!pointer) {
+    warnNoPointer();
     return () => undefined;
+  }
+  if (typeof requestAnimationFrame !== 'function') return () => undefined;
 
   const scrollEl = scrollParentOf(element, axis);
   const scrollStart = axis === 'y' ? scrollEl.scrollTop : scrollEl.scrollLeft;

@@ -104,7 +104,9 @@ type DraggablePointerOptions = {
  * Draggable options, discriminated by `engine`. Omit `engine` (or `'native'`) for
  * native HTML5 DnD (files, cross-window, browser drag image) + `hitbox`; `'pointer'`
  * drives the pointer engine (+ `activationThreshold`) — each variant *forbids* the
- * other engine's options at compile time.
+ * other engine's options at compile time. The pointer engine runs one drag at a
+ * time per `provideDnd` scope: a press that activates while another pointer drag
+ * is in flight (a second finger, say) is ignored until that drag ends.
  */
 export type CreateDraggableOptions<TData, TMeta extends DragMeta = DragMeta> =
   | (DraggableSharedOptions<TData, TMeta> &
@@ -241,7 +243,12 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
                 },
                 kind: 'transfer',
               };
-              eng.begin(source, g.current.x, g.current.y);
+              // one drag at a time per scope: a refused press stays inert
+              if (!eng.begin(source, g.current.x, g.current.y)) {
+                source = null;
+                denied = true;
+                return;
+              }
               const cfg = previewResolver?.();
               if (cfg && envInjector && appRef)
                 preview = createPointerPreview(cfg, envInjector, appRef);
@@ -260,8 +267,8 @@ export function draggable<TData, TMeta extends DragMeta = DragMeta>(
             denied = false;
             if (!source) return;
             let targets: readonly DropTargetHit[] = [];
-            if (g.cancelled) eng.cancel();
-            else targets = eng.end();
+            if (g.cancelled) eng.cancel(source);
+            else targets = eng.end(source);
             if (preview) {
               preview.destroy();
               preview = null;

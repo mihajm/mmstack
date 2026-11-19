@@ -151,6 +151,10 @@ export function connectReorderableItem<T, K = unknown>(
  * {@link reorderableItemTouchAction}; add a `[mmReorderableHandle]` child to
  * scope dragging (and the `touch-action`) to just the handle, leaving the body
  * scrollable on touch.
+ *
+ * The directive owns the row's inline `transform` and `transition`: under the
+ * pointer engine a row at rest gets `transition: none`, so the transform reset
+ * at drop never animates. Put your own transitions (a hover fade) on a child.
  */
 @Directive({
   selector: '[mmReorderableItem]',

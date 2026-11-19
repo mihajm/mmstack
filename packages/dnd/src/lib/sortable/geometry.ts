@@ -230,6 +230,9 @@ export function insertIndexFromSlots(
  * below, like the vertical list it visually is. Used for foreign-entry
  * collision and the target's opening gap, where the last item shifts into a
  * slot that doesn't exist yet.
+ *
+ * `centers` must not be empty (an empty grid has no last center to extend):
+ * it throws a `TypeError` on an empty array.
  */
 export function wrapVirtualSlot(
   centers: readonly Point[],

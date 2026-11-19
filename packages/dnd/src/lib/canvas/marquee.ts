@@ -1,10 +1,4 @@
-import {
-  computed,
-  ElementRef,
-  linkedSignal,
-  type Signal,
-  inject,
-} from '@angular/core';
+import { computed, ElementRef, type Signal, inject } from '@angular/core';
 import { pointerDrag, isServer } from '@mmstack/primitives';
 
 import { intersects, normalizeRect, type Box } from './geometry';
@@ -12,6 +6,7 @@ import { intersects, normalizeRect, type Box } from './geometry';
 export type MarqueeItem<T> = { id: unknown; box: Box; value: T };
 
 export type MarqueeOptions = {
+  /** Px the pointer must travel before the rubber band starts. @default 4 */
   activationThreshold?: number;
   /** Mouse buttons that begin a marquee. @default [0] */
   buttons?: number[];
@@ -54,16 +49,13 @@ export function marquee<T>(
 
   const selecting = computed(() => drag.unthrottled().active);
 
-  // the host origin, measured ONCE per gesture (keyed on the pointer id) —
-  // no layout read per pointer frame
-  const origin = linkedSignal<number | null, { left: number; top: number }>({
-    source: () => drag.unthrottled().pointerId,
-    computation: (id, prev) => {
-      if (id === null) return { left: 0, top: 0 };
-      if (prev && prev.source === id) return prev.value;
-      const r = host.getBoundingClientRect();
-      return { left: r.left, top: r.top };
-    },
+  // every press gets a fresh start point; the pointer id repeats (the mouse is always 1)
+  const pressStart = computed(() => drag.unthrottled().start);
+  // the host origin, measured once per press, never per pointer frame
+  const origin = computed(() => {
+    pressStart();
+    const r = host.getBoundingClientRect();
+    return { left: r.left, top: r.top };
   });
 
   const rect = computed<Box | null>(() => {

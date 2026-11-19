@@ -7,7 +7,6 @@ import {
   resolveAutoScroll,
   resolveHitbox,
   resolvePostMoveFlash,
-  ɵclearWarnedPlugins,
   type AutoScrollPlugin,
   type HitboxPlugin,
   type PostMoveFlash,
@@ -32,6 +31,13 @@ beforeEach(() => TestBed.resetTestingModule());
 describe('injectDndConfig', () => {
   it('returns null when provideDnd was never called', () => {
     TestBed.runInInjectionContext(() => expect(injectDndConfig()).toBeNull());
+  });
+
+  it('accepts a factory config', () => {
+    TestBed.configureTestingModule({
+      providers: [provideDnd(() => ({ plugins: { hitbox: hitboxA } }))],
+    });
+    expect(resolveHitbox(inj())()).toBe(hitboxA);
   });
 
   it('returns the registered config', () => {
@@ -86,8 +92,6 @@ describe('plugin resolution order (option → DI → null)', () => {
 });
 
 describe('missing-plugin dev warning (baked into the resolver)', () => {
-  beforeEach(() => ɵclearWarnedPlugins());
-
   it('warns once when a required plugin resolves to null, then no-ops (memoized)', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const get = resolveHitbox(inj()); // warn defaults to true
@@ -97,6 +101,37 @@ describe('missing-plugin dev warning (baked into the resolver)', () => {
     const msg = spy.mock.calls[0]?.[0] as string;
     expect(msg).toContain('hitbox');
     expect(msg).toContain('provideDnd');
+    spy.mockRestore();
+  });
+
+  it('warns once per plugin across separate resolvers', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    resolveHitbox(inj())();
+    resolveHitbox(inj())();
+    resolveAutoScroll(inj())();
+    resolveAutoScroll(inj())();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[0]?.[0]).toContain('"hitbox"');
+    expect(spy.mock.calls[1]?.[0]).toContain('"autoScroll"');
+    spy.mockRestore();
+  });
+
+  it('warns again in a fresh app: the warn-once state belongs to the root injector', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    resolveHitbox(inj())();
+    TestBed.resetTestingModule();
+    resolveHitbox(inj())();
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+
+  it('does not warn when the plugin is registered', () => {
+    TestBed.configureTestingModule({
+      providers: [provideDnd({ plugins: { hitbox: hitboxA } })],
+    });
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(resolveHitbox(inj())()).toBe(hitboxA);
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 

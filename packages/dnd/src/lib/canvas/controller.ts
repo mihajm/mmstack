@@ -59,6 +59,11 @@ export type CanvasReparentEvent<T, K> = {
    * New frames REBASED into the target container's space (delta plus the
    * origin shift from each item's start container). NOT applied — the
    * consumer restructures its tree and writes frames in ONE update.
+   *
+   * The origin shift comes from the containers' measured boxes at gesture
+   * start, which are axis-aligned bounding boxes: a rotated container rebases
+   * by its bounding box origin, not its own. A container with no rendered
+   * element counts as the root origin (0, 0).
    */
   readonly patches: ReadonlyMap<K, CanvasFrame>;
   /** The container to move the items into (`null` = root). */
@@ -77,9 +82,18 @@ export type CanvasOptions<T, K> = {
   readonly grid?: GridSpec | (() => GridSpec | undefined);
   /** Clamp the moved selection's union box within these canvas-space bounds. */
   readonly bounds?: Box | (() => Box | undefined);
-  /** Sibling snaplines. `true` (default) snaps against every non-participant. */
+  /**
+   * Sibling snaplines. `true` (default) snaps against every non-participant.
+   * `threshold` is in screen px (default 6), so it holds steady under zoom.
+   * `toCanvas: true` also snaps to the `bounds` edges (default `false`).
+   */
   readonly snap?: boolean | { threshold?: number; toCanvas?: boolean };
-  /** Resize handles. `true` (default) enables with no min/max. */
+  /**
+   * Resize handles. `true` (default) enables with no min/max. While resizing,
+   * Shift holds the start aspect ratio (on a corner handle the axis the
+   * pointer moved further drives, width on a tie) and Alt resizes from the
+   * center.
+   */
   readonly resize?:
     | boolean
     | {
@@ -96,9 +110,17 @@ export type CanvasOptions<T, K> = {
   readonly space?: CanvasSpace;
   /** Arrow-key nudging (Shift = ×10) and Cmd/Ctrl+arrows resize. @default true */
   readonly keyboard?: boolean | { step?: number; largeStep?: number };
-  /** Lock a move to the dominant axis while Shift is held. @default true */
+  /**
+   * Lock a move to the dominant axis while Shift is held. Equal travel on both
+   * axes keeps the x axis. @default true
+   */
   readonly lockAxisOnShift?: boolean;
-  /** Opt-in edge auto-scroll of the surface's scroll parent. */
+  /**
+   * Opt-in edge auto-scroll of the surface's scroll parent. `edge` is the
+   * max engage band in px (default 48) and `speed` the max px per 60fps
+   * frame (default 16). `edgeProportion` and `maxSpeedAt` pass through as
+   * given, so unset they take the plugin's defaults.
+   */
   readonly autoScroll?:
     | {
         edge?: number;
@@ -130,9 +152,14 @@ export type CanvasOptions<T, K> = {
   readonly canTransform?: (item: T, mode: CanvasCommitMode) => boolean;
   /**
    * CMMN-style containment: some items are containers; a move resolves the
-   * innermost accepting container under the pointer and reports it. With
-   * `containerOf`, dropping over a DIFFERENT container becomes a reparent
-   * (see {@link CanvasOptions.onReparent}).
+   * innermost accepting container under the pointer and reports it. A
+   * reparent needs both `containerOf` and {@link CanvasOptions.onReparent}:
+   * dropping over a DIFFERENT container then hands the consumer a
+   * {@link CanvasReparentEvent}. With `containerOf` but no `onReparent`, that
+   * drop commits as a plain move in the item's current container space (the
+   * frames are not rebased) and `onCommit` reports the hovered `container`.
+   * `containerOf` alone still feeds the ancestry rule: a selected item inside
+   * another selected item rides on it instead of moving twice.
    */
   readonly containers?: {
     isContainer(item: T): boolean;
@@ -146,7 +173,11 @@ export type CanvasOptions<T, K> = {
   readonly onCommit?: (event: CanvasCommitEvent<T, K>) => void;
   /** A move ended over a different container — the consumer applies it. */
   readonly onReparent?: (event: CanvasReparentEvent<T, K>) => void;
-  /** Screen-reader message after a keyboard transform, `false` to disable. */
+  /**
+   * Builds the screen-reader message after a keyboard nudge or resize. Opt-in:
+   * there is no default message, so keyboard transforms are silent unless you
+   * pass a builder. `false` opts out of one set elsewhere.
+   */
   readonly announceTransform?:
     | false
     | ((event: { item: T; frame: CanvasFrame; count: number }) => string);
@@ -193,7 +224,11 @@ export type CanvasController<T, K = unknown> = {
   press(key: K, shift: boolean): void;
   /** An empty-surface click clears the selection. */
   clearPress(): void;
-  /** Keyboard: nudge the selection by grid steps (Shift = ×10 handled by caller). */
+  /**
+   * Keyboard: nudge the selection by `dx`/`dy` steps. A step is
+   * `keyboard.step` (default: the grid step, or 1 px). `large` (the caller
+   * passes Shift) uses `keyboard.largeStep` (default: 10 steps).
+   */
   nudge(dx: number, dy: number, large: boolean): boolean;
   /** Keyboard: resize the (single) selected item by grid steps. */
   nudgeResize(dw: number, dh: number, large: boolean): boolean;
@@ -391,7 +426,6 @@ export function canvas<T, K>(
         baseFrames: new Map(),
         union: { x: 0, y: 0, width: 0, height: 0 },
         snapTargets: [],
-        containers: [],
         start: startCanvas,
         surfaceOrigin,
       });
@@ -406,6 +440,7 @@ export function canvas<T, K>(
       if (!pressed || !gate(pressed, 'move')) return false;
 
       // Figma press semantics: dragging an unselected item selects it (Shift adds)
+      const before = untracked(sel.ids);
       if (!sel.has(k)) {
         if (shift) sel.add(k);
         else sel.set([k]);
@@ -424,7 +459,11 @@ export function canvas<T, K>(
       for (const id of keys) {
         const b = boxes.get(id);
         const it = map.get(id);
-        if (!b || !it) return false;
+        // an unrendered participant has no box: refuse, and the press selects nothing either
+        if (!b || !it) {
+          if (untracked(sel.ids) !== before) sel.set(before);
+          return false;
+        }
         baseFrames.set(id, { ...b, rotation: frame(it).rotation });
         participantBoxes.push(b);
       }
@@ -515,7 +554,6 @@ export function canvas<T, K>(
         baseFrames: new Map([[k, { ...box, rotation: frame(item).rotation }]]),
         union: box,
         snapTargets: measureSnapTargets(k),
-        containers: [],
         start: startCanvas,
         surfaceOrigin,
       });
@@ -534,7 +572,6 @@ export function canvas<T, K>(
       baseFrames: new Map([[k, { ...box, rotation: frame(item).rotation }]]),
       union: box,
       snapTargets: [],
-      containers: [],
       start: startCanvas,
       surfaceOrigin,
       pivot,

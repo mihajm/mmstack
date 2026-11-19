@@ -4,6 +4,7 @@ import {
   computed,
   DestroyRef,
   Directive,
+  effect,
   ElementRef,
   inject,
   Injector,
@@ -24,7 +25,9 @@ import type { ResizeDirection } from './transform';
 /**
  * Surface wiring: the ONE delegated gesture (arbitrated into move / resize /
  * rotate / marquee), plain-click selection semantics, two-axis edge
- * auto-scroll, and the a11y announce sink. Injection context only.
+ * auto-scroll, and the a11y announce sink. Keyboard transforms are announced
+ * only when the controller has an `announceTransform` builder; there is no
+ * default message. Injection context only.
  */
 export function connectCanvasSurface<T, K = unknown>(
   controller: () => CanvasController<T, K>,
@@ -165,7 +168,8 @@ const ARROWS: Record<string, { x: number; y: number }> = {
 
 /**
  * Item wiring: registration + rendered-state bindings + keyboard (arrows
- * nudge the selection by a grid step, Shift = ×10, Cmd/Ctrl+arrows resize).
+ * nudge the selection by one step, Shift by the large step, which is
+ * `keyboard.largeStep` or 10 steps; Cmd/Ctrl+arrows resize).
  */
 export function connectCanvasItem<T, K = unknown>(
   controller: () => CanvasController<T, K>,
@@ -176,17 +180,29 @@ export function connectCanvasItem<T, K = unknown>(
     element ?? inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   const injector = inject(Injector);
 
+  // registered under the item's current key: a reused element (`track $index`)
+  // moves to its new key, and destroy removes exactly what was registered
+  let registered: { c: CanvasController<T, K>; k: K } | null = null;
+  const unregister = (): void => {
+    registered?.c.unregister(registered.k, el);
+    registered = null;
+  };
+  const sync = (): void => {
+    const c = controller();
+    const k = c.key(item());
+    if (registered?.c === c && Object.is(registered.k, k)) return;
+    untracked(unregister);
+    untracked(() => c.register(k, el));
+    registered = { c, k };
+  };
   afterNextRender(
     () => {
-      const c = controller();
-      c.register(c.key(item()), el);
+      untracked(sync);
+      effect(sync, { injector });
     },
     { injector },
   );
-  inject(DestroyRef).onDestroy(() => {
-    const c = untracked(controller);
-    c.unregister(c.key(untracked(item)), el);
-  });
+  inject(DestroyRef).onDestroy(unregister);
 
   let inner: CanvasItemState<K> | undefined;
   const get = () => (inner ??= controller().itemState(item));
@@ -300,7 +316,8 @@ export class CanvasHandle {
 
 /**
  * A resize handle (selection chrome): `<div mmCanvasResizeHandle="se">`.
- * Acts on the single selected item; render inside or outside items.
+ * Acts on the single selected item; render inside or outside items. A bare
+ * `mmCanvasResizeHandle` is the `se` handle.
  */
 @Directive({
   selector: '[mmCanvasResizeHandle]',
@@ -311,8 +328,9 @@ export class CanvasHandle {
   },
 })
 export class CanvasResizeHandle {
-  readonly direction = input<ResizeDirection>('se', {
+  readonly direction = input<ResizeDirection, ResizeDirection | ''>('se', {
     alias: 'mmCanvasResizeHandle',
+    transform: (v) => v || 'se',
   });
 }
 

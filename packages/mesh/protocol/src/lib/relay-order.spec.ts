@@ -76,7 +76,11 @@ function room() {
     });
     return peer;
   };
-  const write = (origin: string, ops?: SyncOp[]): void => {
+  const write = (
+    origin: string,
+    ops?: SyncOp[],
+    schemaVersion?: number,
+  ): void => {
     const peer = peers.get(origin) as Peer;
     peer.conn.receive({
       t: 'env',
@@ -90,14 +94,43 @@ function room() {
         hlc: { p: ++clock, l: 0 },
         policyVersion: 0,
         ops: ops ?? [set(['k', key++], key)],
+        schemaVersion,
       },
     });
   };
-  return { relay, peers, admitted, join, write };
+  let schema = 0;
+  /** A root replace that raises the schema: a cut whose row is this envelope. */
+  const migrate = (origin: string): void =>
+    write(origin, [set([], { k: {}, schema: schema + 1 })], ++schema);
+  return { relay, peers, admitted, join, write, migrate };
 }
 
 const docSeq = (msg: ServerMsg): number | undefined =>
   msg.t === 'welcome' ? msg.seq : msg.t === 'env' ? msg.env.seq : undefined;
+
+/**
+ * Property R on one connection: envelope seqs strictly increase, and a welcome's seq is at or
+ * above every seq before it, equal only to the migration envelope whose cut it announces (that
+ * re-welcome carries the envelope's own seq). The first breach, or null.
+ */
+function breachOfR(got: readonly ServerMsg[]): string | null {
+  let prev: ServerMsg | undefined;
+  for (const msg of got) {
+    const seq = docSeq(msg);
+    if (seq === undefined) continue;
+    const last = prev && docSeq(prev);
+    const announces =
+      msg.t === 'welcome' &&
+      msg.mode === 'snapshot' &&
+      msg.reason === 'migration' &&
+      prev?.t === 'env' &&
+      prev.env.instance !== msg.instance;
+    if (last !== undefined && (seq < last || (seq === last && !announces)))
+      return `read ${msg.t} seq ${seq} after ${last}`;
+    prev = msg;
+  }
+  return null;
+}
 
 /** Property R and C over everything the peers received; the first violation, or null. */
 function violation(
@@ -105,12 +138,10 @@ function violation(
   admitted: readonly { seq: number }[],
 ): string | null {
   for (const peer of peers) {
-    const seqs = peer.got
-      .map(docSeq)
-      .filter((s): s is number => s !== undefined);
-    for (let i = 1; i < seqs.length; i++) {
-      if (seqs[i] <= seqs[i - 1])
-        return `${peer.origin} read seq ${seqs[i]} after ${seqs[i - 1]}: [${seqs.join(', ')}]`;
+    const r = breachOfR(peer.got);
+    if (r) {
+      const seqs = peer.got.map(docSeq).filter((s) => s !== undefined);
+      return `${peer.origin} ${r}: [${seqs.join(', ')}]`;
     }
     const first = peer.got.find((m) => m.t === 'welcome');
     if (!first || first.t !== 'welcome') return `${peer.origin} never welcomed`;
@@ -187,9 +218,69 @@ describe('relay: delivery order under re-entrant sockets', () => {
     expect(violation(r.peers.values(), r.admitted)).toBeNull();
   });
 
-  it('holds R and C over random re-entrant schedules (2000 seeds)', () => {
+  it('a migration re-welcomes at its own seq: R as stated holds, a strictly increasing welcome seq would not', () => {
+    const r = room();
+    r.join('a');
+    const b = r.join('b');
+    r.write('a', [set([], { k: {} })]);
+    let wrote = false;
+    b.react = (msg) => {
+      if (msg.t !== 'welcome' || wrote) return;
+      wrote = true;
+      r.write('b');
+    };
+    r.migrate('a');
+    const seqs = b.got.map(docSeq).filter((s) => s !== undefined);
+    expect(seqs).toEqual([0, 1, 2, 2, 3]);
+    expect(b.got.filter((m) => m.t === 'welcome')[1]).toMatchObject({
+      mode: 'snapshot',
+      reason: 'migration',
+    });
+    expect(violation(r.peers.values(), r.admitted)).toBeNull();
+    expect(seqs.every((s, i) => i === 0 || s > seqs[i - 1])).toBe(false);
+  });
+
+  it('a welcome at an envelope seq that is not a migration breaks R', () => {
+    const at = (seq: number, instance: string): ServerMsg => ({
+      t: 'welcome',
+      room: 'r',
+      seq,
+      instance,
+      schemaVersion: 0,
+      mode: 'up-to-date',
+      peers: [],
+      members: [],
+    });
+    const env = (seq: number): ServerMsg => ({
+      t: 'env',
+      room: 'r',
+      env: {
+        proto: MESH_PROTO_VERSION,
+        instance: 'g0',
+        origin: 'a',
+        writer: 'a',
+        version: seq,
+        hlc: { p: seq, l: 0 },
+        policyVersion: 0,
+        ops: [],
+        seq,
+      },
+    });
+    expect(breachOfR([at(0, 'g0'), env(1), at(1, 'g1')])).toBe(
+      'read welcome seq 1 after 1',
+    );
+    expect(breachOfR([at(0, 'g0'), env(1), env(1)])).toBe(
+      'read env seq 1 after 1',
+    );
+    expect(breachOfR([at(0, 'g0'), env(2), at(1, 'g0')])).toBe(
+      'read welcome seq 1 after 2',
+    );
+  });
+
+  it('holds R and C over random re-entrant schedules with cuts and migrations (2000 seeds)', () => {
     let failures = 0;
     let first: string | null = null;
+    let announced = 0;
     for (let seed = 0; seed < 2000; seed++) {
       const rnd = mulberry32(seed);
       const r = room();
@@ -204,6 +295,7 @@ describe('relay: delivery order under re-entrant sockets', () => {
           budget--;
           const roll = rnd();
           if (roll < 0.15 && joined < 5) arm(r.join(`j${joined++}`));
+          else if (roll < 0.25) r.migrate(pick([...r.peers.keys()]));
           else r.write(pick([...r.peers.keys()]));
         };
       };
@@ -215,7 +307,12 @@ describe('relay: delivery order under re-entrant sockets', () => {
         const roll = rnd();
         if (roll < 0.15) r.relay.cut('r', { reason: 'compaction' });
         else if (roll < 0.25 && joined < 5) arm(r.join(`j${joined++}`));
+        else if (roll < 0.35) r.migrate(pick([...r.peers.keys()]));
         else r.write(pick([...r.peers.keys()]));
+      }
+      for (const peer of r.peers.values()) {
+        const seqs = peer.got.map(docSeq).filter((s) => s !== undefined);
+        if (seqs.some((s, i) => i > 0 && s === seqs[i - 1])) announced++;
       }
       const v = violation(r.peers.values(), r.admitted);
       if (v) {
@@ -225,5 +322,7 @@ describe('relay: delivery order under re-entrant sockets', () => {
     }
     expect(first).toBeNull();
     expect(failures).toBe(0);
+    // the schedules reach the re-welcome a migration sends at its own seq
+    expect(announced).toBeGreaterThan(500);
   });
 });

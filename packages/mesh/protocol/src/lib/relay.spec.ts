@@ -2310,7 +2310,8 @@ describe('release gate (pure model)', () => {
    * One randomized run: `n` groups submitted in order, interleaved with resolutions of any
    * still-pending promise (resolution order is deliberately NOT submission order).
    */
-  const run = async (seed: number) => {
+  type MakeGate = (emit: (id: number) => void) => Gate<number>;
+  const run = async (seed: number, make: MakeGate = releaseGate) => {
     const rnd = mulberry32(seed);
     const n = 3 + Math.floor(rnd() * 6);
     const groups: Group[] = [];
@@ -2320,7 +2321,7 @@ describe('release gate (pure model)', () => {
 
     const resolved = new Set<number>();
     const emitted: { id: number; resolvedThen: ReadonlySet<number> }[] = [];
-    const gate = releaseGate<number>((id) =>
+    const gate = make((id) =>
       emitted.push({ id, resolvedThen: new Set(resolved) }),
     );
 
@@ -2345,6 +2346,16 @@ describe('release gate (pure model)', () => {
     await settle();
     return { n, groups, emitted };
   };
+
+  /** The first group emitted before it or an earlier group was durable, if any. */
+  const early = (
+    emitted: readonly { id: number; resolvedThen: ReadonlySet<number> }[],
+  ): number | undefined =>
+    emitted.find((e) =>
+      Array.from({ length: e.id + 1 }, (_, j) => j).some(
+        (j) => !e.resolvedThen.has(j),
+      ),
+    )?.id;
 
   it('releases in submit order, never before its own promise, never before an earlier one (200 seeds)', async () => {
     for (let seed = 0; seed < 200; seed++) {
@@ -2399,19 +2410,17 @@ describe('release gate (pure model)', () => {
     }
   });
 
-  it('an ungated emitter fails the same safety assertion (the property is not vacuous)', async () => {
-    const resolved = new Set<number>();
-    const emitted: { id: number; resolvedThen: ReadonlySet<number> }[] = [];
-    const ungated = (id: number) =>
-      emitted.push({ id, resolvedThen: new Set(resolved) });
-
-    const d = deferred();
-    ungated(0); // what the relay does today: broadcast, then hand the adapter the record
-    resolved.add(0);
-    d.resolve();
-    await settle();
-
-    expect(emitted[0].resolvedThen.has(0)).toBe(false);
+  it('an ungated emitter fails the same safety assertion over the same schedules (the property is not vacuous)', async () => {
+    const ungated: MakeGate = (emit) => ({
+      submit: (msgs) => msgs.forEach(emit),
+      pending: () => 0,
+    });
+    let caught = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      if (early((await run(seed, ungated)).emitted) !== undefined) caught++;
+      expect(early((await run(seed)).emitted), `seed ${seed}`).toBeUndefined();
+    }
+    expect(caught).toBeGreaterThan(100);
   });
 
   it('a rejected promise stalls the queue: nothing at or after it is ever released', async () => {
@@ -2460,6 +2469,1229 @@ describe('release gate (pure model)', () => {
     d.resolve();
     await settle();
     expect(emitted).toEqual([0, 1, 2]);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Acknowledgement by duplicate, and where a persistence hook sits in the release order.
+  // A resend of an admitted version is answered with a `drop` 'duplicate', which the client
+  // counts as the acknowledgement, exactly like the echo. The persistence hook runs after the room
+  // admitted the row and may re-enter the room synchronously (a resend of that row, a reconnect of
+  // its origin, another origin's join or write). The driver keeps its own storage log (what the
+  // adapter was told and how each promise settled); every durability property reads that log,
+  // never the room model's bookkeeping.
+  //   D1   no acknowledgement of v (its echo to the submitter, a duplicate drop, a delta welcome
+  //        carrying it) before v is durable, and no welcome at seq s before the rows up to s are
+  //   D1p  no acknowledgement or echo of v before every row up to v's is durable
+  //   D2   per connection, welcome and env seqs strictly increase, and a duplicate drop never
+  //        comes before the echo of its version (property R of relay-order.spec.ts, which lets a
+  //        migration's re-welcome share its envelope's seq; this model has no migration)
+  //   D3   in a room that is NOT stalled: nothing pending means the duplicate drop is out before
+  //        the step returns; everything settled means every held duplicate drop to an open
+  //        connection is out. A stalled room answers nothing, and a duplicate held behind a later
+  //        row that fails is never sent: the accepted, conservative outcome
+  //   D4   no acknowledgement of a version whose row failed, in that room life
+  //   D5   'generation', 'schema' and 'order' drops are out before the step returns
+  //   D6   nothing that carries document state (echo, welcome, duplicate drop) is released while a
+  //        persistence hook runs: whatever the hook submits is released after its row
+  //   D7   a step that starts idle and meets only void hooks ends, when its outermost call
+  //        returns, with nothing queued and every open connection holding all it was owed, in
+  //        the order the driver caused it (echoes, duplicate drops, welcomes; the driver's own
+  //        account). A call nested inside a hook cannot release before that hook returns
+  //   NL   after a crash, the room rebuilt from the durable prefix of the storage log holds every
+  //        acknowledged version
+  //   LV   after that crash, a reconnect and settling everything, every write is acknowledged
+  //        (no refusal is legitimate: the scripts are honest and probes never touch the outbox)
+  //   U    the adapter is told a version at most once per room life
+  //   H    an honest client is never refused 'order'
+  // NON-COVERAGE: one room, two writer origins; no cuts, migrations or journaled refusals (their
+  // hook sites have the commit hook's shape and are covered by rows in relay-durability.spec.ts);
+  // a hook that throws, a throwing `onDrop` and unhandled rejections (real-relay rows in
+  // relay-durability.spec.ts: a throw is synchronous, so it has no schedule to sweep); a welcome is its seq plus, for a delta, the envs above the hello's seq, never
+  // register contents; the client-to-relay link is lossless FIFO while open and a send on a closed
+  // link is lost; a crash keeps exactly the durable prefix of the storage log (the most
+  // conservative adapter `unload` allows), so an adapter keeping later resolved rows past a gap is
+  // not modeled; a client's own restart is a reconnect with the same outbox; the session keeps a
+  // write refused 'generation' and asks for a snapshot, and that branch is not modeled because no
+  // outbox write can be refused 'generation' here (one generation, probes use versions outside the
+  // outbox); policy, ejection, presence and `onDrop` timing are out. relay-order.spec.ts's
+  // generator drives the real relay's API (hello, cuts, typed sockets) and cannot be pointed at
+  // this model; D2 here is its property R, over the hook re-entries it does not generate.
+  // ───────────────────────────────────────────────────────────────────────
+
+  type Stale = 'generation' | 'schema';
+  type DropWhy = Stale | 'order' | 'duplicate';
+  type Ref = {
+    readonly origin: string;
+    readonly version: number;
+    readonly seq: number;
+  };
+  type Wire =
+    | {
+        readonly t: 'welcome';
+        readonly seq: number;
+        readonly envs?: readonly Ref[];
+      }
+    | ({ readonly t: 'env' } & Ref)
+    | {
+        readonly t: 'drop';
+        readonly origin: string;
+        readonly version: number;
+        readonly reason: DropWhy;
+      };
+  /** How the room answers a resend of a version its admission evidence holds. */
+  type AckRule = 'immediate' | 'queued' | 'per-row' | 'admit-after-durable';
+  /**
+   * Where a row's release item enters the queue: after its hook returns (`after-hook`), in a slot
+   * reserved before the hook (`reserved`), or at a mark taken before the hook while a flag queues
+   * every submit and stops the drain (`mark`).
+   */
+  type Order = 'after-hook' | 'reserved' | 'mark';
+  type Neuter =
+    | 'queue-refusals'
+    | 'echo-on-own-promise'
+    | 'async-release'
+    | 'lose-release';
+  type Conn = { readonly owner: string; open: boolean; readonly got: Wire[] };
+  type Held = {
+    readonly conn: Conn;
+    readonly origin: string;
+    readonly version: number;
+    out: boolean;
+  };
+  type Hook = (row: Ref) => Promise<void> | undefined;
+  type Place = (run: () => void, done?: Promise<void>) => void;
+
+  function slotGate(onFail: () => void, neuter?: Neuter) {
+    const async = neuter === 'async-release';
+    type Item = { run?: () => void; done?: Promise<void>; open: boolean };
+    const queue: Item[] = [];
+    let stalled = false;
+    let draining = false;
+    let holding = 0;
+    const drain = async (): Promise<void> => {
+      if (draining || holding > 0) return;
+      draining = true;
+      while (!stalled && queue.length > 0) {
+        const head = queue[0];
+        if (head.open) break;
+        if (head.done) {
+          try {
+            await head.done;
+          } catch {
+            stalled = true;
+            onFail();
+            break;
+          }
+        }
+        queue.shift();
+        head.run?.();
+      }
+      draining = false;
+    };
+    const kick = (): void => {
+      if (stalled) return;
+      if (async) void Promise.resolve().then(drain);
+      else void drain();
+    };
+    return {
+      submit: (run: () => void, done?: Promise<void>): void => {
+        const idle = !draining && holding === 0 && queue.length === 0;
+        if (!async && !stalled && idle && done === undefined) {
+          draining = true;
+          try {
+            run();
+          } finally {
+            draining = false;
+          }
+          if (queue.length > 0) void drain();
+          return;
+        }
+        queue.push({ run, done, open: false });
+        kick();
+      },
+      reserve: (): Place => {
+        const item: Item = { open: true };
+        queue.push(item);
+        return (run, done) => {
+          // the neuter loses a void row's release: the queue still empties
+          item.run = neuter === 'lose-release' && !done ? undefined : run;
+          item.done = done;
+          item.open = false;
+          kick();
+        };
+      },
+      hold: (): Place => {
+        const mark = queue.length;
+        holding++;
+        return (run, done) => {
+          holding--;
+          queue.splice(mark, 0, { run, done, open: false });
+          kick();
+        };
+      },
+      pending: () => queue.length,
+    };
+  }
+
+  function ackRoom(o: {
+    readonly rule: AckRule;
+    readonly order: Order;
+    readonly substrate: readonly Ref[];
+    readonly journal: boolean;
+    readonly deliver: (conn: Conn, msg: Wire) => void;
+    readonly hook: Hook;
+    readonly neuter?: Neuter;
+  }) {
+    type Row = Ref & { settled: boolean; d?: Promise<void> };
+    const rows: Row[] = o.substrate.map((r) => ({ ...r, settled: true }));
+    let seq = rows.reduce((m, r) => Math.max(m, r.seq), 0);
+    const evidence = new Map<string, Set<number>>();
+    const note = (origin: string, version: number): void => {
+      let s = evidence.get(origin);
+      if (!s) evidence.set(origin, (s = new Set()));
+      s.add(version);
+    };
+    for (const r of rows) note(r.origin, r.version);
+    const members = new Set<Conn>();
+    const held: Held[] = [];
+    let stalled = false;
+    let dead = false;
+    const gate = slotGate(() => {
+      stalled = true;
+    }, o.neuter);
+    const send = (conn: Conn, msg: Wire): boolean => {
+      if (dead || !conn.open || !members.has(conn)) return false;
+      o.deliver(conn, msg);
+      return true;
+    };
+    const refuseNow = (conn: Conn, msg: Wire): void => {
+      if (o.neuter === 'queue-refusals') gate.submit(() => send(conn, msg));
+      else send(conn, msg);
+    };
+    const duplicate = (conn: Conn, origin: string, version: number): void => {
+      const entry: Held = { conn, origin, version, out: false };
+      held.push(entry);
+      const msg: Wire = { t: 'drop', origin, version, reason: 'duplicate' };
+      const out = (): void => {
+        entry.out = send(conn, msg);
+      };
+      if (o.rule === 'immediate' || o.rule === 'admit-after-durable')
+        return out();
+      if (o.rule === 'queued') return gate.submit(out);
+      const row = rows.find(
+        (r) => r.origin === origin && r.version === version,
+      );
+      if (!row?.d || row.settled) return out();
+      void row.d.then(out, () => undefined);
+    };
+    const admit = (origin: string, version: number): void => {
+      const row: Row = { origin, version, seq: ++seq, settled: false };
+      rows.push(row);
+      if (o.rule !== 'admit-after-durable') note(origin, version);
+      const audience = [...members];
+      const fan = (): void => {
+        for (const m of audience)
+          send(m, { t: 'env', origin, version, seq: row.seq });
+      };
+      const place =
+        o.order === 'reserved'
+          ? gate.reserve()
+          : o.order === 'mark'
+            ? gate.hold()
+            : undefined;
+      const d = o.hook({ origin, version, seq: row.seq });
+      row.d = d;
+      const durable = (): void => {
+        row.settled = true;
+        if (o.rule === 'admit-after-durable') note(origin, version);
+      };
+      if (d) void d.then(durable, () => undefined);
+      else durable();
+      if (o.neuter === 'echo-on-own-promise') {
+        place?.(() => undefined);
+        if (d) void d.then(fan, () => undefined);
+        else fan();
+        return;
+      }
+      if (place) place(fan, d);
+      else gate.submit(fan, d);
+    };
+
+    return {
+      held,
+      members,
+      stalled: () => stalled,
+      pending: () => gate.pending(),
+      canOrder: (origin: string) => (evidence.get(origin)?.size ?? 0) > 0,
+      /** A same-origin hello displaces the connection that origin held. */
+      hello: (conn: Conn, since?: number): void => {
+        for (const m of [...members]) {
+          if (m.owner !== conn.owner) continue;
+          members.delete(m);
+          m.open = false;
+        }
+        members.add(conn);
+        const at = seq;
+        const envs =
+          o.journal && since !== undefined
+            ? rows
+                .filter((r) => r.seq > since)
+                .map((r) => ({
+                  origin: r.origin,
+                  version: r.version,
+                  seq: r.seq,
+                }))
+            : undefined;
+        gate.submit(() => send(conn, { t: 'welcome', seq: at, envs }));
+      },
+      leave: (conn: Conn): void => {
+        members.delete(conn);
+      },
+      receive: (
+        conn: Conn,
+        origin: string,
+        version: number,
+        stale?: Stale,
+      ): void => {
+        if (dead || !members.has(conn)) return;
+        if (stale)
+          return refuseNow(conn, { t: 'drop', origin, version, reason: stale });
+        const ev = evidence.get(origin);
+        if (ev?.has(version)) return duplicate(conn, origin, version);
+        if (ev && version < Math.max(...ev))
+          return refuseNow(conn, {
+            t: 'drop',
+            origin,
+            version,
+            reason: 'order',
+          });
+        admit(origin, version);
+      },
+      kill: (): void => {
+        dead = true;
+        for (const m of members) m.open = false;
+        members.clear();
+      },
+    };
+  }
+  type AckRoom = ReturnType<typeof ackRoom>;
+
+  /** What a persistence hook does to the room before it returns. */
+  type Reentry = 'resend' | 'reconnect' | 'join-other' | 'write-other';
+  const reentries: readonly Reentry[] = [
+    'resend',
+    'reconnect',
+    'join-other',
+    'write-other',
+  ];
+  type Ev =
+    | {
+        readonly k: 'write';
+        readonly who: string;
+        readonly gated?: boolean;
+        readonly inHook?: Reentry;
+      }
+    | {
+        readonly k: 'resend' | 'settle' | 'fail';
+        readonly who: string;
+        readonly v: number;
+      }
+    | { readonly k: 'leave' | 'join' | 'reconnect'; readonly who: string }
+    | { readonly k: 'crash' }
+    | { readonly k: 'discard' }
+    | {
+        readonly k: 'probe';
+        readonly who: string;
+        readonly reason: Stale | 'order';
+      };
+
+  /** The client session as the model sees it: an outbox, and what it counts acknowledged. */
+  type Client = {
+    readonly origin: string;
+    conn?: Conn;
+    welcomed: boolean;
+    version: number;
+    /** The highest seq heard: the hello's `seq`, so a journaled room answers with a delta. */
+    seen: number;
+    readonly unacked: Set<number>;
+    readonly acked: Set<number>;
+    readonly refused: Set<number>;
+  };
+  /** The driver's own record of one hook call: what the adapter was told and how it settled. */
+  type Stored = Ref & {
+    state: 'told' | 'ok' | 'failed';
+    readonly d?: Deferred;
+  };
+
+  type AckRun = {
+    readonly rule: AckRule;
+    readonly order?: Order;
+    readonly seed?: number;
+    readonly script?: readonly Ev[];
+    /** The client counts a duplicate drop only after it saw the echo (alternative b). */
+    readonly echoFirst?: boolean;
+    readonly neuter?: Neuter;
+    readonly journal?: boolean;
+    readonly voidHooks?: boolean;
+    /** Re-entrant writes and hook re-entries in random runs (default on). */
+    readonly reentry?: boolean;
+  };
+  const key = (r: { origin: string; version: number }): string =>
+    `${r.origin}#${r.version}`;
+  const ackWorld = (run: AckRun) => {
+    const rnd = mulberry32(run.seed ?? 0);
+    const random = run.script === undefined;
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
+    const order = run.order ?? 'after-hook';
+    const journal = run.journal ?? (random && rnd() < 0.5);
+    const voidOnly = run.voidHooks ?? (random && rnd() < 0.3);
+    const violations: string[] = [];
+    const firstAt = new Map<string, number>();
+    const trace: Ev[] = [];
+    const heard: { life: number; owner: string; msg: Wire }[] = [];
+    const stats = {
+      pendingResends: 0,
+      held: 0,
+      fails: 0,
+      crashes: 0,
+      discards: 0,
+      probes: 0,
+      reentrant: 0,
+      hookReentry: 0,
+      gatedHooks: 0,
+      voidSteps: 0,
+      voidOwed: 0,
+      voidShort: 0,
+    };
+    const flag = (tag: string, what: string): void => {
+      if (!firstAt.has(tag)) firstAt.set(tag, trace.length);
+      violations.push(`${tag}: ${what}`);
+    };
+    let life = 0;
+    let substrate: Ref[] = [];
+    let storage: Stored[] = [];
+    const inHook: Stored[] = [];
+    let budget = 0;
+    let gatedOnce: boolean | undefined;
+    let reentryOnce: Reentry | undefined;
+    const gatedNow = (): boolean => {
+      const g = gatedOnce;
+      gatedOnce = undefined;
+      if (g !== undefined) return g;
+      if (voidOnly) return false;
+      return random ? rnd() < 0.75 : true;
+    };
+    const clients: Client[] = ['a', 'b'].map((origin) => ({
+      origin,
+      welcomed: false,
+      version: 0,
+      seen: 0,
+      unacked: new Set<number>(),
+      acked: new Set<number>(),
+      refused: new Set<number>(),
+    }));
+    const byOrigin = (o: string): Client =>
+      clients.find((c) => c.origin === o) as Client;
+    const other = (o: string): Client => byOrigin(o === 'a' ? 'b' : 'a');
+    let room!: AckRoom;
+
+    /**
+     * What each connection is owed by the end of the current step, in the order the driver caused
+     * it, read from the driver's own storage log: a fresh version's echo to every connected client,
+     * a resend's duplicate drop to its sender, a hello's welcome.
+     */
+    let owed: { readonly conn: Conn; readonly name: string; at: number }[] = [];
+    const owe = (conn: Conn, name: string): void =>
+      void owed.push({ conn, name, at: conn.got.length });
+    const nameOf = (msg: Wire): string =>
+      msg.t === 'welcome'
+        ? 'welcome'
+        : msg.t === 'env' || msg.reason === 'duplicate'
+          ? `${msg.t} ${key(msg)}`
+          : `${msg.reason} ${key(msg)}`;
+    const send = (c: Client, v: number): void => {
+      if (!c.conn) return;
+      const mine = storage.filter((e) => e.origin === c.origin);
+      if (mine.some((e) => e.version === v))
+        owe(c.conn, `drop ${c.origin}#${v}`);
+      else if (mine.every((e) => e.version < v))
+        for (const x of clients)
+          if (x.conn) owe(x.conn, `env ${c.origin}#${v}`);
+      room.receive(c.conn, c.origin, v);
+    };
+    const flush = (c: Client): void => {
+      for (const v of [...c.unacked].sort((x, y) => x - y)) send(c, v);
+    };
+    const write = (c: Client): void => {
+      c.unacked.add(++c.version);
+      send(c, c.version);
+    };
+    const ack = (c: Client, v: number): void => {
+      c.unacked.delete(v);
+      c.acked.add(v);
+    };
+    const connect = (c: Client): void => {
+      const conn: Conn = { owner: c.origin, open: true, got: [] };
+      c.conn = conn;
+      owe(conn, 'welcome');
+      room.hello(conn, c.seen > 0 ? c.seen : undefined);
+      if (c.welcomed) flush(c);
+    };
+    const disconnect = (c: Client): void => {
+      if (!c.conn) return;
+      c.conn.open = false;
+      room.leave(c.conn);
+      c.conn = undefined;
+    };
+
+    const reenter = (what: Reentry, row: Ref): void => {
+      const owner = byOrigin(row.origin);
+      const peer = other(row.origin);
+      if (what === 'resend') send(owner, row.version);
+      else if (what === 'reconnect') connect(owner);
+      else if (what === 'join-other') connect(peer);
+      else if (peer.conn) write(peer);
+    };
+    const hook: Hook = (row) => {
+      const gated = gatedNow();
+      const e: Stored = {
+        ...row,
+        state: 'told',
+        d: gated ? deferred() : undefined,
+      };
+      storage.push(e);
+      inHook.push(e);
+      let what = reentryOnce;
+      reentryOnce = undefined;
+      if (!what && budget > 0 && rnd() < 0.3) {
+        budget--;
+        what = pick(reentries);
+      }
+      if (what) {
+        stats.hookReentry++;
+        reenter(what, row);
+      }
+      inHook.pop();
+      if (gated) stats.gatedHooks++;
+      else e.state = 'ok'; // a void hook is durable the moment it returns
+      return e.d?.promise;
+    };
+
+    const prefixOk = (s: number): boolean =>
+      storage.every((x) => x.seq > s || x.state === 'ok');
+    const deliver = (conn: Conn, msg: Wire): void => {
+      const name =
+        msg.t === 'welcome' ? `welcome@${msg.seq}` : `${msg.t} ${key(msg)}`;
+      const carries = msg.t !== 'drop' || msg.reason === 'duplicate';
+      if (carries && inHook.length > 0)
+        flag(
+          'D6',
+          `${conn.owner} got ${name} while the hook of ${key(inHook[inHook.length - 1])} ran`,
+        );
+      if (msg.t !== 'drop') {
+        const prev = [...conn.got].reverse().find((m) => m.t !== 'drop');
+        if (prev && msg.seq <= prev.seq)
+          flag('D2', `${conn.owner} read seq ${msg.seq} after ${prev.seq}`);
+      }
+      const dupBefore = conn.got.some(
+        (m) =>
+          m.t === 'drop' &&
+          m.reason === 'duplicate' &&
+          m.origin === (msg as Ref).origin &&
+          m.version === (msg as Ref).version,
+      );
+      if (msg.t === 'env' && dupBefore)
+        flag(
+          'D2',
+          `${conn.owner} heard the duplicate before the echo of ${key(msg)}`,
+        );
+      const ackOf = (
+        r: { origin: string; version: number },
+        what: string,
+      ): void => {
+        const of = storage.filter(
+          (e) => e.origin === r.origin && e.version === r.version,
+        );
+        if (!of.some((e) => e.state === 'ok'))
+          flag('D1', `${conn.owner} told ${what} before it was durable`);
+        if (
+          of.some((e) => e.state === 'failed') &&
+          !of.some((e) => e.state === 'ok')
+        )
+          flag('D4', `${conn.owner} told ${what} after it failed`);
+        if (!of.some((e) => prefixOk(e.seq)))
+          flag(
+            'D1p',
+            `${conn.owner} told ${what} before its prefix was durable`,
+          );
+      };
+      if (msg.t === 'env') {
+        if (msg.origin === conn.owner) ackOf(msg, name);
+        else if (!prefixOk(msg.seq))
+          flag(
+            'D1p',
+            `${conn.owner} told ${name} before its prefix was durable`,
+          );
+      } else if (msg.t === 'drop' && msg.reason === 'duplicate') {
+        ackOf(msg, name);
+      } else if (msg.t === 'welcome') {
+        if (!prefixOk(msg.seq))
+          flag(
+            'D1',
+            `${conn.owner} welcomed at seq ${msg.seq} before it was durable`,
+          );
+        for (const e of msg.envs ?? [])
+          if (e.origin === conn.owner) ackOf(e, `welcome/delta ${key(e)}`);
+      }
+      conn.got.push(msg);
+      heard.push({ life, owner: conn.owner, msg });
+      const c = clients.find((x) => x.conn === conn);
+      if (!c) return;
+      if (msg.t === 'welcome') {
+        c.seen = Math.max(c.seen, msg.seq);
+        for (const e of msg.envs ?? []) {
+          c.seen = Math.max(c.seen, e.seq);
+          if (e.origin === c.origin) ack(c, e.version);
+        }
+        c.welcomed = true;
+        flush(c);
+      } else if (msg.t === 'env') {
+        c.seen = Math.max(c.seen, msg.seq);
+        if (msg.origin === c.origin) ack(c, msg.version);
+      } else if (msg.origin === c.origin && c.unacked.has(msg.version)) {
+        if (msg.reason === 'duplicate') {
+          if (!run.echoFirst) ack(c, msg.version);
+        } else {
+          c.unacked.delete(msg.version);
+          c.refused.add(msg.version);
+          if (msg.reason === 'order') flag('H', `${key(msg)} refused 'order'`);
+        }
+      }
+      if (msg.t !== 'drop' && budget > 0 && rnd() < 0.2) {
+        budget--;
+        stats.reentrant++;
+        write(c);
+      }
+    };
+
+    const make = (): AckRoom =>
+      ackRoom({
+        rule: run.rule,
+        order,
+        substrate,
+        journal,
+        deliver,
+        hook,
+        neuter: run.neuter,
+      });
+    const crash = (): void => {
+      const prefix: Ref[] = [];
+      for (const e of [...storage].sort((x, y) => x.seq - y.seq)) {
+        if (e.state !== 'ok') break;
+        prefix.push({ origin: e.origin, version: e.version, seq: e.seq });
+      }
+      substrate = prefix;
+      storage = prefix.map((r) => ({ ...r, state: 'ok' }));
+      room.kill();
+      for (const c of clients) c.conn = undefined;
+      life++;
+      room = make();
+    };
+    room = make();
+    const told = (who: string, v: number): Stored | undefined =>
+      storage.find(
+        (e) => e.origin === who && e.version === v && e.state === 'told' && e.d,
+      );
+    const act = (ev: Ev): void => {
+      if (ev.k === 'crash') {
+        stats.crashes++;
+        return crash();
+      }
+      if (ev.k === 'discard') {
+        if (!room.stalled()) return;
+        stats.discards++;
+        for (const c of clients) disconnect(c);
+        return crash();
+      }
+      const c = byOrigin(ev.who);
+      switch (ev.k) {
+        case 'write':
+          if (!c.conn) return;
+          gatedOnce = ev.gated;
+          reentryOnce = ev.inHook;
+          return write(c);
+        case 'resend': {
+          if (!c.conn) return;
+          const idle = room.pending() === 0;
+          if (told(c.origin, ev.v)) stats.pendingResends++;
+          const n = room.held.length;
+          send(c, ev.v);
+          const h = room.held[n];
+          if (h && !h.out) stats.held++;
+          if (idle && h && !h.out)
+            flag('D3', `${key(h)} duplicate held with nothing pending`);
+          return;
+        }
+        case 'settle':
+        case 'fail': {
+          const e = told(ev.who, ev.v);
+          if (!e) return;
+          if (ev.k === 'fail') {
+            stats.fails++;
+            e.state = 'failed';
+            return e.d?.reject(new Error('storage closed'));
+          }
+          e.state = 'ok';
+          return e.d?.resolve();
+        }
+        case 'leave':
+          return disconnect(c);
+        case 'join':
+          if (!c.conn) connect(c);
+          return;
+        case 'reconnect':
+          return connect(c);
+        case 'probe': {
+          const conn = c.conn;
+          if (!conn || (ev.reason === 'order' && !room.canOrder(c.origin)))
+            return;
+          stats.probes++;
+          const v = ev.reason === 'order' ? 0 : c.version + 1000;
+          const at = conn.got.length;
+          room.receive(
+            conn,
+            c.origin,
+            v,
+            ev.reason === 'order' ? undefined : ev.reason,
+          );
+          if (
+            !conn.got
+              .slice(at)
+              .some(
+                (m) =>
+                  m.t === 'drop' && m.reason === ev.reason && m.version === v,
+              )
+          )
+            flag('D5', `${c.origin} probe '${ev.reason}' not answered at once`);
+          return;
+        }
+      }
+    };
+    const apply = (ev: Ev): void => {
+      trace.push(ev);
+      const idle =
+        room.pending() === 0 &&
+        !room.stalled() &&
+        storage.every((e) => e.state === 'ok');
+      const gatedBefore = stats.gatedHooks;
+      owed = [];
+      act(ev);
+      if (
+        idle &&
+        stats.gatedHooks === gatedBefore &&
+        ev.k !== 'crash' &&
+        ev.k !== 'discard'
+      ) {
+        stats.voidSteps++;
+        if (room.pending() > 0)
+          flag(
+            'D7',
+            `${room.pending()} release(s) still queued after an idle void step`,
+          );
+        // delivery, not only an empty queue: an open connection read all it was owed, in order
+        for (const conn of new Set(owed.map((o) => o.conn))) {
+          if (!conn.open) continue;
+          const mine = owed.filter((o) => o.conn === conn);
+          const want = mine.map((o) => o.name);
+          const got = conn.got
+            .slice(Math.min(...mine.map((o) => o.at)))
+            .map(nameOf)
+            .filter((n) => want.includes(n));
+          if (got.join() !== want.join()) {
+            stats.voidShort++;
+            flag(
+              'D7',
+              `${conn.owner} read [${got.join(', ')}] by the end of an idle void step, owed [${want.join(', ')}]`,
+            );
+          }
+        }
+        stats.voidOwed += owed.length;
+      }
+      const seen = new Set<string>();
+      for (const e of storage) {
+        if (seen.has(key(e))) flag('U', `${key(e)} told twice`);
+        seen.add(key(e));
+      }
+    };
+    return {
+      rnd,
+      random,
+      violations,
+      firstAt,
+      trace,
+      heard,
+      stats,
+      clients,
+      flag,
+      arm: (): void => {
+        budget = random && run.reentry !== false ? 4 : 0;
+      },
+      connect,
+      apply,
+      crash,
+      room: () => room,
+      storage: () => storage,
+      substrate: () => substrate,
+    };
+  };
+
+  /** Script or random events, then settle, crash, reconnect and settle again; NL and LV last. */
+  const ackRun = async (run: AckRun) => {
+    const w = ackWorld(run);
+    const { rnd } = w;
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
+    const next = (): Ev => {
+      const room = w.room();
+      const roll = rnd();
+      const who = rnd() < 0.5 ? 'a' : 'b';
+      const pend = w.storage().filter((e) => e.state === 'told' && e.d);
+      const mine = w.storage().filter((e) => e.origin === who);
+      if (roll < 0.26) return { k: 'write', who, gated: rnd() < 0.75 };
+      if (roll < 0.44 && mine.length)
+        return { k: 'resend', who, v: pick(mine).version };
+      if (roll < 0.62 && pend.length) {
+        const e = pick(pend);
+        return { k: 'settle', who: e.origin, v: e.version };
+      }
+      if (roll < 0.66 && pend.length) {
+        const e = pick(pend);
+        return { k: 'fail', who: e.origin, v: e.version };
+      }
+      if (roll < 0.76) {
+        const connected = !!w.clients.find((c) => c.origin === who)?.conn;
+        return {
+          k: connected ? pick(['leave', 'reconnect'] as const) : 'join',
+          who,
+        };
+      }
+      if (roll < 0.8) return { k: 'crash' };
+      if (roll < 0.86)
+        return room.stalled() ? { k: 'discard' } : { k: 'join', who };
+      return {
+        k: 'probe',
+        who,
+        reason: pick(['generation', 'schema', 'order'] as const),
+      };
+    };
+    const quiesce = async (): Promise<void> => {
+      for (let round = 0; round < 50; round++) {
+        await settle(20);
+        const open = w.storage().filter((e) => e.state === 'told' && e.d);
+        if (w.room().stalled() || !open.length) return;
+        for (const e of open) {
+          e.state = 'ok';
+          e.d?.resolve();
+        }
+      }
+    };
+    const step = async (ev: Ev): Promise<void> => {
+      w.apply(ev);
+      await settle(8);
+    };
+
+    for (const c of w.clients) w.connect(c);
+    w.arm();
+    for (const ev of run.script ?? []) await step(ev);
+    const steps = w.random ? 10 + Math.floor(rnd() * 16) : 0;
+    for (let s = 0; s < steps; s++) await step(next());
+    await quiesce();
+    const room = w.room();
+    if (!room.stalled()) {
+      for (const h of room.held) {
+        if (!h.out && h.conn.open && room.members.has(h.conn))
+          w.flag('D3', `held duplicate ${key(h)} never sent`);
+      }
+    }
+    w.crash();
+    for (const c of w.clients) {
+      for (const v of c.acked) {
+        if (
+          !w.substrate().some((r) => r.origin === c.origin && r.version === v)
+        )
+          w.flag('NL', `${c.origin}#${v} acknowledged, then lost in the crash`);
+      }
+    }
+    for (const c of w.clients) w.connect(c);
+    await quiesce();
+    for (const c of w.clients) {
+      for (let v = 1; v <= c.version; v++) {
+        if (c.refused.has(v)) w.flag('LV', `${c.origin}#${v} ended refused`);
+        else if (!c.acked.has(v))
+          w.flag('LV', `${c.origin}#${v} never acknowledged`);
+      }
+    }
+    const tags = new Set(w.violations.map((v) => v.slice(0, v.indexOf(':'))));
+    return { ...w, tags };
+  };
+
+  const sweep = async (run: Omit<AckRun, 'seed'>, seeds: number) => {
+    const tags = new Set<string>();
+    type Stats = ReturnType<typeof ackWorld>['stats'];
+    const stats = {} as Record<keyof Stats, number>;
+    let first: string | null = null;
+    let shortest:
+      | { readonly at: number; readonly trace: readonly Ev[] }
+      | undefined;
+    for (let seed = 0; seed < seeds; seed++) {
+      const r = await ackRun({ ...run, seed });
+      for (const t of r.tags) tags.add(t);
+      for (const k of Object.keys(r.stats) as (keyof Stats)[])
+        stats[k] = (stats[k] ?? 0) + r.stats[k];
+      if (r.violations.length) first ??= `seed ${seed}: ${r.violations[0]}`;
+      const at = r.firstAt.get('D1');
+      if (at !== undefined && (!shortest || at < shortest.at))
+        shortest = { at, trace: r.trace.slice(0, at) };
+    }
+    return { tags, stats, first, shortest };
+  };
+
+  const slotAdapter =
+    (shape: 'submit' | 'reserved' | 'mark'): MakeGate =>
+    (emit) => {
+      const g = slotGate(() => undefined);
+      return {
+        submit: (msgs, done) => {
+          const run = () => msgs.forEach(emit);
+          if (shape === 'submit') return g.submit(run, done);
+          (shape === 'reserved' ? g.reserve() : g.hold())(run, done);
+        },
+        pending: g.pending,
+      };
+    };
+
+  it('the slot gate keeps the release order and safety, whichever way an item enters (200 seeds each)', async () => {
+    for (const shape of ['submit', 'reserved', 'mark'] as const) {
+      for (let seed = 0; seed < 200; seed++) {
+        const { n, emitted } = await run(seed, slotAdapter(shape));
+        expect(
+          emitted.map((e) => e.id),
+          `${shape} seed ${seed}`,
+        ).toEqual(Array.from({ length: n }, (_, i) => i));
+        expect(early(emitted), `${shape} seed ${seed}`).toBeUndefined();
+      }
+    }
+  });
+
+  it('what a hook submits lands behind its reserved row, in the same tick when nothing is owed', () => {
+    for (const shape of ['reserved', 'mark'] as const) {
+      const out: string[] = [];
+      const g = slotGate(() => undefined);
+      const place = shape === 'reserved' ? g.reserve() : g.hold();
+      g.submit(() => out.push('from the hook'));
+      const inner = shape === 'reserved' ? g.reserve() : g.hold();
+      g.submit(() => out.push('from the inner hook'));
+      inner(() => out.push('inner row'));
+      expect(out, shape).toEqual([]);
+      place(() => out.push('row'));
+      expect(out, shape).toEqual([
+        'row',
+        'from the hook',
+        'inner row',
+        'from the inner hook',
+      ]);
+      expect(g.pending()).toBe(0);
+    }
+    const afterHook: string[] = [];
+    const g = slotGate(() => undefined);
+    g.submit(() => afterHook.push('from the hook'));
+    g.submit(() => afterHook.push('row'));
+    expect(afterHook).toEqual(['from the hook', 'row']);
+  });
+
+  it('a queued duplicate answer with a reserved row slot holds D1 to D7, NL, LV, U and H (400 seeds, both shapes)', async () => {
+    for (const order of ['reserved', 'mark'] as const) {
+      const { first, stats } = await sweep({ rule: 'queued', order }, 400);
+      expect(first, order).toBeNull();
+      // the schedules reach every case the properties are about
+      expect(stats.pendingResends).toBeGreaterThan(50);
+      expect(stats.held).toBeGreaterThan(50);
+      expect(stats.fails).toBeGreaterThan(10);
+      expect(stats.crashes).toBeGreaterThan(10);
+      expect(stats.discards).toBeGreaterThan(0);
+      expect(stats.probes).toBeGreaterThan(50);
+      expect(stats.reentrant).toBeGreaterThan(50);
+      expect(stats.hookReentry).toBeGreaterThan(100);
+      expect(stats.voidSteps).toBeGreaterThan(100);
+      expect(stats.voidOwed).toBeGreaterThan(500);
+      expect(stats.voidShort).toBe(0);
+    }
+  });
+
+  it('a duplicate answered at once breaks D1, D4 and NL; without re-entry the shortest trace is two events', async () => {
+    const { tags } = await sweep({ rule: 'immediate', order: 'reserved' }, 400);
+    expect([...tags]).toEqual(
+      expect.arrayContaining(['D1', 'D1p', 'D4', 'NL']),
+    );
+    const quiet = await sweep(
+      { rule: 'immediate', order: 'reserved', reentry: false },
+      400,
+    );
+    expect(quiet.shortest?.at).toBe(2);
+    // a write, then its resend: an explicit one, or the flush of a reconnect
+    expect(quiet.shortest?.trace[0].k).toBe('write');
+  });
+
+  it('a queued duplicate answer with the row submitted after its hook breaks D1 and D6 through the hook', async () => {
+    const { tags } = await sweep({ rule: 'queued', order: 'after-hook' }, 400);
+    expect([...tags]).toEqual(
+      expect.arrayContaining(['D1', 'D1p', 'D2', 'D6']),
+    );
+  });
+
+  it('counterexample: a gated write, resent before its row settles, is acknowledged by the duplicate', async () => {
+    const script: Ev[] = [
+      { k: 'write', who: 'a' },
+      { k: 'resend', who: 'a', v: 1 },
+    ];
+    const atOnce = await ackRun({
+      rule: 'immediate',
+      order: 'reserved',
+      script,
+    });
+    expect(atOnce.violations).toContain(
+      'D1: a told drop a#1 before it was durable',
+    );
+    expect(atOnce.firstAt.get('D1')).toBe(2);
+    expect(
+      (await ackRun({ rule: 'queued', order: 'reserved', script })).violations,
+    ).toEqual([]);
+  });
+
+  it('counterexample: the write fails after its duplicate acknowledged it, and the discard loses it', async () => {
+    const script: Ev[] = [
+      { k: 'write', who: 'a' },
+      { k: 'resend', who: 'a', v: 1 },
+      { k: 'fail', who: 'a', v: 1 },
+      { k: 'resend', who: 'a', v: 1 },
+      { k: 'discard' },
+    ];
+    const atOnce = await ackRun({
+      rule: 'immediate',
+      order: 'reserved',
+      script,
+    });
+    expect(atOnce.tags).toEqual(new Set(['D1', 'D1p', 'D4', 'NL']));
+    expect(atOnce.violations).toContain(
+      'NL: a#1 acknowledged, then lost in the crash',
+    );
+    expect(
+      (await ackRun({ rule: 'queued', order: 'reserved', script })).violations,
+    ).toEqual([]);
+  });
+
+  it('counterexamples through the hook: resend, reconnect, another origin writing, gated and void', async () => {
+    const seen: Ev = { k: 'write', who: 'b', gated: false };
+    const away: Ev = { k: 'leave', who: 'b' };
+    const cases: {
+      readonly pre?: readonly Ev[];
+      readonly ev: Ev;
+      readonly journal?: boolean;
+      readonly want: string;
+    }[] = [
+      {
+        ev: { k: 'write', who: 'a', inHook: 'resend' },
+        want: 'D1: a told drop a#1 before it was durable',
+      },
+      {
+        ev: { k: 'write', who: 'a', inHook: 'resend', gated: false },
+        want: 'D6: a got drop a#1 while the hook of a#1 ran',
+      },
+      {
+        pre: [seen],
+        ev: { k: 'write', who: 'a', inHook: 'reconnect' },
+        journal: true,
+        want: 'D1: a told welcome/delta a#1 before it was durable',
+      },
+      {
+        pre: [seen],
+        ev: { k: 'write', who: 'a', inHook: 'reconnect', gated: false },
+        journal: true,
+        want: 'D6: a got welcome@2 while the hook of a#1 ran',
+      },
+      {
+        pre: [away],
+        ev: { k: 'write', who: 'a', inHook: 'join-other' },
+        want: 'D1: b welcomed at seq 1 before it was durable',
+      },
+      {
+        ev: { k: 'write', who: 'a', inHook: 'write-other' },
+        want: 'D2: a read seq 1 after 2',
+      },
+      {
+        ev: { k: 'write', who: 'a', inHook: 'write-other', gated: false },
+        want: 'D2: b read seq 1 after 2',
+      },
+    ];
+    for (const { pre, ev, journal, want } of cases) {
+      const script = [...(pre ?? []), ev];
+      const afterHook = await ackRun({
+        rule: 'queued',
+        order: 'after-hook',
+        journal,
+        script,
+      });
+      expect(afterHook.violations, JSON.stringify(ev)).toContain(want);
+      for (const order of ['reserved', 'mark'] as const) {
+        const fixed = await ackRun({ rule: 'queued', order, journal, script });
+        expect(fixed.violations, `${order} ${JSON.stringify(ev)}`).toEqual([]);
+      }
+    }
+  });
+
+  it('accepted: a durable version held behind a later, unrelated row that fails is never answered in that room', async () => {
+    const script: Ev[] = [
+      { k: 'write', who: 'a' },
+      { k: 'leave', who: 'a' },
+      { k: 'settle', who: 'a', v: 1 },
+      { k: 'write', who: 'b' },
+      { k: 'join', who: 'a' },
+      { k: 'fail', who: 'b', v: 1 },
+    ];
+    const r = await ackRun({ rule: 'queued', order: 'reserved', script });
+    expect(r.violations).toEqual([]);
+    const firstLife = r.heard
+      .filter((h) => h.life === 0 && h.owner === 'a')
+      .map((h) => h.msg);
+    expect(
+      firstLife.some(
+        (m) => m.t === 'drop' || (m.t === 'env' && m.origin === 'a'),
+      ),
+    ).toBe(false);
+    // the resend after the join was held behind b#1 and never sent; the restarted room answers it
+    expect(r.clients[0].acked.has(1)).toBe(true);
+  });
+
+  it('killed: admission recorded only once durable sequences a resend twice, or refuses it as out of order', async () => {
+    const twice = await ackRun({
+      rule: 'admit-after-durable',
+      order: 'reserved',
+      script: [
+        { k: 'write', who: 'a' },
+        { k: 'resend', who: 'a', v: 1 },
+      ],
+    });
+    expect(twice.violations).toContain('U: a#1 told twice');
+    const order = await ackRun({
+      rule: 'admit-after-durable',
+      order: 'reserved',
+      script: [
+        { k: 'write', who: 'a' },
+        { k: 'write', who: 'a' },
+        { k: 'settle', who: 'a', v: 2 },
+        { k: 'resend', who: 'a', v: 1 },
+      ],
+    });
+    expect(order.violations).toContain("H: a#1 refused 'order'");
+  });
+
+  it('killed: a client that waits for the echo never acknowledges a write whose echo went to a closed connection, when the recovery welcome is a same-generation snapshot', async () => {
+    // a saw b#1 (seq 1), so its hello carries seq 1; its own a#1 is seq 2
+    const script: Ev[] = [
+      { k: 'write', who: 'b', gated: false },
+      { k: 'write', who: 'a' },
+      { k: 'leave', who: 'a' },
+      { k: 'settle', who: 'a', v: 1 },
+      { k: 'join', who: 'a' },
+    ];
+    const snapshot = await ackRun({
+      rule: 'queued',
+      order: 'reserved',
+      echoFirst: true,
+      journal: false,
+      script,
+    });
+    expect(snapshot.violations).toEqual(['LV: a#1 never acknowledged']);
+    // a delta welcome carries a#1 and acknowledges it: the alternative fails only without one
+    const delta = await ackRun({
+      rule: 'queued',
+      order: 'reserved',
+      echoFirst: true,
+      journal: true,
+      script,
+    });
+    expect(delta.violations).toEqual([]);
+    for (const journal of [false, true]) {
+      const r = await ackRun({
+        rule: 'queued',
+        order: 'reserved',
+        journal,
+        script,
+      });
+      expect(r.violations).toEqual([]);
+    }
+  });
+
+  it('killed: a duplicate held behind its own row only overtakes the echo and acknowledges past a failed head', async () => {
+    const overtakes = await ackRun({
+      rule: 'per-row',
+      order: 'reserved',
+      script: [
+        { k: 'write', who: 'b' },
+        { k: 'write', who: 'a' },
+        { k: 'resend', who: 'a', v: 1 },
+        { k: 'settle', who: 'a', v: 1 },
+        { k: 'settle', who: 'b', v: 1 },
+      ],
+    });
+    expect(overtakes.tags).toEqual(new Set(['D1p', 'D2']));
+    expect(overtakes.violations).toContain(
+      'D2: a heard the duplicate before the echo of a#1',
+    );
+    const lost: Ev[] = [
+      { k: 'write', who: 'b' },
+      { k: 'write', who: 'a' },
+      { k: 'resend', who: 'a', v: 1 },
+      { k: 'settle', who: 'a', v: 1 },
+      { k: 'fail', who: 'b', v: 1 },
+      { k: 'discard' },
+    ];
+    const past = await ackRun({
+      rule: 'per-row',
+      order: 'reserved',
+      script: lost,
+    });
+    expect(past.violations).toContain(
+      'NL: a#1 acknowledged, then lost in the crash',
+    );
+    expect(
+      (await ackRun({ rule: 'queued', order: 'reserved', script: lost }))
+        .violations,
+    ).toEqual([]);
+  });
+
+  it('the properties are not vacuous: queued refusals break D5, echoes on their own promise break D2, async releases break D7', async () => {
+    const refusals = await sweep(
+      { rule: 'queued', order: 'reserved', neuter: 'queue-refusals' },
+      200,
+    );
+    expect(refusals.tags.has('D5')).toBe(true);
+    const echoes = await sweep(
+      { rule: 'queued', order: 'reserved', neuter: 'echo-on-own-promise' },
+      200,
+    );
+    expect(echoes.tags.has('D2')).toBe(true);
+    const async = await sweep(
+      { rule: 'queued', order: 'reserved', neuter: 'async-release' },
+      200,
+    );
+    expect(async.tags.has('D7')).toBe(true);
+    // a lost release leaves the queue empty: only the delivery check sees it
+    const lost = await sweep(
+      { rule: 'queued', order: 'reserved', neuter: 'lose-release' },
+      200,
+    );
+    expect(lost.tags.has('D7')).toBe(true);
+    expect(lost.stats.voidShort).toBeGreaterThan(0);
   });
 });
 

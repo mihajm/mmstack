@@ -154,16 +154,32 @@ export type RelayOptions = {
    *
    * Return `void` to release the envelope at once — the memory-adapter behaviour, and the
    * relay's default. Return a promise and the relay holds every outbound message that carries
-   * the envelope (its echo, the settled notice emitted with it, and any welcome answered
-   * while it is in flight) until that promise resolves: a connection is told a write is safe
+   * the envelope (its echo, the settled notice emitted with it, the `'duplicate'` answer to a
+   * resend of it, and any welcome answered while it is in flight) until that promise resolves,
+   * and every later document answer of the room behind it: a connection is told a write is safe
    * only once the adapter says it is, the way a database returns from `COMMIT` after its log
    * is written. Messages that are not document state — presence, signal, direct, membership,
    * ejection — always pass immediately.
    *
    * A rejected promise STALLS the room: the envelope and everything queued behind it stay
-   * unreleased and {@link RelayOptions.onDurabilityFailed} fires once. Nothing is un-ingested
+   * unreleased and {@link RelayOptions.onDurabilityFailed} fires. Nothing is un-ingested
    * and nothing is answered with state that will not survive a restart; recovery is a process
    * restart, after which the writers still holding those envelopes unacked resend them.
+   *
+   * A hook that throws has failed the envelope's durability too, and the room stalls at once:
+   * before the throw reaches the caller of the relay, {@link RoomInfo.stalled} is true and
+   * `onDurabilityFailed` has fired with the thrown value. Rows still queued ahead of it stay
+   * unreleased as well, even once their own promises resolve. The envelope stays sequenced.
+   * The failure hooks fire once per room: a failure in a room already stalled, or behind a row
+   * whose failure stalled it first, is not reported again.
+   *
+   * The hook may re-enter the relay synchronously (an in-process adapter, a connection that
+   * writes, resends or joins from inside it). Document traffic that causes (echoes, welcomes,
+   * settled notices, the `'duplicate'` and journaled refusal answers) is released behind this
+   * envelope, never before it: with a hook that returns `void`, by the time the outermost call
+   * into the relay returns; with a promise, once it resolves. Membership, presence, signal,
+   * direct and ejection messages, and the `'generation'`, `'schema'` and `'order'` drops, go
+   * out at once, from inside the hook.
    */
   readonly onCommit?: (
     room: string,
@@ -174,8 +190,9 @@ export type RelayOptions = {
    * The persistence egress for the rows of the room's logical sequence that are not envelopes: a
    * cut (the whole generation record) and a journaled refusal. Same contract as
    * {@link RelayOptions.onCommit}: synchronous, before anything the row decides leaves the relay,
-   * and a returned promise holds every later answer of the room until it resolves (a rejection
-   * stalls the room, see {@link RoomInfo.stalled}). A migration's cut is its envelope's commit:
+   * and a returned promise holds every later answer of the room until it resolves (a rejection,
+   * or a throw, stalls the room, see {@link RoomInfo.stalled}); what the hook causes
+   * re-entrantly is released behind the row. A migration's cut is its envelope's commit:
    * `onCommit` reports it, with {@link RoomState.generation} already the new record.
    */
   readonly onRow?: (
@@ -205,8 +222,9 @@ export type RelayOptions = {
     readonly consensus?: boolean;
   };
   /**
-   * The durability promise an `onRow` returned for `row` rejected: the room is stalled, exactly as
-   * for {@link RelayOptions.onDurabilityFailed}. Fires once, for the row that failed.
+   * The durability promise an `onRow` returned for `row` rejected, or `onRow` threw for it: the
+   * room is stalled, exactly as for {@link RelayOptions.onDurabilityFailed}. Fires once per room,
+   * for the row whose failure stalled it; a throw from this hook is ignored.
    */
   readonly onRowDurabilityFailed?: (
     room: string,
@@ -214,9 +232,11 @@ export type RelayOptions = {
     cause: unknown,
   ) => void;
   /**
-   * The durability promise for `env` rejected: this room is now stalled and answers nothing
-   * further. Fires once, for the envelope that failed. Report it and restart the process —
-   * there is no in-place recovery, by design.
+   * The durability promise for `env` rejected, or `onCommit` threw for it: this room is now
+   * stalled and answers nothing further. Fires once per room, for the envelope whose failure
+   * stalled it (a throwing hook reports before its throw reaches the caller); a throw from this
+   * hook is ignored. Report it and restart the process — there is no in-place recovery, by
+   * design.
    */
   readonly onDurabilityFailed?: (
     room: string,
@@ -226,12 +246,14 @@ export type RelayOptions = {
   /**
    * Observation of an envelope the relay refused without ejecting anyone; the submitter is
    * told the same thing through a `drop` message. `'duplicate'` is a resend of a version the
-   * room already holds (answered as the acknowledgement it is); `'generation'` an envelope
+   * room already holds, answered as the acknowledgement it is, so that `drop` waits like the
+   * echo, behind everything the room has not released yet; `'generation'` an envelope
    * written in another room generation; `'schema'` a stale-schema straggler after a
    * migration; `'order'` a version below the origin's admitted maximum that was never
-   * admitted. None of the senders is malicious. Pure observation, zero semantic effect;
-   * synchronous and never awaited, like {@link RelayOptions.onCommit}. (`'compacting'` is a
-   * host's refusal, never the relay's.)
+   * admitted; those three `drop`s go out at once. None of the senders is malicious. Pure
+   * observation, zero semantic effect; fired when the envelope is refused, synchronous and never
+   * awaited, like {@link RelayOptions.onCommit}. (`'compacting'` is a host's refusal, never
+   * the relay's.)
    */
   readonly onDrop?: (
     room: string,
@@ -358,8 +380,9 @@ export type RoomInfo = {
   readonly members: number;
   readonly journal: number;
   /**
-   * A durability promise for this room rejected, so its release queue has stopped: nothing queued
-   * behind the failed head will ever be released, and every new answer queues behind it. The
+   * A durability promise for this room rejected (or a persistence hook threw), so its release
+   * queue has stopped: nothing queued behind the failed head will ever be released, and every
+   * new answer queues behind it. The
    * adapter reads this to decide between refusing the room and dropping it (`unload` with
    * `discard`).
    */
@@ -428,30 +451,53 @@ export type Relay = {
  * is the whole behaviour of a relay whose adapter stores synchronously.
  */
 type Release = {
-  submit(
-    run: () => void,
-    done?: Promise<void>,
-    held?: SeqEnvelope | RelayRow,
-  ): void;
+  /** An answer with no durability of its own: released behind everything queued ahead of it. */
+  submit(run: () => void): void;
+  /**
+   * Takes the next place for a row whose persistence hook is about to run, so whatever the hook
+   * submits re-entrantly queues behind the row. Nothing at or behind the place is released until
+   * `fill` names what the row releases and its durability promise. `fail` is a hook that threw:
+   * the room stalls at once and the failure is reported now.
+   */
+  reserve(held: SeqEnvelope | RelayRow): {
+    fill(run: () => void, done?: Promise<void>): void;
+    fail(cause: unknown): void;
+  };
   /** Something is queued or in flight: a fresh answer must queue behind it. */
   busy(): boolean;
-  /** A durability promise rejected; the queue will never drain on its own again. */
+  /** A row's durability failed; the queue will never drain on its own again. */
   stalled(): boolean;
   /** Drops everything queued without releasing it. Only meaningful once stalled. Answers how many. */
   discard(): number;
 };
 
 const createRelease = (
-  onFail: (held: SeqEnvelope | RelayRow | undefined, cause: unknown) => void,
+  onFail: (held: SeqEnvelope | RelayRow, cause: unknown) => void,
 ): Release => {
   type Item = {
-    readonly run: () => void;
-    readonly done?: Promise<void>;
-    readonly held?: SeqEnvelope | RelayRow;
+    run: () => void;
+    /** A reserved row's durability promise, with the row it is reported under. */
+    owed?: {
+      readonly done: Promise<void>;
+      readonly held: SeqEnvelope | RelayRow;
+    };
+    /** Reserved and not filled yet: the drain stops here. */
+    open?: boolean;
   };
   const queue: Item[] = [];
   let stalled = false;
   let draining = false;
+
+  /** The first failure stalls the room and is reported; any later one is not. */
+  const stall = (held: SeqEnvelope | RelayRow, cause: unknown): void => {
+    if (stalled) return;
+    stalled = true;
+    try {
+      onFail(held, cause);
+    } catch {
+      // an observer's throw never replaces the cause nor escapes the drain
+    }
+  };
 
   const drain = async (): Promise<void> => {
     if (draining) return;
@@ -459,14 +505,16 @@ const createRelease = (
     try {
       while (!stalled && queue.length > 0) {
         const head = queue[0];
-        if (head.done) {
+        if (head.open) break;
+        if (head.owed) {
           try {
-            await head.done;
+            await head.owed.done;
           } catch (cause) {
-            stalled = true;
-            onFail(head.held, cause);
+            stall(head.owed.held, cause);
             break;
           }
+          // a hook behind this row threw while it was awaited: nothing more leaves
+          if (stalled) break;
         }
         queue.shift();
         // an adapter that throws on send is its own bug; it must not stall every later release
@@ -482,20 +530,41 @@ const createRelease = (
   };
 
   return {
-    submit: (run, done, held) => {
-      if (!stalled && !draining && queue.length === 0 && done === undefined) {
+    submit: (run) => {
+      if (!stalled && !draining && queue.length === 0) {
         // a socket may re-enter the relay from inside `run`: that release queues behind this one
         draining = true;
         try {
           run();
+        } catch {
+          // the adapter's send bug, swallowed here exactly as in the drain
         } finally {
           draining = false;
           if (queue.length > 0) void drain();
         }
         return;
       }
-      queue.push({ run, done, held });
+      queue.push({ run });
       if (!stalled) void drain();
+    },
+    reserve: (held) => {
+      const item: Item = { run: () => undefined, open: true };
+      queue.push(item);
+      return {
+        fill: (run, done) => {
+          // observed now, so a rejection behind an unsettled head is never unhandled; the drain
+          // still reads it when it gets there
+          void done?.catch(() => undefined);
+          item.run = run;
+          if (done) item.owed = { done, held };
+          item.open = false;
+          if (!stalled) void drain();
+        },
+        fail: (cause) => {
+          item.open = false;
+          stall(held, cause);
+        },
+      };
     },
     busy: () => draining || queue.length > 0,
     stalled: () => stalled,
@@ -636,7 +705,6 @@ export function createRelay(opt: RelayOptions = {}): Relay {
         ejected: new Set(),
         buckets: new Map(),
         release: createRelease((held, cause) => {
-          if (!held) return;
           if ('kind' in held) opt.onRowDurabilityFailed?.(name, held, cause);
           else opt.onDurabilityFailed?.(name, held, cause);
         }),
@@ -659,9 +727,18 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     }
   };
 
+  /** One socket's send inside a fan-out: a socket that throws is skipped, never the others. */
+  const deliver = (socket: RelaySocket, msg: ServerMsg): void => {
+    try {
+      socket.send(msg);
+    } catch {
+      // the adapter's bug on that connection; the rest of the fan-out still goes out
+    }
+  };
+
   const broadcast = (room: Room, msg: ServerMsg, except?: Member): void => {
     for (const member of room.members) {
-      if (member !== except) member.socket.send(msg);
+      if (member !== except) deliver(member.socket, msg);
     }
   };
 
@@ -846,6 +923,28 @@ export function createRelay(opt: RelayOptions = {}): Relay {
   };
 
   /**
+   * Runs a persistence hook in a release place taken before it, so whatever the hook causes
+   * re-entrantly is released behind its row. A hook that throws has failed the row's durability:
+   * the room stalls before the throw reaches the caller, and the failure is reported then.
+   * Answers the fill for what the row releases.
+   */
+  const persist = (
+    room: Room,
+    held: SeqEnvelope | RelayRow,
+    hook: () => void | Promise<void>,
+  ): ((run: () => void) => void) => {
+    const slot = room.release.reserve(held);
+    let done: void | Promise<void>;
+    try {
+      done = hook();
+    } catch (cause) {
+      slot.fail(cause);
+      throw cause;
+    }
+    return (run) => slot.fill(run, done ?? undefined);
+  };
+
+  /**
    * The cut itself, synchronous so no admission falls between capture and boundary: capture the
    * seed, mint the instance, freeze extent and preCutMax, reset registers to the seed (its
    * baselines ride along), clear admission evidence, refusals and readiness; receipts and the
@@ -901,7 +1000,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
     (name: string, room: Room, cut: ReturnType<typeof cutRoom>) => (): void => {
       for (const member of cut.audience) {
         if (!room.members.has(member) || member.ejected) continue;
-        member.socket.send({
+        deliver(member.socket, {
           t: 'welcome',
           room: name,
           ...cut.doc,
@@ -927,8 +1026,10 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       record: { ...generationOf(room), seed: cut.seed },
       dropped: cut.dropped,
     };
-    const done = opt.onRow?.(name, row, stateOf(room));
-    room.release.submit(rewelcome(name, room, cut), done ?? undefined, row);
+    const release = persist(room, row, () =>
+      opt.onRow?.(name, row, stateOf(room)),
+    );
+    release(rewelcome(name, room, cut));
     notice(name, room);
   };
 
@@ -1130,21 +1231,29 @@ export function createRelay(opt: RelayOptions = {}): Relay {
       const joined = new Map<string, Member>();
 
       const disconnect = (): void => {
+        // every room lets the member go before a throw from one of them (a hook in a cut its
+        // census took) reaches the caller
+        let thrown: { readonly cause: unknown } | undefined;
         for (const [name, member] of joined) {
           const room = rooms.get(name);
           if (!room || !room.members.has(member)) continue;
-          room.members.delete(member);
-          dropPresence(name, room, member);
-          broadcast(room, {
-            t: 'member',
-            room: name,
-            origin: member.origin,
-            gone: true,
-          });
-          left(name, room);
-          maybeEvictEmpty(name); // last member left a never-seeded room: reclaim it
+          try {
+            room.members.delete(member);
+            dropPresence(name, room, member);
+            broadcast(room, {
+              t: 'member',
+              room: name,
+              origin: member.origin,
+              gone: true,
+            });
+            left(name, room);
+            maybeEvictEmpty(name); // last member left a never-seeded room: reclaim it
+          } catch (cause) {
+            thrown ??= { cause };
+          }
         }
         joined.clear();
+        if (thrown) throw thrown.cause;
       };
 
       return {
@@ -1363,11 +1472,11 @@ export function createRelay(opt: RelayOptions = {}): Relay {
             eject(msg.room, room, member, violation);
             return;
           }
-          // Refusals that eject nobody. The submitter alone hears them, at once: a `drop`
-          // carries no committed state, so it never waits behind durability.
-          const refuse = (
-            reason: Exclude<DropMsg['reason'], 'compacting'>,
-          ): void => {
+          // Refusals that eject nobody, and that carry no committed state: the submitter alone
+          // hears them, at once, whatever is still waiting for durability ('order' is judged
+          // against versions admitted but possibly not durable yet; an honest client on one
+          // in-order connection never receives it).
+          const refuse = (reason: 'generation' | 'schema' | 'order'): void => {
             opt.onDrop?.(msg.room, env, reason);
             member.socket.send({
               t: 'drop',
@@ -1378,15 +1487,12 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               seq: room.seq,
             });
           };
-          // a journaled refusal is answered behind the durability of its row, and again on every
-          // resend, with the room's sequence as of the reply
-          const answer = (
-            reason: JournaledRefusal,
-            done?: Promise<void>,
-            row?: RefuseRow,
-          ): void => {
-            opt.onDrop?.(msg.room, env, reason);
-            const reply: ServerMsg = {
+          // A drop that stands for committed state: a duplicate is its version's acknowledgement,
+          // a journaled refusal its row's verdict (answered again on every resend). It is released
+          // behind everything queued ahead of it, to the member only while it is still in the
+          // room, with the room's sequence as of the reply.
+          const reply = (reason: 'duplicate' | JournaledRefusal) => {
+            const out: ServerMsg = {
               t: 'drop',
               room: msg.room,
               origin: env.origin,
@@ -1394,13 +1500,13 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               reason,
               seq: room.seq,
             };
-            room.release.submit(
-              () => {
-                if (room.members.has(member)) member.socket.send(reply);
-              },
-              done,
-              row,
-            );
+            return (): void => {
+              if (room.members.has(member)) member.socket.send(out);
+            };
+          };
+          const answer = (reason: 'duplicate' | JournaledRefusal): void => {
+            opt.onDrop?.(msg.room, env, reason);
+            room.release.submit(reply(reason));
           };
           // the generation fence first: nothing written in another generation is answered by
           // this generation's evidence, not even as a duplicate
@@ -1416,7 +1522,7 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           const ranges = room.ranges.get(env.origin);
           // admission evidence: a version the room holds is a resend, and the answer is its
           // acknowledgement — never a second sequence number
-          if (ranges?.has(env.version)) return refuse('duplicate');
+          if (ranges?.has(env.version)) return answer('duplicate');
           // refused stays refused for the generation, and the writer hears it again
           const key = `${env.origin}#${env.version}`;
           const was = room.refused.get(key);
@@ -1449,11 +1555,17 @@ export function createRelay(opt: RelayOptions = {}): Relay {
               version: env.version,
               reason: refused,
             };
-            return answer(
-              refused,
-              opt.onRow?.(msg.room, row, stateOf(room)) ?? undefined,
-              row,
+            const release = persist(room, row, () =>
+              opt.onRow?.(msg.room, row, stateOf(room)),
             );
+            // a throwing observer must not leave the row's place open: the row is journaled
+            // either way, so its verdict still goes out behind it
+            try {
+              opt.onDrop?.(msg.room, env, refused);
+            } finally {
+              release(reply(refused));
+            }
+            return;
           }
           // quiet: this commit arrives at least `quietMs` after the room's previous admitted commit
           const at = now();
@@ -1498,27 +1610,25 @@ export function createRelay(opt: RelayOptions = {}): Relay {
           // welcome's document half is captured at hello, after this ingest), and sending it
           // again would hand that member one change twice.
           const audience = [...room.members];
-          const done = opt.onCommit?.(msg.room, seqEnv, stateOf(room));
-          room.release.submit(
-            () => {
-              const echo: ServerMsg = { t: 'env', room: msg.room, env: seqEnv };
-              for (const member of audience) {
-                if (room.members.has(member)) member.socket.send(echo);
-              }
-              // the settled notice rides BEHIND the envelope that moved it, so no client collects
-              // a watermark before the write it protected has passed
-              if (moved) {
-                broadcast(room, {
-                  t: 'settled',
-                  room: msg.room,
-                  settled: moved,
-                });
-              }
-              if (cut) rewelcome(msg.room, room, cut)();
-            },
-            done ?? undefined,
-            seqEnv,
+          const release = persist(room, seqEnv, () =>
+            opt.onCommit?.(msg.room, seqEnv, stateOf(room)),
           );
+          release(() => {
+            const echo: ServerMsg = { t: 'env', room: msg.room, env: seqEnv };
+            for (const member of audience) {
+              if (room.members.has(member)) deliver(member.socket, echo);
+            }
+            // the settled notice rides BEHIND the envelope that moved it, so no client collects
+            // a watermark before the write it protected has passed
+            if (moved) {
+              broadcast(room, {
+                t: 'settled',
+                room: msg.room,
+                settled: moved,
+              });
+            }
+            if (cut) rewelcome(msg.room, room, cut)();
+          });
           if (cut) notice(msg.room, room);
           else budget(msg.room, room, quiet);
         },

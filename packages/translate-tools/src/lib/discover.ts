@@ -6,6 +6,7 @@ import {
   type Project,
   type SourceFile,
 } from 'ts-morph';
+import { variableCall } from './export-call';
 import { toIdentifier } from './identifier';
 import { liftObjectLiteral } from './lift';
 import { parseLoader } from './loader';
@@ -33,6 +34,10 @@ export type DiscoveredNamespace = {
   source: DiscoveredLocale;
   /** Target locales declared in the `other` map. */
   locales: DiscoveredLocale[];
+  /** Locales named in the `other` map whose loader could not be read (each one warned). */
+  skippedLocales?: string[];
+  /** Whether the `other` map holds a spread, whose locales cannot be discovered. */
+  hasLocaleSpread?: boolean;
 };
 
 export type DiscoverOptions = {
@@ -106,23 +111,44 @@ function discoverCall(
   }
 
   const locales: DiscoveredLocale[] = [];
+  const skippedLocales: string[] = [];
+  let hasLocaleSpread = false;
   const other = call.getArguments()[1];
   if (other && Node.isObjectLiteralExpression(other)) {
     for (const prop of other.getProperties()) {
+      if (Node.isSpreadAssignment(prop)) {
+        hasLocaleSpread = true;
+        warn(
+          `Locale map in ${registryFile.getFilePath()} spreads ${prop.getExpression().getText()}; locales inside a spread are not discovered`,
+        );
+        continue;
+      }
+      if (Node.isShorthandPropertyAssignment(prop)) {
+        skippedLocales.push(prop.getName());
+        warn(
+          `Locale "${prop.getName()}" loader is a shorthand property; write it as "${prop.getName()}: () => import(...)"`,
+        );
+        continue;
+      }
       if (!Node.isPropertyAssignment(prop)) continue;
       const locale = nameText(prop.getNameNode());
       const init = prop.getInitializer();
       if (!init || !Node.isArrowFunction(init)) {
+        skippedLocales.push(locale);
         warn(`Locale "${locale}" loader is not an arrow function`);
         continue;
       }
       const parsed = parseLoader(init);
       if (!parsed) {
+        skippedLocales.push(locale);
         warn(`Unsupported loader shape for locale "${locale}"`);
         continue;
       }
       const resolved = resolveExport(project, registryFile, parsed, warn);
-      if (!resolved) continue;
+      if (!resolved) {
+        skippedLocales.push(locale);
+        continue;
+      }
       locales.push({
         locale,
         moduleFilePath: resolved.moduleFilePath,
@@ -145,6 +171,8 @@ function discoverCall(
       translation: resolvedDefault.translation,
     },
     locales,
+    ...(skippedLocales.length ? { skippedLocales } : {}),
+    ...(hasLocaleSpread ? { hasLocaleSpread } : {}),
   };
 }
 
@@ -192,7 +220,12 @@ function resolveExport(
   if (isCreateNamespace || isMergedNamespace) {
     const ns = stringArg(init, 0);
     const lit = objArg(init, 1);
-    if (ns === null || !lit) return null;
+    if (ns === null || !lit) {
+      warn(
+        `Namespace in ${moduleFile.getFilePath()} needs a string-literal name and an object-literal translation`,
+      );
+      return null;
+    }
     return {
       kind: 'namespace',
       namespace: ns,
@@ -207,7 +240,12 @@ function resolveExport(
     callee.getName() === 'createTranslation'
   ) {
     const lit = objArg(init, 1);
-    if (!lit) return null;
+    if (!lit) {
+      warn(
+        `Translation in ${moduleFile.getFilePath()} is not an object literal; inline it so the tool can read it`,
+      );
+      return null;
+    }
     return {
       kind: 'translation',
       translation: liftObjectLiteral(lit),
@@ -251,14 +289,6 @@ function resolveLoaderTarget(
       return { call, bindingName: 'translation', isDefaultExport: false };
   }
   return null;
-}
-
-function variableCall(
-  moduleFile: SourceFile,
-  name: string,
-): CallExpression | null {
-  const init = moduleFile.getVariableDeclaration(name)?.getInitializer();
-  return init && Node.isCallExpression(init) ? init : null;
 }
 
 function defaultExportCall(moduleFile: SourceFile): LoaderTarget | null {

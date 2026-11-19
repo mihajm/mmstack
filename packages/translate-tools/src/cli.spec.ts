@@ -315,7 +315,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         outDir: path.join(dir, 'i18n'),
         sourceLocale: 'en',
       }),
-    ).toThrow(/Duplicate namespace/);
+    ).toThrow(/Duplicate namespace.*dup/);
   });
 
   it('rejects (per-file) before clobbering an existing file, unless --force is passed', () => {
@@ -517,7 +517,7 @@ describe('cli runners (ephemeral fs, multi-namespace)', () => {
         sourceLocale: 'en',
       });
       expect(files).toHaveLength(3);
-      expect(warn).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('./missing'));
     } finally {
       warn.mockRestore();
     }

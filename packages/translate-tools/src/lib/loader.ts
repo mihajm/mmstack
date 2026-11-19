@@ -10,8 +10,9 @@ export type ParsedLoader = {
   importPath: string;
   /**
    * The property chain accessed on the resolved module (`m.quote.translation` → `['quote',
-   * 'translation']`). Empty for the `() => import('path')` shorthand, where `@mmstack/translate`
-   * auto-resolves the module's `default` / `translation` export.
+   * 'translation']`). Empty for the `() => import('path')` shorthand and the module object
+   * `.then((m) => m)`, where `@mmstack/translate` auto-resolves the module's `default` /
+   * `translation` export.
    */
   accessor: string[];
 };
@@ -22,6 +23,7 @@ export type ParsedLoader = {
  *   - `() => import('path').then((m) => m.a.b)` → `['a', 'b']`
  *   - `() => import('path').then((m) => m.default)` → `['default']`
  *   - `() => import('path')` (shorthand) → `[]` (default / translation auto-resolve)
+ *   - `() => import('path').then((m) => m)` (module object) → `[]`, same as the shorthand
  * Returns `null` for any other shape (async/await, computed access) — the caller warns and skips.
  */
 export function parseLoader(
@@ -77,5 +79,5 @@ function accessorChain(node: Node): string[] | null {
     parts.unshift(cur.getName());
     cur = cur.getExpression();
   }
-  return Node.isIdentifier(cur) && parts.length > 0 ? parts : null;
+  return Node.isIdentifier(cur) ? parts : null;
 }

@@ -86,7 +86,22 @@ npx mmtranslate import --src "src/**/*.ts" --in i18n --source-locale en
 
 ### `generate-manifest`
 
-Writes a config listing the discovered namespaces, their registry files, and locales. It's a starting point you can hand-edit if you'd rather pin discovery than rely on the automatic glob, or if that's not grabbing things correctly for some reason.
+Writes `mmtranslate.config.ts`, a config the other commands read from the working directory:
+
+```ts
+// mmtranslate.config.ts
+export default {
+  src: ['src/**/*.ts'],
+  sourceLocale: 'en',
+  namespaces: ['common', 'quote'],
+};
+```
+
+- `src` and `sourceLocale` are the defaults for `--src` and `--source-locale`; a flag still wins. Relative globs resolve against the config file's directory.
+- `namespaces` pins discovery: `export`, `import`, `dupes`, `unused` and `lint` only handle the listed namespaces, and warn about a discovered namespace that is not listed or a listed one that was not found. Remove the field to handle every discovered namespace.
+- Every field is optional. The file is read statically, like your sources, so keep the values literal. `export default { ... } satisfies MmtranslateConfig` works too (`import type { MmtranslateConfig } from '@mmstack/translate-tools'`).
+
+Run it again to pick up new namespaces: it always lists every namespace it discovers. `--config <file>` reads a config from another path. A manifest written by version 1.1 (an array of entries) is still read, as the namespace list.
 
 ```bash
 npx mmtranslate generate-manifest --src "src/**/*.ts" --out mmtranslate.config.ts
@@ -118,16 +133,17 @@ Comments are located with the TypeScript scanner, so a marker inside a translati
 
 ### Options
 
-| Flag                       | Applies to                 | Default                                     | Meaning                                                                 |
-| -------------------------- | -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
-| `--src <glob>`             | all (repeatable)           | `src/**/*.ts`                               | Source files to scan.                                                   |
-| `--out <dir\|file>`        | export / generate-manifest | `translations` / `mmtranslate.config.ts`    | Output dir (export) or manifest file.                                   |
-| `--in <dir>`               | import                     | `translations`                              | Directory of translated JSON.                                           |
-| `--source-locale <locale>` | all                        | `en` (import: the value recorded at export) | Label for the default/source translation (your app's `defaultLocale`).  |
-| `--force`                  | import                     | off                                         | Overwrite an existing file when adding a new locale.                    |
-| `--ignore-case`            | dupes / lint               | off                                         | Compare values case-insensitively.                                      |
-| `--app-src <glob>`         | unused / lint (repeatable) | the `--src` globs                           | App sources for the usage scan (definition/registry files never count). |
-| `--report json`            | dupes / unused / lint      | human output                                | Machine-readable report.                                                |
+| Flag                       | Applies to                 | Default                                                                            | Meaning                                                                 |
+| -------------------------- | -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `--src <glob>`             | all (repeatable)           | the config's `src`, else `src/**/*.ts`                                             | Source files to scan.                                                   |
+| `--out <dir\|file>`        | export / generate-manifest | `translations` / `mmtranslate.config.ts`                                           | Output dir (export) or manifest file.                                   |
+| `--in <dir>`               | import                     | `translations`                                                                     | Directory of translated JSON.                                           |
+| `--source-locale <locale>` | all                        | the config's `sourceLocale`, else `en` (import: else the value recorded at export) | Label for the default/source translation (your app's `defaultLocale`).  |
+| `--config <file>`          | all                        | `mmtranslate.config.ts` if present                                                 | Config file to read (see `generate-manifest`).                          |
+| `--force`                  | import                     | off                                                                                | Overwrite an existing file when adding a new locale.                    |
+| `--ignore-case`            | dupes / lint               | off                                                                                | Compare values case-insensitively.                                      |
+| `--app-src <glob>`         | unused / lint (repeatable) | the `--src` globs                                                                  | App sources for the usage scan (definition/registry files never count). |
+| `--report json`            | dupes / unused / lint      | human output                                                                       | Machine-readable report.                                                |
 
 ## How discovery works
 
@@ -166,7 +182,12 @@ For a namespace to be discovered and round-tripped:
 - Loaders use a static dynamic `import('./path')`. Every form `@mmstack/translate` accepts at
   runtime is supported: `.then((m) => m.quote.translation)`, `.then((m) => m.default)`, and the
   `() => import('./path')` shorthand (which auto-resolves the module's `default` or `translation`
-  export). Async/`await` or computed-access loaders are skipped with a warning.
+  export), also written `.then((m) => m)`. Async/`await` or computed-access loaders are skipped
+  with a warning.
+- A locale the registry declares but the tool cannot read (a shorthand `{ fr }` entry, an
+  unsupported loader, a translation object held in a variable) is skipped with a warning, and
+  `import` will not replace its loader. A spread in the locale map is warned about too, and
+  `import` will not add new locales to that map; add them by hand.
 - Translation values are string literals, template literals (no substitutions),
   `withParams('literal')`, or nested objects. Dynamic values (a variable, a concatenation) are
   rejected with a clear error — inline a literal so the tool can round-trip it.

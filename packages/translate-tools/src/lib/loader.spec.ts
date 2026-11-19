@@ -73,4 +73,21 @@ describe('parseLoader', () => {
       parseLoader(arrow(`() => import('./x').then((m) => doStuff(m))`)),
     ).toBeNull();
   });
+
+  it('parses the module object `.then((m) => m)` like the shorthand', () => {
+    expect(parseLoader(arrow(`() => import('./x').then((m) => m)`))).toEqual({
+      importPath: './x',
+      accessor: [],
+    });
+  });
+
+  it.each([
+    ['a variable import path', `() => import(p)`],
+    ['a variable import path before .then', `() => import(p).then((m) => m.a)`],
+    ['a plain function call', `() => loadNs()`],
+    ['a cached promise', `() => cached.then((m) => m.quote)`],
+    ['a function reference callback', `() => import('./x').then(pick)`],
+  ])('returns null for %s', (_, expr) => {
+    expect(parseLoader(arrow(expr))).toBeNull();
+  });
 });

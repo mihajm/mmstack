@@ -1,5 +1,6 @@
 export * from './lib/codegen';
 export * from './lib/commands';
+export type { MmtranslateConfig } from './lib/config';
 export * from './lib/discover';
 export * from './lib/icu';
 export * from './lib/lift';

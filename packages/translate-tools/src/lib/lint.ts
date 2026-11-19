@@ -1,6 +1,8 @@
 import { Node, ts, type Project, type SourceFile } from 'ts-morph';
-import { buildProject, type ProjectOptions } from './commands';
+import { buildProject, type PinOptions, type ProjectOptions } from './commands';
+import { pinNamespaces } from './config';
 import { discoverFromProject, type DiscoveredNamespace } from './discover';
+import { exportedCall } from './export-call';
 import { leafEntries } from './nested';
 
 export type LintRuleName = 'duplicate' | 'unused';
@@ -132,10 +134,8 @@ export function keyLines(
   isDefaultExport: boolean,
 ): Map<string, number> {
   const out = new Map<string, number>();
-  const init = isDefaultExport
-    ? sf.getExportAssignment((a) => !a.isExportEquals())?.getExpression()
-    : sf.getVariableDeclaration(exportName)?.getInitializer();
-  if (!init || !Node.isCallExpression(init)) return out;
+  const init = exportedCall(sf, exportName, isDefaultExport);
+  if (!init) return out;
   const obj = init.getArguments().find(Node.isObjectLiteralExpression);
   if (!obj) return out;
 
@@ -238,9 +238,15 @@ export function findDuplicates(
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Identifier boundaries that treat `$` as a word character (`\b` does not).
+const START = '(?<![\\w$])';
+const END = '(?![\\w$])';
+
 /** `a.b.c` as a whitespace-tolerant member chain — also matches the dotted string `'a.b.c'`. */
 function chainRe(segments: string[]): RegExp {
-  return new RegExp(`\\b${segments.map(escapeRe).join('\\s*\\.\\s*')}\\b`);
+  return new RegExp(
+    `${START}${segments.map(escapeRe).join('\\s*\\.\\s*')}${END}`,
+  );
 }
 
 export type UsageVerdict = 'used' | 'unknown' | 'unused';
@@ -264,19 +270,19 @@ export function classifyUsage(key: string, appTexts: string[]): UsageVerdict {
   for (let i = segments.length - 1; i >= 1; i--) {
     const prefix = segments.slice(0, i);
     const chain = prefix.map(escapeRe).join('\\s*\\.\\s*');
-    const computed = new RegExp(`\\b${chain}\\s*\\[`);
+    const computed = new RegExp(`${START}${chain}\\s*\\[`);
     if (appTexts.some((t) => computed.test(t))) return 'unknown';
     // Subtree passed as a value: prefix chain not followed by a deeper access.
     const bare =
       prefix.length >= 2
-        ? new RegExp(`\\b${chain}\\b(?!\\s*[.[\\w])`)
-        : new RegExp(`\\.\\s*${chain}\\b(?!\\s*[.[\\w])`);
+        ? new RegExp(`${START}${chain}${END}(?!\\s*[.[\\w$])`)
+        : new RegExp(`\\.\\s*${chain}${END}(?!\\s*[.[\\w$])`);
     if (appTexts.some((t) => bare.test(t))) return 'unknown';
   }
   return 'unused';
 }
 
-export type LintRunOptions = {
+export type LintRunOptions = PinOptions & {
   rules: LintRuleName[];
   sourceLocale?: string;
   ignoreCase?: boolean;
@@ -305,17 +311,23 @@ export function lintProject(
   opts: LintRunOptions,
   appProject?: Project,
 ): LintReport {
-  const namespaces = discoverFromProject(project, {
+  const discovered = discoverFromProject(project, {
     sourceLocale: opts.sourceLocale ?? 'en',
     onWarn: opts.onWarn,
   });
 
+  // Every discovered namespace's files stay out of the usage scan, pinned or not.
   const definitionFiles = new Set<string>();
-  for (const ns of namespaces) {
+  for (const ns of discovered) {
     definitionFiles.add(ns.registryFilePath);
     definitionFiles.add(ns.source.moduleFilePath);
     for (const locale of ns.locales) definitionFiles.add(locale.moduleFilePath);
   }
+  const namespaces = pinNamespaces(
+    discovered,
+    opts.namespaces,
+    opts.onWarn ?? (() => undefined),
+  );
 
   const suppressionFiles = namespaces
     .map((ns) => project.getSourceFile(ns.source.moduleFilePath))

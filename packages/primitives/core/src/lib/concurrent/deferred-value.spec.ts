@@ -1,4 +1,10 @@
-import { Component, computed, PLATFORM_ID, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  Injector,
+  PLATFORM_ID,
+  signal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { deferredValue, type DeferStrategy } from './deferred-value';
 
@@ -177,5 +183,118 @@ describe('deferredValue', () => {
     source.set('b');
     expect(deferred()).toBe('b'); // no deferral
     expect(deferred.pending()).toBe(false);
+  });
+});
+
+describe('deferredValue: shipped strategies and options', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'browser' }],
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('with no options it catches up after the next render', () => {
+    const source = signal('a');
+    const deferred = TestBed.runInInjectionContext(() => deferredValue(source));
+    TestBed.tick();
+    source.set('b');
+    expect(deferred()).toBe('a');
+    TestBed.tick();
+    TestBed.tick();
+    expect(deferred()).toBe('b');
+    expect(deferred.pending()).toBe(false);
+  });
+
+  it('an injector option works outside an injection context', () => {
+    const sched = manualScheduler();
+    const source = signal(1);
+    const deferred = deferredValue(source, {
+      strategy: sched.strategy,
+      injector: TestBed.inject(Injector),
+    });
+    TestBed.tick();
+    source.set(2);
+    TestBed.tick();
+    sched.flush();
+    expect(deferred()).toBe(2);
+  });
+
+  it('a catch-up equal by the custom equal keeps the held object and notifies no one', () => {
+    const sched = manualScheduler();
+    const first = { id: 1, label: 'a' };
+    const source = signal(first);
+    const deferred = TestBed.runInInjectionContext(() =>
+      deferredValue(source, {
+        strategy: sched.strategy,
+        equal: (a, b) => a.id === b.id,
+      }),
+    );
+    let runs = 0;
+    const consumer = computed(() => (runs++, deferred()));
+    TestBed.tick();
+    sched.flush();
+    consumer();
+    source.set({ id: 1, label: 'b' });
+    TestBed.tick();
+    sched.flush();
+    expect(consumer()).toBe(first);
+    expect(runs).toBe(1);
+  });
+
+  it("'idle' without requestIdleCallback waits for a timer, not for the render, and coalesces", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const source = signal(0);
+    const deferred = TestBed.runInInjectionContext(() =>
+      deferredValue(source, { strategy: 'idle' }),
+    );
+    TestBed.tick();
+    vi.runAllTimers();
+    const seen: number[] = [];
+    const consumer = computed(() => deferred());
+    seen.push(consumer());
+    for (const n of [1, 2, 3]) {
+      source.set(n);
+      TestBed.tick();
+    }
+    expect(deferred()).toBe(0);
+    expect(deferred.pending()).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersToNextTimer();
+    seen.push(consumer());
+    expect(seen).toEqual([0, 3]);
+    expect(deferred.pending()).toBe(false);
+  });
+
+  it("'idle' uses requestIdleCallback where it exists and cancels superseded catch-ups", () => {
+    const queued = new Map<number, () => void>();
+    let next = 0;
+    vi.stubGlobal('requestIdleCallback', (cb: () => void) => {
+      queued.set(++next, cb);
+      return next;
+    });
+    vi.stubGlobal('cancelIdleCallback', (id: number) => queued.delete(id));
+    const source = signal(0);
+    const deferred = TestBed.runInInjectionContext(() =>
+      deferredValue(source, { strategy: 'idle' }),
+    );
+    TestBed.tick();
+    for (const cb of [...queued.values()]) cb();
+    queued.clear();
+    const writes: number[] = [];
+    const consumer = computed(() => deferred());
+    writes.push(consumer());
+    for (const n of [1, 2, 3]) {
+      source.set(n);
+      TestBed.tick();
+    }
+    expect(queued.size).toBe(1);
+    for (const cb of [...queued.values()]) cb();
+    writes.push(consumer());
+    expect(writes).toEqual([0, 3]);
   });
 });

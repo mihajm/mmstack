@@ -280,7 +280,7 @@ describe('store', () => {
       expect(collected).toEqual([10, 20]);
 
       expect(Object.getPrototypeOf(s.v)).toBe(Array.prototype);
-      expect(Object.keys(s.v)).toEqual(['0', '1', 'length']);
+      expect(Object.keys(s.v)).toEqual(['0', '1']);
     });
 
     it('an array node flips to a record and routes as a record afterwards', () => {

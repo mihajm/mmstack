@@ -179,3 +179,33 @@ describe('census: one incident per source', () => {
     expect(entry.member.content).toBe(content);
   });
 });
+
+describe('resourceMember: failure messages', () => {
+  const failureOf = (ref: ResourceLike, kind?: 'mutation') =>
+    resourceMember(ref, { ...opts('m'), ...(kind ? { kind } : {}) }).failure();
+
+  it('an Error-like value that is not an Error gives its string message', () => {
+    const ref = fake('error');
+    ref.error.set({ status: 500, message: 'boom' });
+    expect(failureOf(ref)?.message).toBe('boom');
+  });
+
+  it('a null error gives no message, without a throw', () => {
+    const ref = fake('error');
+    ref.error.set(null);
+    expect(failureOf(ref)).toEqual(
+      expect.objectContaining({ displayName: 'm', message: undefined }),
+    );
+  });
+
+  it.each([undefined, 'mutation'] as const)(
+    'a ref with no error signal fails with no message (kind %s)',
+    (kind) => {
+      const { error: _, ...rest } = fake('error');
+      const ref = rest as ResourceLike;
+      expect(failureOf(ref, kind)).toEqual(
+        expect.objectContaining({ displayName: 'm', message: undefined }),
+      );
+    },
+  );
+});

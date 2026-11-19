@@ -1,5 +1,6 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { mutable } from '../mutable';
 import { mapObject } from './map-object';
 
 describe('mapObject', () => {
@@ -82,5 +83,58 @@ describe('mapObject', () => {
 
       expect(mapped().x.label()).toBe('x=5');
     });
+  });
+
+  it('follows key-set histories of three steps, including a same-size rename', () => {
+    const source = signal<Record<string, number>>({ a: 1, b: 2 });
+    const destroyed: string[] = [];
+    const mapFn = vi.fn((key: string) => ({ key }));
+    const mapped = mapObject(source, mapFn, {
+      onDestroy: (v) => destroyed.push(v.key),
+    });
+    const keys = () => Object.keys(mapped()).sort();
+
+    expect(keys()).toEqual(['a', 'b']);
+    source.set({ a: 1 });
+    expect(keys()).toEqual(['a']);
+    source.set({ a: 1, c: 3 });
+    expect(keys()).toEqual(['a', 'c']);
+    expect(mapped()['c'].key).toBe('c');
+    source.set({ d: 4, c: 3 });
+    expect(keys()).toEqual(['c', 'd']);
+    expect(mapFn.mock.calls.map((c) => c[0])).toEqual(['a', 'b', 'c', 'd']);
+    expect(destroyed).toEqual(['b', 'a']);
+  });
+
+  it('a rename of the only key maps the new key and destroys the old entry', () => {
+    const source = signal<Record<string, number>>({ a: 1 });
+    const onDestroy = vi.fn();
+    const mapped = mapObject(source, (key) => ({ key }), { onDestroy });
+    const first = mapped()['a'];
+    source.set({ b: 2 });
+    expect(Object.keys(mapped())).toEqual(['b']);
+    expect(mapped()['b']).toEqual({ key: 'b' });
+    expect(onDestroy).toHaveBeenCalledTimes(1);
+    expect(onDestroy).toHaveBeenCalledWith(first);
+  });
+
+  it('a mutable() source: an in-place edit of an object value reaches its key', () => {
+    const state = mutable({ address: { city: 'a' }, n: 1 });
+    let nRuns = 0;
+    const view = mapObject(state, (key, prop) =>
+      computed(() => {
+        if (key === 'n') nRuns++;
+        return JSON.stringify(prop());
+      }),
+    );
+    expect(view().address()).toBe('{"city":"a"}');
+    expect(view().n()).toBe('1');
+    state.mutate((s) => {
+      s.address.city = 'x';
+      return s;
+    });
+    expect(view().address()).toBe('{"city":"x"}');
+    view().n();
+    expect(nRuns).toBe(1);
   });
 });

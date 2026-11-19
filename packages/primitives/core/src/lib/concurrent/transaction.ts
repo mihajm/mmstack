@@ -29,6 +29,7 @@ import type { WritableSignalStore } from '../store/types';
 
 export { transactional } from './active-transaction';
 import {
+  beginPinnedHold,
   claimLoads,
   createAttributedPending,
   injectTransitionScope,
@@ -496,11 +497,13 @@ export function injectStartTransaction(): StartTransaction {
     watchSlices(txn, () => {
       const before = snapshotLoads(scope);
       return () => {
-        if (!txn.closed) claimLoads(scope, txn, before);
+        claimLoads(scope, txn, before);
+        // the body settled its own transaction: its loads stay on record as settled
+        if (txn.closed) releaseClaims(scope, txn);
       };
     });
 
-    scope.beginHold();
+    const releaseHold = beginPinnedHold(scope);
 
     // Two phases, not one flag twice: `finished` turns true before the undo pass, the claim
     // release and the hold release (it is the reentrancy guard, read synchronously and
@@ -528,7 +531,7 @@ export function injectStartTransaction(): StartTransaction {
       if (restore) txn.restore();
       else txn.clear();
       releaseClaims(scope, txn);
-      scope.endHold();
+      releaseHold();
       settledSig.set(true);
       resolveDone();
       resolveOutcome(o);
@@ -542,8 +545,39 @@ export function injectStartTransaction(): StartTransaction {
     );
 
     const pending = computed(() =>
-      asyncBody() ? !settledSig() : attributed(),
+      asyncBody() ? !settledSig() : !settledSig() && attributed(),
     );
+
+    const watchSyncSettle = () => {
+      let sawPending = false;
+      const rendered = signal(false);
+      const settled = () =>
+        !untracked(attributed) && untracked(txn.retained) === 0;
+      watcher = effect(
+        () => {
+          const p = attributed();
+          const open = txn.retained() > 0;
+          if (p) sawPending = true;
+          if ((sawPending || rendered()) && !p && !open)
+            finish({ kind: 'completed' }, false);
+        },
+        { injector },
+      );
+      if (onServer) {
+        rendered.set(true);
+        if (settled()) finish({ kind: 'completed' }, false);
+      } else {
+        // no-async fallback; with a retain open it waits for the release
+        afterNextRender(
+          () => {
+            if (sawPending) return;
+            rendered.set(true);
+            if (settled()) finish({ kind: 'completed' }, false);
+          },
+          { injector },
+        );
+      }
+    };
     controllers.set(txn, { pending, outcome, abort: abortWith, fail });
 
     let result: unknown;
@@ -563,15 +597,16 @@ export function injectStartTransaction(): StartTransaction {
         if (!untracked(attributed) && untracked(txn.retained) === 0)
           finish({ kind: 'completed' }, false);
       };
-      watcher = effect(
-        () => {
-          const p = attributed();
-          const open = txn.retained() > 0;
-          if (returned() && rendered() && !p && !open)
-            finish({ kind: 'completed' }, false);
-        },
-        { injector },
-      );
+      if (!finished)
+        watcher = effect(
+          () => {
+            const p = attributed();
+            const open = txn.retained() > 0;
+            if (returned() && rendered() && !p && !open)
+              finish({ kind: 'completed' }, false);
+          },
+          { injector },
+        );
       Promise.resolve(result).then(() => {
         if (finished) return;
         returned.set(true);
@@ -589,34 +624,7 @@ export function injectStartTransaction(): StartTransaction {
       return ref;
     }
 
-    let sawPending = false;
-    const rendered = signal(false);
-    const settled = () =>
-      !untracked(attributed) && untracked(txn.retained) === 0;
-    watcher = effect(
-      () => {
-        const p = attributed();
-        const open = txn.retained() > 0;
-        if (p) sawPending = true;
-        if ((sawPending || rendered()) && !p && !open)
-          finish({ kind: 'completed' }, false);
-      },
-      { injector },
-    );
-    if (onServer) {
-      rendered.set(true);
-      if (settled()) finish({ kind: 'completed' }, false);
-    } else {
-      // no-async fallback; with a retain open it waits for the release
-      afterNextRender(
-        () => {
-          if (sawPending) return;
-          rendered.set(true);
-          if (settled()) finish({ kind: 'completed' }, false);
-        },
-        { injector },
-      );
-    }
+    if (!finished) watchSyncSettle();
 
     const ref: TransactionRef = {
       pending,

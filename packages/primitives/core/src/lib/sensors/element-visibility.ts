@@ -46,7 +46,8 @@ export type ElementVisibilitySignal = Signal<
  * and an optional `debugName`.
  * @returns A `Signal<IntersectionObserverEntry | undefined>`. It emits `undefined` initially,
  * on the server, or if the target is `null`. Otherwise, it emits the latest
- * `IntersectionObserverEntry`. Consumers can derive a boolean `isVisible` from
+ * `IntersectionObserverEntry`. When the target changes it emits `undefined` until the
+ * new element's first entry arrives. Consumers can derive a boolean `isVisible` from
  * this entry's `isIntersecting` property.
  *
  * @example
@@ -135,15 +136,17 @@ function createElementVisibility(
   effect((cleanup) => {
     const el = targetSignal();
 
-    if (!el) return state.set(undefined);
+    // A new target has no entry yet; never report the previous element's.
+    state.set(undefined);
+    if (!el) return;
 
-    let observer: IntersectionObserver | null = null;
-    observer = new IntersectionObserver(([entry]) => state.set(entry), opt);
+    const observer = new IntersectionObserver(
+      ([entry]) => state.set(entry),
+      opt,
+    );
     observer.observe(el instanceof ElementRef ? el.nativeElement : el);
 
-    cleanup(() => {
-      observer?.disconnect();
-    });
+    cleanup(() => observer.disconnect());
   });
 
   const base = state.asReadonly() as InternalElementVisibilitySignal;

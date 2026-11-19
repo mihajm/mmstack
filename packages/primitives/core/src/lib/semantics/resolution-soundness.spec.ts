@@ -67,6 +67,42 @@ describe('[PROVEN] resolution soundness — agreement on all COMPLETING resoluti
     );
   });
 
+  it('[PIN] a pending in a spreading position never commits a length: the seed -912417862 counterexample and the flat / concat ones', () => {
+    const pending = loading('spreading');
+    const cases: Expr[] = [
+      {
+        t: 'hof',
+        m: 'map',
+        arr: {
+          t: 'hof',
+          m: 'flatMap',
+          arr: lit(12),
+          cb: arrow(['p'], { t: 'pending' }),
+        },
+        cb: arrow(['p'], lit(0)),
+      },
+      {
+        t: 'spreading',
+        m: 'flat',
+        arr: { t: 'arr', slots: [plain({ t: 'pending' })] },
+        args: [],
+      },
+      {
+        t: 'spreading',
+        m: 'concat',
+        arr: { t: 'arr', slots: [] },
+        args: [{ t: 'pending' }],
+      },
+    ];
+    for (const e of cases) {
+      expect(evalAlgebra(e, pending, {})).toBe(pending);
+      const lengths = new Set(
+        RESOLUTIONS.map((r) => (evalPlain(e, r, {}) as unknown[]).length),
+      );
+      expect(lengths.size).toBeGreaterThan(1);
+    }
+  });
+
   it('[ORACLE search-receiver] indexOf/lastIndexOf/includes walk the RECEIVER, not just the args — a pending element inside the spec search range that the target could resolve to must propagate, never commit a contradictable -1/false (the escaped soundness bug; random generation is too sparse here to be the standing defense)', () => {
     const pending = loading('search-receiver');
     const arrWith = (slots: readonly Slot[]): Expr => ({ t: 'arr', slots });

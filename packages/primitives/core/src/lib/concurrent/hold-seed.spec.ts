@@ -209,3 +209,39 @@ describe('hold registry reclamation', () => {
     endOwnHold(page);
   });
 });
+
+describe('hold registry: unrelated scopes ending out of order', () => {
+  afterEach(() => expect(holdRegistrySize()).toBe(0));
+
+  it('a later unrelated hold does not drop the entries an earlier one still reads', () => {
+    const sig = signal(0);
+    const a = {};
+    const b = {};
+    beginOwnHold(a);
+    recordHoldEntry(sig, 'pre');
+    beginOwnHold(b);
+    expect([seed(a, sig), seed(b, sig)]).toEqual(['pre', undefined]);
+    endOwnHold(b);
+    expect(seed(a, sig)).toBe('pre');
+    endOwnHold(a);
+  });
+
+  it('every entry of a signal expiring while another hold stays open is pruned without a throw', () => {
+    const sig = signal(0);
+    const other = signal(0);
+    const a = {};
+    const b = {};
+    beginOwnHold(b);
+    recordHoldEntry(sig, 'pre');
+    recordHoldEntry(other, 'pre-other');
+    beginOwnHold(a);
+    recordHoldEntry(other, 'in-a');
+    expect(() => endOwnHold(b)).not.toThrow();
+    expect([seed(a, sig), seed(a, other), holdRegistrySize()]).toEqual([
+      undefined,
+      'in-a',
+      1,
+    ]);
+    endOwnHold(a);
+  });
+});

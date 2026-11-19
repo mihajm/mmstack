@@ -136,6 +136,7 @@ export class MmOutcome<T> implements OnChanges {
     getTransitionScope(inject(Injector))?.census ?? null;
   private readonly id = memberId(MEMBER_SITE, ordinalOf(this));
   private attached: MmOutcomeSource<T> | undefined;
+  private attachedName: string | undefined;
   private leave: (() => void) | undefined;
   private shownTpl: TemplateRef<unknown> | null = null;
   private view: EmbeddedViewRef<Record<string, unknown>> | null = null;
@@ -165,17 +166,15 @@ export class MmOutcome<T> implements OnChanges {
   // view's update, before the boundary that reads the census renders.
   ngOnChanges(): void {
     const src = this.mmOutcome();
-    if (src === this.attached) return;
+    const name = this.mmOutcomeName();
+    if (src === this.attached && name === this.attachedName) return;
     this.leave?.();
     this.leave = undefined;
     this.attached = src;
+    this.attachedName = name;
     if (this.census === null) return;
     this.leave = this.census.register(
-      readerMember(
-        src as MmOutcomeSource<unknown>,
-        this.id,
-        this.mmOutcomeName(),
-      ),
+      readerMember(src as MmOutcomeSource<unknown>, this.id, name),
     );
   }
 

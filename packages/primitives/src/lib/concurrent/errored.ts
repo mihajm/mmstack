@@ -10,6 +10,7 @@ import {
   inject,
   Injector,
   input,
+  type OnChanges,
   type OnInit,
   signal,
   type Signal,
@@ -155,7 +156,7 @@ const asError = (e: unknown): Error =>
   selector: '[mmErrored]',
   exportAs: 'mmErrored',
 })
-export class MmErrored implements OnInit {
+export class MmErrored implements OnChanges, OnInit {
   private readonly tpl = inject(TemplateRef) as TemplateRef<unknown>;
   private readonly vcr = inject(ViewContainerRef);
   private readonly errorHandler = inject(ErrorHandler, { optional: true });
@@ -187,6 +188,7 @@ export class MmErrored implements OnInit {
   private readonly id = memberId('mmErrored', (ordinal += 1));
   private content: EmbeddedViewRef<unknown> | null = null;
   private fallbackView: EmbeddedViewRef<WritableContext> | null = null;
+  private fallbackTpl: TemplateRef<MmErroredContext> | null = null;
   private readonly hidden = new Map<Node, Saved>();
   private retrying = false;
   /** Set for the first fault of a retry, whose error replaces the one shown. */
@@ -209,6 +211,11 @@ export class MmErrored implements OnInit {
       this.destroyed = true;
       this.leaveCensus();
     });
+  }
+
+  ngOnChanges(): void {
+    const fault = untracked(this.fault);
+    if (fault) this.showFallback(fault.error);
   }
 
   ngOnInit(): void {
@@ -371,19 +378,23 @@ export class MmErrored implements OnInit {
   private settle(): void {
     this.fallbackView?.destroy();
     this.fallbackView = null;
+    this.fallbackTpl = null;
     this.fault.set(null);
     this.leaveCensus();
   }
 
   private showFallback(error: Error): void {
+    const tpl = untracked(this.fallback) || null;
     const existing = this.fallbackView;
-    if (existing) {
+    if (existing && tpl === this.fallbackTpl) {
       existing.context.$implicit = error;
       existing.context.error = error;
       existing.markForCheck();
       return;
     }
-    const tpl = untracked(this.fallback);
+    existing?.destroy();
+    this.fallbackView = null;
+    this.fallbackTpl = tpl;
     if (!tpl) return;
     this.fallbackView = this.vcr.createEmbeddedView(
       tpl as TemplateRef<WritableContext>,

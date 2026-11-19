@@ -406,3 +406,68 @@ describe('guessable: ledger, API edges, reactivity', () => {
     expect(barrel.guessable).toBe(guessable);
   });
 });
+
+describe('guessable: upstream changes, absent guesses, views', () => {
+  it('an upstream change and back again keeps the guess buried', () => {
+    const sig = signal(1);
+    const g = guessable(sig);
+    const t = createTransaction();
+    t.guess(g, 9);
+    expect(g()).toBe(9);
+    sig.set(2);
+    expect(g()).toBe(2);
+    sig.set(1);
+    expect(g()).toBe(1);
+    t.clear();
+    expect(g()).toBe(1);
+  });
+
+  it('an upstream write that keeps an equal value still buries, with equality off', () => {
+    const sig = signal({ n: 1 }, { equal: () => false });
+    const g = guessable(sig);
+    const t = createTransaction();
+    t.guess(g, { n: 9 });
+    const same = untracked(sig);
+    sig.set(same);
+    expect(g()).toBe(same);
+    t.clear();
+  });
+
+  it('a guess of undefined shows, and the truth returns when it settles', () => {
+    const g = guessable(signal<number | undefined>(5));
+    const t = createTransaction();
+    t.guess(g, undefined);
+    expect(g()).toBeUndefined();
+    t.clear();
+    expect(g()).toBe(5);
+  });
+
+  it('asReadonly reads like the guessable, guess included', () => {
+    const g = guessable(signal(1));
+    const ro = g.asReadonly();
+    expect(ro()).toBe(1);
+    const t = createTransaction();
+    t.guess(g, 9);
+    expect(ro()).toBe(9);
+    t.clear();
+    expect(ro()).toBe(1);
+  });
+
+  it('a second write in the guessing transaction after an upstream change keeps a held reader frozen', () => {
+    const s = scope();
+    const sig = signal(0);
+    const g = guessable(sig);
+    const held = s.hold(g);
+    s.beginHold();
+    const t = createTransaction();
+    t.enter(() => g.set(1));
+    t.guess(g, 9);
+    sig.set(5);
+    t.enter(() => g.set(2));
+    expect(g()).toBe(2);
+    expect(held()).toBe(0);
+    s.endHold();
+    expect(held()).toBe(2);
+    t.clear();
+  });
+});

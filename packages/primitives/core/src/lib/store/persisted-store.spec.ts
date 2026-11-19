@@ -472,9 +472,10 @@ describe('persist (composable reader on an existing store)', () => {
       { key: 'burst', store: backend, writeDebounceMs: 30 },
     );
     await tick();
-    s.n.set(1);
-    s.n.set(2);
-    s.n.set(3);
+    for (const n of [1, 2, 3]) {
+      s.n.set(n);
+      TestBed.tick(); // each run of the persist effect reschedules the debounced write
+    }
     await handle.flush();
     expect(backend.map.get('burst')).toEqual({ n: 3 });
     expect(sets).toBe(1); // the debounce collapsed the burst; flush wrote once
@@ -489,7 +490,8 @@ describe('persist (composable reader on an existing store)', () => {
     await tick();
     expect(s()).toEqual({ n: 5 }); // hydrated from disk
 
-    s.n.set(9); // schedules a debounced write ~40ms out
+    s.n.set(9);
+    TestBed.tick(); // runs the persist effect, which schedules a debounced write ~40ms out
     await handle.clear(); // must cancel it, reset the store, and delete the entry
     expect(s()).toEqual({ n: 0 });
     expect(backend.map.has('c')).toBe(false);

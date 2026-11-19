@@ -1,11 +1,13 @@
 import { isServer } from '../platform';
 import {
   afterNextRender,
+  computed,
   DestroyRef,
   effect,
   inject,
   Injector,
   type Signal,
+  signal,
   untracked,
 } from '@angular/core';
 import {
@@ -46,7 +48,9 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
 
   return (fn: () => void): TransitionRef => {
     // attributed: loads already in flight when the transition starts are not ours
-    const pending = createAttributedPending(scope);
+    const attributed = createAttributedPending(scope);
+    const settled = signal(false);
+    const pending = computed(() => !settled() && attributed());
     untracked(fn);
 
     let sawPending = false;
@@ -54,11 +58,12 @@ export function injectStartTransition(): (fn: () => void) => TransitionRef {
       const settle = () => {
         releaseDestroy();
         watcher.destroy();
+        settled.set(true);
         resolve();
       };
       const watcher = effect(
         () => {
-          const p = pending();
+          const p = attributed();
           if (p) sawPending = true;
           // settle: requests went in flight and then drained
           if (sawPending && !p) settle();

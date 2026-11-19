@@ -42,6 +42,13 @@ class Knobs {
     if (this.bad()) throw new Error('bad');
     return 'ok';
   });
+  readonly bad2 = signal(false);
+  readonly label = signal('one');
+  readonly value2 = computed(() => {
+    const label = this.label();
+    if (this.bad2()) throw new Error('bad2');
+    return label;
+  });
 }
 
 @Component({
@@ -697,6 +704,179 @@ describe('*mmErrored: a retry that goes wrong', () => {
     knobs.bad.set(false);
     fixture.componentInstance.boundary().retry();
     await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+    expect(isShown(container.querySelector('.content'))).toBe(true);
+  });
+});
+
+@Component({
+  selector: 'rr-leaf2',
+  template: `<span class="leaf2">{{ knobs.value2() }}</span>`,
+})
+class Leaf2 {
+  readonly knobs = inject(Knobs);
+  constructor() {
+    this.knobs.leaves.push(this);
+  }
+}
+
+/** Detached and opted in, reading `value2`. */
+@Component({
+  selector: 'rr-detached-leaf2',
+  template: `<span class="dleaf">{{ knobs.value2() }}</span>`,
+})
+class DetachedLeaf2 {
+  readonly knobs = inject(Knobs);
+  private readonly cdr = inject(ChangeDetectorRef);
+  constructor() {
+    this.knobs.leaves.push(this);
+    this.cdr.detach();
+    injectRenderOnRetry();
+  }
+  render(): void {
+    this.cdr.detectChanges();
+  }
+}
+
+@Component({
+  selector: 'rr-removed-host',
+  imports: [MmErrored, Leaf, Leaf2],
+  template: `<div class="content" *mmErrored="fb">
+      @if (knobs.on()) {
+        <rr-leaf />
+      }
+      <rr-leaf2 />
+    </div>
+    ${FALLBACK}`,
+})
+class RemovedFaulterHost {
+  readonly knobs = inject(Knobs);
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+@Component({
+  selector: 'rr-foreign-host',
+  imports: [MmErrored, Leaf],
+  template: `<div class="content" *mmErrored="fb">
+      <div class="foreign" [innerHTML]="html"></div>
+      <rr-leaf />
+    </div>
+    ${FALLBACK}`,
+})
+class ForeignDomHost {
+  readonly html = '<section><b>third party</b></section>';
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+@Component({
+  selector: 'rr-two-detached-host',
+  imports: [MmErrored, DetachedLeaf2],
+  template: `<div class="content" *mmErrored="fb">
+      <rr-detached-leaf2 /><rr-detached-leaf2 />
+    </div>
+    ${FALLBACK}`,
+})
+class TwoDetachedHost {
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+@Component({
+  selector: 'rr-lone',
+  template: `<span class="lone">lone</span>`,
+})
+class Lone {
+  constructor() {
+    injectRenderOnRetry();
+  }
+}
+
+describe('*mmErrored: what a retry tracks between faults', () => {
+  it('a component that faulted, recovered and was removed does not force a rebuild for a later fault', async () => {
+    const { fixture, container, knobs, settle } =
+      await setup(RemovedFaulterHost);
+    const boundary = fixture.componentInstance.boundary();
+    knobs.bad.set(true);
+    await settle();
+    knobs.bad.set(false);
+    boundary.retry();
+    await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+
+    knobs.on.set(false);
+    await settle();
+    const kept = [...knobs.leaves];
+    knobs.bad2.set(true);
+    await settle();
+    expect(container.querySelector('.fb')?.textContent).toBe('bad2');
+    knobs.bad2.set(false);
+    boundary.retry();
+    await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+    expect(knobs.leaves).toEqual(kept);
+  });
+
+  it('content with DOM Angular did not render still retries in place', async () => {
+    const { fixture, container, knobs, settle } = await setup(ForeignDomHost);
+    const kept = [...knobs.leaves];
+    knobs.bad.set(true);
+    await settle();
+    knobs.bad.set(false);
+    expect(() => fixture.componentInstance.boundary().retry()).not.toThrow();
+    await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+    expect(container.querySelector('.foreign b')?.textContent).toBe(
+      'third party',
+    );
+    expect(knobs.leaves).toEqual(kept);
+  });
+
+  it('every opted-in component under one boundary is rendered by a retry', async () => {
+    const { fixture, container, knobs, settle } = await setup(TwoDetachedHost);
+    const [a, b] = knobs.leaves as DetachedLeaf2[];
+    a.render();
+    b.render();
+    knobs.bad2.set(true);
+    a.render();
+    await settle();
+    expect(container.querySelector('.fb')?.textContent).toBe('bad2');
+    knobs.label.set('two');
+    knobs.bad2.set(false);
+    fixture.componentInstance.boundary().retry();
+    await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+    expect(
+      [...container.querySelectorAll('.dleaf')].map((e) => e.textContent),
+    ).toEqual(['two', 'two']);
+  });
+
+  it('injectRenderOnRetry with no boundary above does nothing', async () => {
+    const { container } = await render(Lone);
+    expect(container.querySelector('.lone')?.textContent).toBe('lone');
+  });
+});
+
+@Component({
+  selector: 'rr-mixed-host',
+  imports: [MmErrored, Swallow, Leaf],
+  template: `<div class="content" *mmErrored="fb">
+      <rr-leaf /><rr-swallow><rr-leaf /></rr-swallow>
+    </div>
+    ${FALLBACK}`,
+})
+class MixedReachHost {
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+describe('*mmErrored: one pass, a reachable and an unreachable fault', () => {
+  it('the retry rebuilds when any faulted view is out of its reach', async () => {
+    const { fixture, container, knobs, settle } = await setup(MixedReachHost);
+    expect(knobs.leaves.length).toBe(2);
+    knobs.bad.set(true);
+    await settle();
+    knobs.bad.set(false);
+    fixture.componentInstance.boundary().retry();
+    await settle();
+    expect(knobs.leaves.length).toBe(4);
     expect(container.querySelector('.fb')).toBeNull();
     expect(isShown(container.querySelector('.content'))).toBe(true);
   });

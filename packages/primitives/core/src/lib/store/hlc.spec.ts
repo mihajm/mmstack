@@ -41,11 +41,13 @@ describe('hlc', () => {
   it('warns in dev mode when an observed remote clock leads by more than the skew bound', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      const clock = createHlcClock(() => 1_000);
-      clock.observe({ p: 1_000 + 4 * 60_000, l: 0 });
+      const wall = 1_700_000_000_000; // epoch-scale, as with Date.now
+      const clock = createHlcClock(() => wall);
+      clock.observe({ p: wall - 60_000, l: 0 });
+      clock.observe({ p: wall + 4 * 60_000, l: 0 });
       expect(warn).not.toHaveBeenCalled();
 
-      clock.observe({ p: 1_000 + 6 * 60_000, l: 0 });
+      clock.observe({ p: wall + 6 * 60_000, l: 0 });
       expect(warn).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();
@@ -67,5 +69,13 @@ describe('hlc', () => {
     expect(next.p).toBe(1_000);
     expect(next.l).toBeGreaterThan(5); // stepped past the observed logical counter
     expect(compareHlc({ p: 1_000, l: 5 }, next)).toBeLessThan(0);
+  });
+
+  it("observe at the clock's own physical time still sorts the next local stamp after the remote", () => {
+    const clock = createHlcClock(() => 1_000);
+    clock.next(); // the clock is already at p = 1000
+    const remote: Hlc = { p: 1_000, l: 5 };
+    clock.observe(remote);
+    expect(compareHlc(remote, clock.next())).toBeLessThan(0);
   });
 });

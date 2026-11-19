@@ -137,9 +137,10 @@ function storeTabSync(
     if (helloTimer !== undefined) clearTimeout(helloTimer);
     for (const timer of responseTimers.values()) clearTimeout(timer);
     responseTimers.clear();
+    // destroy drains the outbox: keep the envelope subscriber until it has posted
+    sync.destroy();
     unsubEnv();
     unsub();
-    sync.destroy();
   });
 }
 
@@ -323,7 +324,8 @@ export function tabSync<T extends WritableSignal<any>>(
  * - Uses a single BroadcastChannel for all synchronized signals
  * - Automatically cleans up listeners when the injection context is destroyed
  * - Initial signal value after sync setup is not broadcasted to prevent loops
- * - Received values are not re-broadcast, so tabs never echo each other's updates
+ * - Received values are not re-broadcast. One redundant hop is possible when two equal values
+ *   arrive before the sync effect runs; peers ignore it, so tabs still converge
  *
  */
 export function tabSync<T extends WritableSignal<any>>(

@@ -8,8 +8,12 @@ import { InjectionToken, type Provider } from '@angular/core';
  * inject, so nothing is allocated or measured unless a listener is installed.
  *
  * Span-shaped hooks (`*Start`) return an opaque handle passed back to their `*End`, and carry
- * `at` epoch-ms stamps — deliberately isomorphic to the telemetry `startSpan`/`SpanHandle` SPI,
+ * `at` stamps — deliberately isomorphic to the telemetry `startSpan`/`SpanHandle` SPI,
  * so a telemetry consumer maps one-to-one.
+ *
+ * Every `at` is in milliseconds on the `performance.now()` timeline (relative to the page's time
+ * origin), not epoch time. Add `performance.timeOrigin` to get epoch milliseconds. Where
+ * `performance` is missing, the stamp falls back to `Date.now()`.
  */
 export type ConcurrencyInstrumentation = {
   pendingStart?(e: { scope: string; resources: number; at: number }): unknown;

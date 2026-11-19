@@ -1352,3 +1352,223 @@ describe('*mmErrored: retry({ rebuild: true })', () => {
     expect(container.querySelector('.content')).toBe(content);
   });
 });
+
+let creationThrow: unknown;
+
+@Component({ selector: 'er-raw-thrower', template: `<span>raw</span>` })
+class RawThrower {
+  constructor() {
+    if (creationThrow !== undefined) throw creationThrow;
+  }
+}
+
+@Component({
+  selector: 'er-raw-host',
+  imports: [MmErrored, RawThrower],
+  template: `
+    <ng-template [mmErrored]="fb"><er-raw-thrower /></ng-template>
+    <ng-template #fb let-error
+      ><p class="fb">{{ error.message }}</p></ng-template
+    >
+  `,
+})
+class RawHost {
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+@Component({
+  selector: 'er-text-host',
+  imports: [MmErrored],
+  template: `<div class="wrap">
+      <ng-template [mmErrored]="fb">{{ label() }}</ng-template>
+    </div>
+    <ng-template #fb let-retry="retry"
+      ><button class="retry" (click)="retry()">retry</button></ng-template
+    >`,
+})
+class TextRootHost {
+  readonly knobs = inject(Knobs);
+  readonly boundary = viewChild.required(MmErrored);
+  protected readonly label = computed(() => {
+    const label = this.knobs.label();
+    if (this.knobs.bad()) throw new Error('bad-text');
+    return label;
+  });
+}
+
+@Component({
+  selector: 'er-bare-host',
+  imports: [MmErrored, Child],
+  template: `<ng-template mmErrored
+    ><div class="content"><er-child /></div
+  ></ng-template>`,
+})
+class NoFallbackHost {
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+@Component({
+  selector: 'er-switch-host',
+  imports: [MmErrored, Child],
+  template: `
+    <ng-template
+      [mmErrored]="pick() === 'big' ? big : pick() === 'small' ? small : null"
+    >
+      <div class="content"><er-child /></div>
+    </ng-template>
+    <ng-template #big let-error
+      ><p class="big">{{ error.message }}</p></ng-template
+    >
+    <ng-template #small let-error
+      ><p class="small">{{ error.message }}</p></ng-template
+    >
+  `,
+})
+class SwitchFallbackHost {
+  readonly pick = signal<'big' | 'small' | 'none'>('big');
+  readonly boundary = viewChild.required(MmErrored);
+}
+
+const textOf = (el: Element | null): string =>
+  [...(el?.childNodes ?? [])]
+    .filter((n) => n.nodeType === 3)
+    .map((n) => (n as Text).data)
+    .join('');
+
+describe('*mmErrored: contract edges', () => {
+  afterEach(() => (creationThrow = undefined));
+
+  it('a thrown string becomes an Error with that message', async () => {
+    creationThrow = 'boom';
+    const { fixture, container } = await setup(RawHost);
+    expect(fixture.componentInstance.boundary().error()?.message).toBe('boom');
+    expect(container.querySelector('.fb')?.textContent).toBe('boom');
+  });
+
+  it('a thrown non-Error object is kept as the cause', async () => {
+    const thrown = { code: 42 };
+    creationThrow = thrown;
+    const { fixture } = await setup(RawHost);
+    expect(fixture.componentInstance.boundary().error()?.cause).toBe(thrown);
+  });
+
+  it('a text root is blanked while faulted and restored by a clean retry', async () => {
+    const { container, knobs, settle } = await setup(TextRootHost);
+    const wrap = container.querySelector('.wrap');
+    expect(textOf(wrap)).toBe('one');
+    knobs.bad.set(true);
+    await settle();
+    expect(textOf(wrap)).toBe('');
+    knobs.bad.set(false);
+    (container.querySelector('.retry') as HTMLButtonElement).click();
+    await settle();
+    expect(textOf(wrap)).toBe('one');
+    expect(container.querySelector('.retry')).toBeNull();
+  });
+
+  it('a retry that throws a different error shows the new one', async () => {
+    const { fixture, container, knobs, settle } = await setup(P1Host);
+    const scope = scopeOf(fixture.debugElement.injector);
+    knobs.bad.set(true);
+    await settle();
+    expect(container.querySelector('.fb')?.textContent).toBe('bad:one');
+    knobs.label.set('two');
+    fixture.componentInstance.boundary().retry();
+    await settle();
+    expect(fixture.componentInstance.boundary().error()?.message).toBe(
+      'bad:two',
+    );
+    expect(container.querySelector('.fb')?.textContent).toBe('bad:two');
+    expect(scope.errored().map((e) => e.failure.message)).toEqual(['bad:two']);
+  });
+});
+
+describe('*mmErrored: reset, teardown and the fallback input', () => {
+  it('the reset handed to the ErrorHandler brings the content back after the fix', async () => {
+    const { container, handler, knobs, settle } = await setup(P1Host);
+    knobs.bad.set(true);
+    await settle();
+    const reset = handler.viewErrors[0].details.boundary?.reset;
+    knobs.bad.set(false);
+    reset?.();
+    await settle();
+    expect(container.querySelector('.fb')).toBeNull();
+    expect(isShown(container.querySelector('.content'))).toBe(true);
+  });
+
+  it('a kept reset or retry called after the host is destroyed does nothing', async () => {
+    const { fixture, container, handler, knobs, settle } = await setup(P1Host);
+    knobs.bad.set(true);
+    await settle();
+    const reset = handler.viewErrors[0].details.boundary?.reset;
+    const boundary = fixture.componentInstance.boundary();
+    knobs.bad.set(false);
+    fixture.destroy();
+    expect(() => reset?.()).not.toThrow();
+    expect(() => boundary.retry()).not.toThrow();
+    expect(container.querySelector('.fb')).not.toBeNull();
+    expect(knobs.instances.length).toBe(1);
+  });
+
+  it('with no fallback template a fault shows nothing and a retry shows the content', async () => {
+    const { fixture, container, knobs, settle } = await setup(NoFallbackHost);
+    const content = container.querySelector('.content');
+    knobs.bad.set(true);
+    await settle();
+    expect(isShown(content)).toBe(false);
+    expect(fixture.componentInstance.boundary().error()?.message).toBe(
+      'bad:one',
+    );
+    knobs.bad.set(false);
+    fixture.componentInstance.boundary().retry();
+    await settle();
+    expect(isShown(content)).toBe(true);
+    expect(fixture.componentInstance.boundary().error()).toBeUndefined();
+  });
+
+  it('a destroy hook that throws during a rebuild is reported with the declaring component', async () => {
+    const { fixture, handler, knobs, settle } = await poisonedSetup();
+    knobs.destroyThrows.set(true);
+    fixture.componentInstance.boundary().retry({ rebuild: true });
+    knobs.destroyThrows.set(false);
+    await settle();
+    const report = handler.viewErrors.find(
+      (r) => r.error.message === 'destroy-failed',
+    );
+    expect(report?.details.declarationType).toBe(RebuildHost);
+    expect(report?.details.declarationInstance).toBe(fixture.componentInstance);
+  });
+
+  it('a fallback template changed while faulted replaces the one shown', async () => {
+    const { fixture, container, knobs, settle } =
+      await setup(SwitchFallbackHost);
+    knobs.bad.set(true);
+    await settle();
+    expect(container.querySelector('.big')?.textContent).toBe('bad:one');
+    fixture.componentInstance.pick.set('small');
+    await settle();
+    expect(container.querySelector('.big')).toBeNull();
+    expect(container.querySelector('.small')?.textContent).toBe('bad:one');
+    fixture.componentInstance.pick.set('none');
+    await settle();
+    expect(container.querySelector('.small')).toBeNull();
+  });
+
+  it('a fallback bound after the fault began shows at once', async () => {
+    const { fixture, container, knobs, settle } =
+      await setup(SwitchFallbackHost);
+    fixture.componentInstance.pick.set('none');
+    await settle();
+    knobs.bad.set(true);
+    await settle();
+    expect(container.querySelector('.big')).toBeNull();
+    fixture.componentInstance.pick.set('big');
+    await settle();
+    expect(container.querySelector('.big')?.textContent).toBe('bad:one');
+    knobs.bad.set(false);
+    fixture.componentInstance.boundary().retry();
+    await settle();
+    expect(container.querySelector('.big')).toBeNull();
+    expect(isShown(container.querySelector('.content'))).toBe(true);
+  });
+});

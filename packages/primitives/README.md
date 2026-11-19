@@ -75,7 +75,7 @@ const upper = derived(user, {
 
 When the source is a `MutableSignal`, the derived signal is also a `MutableSignal` — `derived(state, 'items').mutate(arr => { arr.push(...); return arr })` propagates correctly.
 
-Pass `vivify` on the key/index form to create a missing container when writing through a `null`/`undefined` source — instead of throwing (mutable / array) or dropping the write. Choose `'object'`, `'array'`, `'auto'` (an array for index keys, an object otherwise), or a `() => container` factory; it defaults to off.
+Pass `vivify` on the key/index form to create a missing container when writing through a `null`/`undefined` source — instead of dropping the write (a dev-mode warning names the key). Choose `'object'`, `'array'`, `'auto'` (an array for index keys, an object otherwise), or a `() => container` factory; it defaults to off.
 
 ```typescript
 const user = signal<{ name: string } | null>(null);
@@ -118,7 +118,7 @@ form.user.address.city.set('NYC');
 // form() === { user: { address: { city: 'NYC' } } }
 ```
 
-Each level's shape is resolved from what's known: a value that is currently an object/array re-creates as that same shape (resolved per path and cached, so it survives the value later being nulled), while genuinely-unknown levels follow your option — `'auto'` (an array for index keys, an object otherwise), `'object'`, `'array'`, or a `() => container` factory. `false` (the default) keeps writes through `null` as no-ops. Adding a key that simply wasn't present on an existing object always works and needs no `vivify`.
+Each level's shape is resolved from what's known: a value that is currently an object/array re-creates as that same shape (resolved per path and cached, so it survives the value later being nulled), while genuinely-unknown levels follow your option — `'auto'` (an array for index keys, an object otherwise), `'object'`, `'array'`, or a `() => container` factory. An explicit shape or factory applies to the root container only (the factory returns the root's value); deeper unknown levels infer their shape from the key, as `'auto'` does. `false` (the default) keeps writes through `null` as no-ops. Adding a key that simply wasn't present on an existing object always works and needs no `vivify`.
 
 Top-level array support isn't exposed yet — use `indexArray` / `mapArray` for those.
 
@@ -126,7 +126,7 @@ Top-level array support isn't exposed yet — use `indexArray` / `mapArray` for 
 
 **Unions are fully supported by default.** A node may flip between array ↔ record ↔ primitive ↔ `null` freely: routing (`keys`/iteration/prototype) follows the live kind, and a child signal you grabbed **before** a flip stays correct after it — reads resolve against the new shape (`undefined` through a `null` parent, no throw) and writes copy by the container's live shape, so writing through a pre-flip child never turns an array into a plain object.
 
-> Reserved keys: `set`, `update`, `mutate`, `inline`, `asReadonly` (and `extend`, until its removal next minor) resolve to the signal's own methods, so record keys with those names aren't reachable as child stores — read them off the value (`s().set`) instead.
+> Reserved keys: `set`, `update`, `mutate`, `inline`, `asReadonly` and `asReadonlyStore` resolve to the signal's own methods, so record keys with those names aren't reachable as child stores — read them off the value (`s().set`) instead. `then` is an ordinary data key, and a store node is a function-valued proxy, so a node can look like a thenable: `await`, `Promise.resolve` or an async return would call its `then` child and never settle. Pass a store through a promise boxed, for example `return { store }`. In dev mode an awaited store rejects at once with an error that says to box it; in production it stays pending.
 
 ### `extendStore` (scoped overlay)
 
@@ -390,7 +390,7 @@ const rows = keepPrevious(resource.value, { fallback: [] }); // [] only until th
 
 `fallback` is yielded only while nothing has ever been defined; after the first defined value the previous value covers every gap, never the fallback. Like any linked signal the hold is lazy: it carries a value it has computed with, so place it over the value your readers read — reading is what feeds it. `@mmstack/resource` does exactly that for its `keepPrevious` option.
 
-If the source is writable, `set` / `update` / `asReadonly` (and `mutate` / `inline` / `from` for mutable / derived sources) are forwarded through, so it stays a drop-in replacement. `@mmstack/resource` uses it under the hood for its `keepPrevious` option.
+If the source is writable, `set` / `update` (and `mutate` / `inline` / `from` for mutable / derived sources) are forwarded through, so it stays a drop-in replacement. `asReadonly` is the wrapper's own and reads the held value. `@mmstack/resource` uses it under the hood for its `keepPrevious` option.
 
 ### Keep-alive — `MmActivity` / `injectPaused` / `providePaused`
 
@@ -507,7 +507,7 @@ A structural directive on an element that carries `error` or `failed` projects i
 providers: [provideTransitionScope({ deadline: { ms: 10_000 } })];
 ```
 
-Each suspending member gets its own 10 s, counted from its own registration. A member still pending when its time runs out is declared failed with a message that names it (`orders did not settle within 10000ms …`), and the boundary shows its error slot. If the member settles later, the synthesized failure goes away; a failure of its own always wins over it. Indicator-only members are never armed: they cannot hold anything.
+Each suspending member gets its own 10 s for each stretch it spends pending, counted from its registration or from when it goes pending again. A member still pending when its time runs out is declared failed with a message that names it (`orders did not settle within 10000ms …`), and the boundary shows its error slot. If the member settles later, the synthesized failure goes away, and going pending again (a retry, say) starts a fresh 10 s; a failure of its own always wins over it. Indicator-only members are never armed: they cannot hold anything.
 
 **Precedence.** When one suspending member is still loading and another has failed, the scope has to pick what to show. `'pending-first'`, the default, keeps the placeholder until every suspending member has settled, then shows the error slot if a failure is still there. `'error-first'` shows the error slot as soon as a failure leaves nothing to show, even while others load; a failure that does not blank (indicator-only, or content still held) never ends the placeholder while a suspending member has nothing to show. Why pending-first: with three members, one loading, one failed, one done, showing the failure at once means retrying it alone, and if the loading member then fails too the boundary shows a second error and needs a second round for one incident. Waiting for the loading member shows every failure together, and one `retryAll()` covers them. `<mm-suspense>` uses the default; for `'error-first'`, provide the scope yourself and read it with `<mm-unscoped-suspense>` (below):
 
@@ -1052,7 +1052,7 @@ history.canRedo(); // Signal<boolean>
 storeHistory(doc, { track: syncClient, policies }); // collaborative: only your own writes are undoable
 ```
 
-Undo is selective. When nobody else touched a path since your change, undo restores it exactly. When another writer changed it since, undo takes back only what your change did and keeps theirs: an array with no merge policy goes back slot by slot (base `[0, 0]`, you wrote `[1, 0]`, a peer `[0, 2]`, the merged `[1, 2]` undoes to `[0, 2]`), a record merges key by key, and a list under the `keyedArray` merge policy merges by identity. Pass `policies` (and `folds`) with the SAME values you gave the sync, so undo merges each path the way the sync does; an explicit `lww` or a custom fold restores your value whole. Undoing an add removes the key only while it still holds what you added; undoing a delete always restores it. Redo re-applies what the undo actually changed.
+Undo is selective. When nobody else touched a path since your change, undo restores it exactly. When another writer changed it since, undo takes back only what your change did and keeps theirs: an array with no merge policy goes back slot by slot (base `[0, 0]`, you wrote `[1, 0]`, a peer `[0, 2]`, the merged `[1, 2]` undoes to `[0, 2]`), a record merges key by key, and a list under the `keyedArray` merge policy merges by identity. Pass `policies` (and `folds`) with the SAME values you gave the sync, so undo merges each path the way the sync does; an explicit `lww` or a custom fold restores your value whole. Undoing an edit is skipped when the key or a parent was deleted since. Undoing an add removes the key only while it still holds what you added; undoing a delete restores it while every parent still holds a record or an array, and is skipped when someone deleted or replaced a parent. `undo()` and `redo()` return `true` when they wrote anything, and `false` when there was nothing to undo or every part of the change was skipped; a skipped step leaves no redo entry. Redo re-applies what the undo actually changed.
 
 Two limits are accepted. Undo is identity-blind for an array with no policy: if your change reordered `[a, b]` and someone then edited `b`, undo puts their edit on `a`. And if others MOVED elements since your change (base `[5, 6, 7]`, you wrote `[1, 6, 7]`, a peer swapped to `[1, 7, 6]`), your previous value comes back whole, `[5, 6, 7]`, and their swap is lost; the pre-22.23 per-index undo gave `[5, 7, 6]`. Use the `keyedArray` merge policy or a keyed container for lists that move.
 
@@ -1291,7 +1291,7 @@ setErrorReporter((report) => {
 
 ### The compiler & expression kit (`@mmstack/primitives/algebra`)
 
-For teams building dynamic expression interpreters or AST compilers that evaluate user expressions over async sentinels, the operator algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`, `joinAbsorbersDeep`) and sentinel-safe array shims (`ARRAY_METHOD_SHIMS`, `spreadArray`) are published separately under:
+For teams building dynamic expression interpreters or AST compilers that evaluate user expressions over async sentinels, the operator algebra (`strictUnary`, `strictBinary`, `and`, `or`, `coalesce`, `conditional`, `member`, `invoke`, `joinAbsorbersDeep`) and sentinel-safe array shims (`ARRAY_METHOD_SHIMS`, `spreadArray`) are published separately under: The array shims keep a pending value as an element where the result's length is fixed (`map`, `with`), and make the whole result pending where it could spread (a `flatMap` callback result, a `flat` element within the depth, a `concat` argument).
 
 ```typescript
 import { strictBinary, ARRAY_METHOD_SHIMS } from '@mmstack/primitives/algebra';

@@ -40,8 +40,11 @@ export interface CensusOptions {
   readonly arm?: DrainArm;
   /**
    * The settlement backstop, when this census carries one. Each READINESS member gets its own
-   * budget, counted from ITS OWN enrolment: a window-relative deadline would silently extend a late
-   * enrollee's, which is the opposite of what a backstop is for. Absent by default; a census without
+   * budget for each stretch it spends pending, counted from the start of that stretch (its
+   * enrolment, for a member that enrols pending): a window-relative deadline would silently extend
+   * a late enrollee's, which is the opposite of what a backstop is for. Settling clears a breach,
+   * and going pending again starts a fresh budget. The clock runs while the census is observed;
+   * a boundary always observes it. Absent by default; a census without
    * one has no liveness of its own and relies entirely on its members settling.
    *
    * Non-readiness members (enrolled facades, indicator-only members) are deliberately NOT armed:
@@ -170,18 +173,30 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
     const deadline = options.deadline;
     if (deadline === undefined || !member.readiness)
       return { member, cancel: () => undefined };
-    const breached = signal(false);
-    const cancel = (deadline.arm ?? realDeadlineArm)(
-      () => breached.set(true),
-      deadline.ms,
-    );
+    const arm = deadline.arm ?? realDeadlineArm;
+    // each pending stretch arms its own clock; a fire counts only for the stretch that armed it
+    let stretch = 0;
+    let cancelClock: (() => void) | undefined;
+    const fired = signal(0);
+    const breached = computed(() => {
+      const pending = member.pending();
+      if (pending && cancelClock === undefined) {
+        const own = ++stretch;
+        cancelClock = arm(() => fired.set(own), deadline.ms);
+      } else if (!pending && cancelClock !== undefined) {
+        cancelClock();
+        cancelClock = undefined;
+      }
+      return pending && fired() === stretch;
+    });
+    // a member that registers pending starts its first stretch at registration
+    untracked(breached);
     return {
-      member: withSettlementDeadline(
-        member,
-        breached.asReadonly(),
-        deadline.ms,
-      ),
-      cancel,
+      member: withSettlementDeadline(member, breached, deadline.ms),
+      cancel: () => {
+        cancelClock?.();
+        cancelClock = undefined;
+      },
     };
   };
 
@@ -192,7 +207,10 @@ export function createCensus(options: CensusOptions = {}): CensusRegistry {
       if (removed) return;
       removed = true;
       cancel();
-      members.update((list) => list.filter((m) => m !== member));
+      members.update((list) => {
+        const i = list.indexOf(member);
+        return i === -1 ? list : [...list.slice(0, i), ...list.slice(i + 1)];
+      });
     };
   };
 

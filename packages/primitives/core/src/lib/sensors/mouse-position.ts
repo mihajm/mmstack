@@ -37,7 +37,8 @@ export type MousePositionOptions = SensorRunOptions & {
   /**
    * Defines the coordinate system for the reported position.
    * - `'client'`: Coordinates relative to the viewport (`clientX`, `clientY`).
-   * - `'page'`: Coordinates relative to the entire document (`pageX`, `pageY`).
+   * - `'page'`: Coordinates relative to the entire document (`pageX`, `pageY`). They also
+   *   update when the document scrolls under a still cursor.
    * @default 'client'
    */
   coordinateSpace?: 'client' | 'page';
@@ -167,20 +168,39 @@ function createMousePosition(opt?: MousePositionOptions): MousePositionSignal {
     },
   );
 
-  const updatePosition: EventListener = (event) => {
-    let x: number, y: number;
+  const page = coordinateSpace === 'page';
+  let lastClient: { x: number; y: number } | null = null;
 
-    if (event instanceof MouseEvent) {
-      x = coordinateSpace === 'page' ? event.pageX : event.clientX;
-      y = coordinateSpace === 'page' ? event.pageY : event.clientY;
-    } else if ((event as TouchEvent).touches?.length > 0) {
-      const firstTouch = (event as TouchEvent).touches[0];
-      x = coordinateSpace === 'page' ? firstTouch.pageX : firstTouch.clientX;
-      y = coordinateSpace === 'page' ? firstTouch.pageY : firstTouch.clientY;
+  type Point = Pick<Touch, 'clientX' | 'clientY' | 'pageX' | 'pageY'>;
+
+  // Branch on the event type, not `instanceof MouseEvent`: events from a same-origin
+  // iframe are built by that frame's constructors.
+  const updatePosition: EventListener = (event) => {
+    let point: Point;
+    if (event.type === 'touchmove') {
+      const touches = (event as TouchEvent).touches;
+      if (!(touches?.length > 0)) return;
+      point = touches[0];
     } else {
-      return;
+      point = event as MouseEvent;
     }
-    pos.set({ x, y });
+    lastClient = { x: point.clientX, y: point.clientY };
+    pos.set(page ? { x: point.pageX, y: point.pageY } : lastClient);
+  };
+
+  // Page coordinates move when the document scrolls under a still cursor.
+  const onScroll = (view: Window) => () => {
+    if (!lastClient) return;
+    pos.set({
+      x: lastClient.x + view.scrollX,
+      y: lastClient.y + view.scrollY,
+    });
+  };
+
+  const viewOf = (el: Window | Document | HTMLElement): Window | null => {
+    if ('defaultView' in el) return el.defaultView;
+    if ('ownerDocument' in el) return el.ownerDocument?.defaultView ?? null;
+    return el;
   };
 
   const attach = (el: Window | Document | HTMLElement): (() => void) => {
@@ -191,6 +211,13 @@ function createMousePosition(opt?: MousePositionOptions): MousePositionSignal {
     });
     if (touch) {
       el.addEventListener('touchmove', updatePosition, {
+        passive: true,
+        signal: controller.signal,
+      });
+    }
+    const view = page ? viewOf(el) : null;
+    if (view) {
+      view.addEventListener('scroll', onScroll(view), {
         passive: true,
         signal: controller.signal,
       });

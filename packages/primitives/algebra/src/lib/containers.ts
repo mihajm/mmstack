@@ -45,8 +45,7 @@ const passthroughShim = (
   method: string,
   scanArgs: 'all' | 'none' | readonly number[] = 'all',
 ): ArrayMethodShim => {
-  const labeled =
-    method === 'flat' ? labeledFlat : labeledPassthrough(method, scanArgs);
+  const labeled = labeledPassthrough(method, scanArgs);
   return (input, args, apply) => {
     if (SENSITIVE_POLICY.mode) return labeled(input, args, apply);
     const receiver = input as readonly unknown[];
@@ -65,8 +64,9 @@ const passthroughShim = (
 
 type SearchMethod = 'indexOf' | 'lastIndexOf' | 'includes';
 
+// unary plus is ToNumber: it throws on a BigInt or a Symbol, as the native methods do
 const toIntegerOrInfinity = (value: unknown): number => {
-  const number = Number(value);
+  const number = +(value as number);
   if (Number.isNaN(number)) return 0;
   if (number === Infinity || number === -Infinity) return number;
   return Math.trunc(number);
@@ -98,6 +98,7 @@ const searchShim = (method: SearchMethod): ArrayMethodShim => {
         from = len - 1;
       }
       for (let i = from; i >= 0; i--) {
+        if (!(i in receiver)) continue;
         const element = receiver[i];
         if (isAbsorbing(element)) return element;
         if (matches(element)) return i;
@@ -111,6 +112,8 @@ const searchShim = (method: SearchMethod): ArrayMethodShim => {
       if (start < 0) start = 0;
     }
     for (let i = start; i < len; i++) {
+      // indexOf skips holes; includes reads them as undefined
+      if (method !== 'includes' && !(i in receiver)) continue;
       const element = receiver[i];
       if (isAbsorbing(element)) return element;
       if (matches(element)) return method === 'includes' ? true : i;
@@ -144,8 +147,40 @@ const shimMap: ArrayMethodShim = (receiver, args, apply) =>
     invoke(args[0], [element, index], apply),
   );
 
-const shimFlatMap: ArrayMethodShim = (receiver, args, apply) =>
-  (shimMap(receiver, args, apply) as unknown[]).flat();
+// Whether a callback result spreads decides the length, so a pending result makes the whole
+// answer pending (as a pending `filter` verdict does).
+const shimFlatMap: ArrayMethodShim = (receiver, args, apply) => {
+  const mapped = shimMap(receiver, args, apply) as unknown[];
+  return joinAbsorbers(mapped) ?? mapped.flat();
+};
+
+/** The absorbers `flat` would spread: elements within `depth` (holes skipped). */
+function spreadAbsorbers(
+  source: readonly unknown[],
+  depth: number,
+  found: unknown[] = [],
+): unknown[] {
+  if (depth <= 0) return found;
+  for (let i = 0; i < source.length; i++) {
+    if (!(i in source)) continue;
+    const element = source[i];
+    if (isAbsorbing(element)) found.push(element);
+    else if (Array.isArray(element)) spreadAbsorbers(element, depth - 1, found);
+  }
+  return found;
+}
+
+const shimFlat: ArrayMethodShim = (input, args, apply) => {
+  if (SENSITIVE_POLICY.mode) return labeledFlat(input, args, apply);
+  const argAbsorber = joinAbsorbers(args);
+  if (argAbsorber) return argAbsorber;
+  const receiver = input as readonly unknown[];
+  const depth = args[0] === undefined ? 1 : toIntegerOrInfinity(args[0]);
+  return (
+    joinAbsorbers(spreadAbsorbers(receiver, depth)) ??
+    (receiver as unknown[]).flat(...(args as [number?]))
+  );
+};
 
 type Settled = { value: unknown } | undefined;
 
@@ -244,15 +279,23 @@ const shimToSorted: ArrayMethodShim = (input, args, apply) => {
   return joinAbsorbers(absorbers) ?? out;
 };
 
+/**
+ * Sentinel-safe array methods, by name. A pending value only changes an answer where its
+ * resolution could: in a position that spreads into the result (a `flatMap` callback result, a
+ * `flat` element within the depth, a `concat` argument) it decides the length, so the whole result
+ * is pending, as with a pending `filter` verdict. In a fixed-length position (a `map` result, a
+ * `with` value, an element nested deeper than it spreads) it stays an element.
+ */
 export const ARRAY_METHOD_SHIMS: Readonly<Record<string, ArrayMethodShim>> =
   Object.freeze({
     at: passthroughShim('at'),
-    concat: passthroughShim('concat', 'none'),
+    // an array argument spreads, so a pending argument decides the length
+    concat: passthroughShim('concat'),
     slice: passthroughShim('slice'),
     includes: searchShim('includes'),
     indexOf: searchShim('indexOf'),
     lastIndexOf: searchShim('lastIndexOf'),
-    flat: passthroughShim('flat'),
+    flat: shimFlat,
     toReversed: passthroughShim('toReversed'),
     toSpliced: passthroughShim('toSpliced', [0, 1]),
     with: passthroughShim('with', [0]),

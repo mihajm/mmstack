@@ -188,3 +188,18 @@ describe('optimistic (overlay tier for a plain signal)', () => {
     expect(barrel.optimisticStore).toBe(optimisticStore);
   });
 });
+
+describe('optimistic (plain signal): fork()', () => {
+  it('a fork shows on the view only, and discard returns the view to base; twice is harmless', () => {
+    const base = signal(1);
+    const view = optimistic(base);
+    const fork = view.fork();
+    fork.value.set(9);
+    expect(view()).toBe(9);
+    expect(base()).toBe(1);
+    fork.discard();
+    expect(view()).toBe(1);
+    expect(() => fork.discard()).not.toThrow();
+    expect(view()).toBe(1);
+  });
+});

@@ -2,6 +2,7 @@ import {
   computed,
   inject,
   Injector,
+  isDevMode,
   isSignal,
   signal,
   untracked,
@@ -62,7 +63,9 @@ export type toStoreOptions = {
    * knowledge is captured when the path is first accessed and cached, so it holds even after
    * the value is later nulled. This option governs only genuinely-unknown (currently
    * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
-   * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+   * explicit `'object'`/`'array'`, or a `() => container` factory. An explicit shape or factory
+   * applies to the root container only (the factory returns the root's value); deeper unknown
+   * levels infer their shape from the key, as `'auto'` does. See {@link Vivify}.
    */
   vivify?: Vivify;
   /**
@@ -123,6 +126,24 @@ function getCachedChild(
 }
 
 /**
+ * @internal Every store node's call path. A signal read takes no arguments; the promise machinery
+ * calls a `then` child as `then(resolve, reject)` when a store is awaited, so in dev mode that
+ * shape fails loudly instead of leaving the promise pending forever.
+ */
+function callNode(target: any, thisArg: unknown, args: unknown[]): unknown {
+  if (
+    args.length >= 2 &&
+    typeof args[0] === 'function' &&
+    typeof args[1] === 'function' &&
+    isDevMode()
+  )
+    throw new Error(
+      '[@mmstack/primitives] a store was awaited (or passed to Promise.resolve or returned from an async function). A store node is a function-valued proxy and can look like a thenable; box it instead, e.g. `{ store }`.',
+    );
+  return Reflect.apply(target, thisArg, args);
+}
+
+/**
  * @internal Whether a mutable parent's child value must always re-notify: in-place mutation
  * keeps an object child's reference stable, so `Object.is` would swallow the change. Decided
  * per-VALUE (not snapshotted at build) so a union child that becomes an object later still
@@ -144,6 +165,7 @@ function buildChildNode(
   prop: Key,
   isMutableSource: boolean,
   options: Required<toStoreOptions>,
+  childOptions: Required<toStoreOptions>,
 ): Signal<any> {
   let vivifyFn = options.vivify === false ? createVivify(false) : undefined;
   const resolveVivifyFn = (sample: unknown) =>
@@ -160,7 +182,7 @@ function buildChildNode(
     equal: isMutableSource ? mutableChildEqual : undefined,
   });
 
-  const proxy = toStore(computation, options);
+  const proxy = toStore(computation, childOptions);
 
   markAsLeaf(
     proxy,
@@ -194,6 +216,11 @@ export function toStore<T extends AnyRecord>(
  * array and a record keeps working. Flips are route-forward: after a flip the node behaves as
  * its new kind on the next access, while child proxies cached under the old shape go stale and
  * are pruned by the GC.
+ *
+ * A store node is a function-valued proxy and `then` is an ordinary data key, so a node can look
+ * like a thenable: `await`, `Promise.resolve` or an async return would call its `then` child and
+ * never settle. Pass a store through a promise boxed, e.g. `{ store }`. In dev mode a node called
+ * the way a promise calls `then` (two function arguments) throws an error saying so.
  *
  * @example
  * const state = store({ user: { name: 'John' } });
@@ -268,6 +295,12 @@ export function toStore<T extends AnyRecord>(
     },
   };
 
+  // an explicit shape or factory is for this node's own container; deeper levels infer by key
+  const CHILD_OPTIONS: Required<toStoreOptions> =
+    vivify === false || vivify === 'auto'
+      ? STORE_OPTIONS
+      : { ...STORE_OPTIONS, vivify: 'auto' };
+
   // built lazily so non-array nodes never allocate it
   let length: Signal<number> | undefined;
   const arrayLength = () =>
@@ -277,7 +310,11 @@ export function toStore<T extends AnyRecord>(
     }));
 
   const s = new Proxy(writableSource, {
-    has(_: any, prop) {
+    apply: callNode,
+    has(target: any, prop) {
+      if (prop === 'asReadonlyStore') return true;
+      if (typeof prop === 'string' && SIGNAL_FN_PROP.has(prop))
+        return typeof target[prop] === 'function';
       const v = untracked(source) as any;
       if (untracked(kind) === 'array') {
         if (prop === 'length') return true;
@@ -312,10 +349,9 @@ export function toStore<T extends AnyRecord>(
     getOwnPropertyDescriptor(_, prop) {
       const v = untracked(source) as any;
       if (untracked(kind) === 'array') {
-        if (
-          prop === 'length' ||
-          (typeof prop === 'string' && !isNaN(+prop) && +prop < v.length)
-        )
+        // like a native array, `length` is an own key but not enumerable
+        if (prop === 'length') return { enumerable: false, configurable: true };
+        if (typeof prop === 'string' && !isNaN(+prop) && +prop < v.length)
           return { enumerable: true, configurable: true };
         return;
       }
@@ -367,7 +403,14 @@ export function toStore<T extends AnyRecord>(
         getCachedChild(
           target,
           prop,
-          () => buildChildNode(target, key, isMutableSource, STORE_OPTIONS),
+          () =>
+            buildChildNode(
+              target,
+              key,
+              isMutableSource,
+              STORE_OPTIONS,
+              CHILD_OPTIONS,
+            ),
           STORE_OPTIONS[STORE_SHARED_GLOBALS].cache,
           STORE_OPTIONS[STORE_SHARED_GLOBALS].registry,
         );
@@ -376,23 +419,10 @@ export function toStore<T extends AnyRecord>(
       try {
         k = untracked(kind);
       } catch (cause) {
-        if (typeof prop === 'string' && prop !== 'extend')
+        if (typeof prop === 'string')
           return child(isIndexProp(prop) ? +prop : prop);
         throw cause;
       }
-
-      if (prop === 'extend' && k !== 'array')
-        return (seed: AnyRecord | Signal<AnyRecord>) =>
-          scopedStore(
-            s,
-            seed,
-            isMutableSource
-              ? 'mutable'
-              : isWritableSource
-                ? 'writable'
-                : 'readonly',
-            STORE_OPTIONS,
-          );
 
       if (k === 'array') {
         if (prop === 'length') return arrayLength();
@@ -481,6 +511,7 @@ function scopedStore(
   }
 
   const scope: any = new Proxy(base, {
+    apply: callNode,
     get(target, prop) {
       if (typeof prop === 'symbol') {
         if (prop === IS_STORE) return true;
@@ -488,9 +519,6 @@ function scopedStore(
         if (prop === SCOPE_PARENT) return parent;
         if (prop === STORE_SHARED_OPTIONS) return options;
       }
-      if (prop === 'extend')
-        return (childSeed: AnyRecord | Signal<AnyRecord>) =>
-          scopedStore(scope, childSeed, kind, options);
       if (prop === 'asReadonlyStore')
         return () =>
           toStore(
@@ -596,7 +624,9 @@ export function store<T extends AnyRecord>(
      * knowledge is captured when the path is first accessed and cached, so it holds even after
      * the value is later nulled. This option governs only genuinely-unknown (currently
      * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
-     * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+     * explicit `'object'`/`'array'`, or a `() => container` factory. An explicit shape or factory
+     * applies to the root container only (the factory returns the root's value); deeper unknown
+     * levels infer their shape from the key, as `'auto'` does. See {@link Vivify}.
      */
     vivify?: Vivify;
     /**
@@ -632,7 +662,9 @@ export function mutableStore<T extends AnyRecord>(
      * knowledge is captured when the path is first accessed and cached, so it holds even after
      * the value is later nulled. This option governs only genuinely-unknown (currently
      * `null`/`undefined`) levels: `'auto'` (an array for index keys, an object otherwise), an
-     * explicit `'object'`/`'array'`, or a `() => container` factory. See {@link Vivify}.
+     * explicit `'object'`/`'array'`, or a `() => container` factory. An explicit shape or factory
+     * applies to the root container only (the factory returns the root's value); deeper unknown
+     * levels infer their shape from the key, as `'auto'` does. See {@link Vivify}.
      */
     vivify?: Vivify;
     /**

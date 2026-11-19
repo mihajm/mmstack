@@ -32,7 +32,19 @@
           "../core/**/*.test.ts",
           "../algebra/**/*.spec.ts",
           "../algebra/**/*.test.ts"
-        ]
+        ],
+        "exclude": ["**/*.browser.spec.ts", "../core/**/*.browser.spec.ts"]
+      }
+    },
+    "test-browser": {
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.browser.spec.ts", "../core/**/*.browser.spec.ts"],
+        "browsers": ["chromiumHeadless"]
+      },
+      "configurations": {
+        "webkit": { "browsers": ["webkitHeadless"] },
+        "firefox": { "browsers": ["firefoxHeadless"] }
       }
     },
     "mutate": {

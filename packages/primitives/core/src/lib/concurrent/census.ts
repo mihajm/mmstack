@@ -116,6 +116,11 @@ export interface EnrolledFacade {
 }
 
 export interface CensusRegistry {
+  /**
+   * Add a member; the returned leave removes it. Registrations are counted: the same member
+   * registered twice is in the census twice, and each leave releases only its own registration
+   * (calling it again does nothing).
+   */
   register(member: CensusMember): () => void;
   enroll(descriptor: FacadeDescriptor): EnrolledFacade;
   snapshot(): readonly CensusMember[];

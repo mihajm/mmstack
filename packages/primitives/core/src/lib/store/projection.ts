@@ -19,7 +19,8 @@ function keyOf(item: unknown, key: ReconcileKey): unknown {
  * Produces a value equal to `next` but sharing as much of `prev`'s reference structure as possible:
  * an object subtree that did not change keeps its `prev` reference, and array items are matched by
  * `key` so a surviving item keeps its identity across a reorder/insert/remove (only added items are
- * new, only removed items are dropped). This is what lets a derived store recompute without tearing
+ * new, only removed items are dropped). Items that share a key match in order; an item without a
+ * key matches the keyless item at the same index. This is what lets a derived store recompute without tearing
  * down every downstream `computed` that reads an unchanged part of it.
  */
 export function reconcile<T>(prev: T, next: T, key: ReconcileKey = 'id'): T {
@@ -34,11 +35,29 @@ function reconcileValue(
   if (Object.is(prev, next)) return prev;
 
   if (isPlainArray(prev) && isPlainArray(next)) {
-    const byKey = new Map<unknown, unknown>();
-    for (const item of prev) byKey.set(keyOf(item, key), item);
+    // a key shared by several items matches them in order; a keyless item matches the keyless
+    // item at its own index
+    const byKey = new Map<unknown, unknown[]>();
+    for (const item of prev) {
+      const k = keyOf(item, key);
+      if (k === undefined) continue;
+      const queue = byKey.get(k);
+      if (queue) queue.push(item);
+      else byKey.set(k, [item]);
+    }
+    const taken = new Map<unknown, number>();
     let changed = prev.length !== next.length;
     const out = next.map((item, i) => {
-      const match = byKey.get(keyOf(item, key));
+      const k = keyOf(item, key);
+      let match: unknown;
+      if (k === undefined) {
+        if (i < prev.length && keyOf(prev[i], key) === undefined)
+          match = prev[i];
+      } else {
+        const n = taken.get(k) ?? 0;
+        match = byKey.get(k)?.[n];
+        taken.set(k, n + 1);
+      }
       const rv = match !== undefined ? reconcileValue(match, item, key) : item;
       if (rv !== prev[i]) changed = true;
       return rv;

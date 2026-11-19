@@ -115,6 +115,8 @@ export function joined(...args: unknown[]): Signal<Result<unknown>> {
   let options: JoinedOptions<unknown> | undefined;
   let fn: ((...values: unknown[]) => unknown) | undefined;
   let end = args.length;
+  // A forwarded `options?` arrives as a trailing `undefined`: unset, not a source.
+  if (end > 0 && args[end - 1] === undefined) end--;
   const last = args[end - 1];
   if (end > 0 && !isSource(last) && typeof last === 'object') {
     options = last as JoinedOptions<unknown>;

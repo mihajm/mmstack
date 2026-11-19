@@ -31,8 +31,6 @@ export type NetworkStatusSignal = Signal<boolean> & {
   readonly since: Signal<Date>;
 };
 
-const serverDate = new Date();
-
 /**
  * Creates a read-only signal that tracks the browser's online status.
  *
@@ -64,7 +62,8 @@ function createNetworkStatus(debugName: string): NetworkStatusSignal {
     const sig = computed(() => true, {
       debugName,
     }) as InternalNetworkStatusSignal;
-    sig.since = computed(() => serverDate);
+    const created = new Date();
+    sig.since = computed(() => created);
     return sig;
   }
 

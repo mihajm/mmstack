@@ -202,3 +202,59 @@ describe('outcomeOf (M5 outcome table)', () => {
     });
   });
 });
+
+describe('outcomeOf: one sentinel per distinct failure', () => {
+  function failing() {
+    const status = signal<ResourceStatus>('resolved');
+    const error = signal<unknown>(undefined);
+    const ref: OutcomeSource<number> = {
+      status,
+      value: signal(1),
+      hasValue: () => true,
+      error,
+    };
+    const out = outcomeOf(ref);
+    const failWith = (e: unknown) => {
+      error.set(e);
+      status.set('error');
+      return out();
+    };
+    return { out, failWith };
+  }
+
+  it('an object failure maps to the same sentinel each time it shows, A then B then A', () => {
+    const { failWith } = failing();
+    const a = new Error('a');
+    const b = new Error('b');
+    const first = failWith(a);
+    const second = failWith(b);
+    const third = failWith(a);
+    expect(second).not.toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('a primitive failure that changes mints a new sentinel with its own cause', () => {
+    const { failWith } = failing();
+    const first = failWith('timeout');
+    const second = failWith('offline');
+    expect(second).not.toBe(first);
+    expect(isError(second)).toBe(true);
+    expect(outcomeErrorCause(second as never)?.cause).toBe('offline');
+  });
+
+  it('a null cause gives an error sentinel whose cause is null, without a throw', () => {
+    const { failWith } = failing();
+    const out = failWith(null);
+    expect(isError(out)).toBe(true);
+    expect(outcomeErrorCause(out as never)).toEqual({ cause: null });
+  });
+
+  it('a source with no error signal still gives an error sentinel', () => {
+    const ref: OutcomeSource<number> = {
+      status: signal<ResourceStatus>('error'),
+      value: signal(undefined),
+      hasValue: () => false,
+    };
+    expect(isError(outcomeOf(ref)())).toBe(true);
+  });
+});

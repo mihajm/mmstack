@@ -59,8 +59,9 @@ function throwLabeled(level: Level, thrown: Error): never {
   throw thrown;
 }
 
+// unary plus is ToNumber: it throws on a BigInt or a Symbol, as the native methods do
 const toIntegerOrInfinity = (value: unknown): number => {
-  const number = Number(value);
+  const number = +(value as number);
   if (Number.isNaN(number)) return 0;
   if (number === Infinity || number === -Infinity) return number;
   return Math.trunc(number);
@@ -107,9 +108,26 @@ export function labeledPassthrough(
   });
 }
 
+/** ArraySpeciesCreate(receiver, 0): a subclass receiver gets a result of its own species. */
+function speciesCreate(receiver: readonly unknown[]): unknown[] {
+  if (!Array.isArray(receiver)) return [];
+  let C: unknown = (receiver as { constructor?: unknown }).constructor;
+  if (C !== null && (typeof C === 'object' || typeof C === 'function')) {
+    C = (C as { [Symbol.species]?: unknown })[Symbol.species];
+    if (C === null) C = undefined;
+  }
+  if (C === undefined || C === Array) return [];
+  if (typeof C !== 'function')
+    throw new TypeError(
+      'object.constructor[Symbol.species] is not a constructor',
+    );
+  return new (C as new (n: number) => unknown[])(0);
+}
+
 /**
  * `flat` reads through boxes: elements read out of a boxed array come out boxed, and the result is
- * labeled whole when any element it read was labeled (whether it spread decides the length).
+ * labeled whole when any element it read was labeled (whether it spread decides the length). A
+ * pending element within the depth could spread, so it makes the whole result pending.
  */
 export const labeledFlat: ArrayMethodShim = overReceiver((receiver, args) => {
   const { xs, boxed } = open(receiver);
@@ -120,8 +138,9 @@ export const labeledFlat: ArrayMethodShim = overReceiver((receiver, args) => {
     raw === undefined ? 1 : toIntegerOrInfinity(raw),
   );
   if (depth < 0) depth = 0;
-  const out: unknown[] = [];
+  const out = speciesCreate(xs);
   let read: Level = 0;
+  const absorbers: unknown[] = [];
   const into = (
     source: readonly unknown[],
     level: number,
@@ -135,13 +154,15 @@ export const labeledFlat: ArrayMethodShim = overReceiver((receiver, args) => {
         : source[i];
       read = raise(read, levelOf(element));
       const inner = unlabel(element);
-      if (level > 0 && Array.isArray(inner))
+      if (level > 0 && isAbsorbing(inner)) absorbers.push(inner);
+      else if (level > 0 && Array.isArray(inner))
         into(inner, level - 1, levelOf(element));
-      else out.push(element);
+      else out[out.length] = element;
     }
   };
   into(xs, depth, 0);
-  return labelAt(raise(raise(boxed, read), levelInArrays(args[0])), out);
+  const level = raise(raise(boxed, read), levelInArrays(args[0]));
+  return labelAt(level, joinAbsorbers(absorbers) ?? out);
 });
 
 type SearchMethod = 'indexOf' | 'lastIndexOf' | 'includes';
@@ -171,6 +192,8 @@ export function labeledSearch(method: SearchMethod): ArrayMethodShim {
         ? (element: unknown) => sameValueZero(element, target)
         : (element: unknown) => element === target;
     const visit = (i: number): Settled => {
+      // indexOf and lastIndexOf skip holes; includes reads them as undefined
+      if (method !== 'includes' && !(i in xs)) return undefined;
       const element = xs[i];
       labeled = raise(labeled, levelOf(element));
       const plain = unlabel(element);
@@ -265,11 +288,14 @@ export const labeledFlatMap: ArrayMethodShim = overReceiver(
     const mapped = xs.map((element, index) =>
       call(args[0], [labelAt(boxed, element), index], apply, boxed),
     );
-    // Whether a result spreads decides the length: any labeled element read labels the whole result.
+    // Whether a result spreads decides the length: any labeled element read labels the whole result,
+    // and a pending result makes the whole result pending.
     let read: Level = 0;
+    const absorbers: unknown[] = [];
     const spreadable = mapped.map((result) => {
       const inner = unlabel(result);
       const level = levelOf(result);
+      if (isAbsorbing(inner)) absorbers.push(inner);
       if (level) read = raise(read, level);
       else if (Array.isArray(inner))
         read = raise(read, maxLevel(inner, levelOf));
@@ -277,7 +303,10 @@ export const labeledFlatMap: ArrayMethodShim = overReceiver(
         ? underLabel(() => inner.map((x) => labelAt(level, x)), level)
         : result;
     });
-    return labelAt(raise(boxed, read), spreadable.flat());
+    return labelAt(
+      raise(boxed, read),
+      joinAbsorbers(absorbers) ?? spreadable.flat(),
+    );
   },
 );
 
@@ -447,7 +476,8 @@ export const labeledToSorted: ArrayMethodShim = overReceiver(
         return 0;
       }
       // The sort coerces the verdict to a number; over a label that runs as a labeled region.
-      if (labeled) return underLabel(() => Number(coercible(plain)), labeled);
+      if (labeled)
+        return underLabel(() => +(coercible(plain) as number), labeled);
       return (
         typeof plain === 'object' && plain !== null ? coercible(plain) : plain
       ) as number;

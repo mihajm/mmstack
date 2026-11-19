@@ -125,4 +125,132 @@ describe('with-history', () => {
     sig.redo();
     expect(sig()).toBe('a');
   });
+
+  describe('maxSize bounds', () => {
+    const fill = (maxSize: number, strategy?: 'shift' | 'halve') => {
+      const sig = withHistory(signal(0), {
+        maxSize,
+        cleanupStrategy: strategy,
+      });
+      for (let i = 1; i <= 10; i++) sig.set(i);
+      return sig;
+    };
+
+    it.each([
+      [1, 'halve'],
+      [1, 'shift'],
+      [2, 'halve'],
+      [3, 'shift'],
+      [4, 'halve'],
+      [5, 'halve'],
+    ] as const)(
+      'maxSize %i (%s) never keeps more than maxSize undo states',
+      (maxSize, strategy) => {
+        const sig = fill(maxSize, strategy);
+        expect(sig.history().length).toBeLessThanOrEqual(maxSize);
+        expect(sig.history().at(-1)).toBe(9);
+        const oldest = sig.history()[0];
+        while (sig.canUndo()) sig.undo();
+        expect(sig()).toBe(oldest);
+      },
+    );
+
+    it('maxSize 1 keeps exactly the last previous value', () => {
+      const sig = fill(1);
+      expect(sig.history()).toEqual([9]);
+      sig.undo();
+      expect(sig()).toBe(9);
+      expect(sig.canUndo()).toBe(false);
+    });
+
+    it('maxSize 0 keeps no history at all', () => {
+      for (const strategy of ['shift', 'halve'] as const) {
+        const sig = fill(0, strategy);
+        expect(sig()).toBe(10);
+        expect(sig.history()).toEqual([]);
+        expect(sig.canUndo()).toBe(false);
+        sig.undo();
+        expect(sig()).toBe(10);
+      }
+    });
+
+    it('the redo stack is bounded by maxSize 1 too', () => {
+      const sig = withHistory(signal(0), { maxSize: 1 });
+      sig.set(1);
+      sig.undo();
+      expect(sig()).toBe(0);
+      sig.redo();
+      expect(sig()).toBe(1);
+      expect(sig.history()).toEqual([0]);
+      expect(sig.canRedo()).toBe(false);
+    });
+
+    it("'shift' drops one entry where 'halve' drops half", () => {
+      const shift = withHistory(signal(0), {
+        maxSize: 4,
+        cleanupStrategy: 'shift',
+      });
+      const halve = withHistory(signal(0), { maxSize: 4 });
+      for (let i = 1; i <= 5; i++) {
+        shift.set(i);
+        halve.set(i);
+      }
+      expect(shift.history()).toEqual([1, 2, 3, 4]);
+      expect(halve.history()).toEqual([2, 3, 4]);
+    });
+  });
+
+  describe('stack contract', () => {
+    it('a fresh signal has nothing to redo and redo is a no-op', () => {
+      const sig = withHistory(signal(1));
+      expect(sig.canRedo()).toBe(false);
+      sig.redo();
+      expect(sig()).toBe(1);
+      expect(sig.history()).toEqual([]);
+      expect(sig.canUndo()).toBe(false);
+    });
+
+    it('update records history and undo restores', () => {
+      const sig = withHistory(signal(1));
+      sig.update((v) => v + 1);
+      expect(sig()).toBe(2);
+      expect(sig.history()).toEqual([1]);
+      sig.undo();
+      expect(sig()).toBe(1);
+    });
+
+    it('redo pushes onto undo history, so undo after redo goes back again', () => {
+      const sig = withHistory(signal('a'));
+      sig.set('b');
+      sig.undo();
+      sig.redo();
+      expect(sig()).toBe('b');
+      expect(sig.canUndo()).toBe(true);
+      sig.undo();
+      expect(sig()).toBe('a');
+    });
+
+    it('clear empties the redo stack too', () => {
+      const sig = withHistory(signal(0));
+      sig.set(1);
+      sig.undo();
+      expect(sig.canRedo()).toBe(true);
+      sig.clear();
+      expect(sig.canRedo()).toBe(false);
+      sig.redo();
+      expect(sig()).toBe(0);
+    });
+
+    it('canClear follows both stacks', () => {
+      const sig = withHistory(signal(0));
+      expect(sig.canClear()).toBe(false);
+      sig.set(1);
+      expect(sig.canClear()).toBe(true);
+      sig.undo();
+      expect(sig.canUndo()).toBe(false);
+      expect(sig.canClear()).toBe(true);
+      sig.clear();
+      expect(sig.canClear()).toBe(false);
+    });
+  });
 });

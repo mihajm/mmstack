@@ -154,6 +154,14 @@ function build(value: unknown, walk: SensitiveWalk): unknown {
       Object.defineProperty(copy, key, { ...d, value: build(d.value, walk) });
     else Object.defineProperty(copy, key, d);
   }
+  // own properties the walk does not descend (symbol keys, non-enumerable ones, named array
+  // properties) are carried over as they are
+  const walked = new Set<PropertyKey>(keys);
+  for (const key of Reflect.ownKeys(value)) {
+    if (walked.has(key) || (key === 'length' && Array.isArray(value))) continue;
+    const d = Object.getOwnPropertyDescriptor(value, key);
+    if (d) Object.defineProperty(copy, key, d);
+  }
   return copy;
 }
 
@@ -162,7 +170,8 @@ function build(value: unknown, walk: SensitiveWalk): unknown {
  * `records`) by own enumerable data properties only, so accessors are never run and are copied as
  * accessors; stores, sentinels and class instances are not descended; cycle-safe. A container is
  * copied only when something below it is replaced, its copy is registered before it is filled (so
- * aliases and cycles survive), and it keeps its prototype (null included).
+ * aliases and cycles survive), and it keeps its prototype (null included) and every own property
+ * it does not descend, as it is.
  */
 export function walkSensitive(value: unknown, walk: SensitiveWalk): unknown {
   analyze(value, walk);

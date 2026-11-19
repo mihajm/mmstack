@@ -24,7 +24,7 @@ export type AnyRecord = Record<Key, any>;
 /**
  * @internal Resolves to `true` only for `any`. In a conditional type, `any` distributes across
  * *both* branches (`unknown | object`), and `unknown | X` collapses to `unknown` — which would
- * erase a store's property access and `extend`. Guarding on this routes an `any`-typed store to
+ * erase a store's property access. Guarding on this routes an `any`-typed store to
  * the full object shape instead.
  */
 type IsAny<T> = 0 extends 1 & T ? true : false;
@@ -56,55 +56,25 @@ export type MutableArrayStore<T extends any[]> = MutableSignal<T> & {
   [Symbol.iterator](): Iterator<MutableSignalStore<T[number]>>;
 };
 
-/** @internal The object shape of a readonly store: a child store per key, plus `extend`. */
+/** @internal The object shape of a readonly store: a child store per key. */
 type SignalStoreObject<T> = Simplify<
   Readonly<{
     [K in keyof Required<T>]: SignalStore<NonNullable<T>[K]>;
-  }> & {
-    /** @deprecated Use the standalone `extendStore(store, …)`; the `extend` key is removed next minor. */
-    readonly extend: {
-      <L extends AnyRecord>(
-        source: Signal<L>,
-      ): SignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-      <L extends AnyRecord>(
-        props: L,
-      ): SignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-    };
-  }
+  }>
 >;
 
 /** @internal The object shape of a writable store. */
 type WritableSignalStoreObject<T> = Simplify<
   Readonly<{
     [K in keyof Required<T>]: WritableSignalStore<NonNullable<T>[K]>;
-  }> & {
-    /** @deprecated Use the standalone `extendStore(store, …)`; the `extend` key is removed next minor. */
-    readonly extend: {
-      <L extends AnyRecord>(
-        source: WritableSignal<L>,
-      ): WritableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-      <L extends AnyRecord>(
-        props: L,
-      ): WritableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-    };
-  }
+  }>
 >;
 
 /** @internal The object shape of a mutable store. */
 type MutableSignalStoreObject<T> = Simplify<
   Readonly<{
     [K in keyof Required<T>]: MutableSignalStore<NonNullable<T>[K]>;
-  }> & {
-    /** @deprecated Use the standalone `extendStore(store, …)`; the `extend` key is removed next minor. */
-    readonly extend: {
-      <L extends AnyRecord>(
-        source: MutableSignal<L>,
-      ): MutableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-      <L extends AnyRecord>(
-        props: L,
-      ): MutableSignalStore<Simplify<Omit<NonNullable<T>, keyof L> & L>>;
-    };
-  }
+  }>
 >;
 
 export type SignalStore<T> = Signal<UnwrapOpaque<T>> &

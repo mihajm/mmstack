@@ -8,6 +8,7 @@ import {
   inject,
   Injector,
   input,
+  isDevMode,
   signal,
   type Signal,
   TemplateRef,
@@ -58,6 +59,11 @@ type Incoming<T> = {
  * background work can never delay the swap. Set `mmTransitionImmediate` to skip holding, and
  * `mmTransitionViewTransition` to wrap the swap in `document.startViewTransition` (feature
  * detected). On the server every change swaps immediately.
+ *
+ * Hiding works on the template's root elements, so use one element as the root, as above. With an
+ * `ng-container` root, its element children are hidden, but text at the root and the content of a
+ * block (`@if`, `@for`, `@switch`) placed directly inside it stay visible during the hold. In dev
+ * mode the directive warns once when part of a held view shows.
  */
 @Directive({
   selector: '[mmTransition]',
@@ -86,6 +92,8 @@ export class MmTransition<T> {
   private incoming: Incoming<T> | null = null;
   /** Bumped on every re-target/teardown so a superseded (possibly deferred) swap can't commit. */
   private swapEpoch = 0;
+
+  private warnedVisibleRoots = false;
 
   private readonly holding = signal(false);
   /** True while an incoming view is mounted hidden, waiting to settle. */
@@ -150,12 +158,15 @@ export class MmTransition<T> {
     );
     this.incoming = { view, watcher };
 
-    // Fallback for a branch that loads nothing.
+    // Fallback for a branch that loads nothing and was never held; the watcher commits the others.
     afterNextRender(
       () => {
+        if (isDevMode() && epoch === this.swapEpoch)
+          this.warnVisibleRoots(view);
         if (
           epoch === this.swapEpoch &&
           !sawPending &&
+          !sawHolding &&
           !untracked(scope.pending) &&
           !untracked(scope.holding)
         ) {
@@ -223,11 +234,24 @@ export class MmTransition<T> {
     return { view, scope };
   }
 
+  private warnVisibleRoots(view: EmbeddedViewRef<unknown>): void {
+    if (this.warnedVisibleRoots || !view.rootNodes.some(isShownRoot)) return;
+    this.warnedVisibleRoots = true;
+    console.warn(
+      '*mmTransition: part of the incoming view shows while it is held. Text at the template root, and the content of a block (@if, @for, @switch) placed directly inside an ng-container root, cannot be hidden. Use one element as the template root.',
+    );
+  }
+
   private setHidden(view: EmbeddedViewRef<unknown>, hidden: boolean): void {
     for (const node of view.rootNodes) {
-      // covers HTML and SVG roots; text/comment roots can't be styled — prefer an element root
       if (node instanceof HTMLElement || node instanceof SVGElement)
         node.style.display = hidden ? 'none' : '';
     }
   }
+}
+
+function isShownRoot(node: Node): boolean {
+  if (node instanceof HTMLElement || node instanceof SVGElement)
+    return node.style.display !== 'none';
+  return node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim();
 }

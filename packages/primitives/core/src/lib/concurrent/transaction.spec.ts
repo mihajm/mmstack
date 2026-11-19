@@ -578,10 +578,10 @@ describe('slice claims through startTransaction', () => {
     bTx.enter(kickoff);
     expect([a.pending(), b.pending()]).toEqual([false, true]);
 
-    // outside any slice: started since both checkpoints, so both see it
+    // outside any slice: started since B's checkpoint, so B sees it; A has settled and does not
     res.status.set('resolved');
     kickoff();
-    expect([a.pending(), b.pending()]).toEqual([true, true]);
+    expect([a.pending(), b.pending()]).toEqual([false, true]);
     b.abort();
     a.abort();
   });

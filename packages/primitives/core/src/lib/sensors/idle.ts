@@ -41,12 +41,12 @@ const DEFAULT_EVENTS = [
   'visibilitychange',
 ];
 
-const serverDate = new Date();
-
 /**
  * Creates a read-only signal that flips to `true` after a window of user
  * inactivity. Any of the configured `events` (default: pointer/keyboard/scroll
- * activity) resets the timer and flips the signal back to `false`.
+ * activity) resets the timer and flips the signal back to `false`. Events are
+ * read on `window` in the capture phase, so a scroll inside a scrollable panel
+ * counts as activity.
  *
  * SSR-safe — always `false` with a frozen `since` date on the server.
  *
@@ -67,7 +67,8 @@ function createIdle(opt?: IdleOptions): IdleSignal {
     const sig = computed(() => false, {
       debugName: opt?.debugName ?? 'idle',
     }) as InternalIdleSignal;
-    sig.since = computed(() => serverDate);
+    const created = new Date();
+    sig.since = computed(() => created);
     return sig;
   }
 
@@ -97,7 +98,9 @@ function createIdle(opt?: IdleOptions): IdleSignal {
   const abortController = new AbortController();
 
   for (const ev of events) {
+    // Capture, so activity events that do not bubble (scroll inside a container) count.
     window.addEventListener(ev, reset, {
+      capture: true,
       passive: true,
       signal: abortController.signal,
     });

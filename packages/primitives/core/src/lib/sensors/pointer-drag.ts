@@ -113,7 +113,10 @@ type InternalPointerDragSignal = Signal<PointerDragState> & {
 /** A gesture signal with an `unthrottled` view and an imperative `cancel()`. */
 export type PointerDragSignal = Signal<PointerDragState> & {
   readonly unthrottled: Signal<PointerDragState>;
-  /** Abort the current gesture and reset to idle (e.g. on Escape / programmatically). */
+  /**
+   * Abort the current gesture, release its pointer capture and reset to idle
+   * (e.g. on Escape / programmatically).
+   */
   cancel: () => void;
 };
 
@@ -230,6 +233,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
   let activeButton = -1;
   let activePointerType = '';
   let activeOrigin: HTMLElement | null = null;
+  let captureEl: HTMLElement | null = null;
   let activated = false;
   let gesture: AbortController | null = null;
 
@@ -249,6 +253,14 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
     if (activePointerId === null) return;
     gesture?.abort();
     gesture = null;
+    // An abort with the button still held would keep capture until the physical release.
+    try {
+      if (captureEl?.hasPointerCapture(activePointerId))
+        captureEl.releasePointerCapture(activePointerId);
+    } catch {
+      // capture unsupported — nothing to release
+    }
+    captureEl = null;
     activePointerId = null;
     activeButton = -1;
     activePointerType = '';
@@ -315,6 +327,7 @@ function createPointerDrag(opt?: PointerDragOptions): PointerDragSignal {
       startPoint = coord(e);
       try {
         el.setPointerCapture(e.pointerId);
+        captureEl = el;
       } catch {
         // capture unsupported (older browsers / test env) — listeners still work
       }

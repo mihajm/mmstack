@@ -13,6 +13,8 @@ import {
   SEARCH_NAMES,
   type SearchName,
   type Slot,
+  SPREADING_METHOD_NAMES,
+  type SpreadingMethodName,
   type UnaryOp,
 } from '@mmstack/primitives/testing';
 
@@ -54,6 +56,21 @@ function nodesFor(
     .map<readonly Slot[]>((pairs) =>
       pairs.map(([isSpread, e]) => ({ spread: isSpread, e })),
     );
+  // a pending in a spreading position (an element `flat` may spread, a `concat` argument): its
+  // resolution decides the result's length
+  const pendingOrArray = fc.oneof(
+    fc.constant<Expr>({ t: 'pending' }),
+    fc.array(sub, { maxLength: 2 }).map<Expr>((es) => ({
+      t: 'arr',
+      slots: es.map((e) => ({ spread: false, e })),
+    })),
+  );
+  const spreadingReceiver = fc
+    .array(fc.oneof(sub, pendingOrArray), { maxLength: 3 })
+    .map<Expr>((es) => ({
+      t: 'arr',
+      slots: es.map((e) => ({ spread: false, e })),
+    }));
   const nodes: fc.Arbitrary<Expr>[] = [
     litArb,
     litArb,
@@ -112,6 +129,14 @@ function nodesFor(
         target,
         from,
       })),
+    fc
+      .tuple(
+        fc.constantFrom<SpreadingMethodName>(...SPREADING_METHOD_NAMES),
+        // an array literal most of the time: the receiver must be an array to reach the shim
+        fc.oneof(sub, spreadingReceiver, spreadingReceiver),
+        fc.array(fc.oneof(sub, pendingOrArray), { maxLength: 2 }),
+      )
+      .map<Expr>(([m, arr, args]) => ({ t: 'spreading', m, arr, args })),
   ];
   if (options.functions) {
     const arrowExpr = fc

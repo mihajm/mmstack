@@ -63,9 +63,6 @@ export default defineConfig({
         '**/webrtc.spec.ts',
         '**/mesh-agent.spec.ts',
         '**/worker-mesh.spec.ts',
-        // setOffline emulation and multi-tab Web Lock handover timing are not
-        // reliable under Playwright's WebKit driver (the lib is not Safari-bound)
-        '**/persistence.spec.ts',
       ],
     },
   ],

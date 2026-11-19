@@ -1,5 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { createCircuitBreaker, type CircuitBreaker } from './circuit-breaker';
+import {
+  createCircuitBreaker,
+  provideCircuitBreakerDefaultOptions,
+  type CircuitBreaker,
+} from './circuit-breaker';
 
 describe('circuit-breaker', () => {
   beforeEach(() => {
@@ -231,6 +235,134 @@ describe('circuit-breaker', () => {
         expect(() => cb.hardReset()).not.toThrow();
         expect(cb.status()).toBe('CLOSED');
       });
+    });
+  });
+
+  describe('recovery cycle', () => {
+    const openBreaker = (opt: Parameters<typeof createCircuitBreaker>[0]) =>
+      TestBed.runInInjectionContext(() => createCircuitBreaker(opt));
+
+    it('schedules a new half-open after a failed trial', () => {
+      const cb = openBreaker({ threshold: 3, timeout: 5000 });
+      cb.fail();
+      cb.fail();
+      cb.fail();
+      TestBed.tick();
+      vi.advanceTimersByTime(5000);
+      expect(cb.status()).toBe('HALF_OPEN');
+
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
+      TestBed.tick();
+      vi.advanceTimersByTime(4999);
+      expect(cb.status()).toBe('OPEN');
+      vi.advanceTimersByTime(1);
+      expect(cb.status()).toBe('HALF_OPEN');
+
+      cb.success();
+      expect(cb.status()).toBe('CLOSED');
+    });
+
+    it('does not half-open after destroy()', () => {
+      const cb = openBreaker({ threshold: 1, timeout: 1000 });
+      cb.fail();
+      TestBed.tick();
+      cb.destroy();
+      vi.advanceTimersByTime(5000);
+      expect(cb.status()).toBe('OPEN');
+    });
+
+    it('halfOpen() on a closed breaker keeps it closed', () => {
+      const cb = openBreaker({ threshold: 3, timeout: 1000 });
+      cb.halfOpen();
+      expect(cb.status()).toBe('CLOSED');
+      cb.fail();
+      expect(cb.status()).toBe('CLOSED');
+    });
+
+    it('halfOpen() on an open breaker allows one trial', () => {
+      const cb = openBreaker({ threshold: 2, timeout: 60_000 });
+      cb.fail();
+      cb.fail();
+      cb.halfOpen();
+      expect(cb.status()).toBe('HALF_OPEN');
+      expect(cb.isOpen()).toBe(true);
+      expect(cb.isClosed()).toBe(true);
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
+    });
+  });
+
+  describe('defaults', () => {
+    it('opens after 5 failures with no options', () => {
+      const cb = TestBed.runInInjectionContext(() => createCircuitBreaker());
+      for (let i = 0; i < 4; i++) cb.fail();
+      expect(cb.status()).toBe('CLOSED');
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
+      TestBed.tick();
+      vi.advanceTimersByTime(29_999);
+      expect(cb.status()).toBe('OPEN');
+      vi.advanceTimersByTime(1);
+      expect(cb.status()).toBe('HALF_OPEN');
+    });
+
+    it('treats explicit undefined classifiers as unset', () => {
+      const cb = TestBed.runInInjectionContext(() =>
+        createCircuitBreaker({
+          threshold: 1,
+          timeout: 100,
+          shouldFail: undefined,
+          shouldFailForever: undefined,
+        }),
+      );
+      cb.fail(new Error('x'));
+      expect(cb.status()).toBe('OPEN');
+      TestBed.tick();
+      vi.advanceTimersByTime(100);
+      expect(cb.status()).toBe('HALF_OPEN');
+    });
+
+    it('applies provideCircuitBreakerDefaultOptions to calls without options', () => {
+      TestBed.configureTestingModule({
+        providers: [provideCircuitBreakerDefaultOptions({ threshold: 2 })],
+      });
+      const cb = TestBed.runInInjectionContext(() => createCircuitBreaker());
+      cb.fail();
+      expect(cb.status()).toBe('CLOSED');
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
+    });
+
+    it('keeps the provided threshold when a call sets only other fields', () => {
+      TestBed.configureTestingModule({
+        providers: [
+          provideCircuitBreakerDefaultOptions({ threshold: 2, timeout: 50 }),
+        ],
+      });
+      const cb = TestBed.runInInjectionContext(() =>
+        createCircuitBreaker({ timeout: 1000 }),
+      );
+      cb.fail();
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
+      TestBed.tick();
+      vi.advanceTimersByTime(999);
+      expect(cb.status()).toBe('OPEN');
+      vi.advanceTimersByTime(1);
+      expect(cb.status()).toBe('HALF_OPEN');
+    });
+
+    it('keeps provided defaults when a call passes undefined fields', () => {
+      TestBed.configureTestingModule({
+        providers: [provideCircuitBreakerDefaultOptions({ threshold: 2 })],
+      });
+      const cb = TestBed.runInInjectionContext(() =>
+        createCircuitBreaker({ threshold: undefined, timeout: undefined }),
+      );
+      cb.fail();
+      cb.fail();
+      expect(cb.status()).toBe('OPEN');
     });
   });
 });

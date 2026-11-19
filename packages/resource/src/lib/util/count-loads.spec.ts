@@ -28,8 +28,19 @@ describe('countLoads', () => {
 
     const refused = make(false);
     refused.req.set('a');
+    expect(refused.loads()).toBe(1);
     refused.resource.reload();
     expect(refused.loads()).toBe(1);
+  });
+
+  it('every accepted reload moves it by one', () => {
+    const { req, loads, resource } = make(true);
+    req.set('a');
+    expect(loads()).toBe(1);
+    resource.reload();
+    expect(loads()).toBe(2);
+    resource.reload();
+    expect(loads()).toBe(3);
   });
 
   it('is current on read: an abort+restart in one tick is visible without an effect', () => {

@@ -31,8 +31,11 @@ import {
   MUTATION_REPLAY_LOCKS,
   MUTATION_SYNC,
   MutationPersistence,
-  type MutationSyncChannel,
 } from './util/persist-mutations';
+import {
+  createFakeChannelHub,
+  createFakeLocks,
+} from './util/testing/fake-locks';
 
 const TEST_CONTEXT = new HttpContextToken<{
   validate: (req: HttpRequest<any>) => void;
@@ -732,109 +735,6 @@ describe('mutation persistence', () => {
   });
 
   describe('cross-tab replay claim (Web Locks)', () => {
-    function createFakeLocks(): LockManager {
-      type Mode = 'exclusive' | 'shared';
-      type Waiter = { mode: Mode; grant: () => void; aborted: boolean };
-      const held = new Map<string, { mode: Mode }[]>();
-      const queues = new Map<string, Waiter[]>();
-      const holdersOf = (name: string) => {
-        let holders = held.get(name);
-        if (!holders) held.set(name, (holders = []));
-        return holders;
-      };
-      const compatible = (name: string, mode: Mode) => {
-        const holders = holdersOf(name);
-        return (
-          !holders.length ||
-          (mode === 'shared' && holders.every((h) => h.mode === 'shared'))
-        );
-      };
-      const pump = (name: string) => {
-        const queue = queues.get(name) ?? [];
-        while (queue.length) {
-          const next = queue[0];
-          if (next.aborted) {
-            queue.shift();
-            continue;
-          }
-          if (!compatible(name, next.mode)) break;
-          queue.shift();
-          next.grant();
-        }
-      };
-      const acquire = (name: string, mode: Mode) => {
-        const holder = { mode };
-        holdersOf(name).push(holder);
-        return () => {
-          const holders = holdersOf(name);
-          const idx = holders.indexOf(holder);
-          if (idx >= 0) holders.splice(idx, 1);
-          pump(name);
-        };
-      };
-      const request = async (
-        name: string,
-        options: { mode?: Mode; ifAvailable?: boolean; signal?: AbortSignal },
-        callback: (lock: unknown) => Promise<unknown>,
-      ) => {
-        const mode = options?.mode ?? 'exclusive';
-        if (options?.ifAvailable) {
-          if (!compatible(name, mode)) return callback(null);
-          const release = acquire(name, mode);
-          try {
-            return await callback({});
-          } finally {
-            release();
-          }
-        }
-        const signal = options?.signal;
-        const release = await new Promise<() => void>((grant, reject) => {
-          if (signal?.aborted)
-            return reject(new DOMException('aborted', 'AbortError'));
-          if (compatible(name, mode)) return grant(acquire(name, mode));
-          const waiter: Waiter = {
-            mode,
-            grant: () => grant(acquire(name, mode)),
-            aborted: false,
-          };
-          const queue = queues.get(name) ?? [];
-          queue.push(waiter);
-          queues.set(name, queue);
-          signal?.addEventListener('abort', () => {
-            waiter.aborted = true;
-            reject(new DOMException('aborted', 'AbortError'));
-          });
-        });
-        try {
-          return await callback({});
-        } finally {
-          release();
-        }
-      };
-      return { request } as unknown as LockManager;
-    }
-
-    function createFakeChannelHub() {
-      const channels = new Set<MutationSyncChannel>();
-      return {
-        connect(): MutationSyncChannel {
-          const channel: MutationSyncChannel = {
-            onmessage: null,
-            postMessage(message: unknown) {
-              for (const other of channels)
-                if (other !== channel)
-                  other.onmessage?.({ data: message } as MessageEvent);
-            },
-            close() {
-              channels.delete(channel);
-            },
-          };
-          channels.add(channel);
-          return channel;
-        },
-      };
-    }
-
     type SharedInfra = {
       db: Provider;
       locks: LockManager;

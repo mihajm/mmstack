@@ -1,7 +1,15 @@
 export * from './lib/infinite-query';
 export * from './lib/manual-query';
 export * from './lib/mutation-resource';
-export * from './lib/options';
+export {
+  injectResourceOptions,
+  provideResourceOptions,
+  provideTypedResourceOptions,
+  type CommonResourceOptions,
+  type RegistrableRef,
+  type ResourceCacheOptions,
+  type TransitionRegistration,
+} from './lib/options';
 export * from './lib/query-resource';
 export * from './lib/stream-resource';
 export * from './lib/util/public_api';

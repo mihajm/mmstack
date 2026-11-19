@@ -1,5 +1,4 @@
 import {
-  HttpContext,
   HttpHeaders,
   HttpParams,
   type HttpResourceRequest,
@@ -30,14 +29,12 @@ function equalTransferCache(
 }
 
 function equalParamArray(
-  a: (string | number | boolean)[],
-  b: (string | number | boolean)[],
+  a: readonly (string | number | boolean)[],
+  b: readonly (string | number | boolean)[],
 ): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
   if (a.length !== b.length) return false;
-
-  return a.every((value) => b.includes(value));
+  // order is significant, as in hashRequest
+  return a.every((value, i) => value === b[i]);
 }
 
 function headersToObject(headerClass: HttpHeaders) {
@@ -108,8 +105,8 @@ function equalBody(
   a: HttpResourceRequest['body'],
   b: HttpResourceRequest['body'],
 ): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
   return hash(a) === hash(b);
 }
 
@@ -138,21 +135,6 @@ function equalHeaders(
   });
 }
 
-function toHttpContextEntries(ctx: HttpResourceRequest['context']) {
-  if (!ctx) return [];
-
-  if (ctx instanceof HttpContext) {
-    const tokens = Array.from(ctx.keys());
-    return tokens.map((key) => [key.toString(), ctx.get(key)] as const);
-  }
-
-  if (typeof ctx === 'object') {
-    return Object.entries(ctx) as [string, unknown][];
-  }
-
-  return [];
-}
-
 function equalContext(
   a: HttpResourceRequest['context'],
   b: HttpResourceRequest['context'],
@@ -160,12 +142,38 @@ function equalContext(
   if (!a && !b) return true;
   if (!a || !b) return false;
 
-  const aEntries = toHttpContextEntries(a);
-  const bEntries = toHttpContextEntries(b);
-  if (aEntries.length !== bEntries.length) return false;
-  if (aEntries.length === 0) return true;
-  const bMap = new Map(bEntries);
-  return aEntries.every(([key, value]) => value === bMap.get(key));
+  // tokens compare by identity: HttpContextToken has no meaningful string form
+  const aTokens = Array.from(a.keys());
+  if (aTokens.length !== Array.from(b.keys()).length) return false;
+  return aTokens.every(
+    (token) => b.has(token) && a.get(token) === b.get(token),
+  );
+}
+
+const COMPARED_FIELDS = new Set<string>([
+  'url',
+  'method',
+  'params',
+  'headers',
+  'body',
+  'context',
+  'transferCache',
+]);
+
+function equalOtherFields(
+  a: Partial<HttpResourceRequest>,
+  b: Partial<HttpResourceRequest>,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (COMPARED_FIELDS.has(key)) continue;
+    if (
+      (a as Record<string, unknown>)[key] !==
+      (b as Record<string, unknown>)[key]
+    )
+      return false;
+  }
+  return true;
 }
 
 export function createEqualRequest<TResult>(
@@ -187,10 +195,8 @@ export function createEqualRequest<TResult>(
     if (!eqb(a.body as TResult, b.body as TResult)) return false;
     if (!equalContext(a.context, b.context)) return false;
 
-    if (a.withCredentials !== b.withCredentials) return false;
-    if (a.reportProgress !== b.reportProgress) return false;
     if (!equalTransferCache(a.transferCache, b.transferCache)) return false;
 
-    return true;
+    return equalOtherFields(a, b);
   };
 }

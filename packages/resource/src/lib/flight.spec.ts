@@ -7,7 +7,12 @@ import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import { PLATFORM_ID, signal, type Provider } from '@angular/core';
+import {
+  EnvironmentInjector,
+  PLATFORM_ID,
+  signal,
+  type Provider,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { manualQueryResource } from './manual-query';
 import {
@@ -367,5 +372,25 @@ describe('queryResource onFlight', () => {
     await expect(second).resolves.toEqual({ v: 3 });
     await expect(third).resolves.toEqual({ v: 3 });
     expect(edges).toEqual(['start 2', 'superseded 2', 'start 3', 'landed 3']);
+  });
+  it('works with an explicit injector outside an injection context', async () => {
+    setup();
+    const injector = TestBed.inject(EnvironmentInjector);
+    queryResource<Value>(() => '/api/inj', { onFlight: record, injector });
+    TestBed.tick();
+    http.expectOne('/api/inj').flush({ v: 1 });
+    await settle();
+    expect(edges).toEqual(['start 1', 'landed 1']);
+  });
+
+  it('destroy() after landing adds no second terminal edge', async () => {
+    setup();
+    const res = make(() => '/api/done');
+    TestBed.tick();
+    http.expectOne('/api/done').flush({ v: 1 });
+    await settle();
+    res.destroy();
+    TestBed.tick();
+    expect(edges).toEqual(['start 1', 'landed 1']);
   });
 });

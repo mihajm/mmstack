@@ -493,6 +493,15 @@ describe('mutationResource', () => {
 
   it('triggerOnSameRequest: an identical mutation fired while one is in flight still triggers a request', async () => {
     let requests = 0;
+    // one shared context, so two mutations of equal value build equal requests
+    const context = createTestContext(
+      () => {
+        requests++;
+      },
+      { ok: true },
+      false,
+      100,
+    );
 
     const res = TestBed.runInInjectionContext(() =>
       mutationResource(
@@ -500,14 +509,7 @@ describe('mutationResource', () => {
           url: 'https://example.com/same',
           method: 'POST',
           body,
-          context: createTestContext(
-            () => {
-              requests++;
-            },
-            { ok: true },
-            false,
-            100,
-          ),
+          context,
         }),
         { triggerOnSameRequest: true },
       ),

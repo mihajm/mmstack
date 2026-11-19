@@ -35,8 +35,9 @@ import {
  * keep each other's `pending` mirrors current over a `BroadcastChannel` (stash/settle
  * events) — but a sibling-announced row is display-only until its owner is gone: replay
  * eligibility always comes from the lock + the disk re-sync, never from the broadcast.
- * Where Web Locks are unavailable (non-secure context, very old browsers) the claim falls
- * back to per-instance — the pre-lock behavior.
+ * Where Web Locks are unavailable (non-secure context, very old browsers) or refuse every
+ * request (an opaque-origin document) the claim falls back to per-instance — the pre-lock
+ * behavior.
  *
  * KNOWN LIMITS:
  * - **At-least-once**: independent of tabs, a close between sending a replay and settling
@@ -163,9 +164,12 @@ export const MUTATION_SYNC = new InjectionToken<MutationSyncChannel | null>(
 );
 
 /**
- * An in-memory, deterministic mutation-persistence store for unit tests — no IndexedDB.
- * The returned `db` is inspectable; pass `seed` to simulate rows persisted by a previous
- * session (they hydrate on first use, exactly like real rows would).
+ * Replaces the IndexedDB store behind mutation persistence with an in-memory one, for unit tests.
+ * Rows live in one in-memory map per call, shared by every injector given the returned provider,
+ * and rows past their ttl are left out of reads, as with the real store. Pass `seed` to simulate rows persisted by a
+ * previous session: each gets the id `<key>#<n>` in seed order, `created` defaults to now and its
+ * ttl is 7 days. They hydrate on first use, like real rows. To see what is stored, read
+ * {@link injectPendingMutations}.
  */
 export function provideMockMutationPersistence(seed?: {
   rows?: { key: string; raw: unknown; created?: number; session?: string }[];
@@ -307,17 +311,20 @@ export class MutationPersistence {
         .request(
           sessionLockName(this.instanceId),
           { mode: 'exclusive', signal: this.destroyed.signal },
-          () =>
-            new Promise<void>((resolve) => (this.releaseSessionLock = resolve)),
+          async () => {
+            // granted after teardown began: the abort no longer reaches a granted request
+            if (this.destroyed.signal.aborted) return;
+            await new Promise<void>(
+              (resolve) => (this.releaseSessionLock = resolve),
+            );
+          },
         )
         .catch(() => undefined);
     }
   }
 
   /** True when `session`'s owner still holds its lock — its rows are not ours to replay. */
-  private isSessionLive(session: string): Promise<boolean> {
-    const locks = this.locks;
-    if (!locks) return Promise.resolve(false);
+  private isSessionLive(locks: LockManager, session: string): Promise<boolean> {
     return new Promise((resolve) =>
       locks
         .request(
@@ -334,7 +341,8 @@ export class MutationPersistence {
     entries: readonly { value: Envelope }[],
   ): Promise<ReadonlySet<string>> {
     const alive = new Set<string>();
-    if (!this.locks) return alive;
+    const locks = this.locks;
+    if (!locks) return alive;
     const sessions = new Set<string>();
     for (const e of entries) {
       const s = e.value.session;
@@ -342,7 +350,7 @@ export class MutationPersistence {
     }
     await Promise.all(
       Array.from(sessions, async (s) => {
-        if (await this.isSessionLive(s)) alive.add(s);
+        if (await this.isSessionLive(locks, s)) alive.add(s);
       }),
     );
     return alive;
@@ -451,6 +459,7 @@ export class MutationPersistence {
   /** All stashed mutations, across every key — including keys with no live resource. */
   readonly pending: Signal<readonly PendingMutation[]> = computed(() =>
     Array.from(this.rows().values())
+      .filter((r) => r.expiresAt > Date.now())
       .toSorted((a, b) => a.seq - b.seq)
       .map(({ id, key, raw, created }) => ({ id, key, raw, created })),
   );
@@ -561,11 +570,17 @@ export class MutationPersistence {
    * REPLAYABLE stashed rows for one key, replay order (oldest first). Read after
    * `whenHydrated`. Rows a living sibling tab announced (`'broadcast'` origin) are
    * excluded — their owner sends them itself; they join the feed only after a takeover
-   * {@link refresh} finds them on disk.
+   * {@link refresh} finds them on disk. Rows past their ttl are dropped here, so a kept
+   * failure stops retrying once it expires even in a tab that never reloads.
    */
   rowsFor(key: string): PendingMutation[] {
-    return Array.from(untracked(this.rows).values())
-      .filter((r) => r.key === key && r.origin !== 'broadcast')
+    const now = Date.now();
+    const rows = Array.from(untracked(this.rows).values()).filter(
+      (r) => r.key === key && r.origin !== 'broadcast',
+    );
+    for (const r of rows) if (r.expiresAt <= now) this.remove(r.id);
+    return rows
+      .filter((r) => r.expiresAt > now)
       .toSorted((a, b) => a.seq - b.seq)
       .map(({ id, key: k, raw, created }) => ({ id, key: k, raw, created }));
   }
@@ -620,11 +635,13 @@ export class MutationPersistence {
     const controller = new AbortController();
     let releaseHold: (() => void) | undefined;
     let released = false;
+    let granted = false;
     this.locks
       .request(
         `mmstack-mutation-replay:${key}`,
         { mode: 'exclusive', signal: controller.signal },
         async () => {
+          granted = true;
           if (released) return;
           await this.refresh(key);
           if (released) return;
@@ -636,7 +653,12 @@ export class MutationPersistence {
           });
         },
       )
-      .catch(() => undefined);
+      .catch(() => {
+        // a LockManager that refuses every request (opaque origin): fall back to per-instance
+        if (released || granted) return;
+        this.heldLocks.add(key);
+        void this.whenHydrated.then(invokeIfCurrent);
+      });
     return () => {
       released = true;
       this.heldLocks.delete(key);

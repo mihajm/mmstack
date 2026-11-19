@@ -1,6 +1,7 @@
 import { type HttpResourceRequest } from '@angular/common/http';
 import {
   computed,
+  DestroyRef,
   inject,
   Injector,
   signal,
@@ -9,6 +10,7 @@ import {
 } from '@angular/core';
 import { nestedEffect } from '@mmstack/primitives';
 import { applyResourceRegistration } from './options';
+import { type InternalQueryHooks, ON_FINAL_ERROR } from './util/internal-hooks';
 import {
   queryResource,
   type QueryResourceOptions,
@@ -131,16 +133,45 @@ export function manualQueryResource<TResult, TRaw = TResult>(
     () => {
       const state = trigger();
       if (state.epoch === 0) return;
-      if (state.override) return state.override;
-
-      return untracked(request);
+      const r = state.override || untracked(request);
+      if (!r) return;
+      // a fresh object per trigger, so a trigger equal to the previous one still fetches
+      return typeof r === 'string' ? { method: 'GET', url: r } : { ...r };
     },
     {
       equal: () => false,
     },
   );
 
-  const resource = queryResource(req, { ...options, register: false });
+  let pending: {
+    res: (value: TResult) => void;
+    rej: (err: unknown) => void;
+  }[] = [];
+  let watcher: { destroy: () => void } | null = null;
+  let sawLoading = false;
+
+  const settle = (fn: (p: (typeof pending)[number]) => void) => {
+    const settled = pending;
+    pending = [];
+    watcher?.destroy();
+    watcher = null;
+    sawLoading = false;
+    settled.forEach(fn);
+  };
+
+  const abortError = () =>
+    new DOMException('The triggered load was aborted', 'AbortError');
+
+  const resource = queryResource(req, {
+    ...options,
+    register: false,
+    triggerOnSameRequest: true,
+    [ON_FINAL_ERROR]: (err: unknown) => {
+      if (sawLoading) settle((p) => p.rej(err));
+    },
+  } as QueryResourceOptions<TResult, TRaw> & InternalQueryHooks);
+
+  injector.get(DestroyRef).onDestroy(() => settle((p) => p.rej(abortError())));
 
   // An untriggered manual query is READY, not missing data: with `register: 'suspend'`
   // the boundary must only hold while a triggered load is in flight.
@@ -159,16 +190,11 @@ export function manualQueryResource<TResult, TRaw = TResult>(
     options?.displayName,
   );
 
-  let pending: {
-    res: (value: TResult) => void;
-    rej: (err: unknown) => void;
-  }[] = [];
-  let watcher: { destroy: () => void } | null = null;
-
   return {
     ...resource,
     destroy: () => {
       unregister();
+      settle((p) => p.rej(abortError()));
       resource.destroy();
     },
     trigger: (override, injectorOverride) => {
@@ -191,8 +217,6 @@ export function manualQueryResource<TResult, TRaw = TResult>(
 
         if (watcher) return;
 
-        let sawLoading = false;
-
         watcher = nestedEffect(
           () => {
             const status = resource.status();
@@ -203,19 +227,11 @@ export function manualQueryResource<TResult, TRaw = TResult>(
             }
             if (!sawLoading) return;
 
-            if (status === 'resolved' || status === 'error') {
-              const settled = pending;
-              pending = [];
-              watcher?.destroy();
-              watcher = null;
-
-              if (status === 'resolved') {
-                const value = untracked(resource.value) as TResult;
-                settled.forEach((p) => p.res(value));
-              } else {
-                const err = untracked(resource.error);
-                settled.forEach((p) => p.rej(err));
-              }
+            if (status === 'resolved') {
+              const value = untracked(resource.value) as TResult;
+              settle((p) => p.res(value));
+            } else if (status === 'local' || status === 'idle') {
+              settle((p) => p.rej(abortError()));
             }
           },
           { injector: injectorOverride ?? injector },

@@ -23,13 +23,34 @@
       "defaultConfiguration": "production"
     },
     "test": {
-      "executor": "@nx/angular:unit-test"
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.spec.ts", "**/*.test.ts"],
+        "exclude": ["**/*.browser.spec.ts"]
+      }
+    },
+    "test-browser": {
+      "executor": "@nx/angular:unit-test",
+      "options": {
+        "include": ["**/*.browser.spec.ts"],
+        "browsers": ["chromiumHeadless"]
+      },
+      "configurations": {
+        "webkit": { "browsers": ["webkitHeadless"] },
+        "firefox": { "browsers": ["firefoxHeadless"] }
+      }
     },
     "mutate": {
-      "executor": "./tools/stryker:mutate"
+      "executor": "./tools/stryker:mutate",
+      "options": {
+        "exclude": ["packages/resource/src/lib/util/testing/**"]
+      }
     },
     "mutate-report": {
-      "executor": "./tools/stryker:mutate-report"
+      "executor": "./tools/stryker:mutate-report",
+      "options": {
+        "exclude": ["packages/resource/src/lib/util/testing/**"]
+      }
     }
   }
 }

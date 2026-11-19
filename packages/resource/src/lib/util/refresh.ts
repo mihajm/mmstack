@@ -29,7 +29,8 @@ export type RefreshOptions =
        */
       onFocus?: boolean;
       /**
-       * Reload when the browser comes back online.
+       * Reload when the browser comes back online. The first request after the network
+       * returns goes to the server even when its cached entry is still fresh.
        * @default false
        */
       onReconnect?: boolean;

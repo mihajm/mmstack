@@ -36,14 +36,23 @@ type InvalidateMessage<T> = BaseSyncMessage<
 
 type StoreMessage<T> = BaseSyncMessage<Omit<CacheEntry<T>, 'timeout'>, 'store'>;
 
-type InternalSyncMessage<T> = InvalidateMessage<T> | StoreMessage<T>;
+type ClearMessage = { action: 'clear' };
+
+type InternalSyncMessage<T> =
+  | InvalidateMessage<T>
+  | StoreMessage<T>
+  | ClearMessage;
 
 /**
  * A message type used for synchronizing cache updates across tabs.
  * @internal
  * @template T - The type of data being cached.
  */
-type SyncMessage<T> = InternalSyncMessage<T> & {
+type SyncMessage<T> = (
+  | InvalidateMessage<T>
+  | StoreMessage<T>
+  | ClearMessage
+) & {
   cacheId: string;
   type: 'cache-sync-message';
 };
@@ -137,6 +146,8 @@ export class Cache<T> {
   private readonly id = generateID();
   private hydrated = false;
   private readonly hydrationTombstones = new Set<string>();
+  // bulk invalidations (and clear) made before hydration finished; matching rows stay out
+  private readonly hydrationFilters: ((key: string) => boolean)[] = [];
 
   private warnedForeignKeys = false;
 
@@ -213,6 +224,13 @@ export class Cache<T> {
     if (syncTabs) {
       const channel = new BroadcastChannel(syncTabs.id);
       this.broadcast = (msg: InternalSyncMessage<T>) => {
+        if (msg.action === 'clear')
+          return channel.postMessage({
+            action: 'clear',
+            cacheId: this.id,
+            type: 'cache-sync-message',
+          } satisfies SyncMessage<unknown>);
+
         if (msg.action === 'invalidate')
           return channel.postMessage({
             action: 'invalidate',
@@ -247,6 +265,8 @@ export class Cache<T> {
           this.restoreInternal({ ...msg.entry, value });
         } else if (msg.action === 'invalidate') {
           this.invalidateInternal(msg.entry.key, true);
+        } else if (msg.action === 'clear') {
+          this.clearInternal(true);
         }
       };
 
@@ -271,13 +291,20 @@ export class Cache<T> {
       .then((entries) => {
         if (destroyed) return;
         const current = untracked(this.internal);
+        const filtered = (key: string) =>
+          this.hydrationFilters.some((matches) => matches(key));
         entries.forEach((entry) => {
           if (current.has(entry.key)) return;
           if (this.hydrationTombstones.has(entry.key)) return;
+          if (filtered(entry.key)) {
+            void this.db.then((db) => db.remove(entry.key));
+            return;
+          }
           this.restoreInternal(entry);
         });
         this.hydrated = true;
         this.hydrationTombstones.clear();
+        this.hydrationFilters.length = 0;
       });
 
     this.destroy = destroy;
@@ -451,7 +478,13 @@ export class Cache<T> {
     if (existing) clearTimeout(existing.timeout);
 
     const remaining = next.expiresAt - Date.now();
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      // an already expired write replaces the old value with nothing
+      if (existing) this.invalidateInternal(next.key, fromSync);
+      else if (!fromSync && persist)
+        void this.db.then((db) => db.remove(next.key));
+      return;
+    }
 
     const timeout =
       Number.isFinite(remaining) && remaining <= MAX_TIMER_DELAY
@@ -562,6 +595,7 @@ export class Cache<T> {
    * cache.invalidateWhere((key) => key.includes('/me/'));
    */
   invalidateWhere(predicate: (key: string) => boolean): number {
+    if (!this.hydrated) this.hydrationFilters.push(predicate);
     const keys = Array.from(untracked(this.internal).keys()).filter(predicate);
     for (const key of keys) this.invalidateInternal(key);
     return keys.length;
@@ -586,12 +620,31 @@ export class Cache<T> {
 
   /**
    * Removes EVERY entry — memory, persisted rows, and (via broadcast) other tabs.
-   * Call on logout/auth changes so no prior user's responses survive.
+   * Call on logout/auth changes so no prior user's responses survive. Persisted rows
+   * that are not in memory (evicted, or not hydrated yet) are removed as well.
    */
   clear() {
-    for (const key of Array.from(untracked(this.internal).keys())) {
-      this.invalidateInternal(key);
-    }
+    this.clearInternal(false);
+  }
+
+  private clearInternal(fromSync: boolean) {
+    if (!this.hydrated) this.hydrationFilters.push(() => true);
+
+    const current = untracked(this.internal);
+    current.forEach((entry) => clearTimeout(entry.timeout));
+    if (current.size) this.internal.set(new Map());
+
+    if (fromSync) return;
+
+    void this.db.then((db) =>
+      db.clear
+        ? db.clear()
+        : db
+            .getAll()
+            .then((rows) => Promise.all(rows.map((row) => db.remove(row.key))))
+            .then(() => undefined),
+    );
+    this.broadcast({ action: 'clear' });
   }
 
   private cleanup() {
@@ -606,6 +659,7 @@ export class Cache<T> {
         expired.forEach(([key]) => map.delete(key));
         return map;
       });
+      this.removePersisted(expired.map(([key]) => key));
     }
 
     if (untracked(this.internal).size <= this.cleanupOpt.maxSize) return;
@@ -630,6 +684,13 @@ export class Cache<T> {
     });
 
     this.internal.set(new Map(keep));
+    // an evicted row must not come back on reload, or survive a later invalidation unseen
+    this.removePersisted(removed.map(([key]) => key));
+  }
+
+  private removePersisted(keys: string[]) {
+    if (!keys.length) return;
+    void this.db.then((db) => Promise.all(keys.map((key) => db.remove(key))));
   }
 }
 
@@ -807,6 +868,7 @@ export function provideQueryCache(opt?: CacheOptions): Provider {
                   });
                 },
                 remove: db.remove,
+                clear: db.clear,
               };
             });
 

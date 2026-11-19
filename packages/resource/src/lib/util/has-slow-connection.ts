@@ -1,14 +1,19 @@
+/**
+ * Whether the browser reports a slow or data-saving connection (`saveData`, or an
+ * `effectiveType` ending in `2g`). Always `false` where there is no `window` (SSR) or
+ * no Network Information API.
+ */
 export function hasSlowConnection() {
-  if (
-    window &&
-    'navigator' in window &&
-    'connection' in window.navigator &&
-    typeof window.navigator.connection === 'object' &&
-    !!window.navigator.connection &&
-    'effectiveType' in window.navigator.connection &&
-    typeof window.navigator.connection.effectiveType === 'string'
-  )
-    return window.navigator.connection.effectiveType.endsWith('2g');
-
-  return false;
+  if (typeof window === 'undefined') return false;
+  const connection = (
+    window.navigator as Navigator & {
+      connection?: { effectiveType?: unknown; saveData?: unknown };
+    }
+  )?.connection;
+  if (typeof connection !== 'object' || !connection) return false;
+  if (connection.saveData === true) return true;
+  return (
+    typeof connection.effectiveType === 'string' &&
+    connection.effectiveType.endsWith('2g')
+  );
 }

@@ -24,6 +24,8 @@ type CacheEntryOptions = {
   parse?: (val: unknown) => unknown;
   persist?: boolean;
   skipTabSync?: boolean;
+  /** One-shot: the first request carrying it goes to the network even when the entry is fresh. */
+  bypassFresh?: { used: boolean };
 };
 
 const CACHE_CONTEXT = new HttpContextToken<CacheEntryOptions>(() => ({
@@ -59,7 +61,6 @@ function parseCacheControlHeader(
 ): ResolvedCacheControl {
   const header = req.headers.get('Cache-Control');
 
-  let sMaxAge: number | null = null;
   const directives: ResolvedCacheControl = {
     noStore: false,
     noCache: false,
@@ -85,8 +86,8 @@ function parseCacheControlHeader(
       case 'no-cache':
         directives.noCache = true;
         break;
+      // s-maxage and proxy-revalidate address shared caches only (RFC 9111); this cache is private
       case 'must-revalidate':
-      case 'proxy-revalidate':
         directives.mustRevalidate = true;
         break;
       case 'immutable':
@@ -102,12 +103,6 @@ function parseCacheControlHeader(
         break;
       }
 
-      case 's-maxage': {
-        if (!value) break;
-        const parsedValue = parseInt(value, 10);
-        if (!isNaN(parsedValue)) sMaxAge = parsedValue;
-        break;
-      }
       case 'stale-while-revalidate': {
         if (!value) break;
         const parsedValue = parseInt(value, 10);
@@ -116,8 +111,6 @@ function parseCacheControlHeader(
       }
     }
   }
-
-  if (sMaxAge !== null) directives.maxAge = sMaxAge;
 
   if (directives.noStore)
     return {
@@ -233,7 +226,10 @@ export function createCacheInterceptor(
     const key = opt.key ?? hashRequest(req);
     const entry = cache.getUntracked(key);
 
-    if (entry && !entry.isStale) return of(entry.value);
+    const bypass = !!opt.bypassFresh && !opt.bypassFresh.used;
+    if (opt.bypassFresh) opt.bypassFresh.used = true;
+
+    if (entry && !entry.isStale && !bypass) return of(entry.value);
 
     return sharePending(inFlight, key, () => {
       const eTag = entry?.value.headers.get('ETag');

@@ -62,6 +62,7 @@ import {
 import { type CacheEntry } from './util/cache/cache';
 import { countLoads } from './util/count-loads';
 import { type FlightEdge, trackFlights } from './util/flight';
+import { type InternalQueryHooks, ON_FINAL_ERROR } from './util/internal-hooks';
 
 export { type RefreshOptions } from './util';
 export { type FlightEdge, type FlightPhase } from './util/flight';
@@ -476,12 +477,13 @@ function createQueryResource<TResult, TRaw = TResult>(
     ? options.injector.get(DestroyRef)
     : inject(DestroyRef);
 
+  const cbOption = options?.circuitBreaker;
   const cb = createCircuitBreaker(
-    options?.circuitBreaker === true
-      ? undefined
-      : (options?.circuitBreaker ?? false),
+    cbOption === true ? undefined : (cbOption ?? false),
     options?.injector,
   );
+  // a breaker passed in is shared with other resources, so only an internal one is destroyed here
+  const ownsBreaker = cb !== cbOption;
 
   const networkAvailable = injectNetworkStatus(options.injector);
 
@@ -509,7 +511,7 @@ function createQueryResource<TResult, TRaw = TResult>(
 
   const disabledReason = computed<DisabledReason | null>(() => {
     if (!networkAvailable()) return 'offline';
-    if (cb.isOpen()) return 'circuit-open';
+    if (cb.status() === 'OPEN') return 'circuit-open';
     if (paused() || !rawRequest()) return 'no-request';
     return null;
   });
@@ -583,8 +585,26 @@ function createQueryResource<TResult, TRaw = TResult>(
   const skipTabSync =
     typeof options?.cache === 'object' && options.cache.skipTabSync === true;
 
+  const refreshOpt = options?.refresh;
+  const forceOnReconnect =
+    typeof refreshOpt === 'object' && refreshOpt.onReconnect === true;
+
+  // true for the request issued right after the network came back
+  const reconnected = forceOnReconnect
+    ? linkedSignal<
+        { online: boolean; req: HttpResourceRequest | undefined },
+        boolean
+      >({
+        source: () => ({ online: networkAvailable(), req: stableRequest() }),
+        computation: (curr, prev) =>
+          !!prev && !prev.source.online && curr.online,
+      })
+    : () => false;
+
   const cachedRequest = options?.cache
     ? computed(() => {
+        // read before the early return, so the offline state is observed too
+        const forceNetwork = reconnected();
         const r = stableRequest();
         if (!r) return r;
 
@@ -599,6 +619,7 @@ function createQueryResource<TResult, TRaw = TResult>(
             persist,
             skipTabSync,
             parse: options?.parse as (val: unknown) => unknown,
+            bypassFresh: forceNetwork ? { used: false } : undefined,
           }),
         };
       })
@@ -705,16 +726,25 @@ function createQueryResource<TResult, TRaw = TResult>(
       online: networkAvailable,
     },
   );
-  const onError = options?.onError;
+  const userOnError = options?.onError;
+  const onFinalError = (options0 as InternalQueryHooks | undefined)?.[
+    ON_FINAL_ERROR
+  ];
+  // The breaker hears each failed attempt here, before anything else reacts to the error, so an
+  // attempt that trips it is the final one: no retry follows into an open breaker.
+  const onError = (err: unknown, retryCount: number, isFinal: boolean) => {
+    const final = untracked(() => {
+      cb.fail(err as Error | undefined);
+      return isFinal || cb.status() === 'OPEN';
+    });
+    if (final) flight?.fail();
+    userOnError?.(err, retryCount, final);
+    if (final) onFinalError?.(err);
+  };
   resource = retryOnError(
     resource,
     options?.retry,
-    flight
-      ? (err, retryCount, isFinal) => {
-          if (isFinal) flight.fail();
-          onError?.(err, retryCount, isFinal);
-        }
-      : onError,
+    onError,
     options.injector,
     flight?.markRetry,
   );
@@ -771,8 +801,9 @@ function createQueryResource<TResult, TRaw = TResult>(
   const cbEffectRef = effect(
     () => {
       const status = resource.status();
-      if (status === 'error') cb.fail(untracked(resource.error));
-      else if (status === 'resolved') cb.success();
+      untracked(() => {
+        if (status === 'resolved') cb.success();
+      });
     },
     {
       injector: options.injector,
@@ -783,8 +814,19 @@ function createQueryResource<TResult, TRaw = TResult>(
     ? options.injector.get(HttpClient)
     : inject(HttpClient);
 
+  const hasValue = resource.hasValue;
+
   const ref: QueryResourceRef<TResult | undefined> = {
     ...resource,
+    asReadonly: () =>
+      ({
+        value: value.asReadonly(),
+        status: resource.status,
+        error: resource.error,
+        isLoading: resource.isLoading,
+        snapshot: resource.snapshot,
+        hasValue,
+      }) as ReturnType<HttpResourceRef<TResult | undefined>['asReadonly']>,
     loads: counted.loads,
     value,
     hasContent: () => value() !== undefined,
@@ -816,7 +858,7 @@ function createQueryResource<TResult, TRaw = TResult>(
     destroy: () => {
       flight?.destroy();
       cbEffectRef.destroy();
-      cb.destroy();
+      if (ownsBreaker) cb.destroy();
       resource.destroy();
     },
     prefetch: async (partial) => {
@@ -866,6 +908,8 @@ function createQueryResource<TResult, TRaw = TResult>(
               bustBrowserCache,
               ignoreCacheControl,
               persist,
+              skipTabSync,
+              parse: options?.parse as (val: unknown) => unknown,
             }),
             headers: prefetchRequest.headers as HttpHeaders,
             observe: 'response',

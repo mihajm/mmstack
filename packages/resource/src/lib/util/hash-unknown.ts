@@ -32,7 +32,8 @@ function hashKey(queryKey: unknown[]): string {
   return JSON.stringify(queryKey, (_, val) => {
     if (val instanceof Map) {
       const entries = [...val.entries()]
-        .map((e) => [hash(e[0]), e] as const)
+        // the whole entry is the sort key, so equal-looking keys still order canonically
+        .map((e) => [hash(e[0], e[1]), e] as const)
         .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
         .map(([, e]) => e);
       return { __map__: entries };

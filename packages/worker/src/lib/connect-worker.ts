@@ -62,13 +62,14 @@ export type ConnectWorkerOptions = {
    * Receives what the worker port reports once the worker is up: an `error` event after the
    * `ready` handshake (an uncaught exception inside the worker, which keeps running) and any
    * `messageerror` (a message that could not be deserialized). The connection and every replica
-   * keep their state; nothing restarts. Without it, dev mode logs a warning.
+   * keep their state; nothing restarts on its own (call `restart()` when the app decides the worker
+   * is no longer usable). Without it, dev mode logs a warning.
    */
   readonly onError?: (e: unknown) => void;
 };
 
 export type WorkerRef<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
-  /** True once the `ready` handshake has completed (and again after an auto-restart). */
+  /** True once the `ready` handshake has completed (and again after any restart). */
   readonly connected: Signal<boolean>;
   /** The worker's advertised manifest, or `null` before the first `ready`. */
   readonly manifest: Signal<WorkerManifest | null>;
@@ -78,6 +79,19 @@ export type WorkerRef<M extends WorkerSchema = WorkerSchema> = HasSchema<M> & {
     input: TaskInput<M, K>,
     opt?: { signal?: AbortSignal; transfer?: Transferable[] },
   ): Promise<TaskOutput<M, K>>;
+  /**
+   * Drops the current connection and starts a fresh worker, taking the same path as a worker that
+   * fails to start. `connected()` goes `false`, every pending `runTask` rejects with
+   * `WorkerCrashedError`, pending replica writes reject the same way, and the old worker is closed
+   * (`terminate()` or `close()`). A new worker is spawned at once, with no backoff delay; after its
+   * `ready` handshake `connected()` is `true` again and every live replica re-subscribes and
+   * re-hydrates from the new owner, whose state starts fresh. Works under `restart: 'auto'` and
+   * `restart: 'manual'` alike: the option only governs automatic respawn after a startup failure,
+   * while an explicit call always respawns once. A call while a respawn is already pending
+   * (scheduled, or spawned but not yet `ready`) does nothing, and so does a call after `destroy()`
+   * or on the server. Typical use: an `onError` handler that decides the worker is no longer usable.
+   */
+  restart(): void;
   destroy(): void;
 
   /** @internal Post an envelope to the worker. */
@@ -136,6 +150,9 @@ function build(
   let destroyed = false;
   let crashed = false;
   let handshaken = false; // the current port has answered `ready`
+  // a respawn is on its way: scheduled after a startup failure, or spawned by restart() and not yet ready
+  let respawnTimer: ReturnType<typeof setTimeout> | null = null;
+  let restarting = false;
   let port: WorkerPortLike = null as unknown as WorkerPortLike;
 
   const send = (msg: WorkerEnvelope, transfer?: Transferable[]): void => {
@@ -148,6 +165,7 @@ function build(
         attempt = 0;
         crashed = false;
         handshaken = true;
+        restarting = false;
         manifest.set({
           hostId: msg.hostId,
           stores: msg.stores,
@@ -187,18 +205,33 @@ function build(
     }
   };
 
-  const handleCrash = (): void => {
-    if (destroyed) return;
+  const dropConnection = (): void => {
     crashed = true;
     connected.set(false);
     for (const [, p] of taskPending) p.reject(new WorkerCrashedError());
     taskPending.clear();
     for (const fn of disconnectHooks) fn();
+  };
+
+  const handleCrash = (): void => {
+    if (destroyed) return;
+    restarting = false;
+    dropConnection();
     if (restart === 'manual') return;
     const delay = restartDelay(attempt++);
-    setTimeout(() => {
-      if (!destroyed) openPort();
+    respawnTimer = setTimeout(() => {
+      respawnTimer = null;
+      if (destroyed) return;
+      restarting = true;
+      openPort();
     }, delay);
+  };
+
+  const restartNow = (): void => {
+    if (destroyed || isServer || respawnTimer !== null || restarting) return;
+    dropConnection();
+    restarting = true;
+    openPort(); // closes the old worker before spawning the new one
   };
 
   const report = (e: unknown): void => {
@@ -305,6 +338,7 @@ function build(
         signal?.addEventListener('abort', onAbort, { once: true });
       });
     },
+    restart: restartNow,
     destroy: teardown,
     _send: send,
     _subscribe(handler) {
@@ -320,8 +354,5 @@ function build(
       return () => disconnectHooks.delete(fn);
     },
   };
-  // untyped and non-enumerable: drops the connection the way a failed start does, for specs that
-  // need a lost connection after `ready` (no port event leads there)
-  Object.defineProperty(ref, '_crash', { value: handleCrash });
   return ref;
 }

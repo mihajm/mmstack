@@ -10,7 +10,6 @@ import {
 } from '../testing/harness';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 const tick = async () => {
   for (let i = 0; i < 6; i++) await new Promise<void>((r) => setTimeout(r, 1));
@@ -132,7 +131,7 @@ describe('connectWorker — crash / restart', () => {
     // a worker that dies after its handshake: the port stops, and the connection is dropped
     const crash = () => {
       port!.crash();
-      crashWorker(worker);
+      worker.restart();
     };
     return { owned, worker, replica, crash };
   }

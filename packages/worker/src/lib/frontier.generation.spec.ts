@@ -10,7 +10,6 @@ import {
 import { describe, expect, it } from 'vitest';
 import { connectWorker } from './connect-worker';
 import { workerStore } from './worker-store';
-import { crashWorker } from '../testing/crash';
 
 // Frontiers compare only within ONE owner generation. A replacement owner seeded from the VALUE
 // (not the registers) starts a fresh per-origin history; the replica must drop the dead owner's
@@ -94,7 +93,7 @@ describe('frontier generations', () => {
     const seed = structuredClone(untracked(current.room));
     hostA.dispose();
     current = makeHost(seed);
-    crashWorker(worker);
+    worker.restart();
     // between A's death and B's checkpoint: the held result is A's, nothing is comparable
     expect(check.value()?.of.instance).toBe(hostA.hostId);
     expect(doc.applied().instance).toBe('');

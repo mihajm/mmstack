@@ -12,7 +12,7 @@ Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atla
 - **Two engines, one API.** `native` uses HTML5 DnD (files, cross-window, the browser's drag image); `pointer` uses pointer events with FLIP (buttery same-page sorting, custom followers). Both feed the same session, so `monitor`, `dragging`, and `isDragOver` behave identically. Pick per element or set a default once.
 - **Sorting that doesn't fight Angular.** Reordering is a single splice on **your** `WritableSignal<T[]>` at drop — no parallel order state, the array untouched mid-drag. The pointer engine animates from derived state (FLIP) instead of mutating the DOM.
 - **Cross-list & nested.** Share one `sortableGroup<T>()` and items drag between lists; innermost wins for nested lists, with a `canReceive` guard.
-- **Accessible out of the box.** Focus + arrow-key reordering and screen-reader announcements are on by default (opt-out or fully replaceable).
+- **Accessible out of the box.** Focus + arrow-key reordering and screen-reader announcements are on by default for sortable lists (opt-out or fully replaceable). Canvas keyboard moves are announced once you pass `announceTransform`.
 - **Zero required plugins.** Edge detection and auto-scroll are opt-in — use the first-party **zero-dependency** plugins from the secondary entry point `@mmstack/dnd/plugins`, or plug in pragmatic's sub-libraries. Missing a plugin degrades gracefully (dev warning + no-op), never a throw.
 - **Typed everywhere.** `accepts` narrows payloads with no casting; a symbol-keyed `meta` channel never collides with your data; engine-only options are compile-time-guarded per engine.
 - **Composable or declarative.** Every primitive is a plain function; every directive is a thin wrapper over it. And every option is DI-defaultable.
@@ -25,7 +25,7 @@ Built on [@atlaskit/pragmatic-drag-and-drop](https://www.npmjs.com/package/@atla
 npm install @mmstack/dnd @atlaskit/pragmatic-drag-and-drop
 ```
 
-`@atlaskit/pragmatic-drag-and-drop` is a peer dependency (it powers the native engine and the shared global monitor). The **optional** sub-libraries below are _not_ peers — reach for them only if you prefer them over the first-party plugins (see [Plugins](#plugins)):
+`@atlaskit/pragmatic-drag-and-drop` is a peer dependency (it powers the native engine and the shared global monitor). The sub-libraries below are **optional** peers (marked optional in `peerDependenciesMeta`, so nothing installs them for you) — reach for them only if you prefer them over the first-party plugins (see [Plugins](#plugins)):
 
 ```bash
 npm install @atlaskit/pragmatic-drag-and-drop-hitbox       # edge detection
@@ -322,7 +322,7 @@ reorderable(this.tasks, { key: (t) => t.id }); // native indicator (default)
 reorderable(this.tasks, { key: (t) => t.id, engine: 'pointer' }); // FLIP glide
 ```
 
-The item is `position: relative` in both engines so the native indicator can overlay; opt into the reserved gap space (pointer engine, cross-list) with `padding-bottom: calc(<your> + var(--mm-sortable-reserved, 0px))` on the container.
+The item is `position: relative` in both engines so the native indicator can overlay; opt into the reserved gap space (pointer engine, cross-list) with `padding-bottom: calc(<your> + var(--mm-sortable-reserved, 0px))` on the container. The item directive owns the row's inline `transform` and `transition`: under the pointer engine a row at rest gets `transition: none`, so the transform reset at drop never animates. Put your own transitions (a hover fade, for example) on a child element.
 
 **The dragged item is its key, read live.** Every decision during a drag (the gap, a cross-list hand-off, the drop) finds the dragged item by `key` in the list as it is now, not by the slot it held when the drag began. If another writer (a second tab, an agent, a resource refresh) inserts or removes rows mid-drag, the drop still moves or transfers the item you grabbed. With the pointer engine the list is re-measured once after such a change has rendered, and the dragged row stays under the pointer. If the dragged item itself is removed, a changed list cannot be measured, or the drop comes before such a change has rendered, the drag is cancelled with a dev-mode warning and nothing commits. Both engines hand the target the source's live item for the key, never the payload captured when the drag began, so an edit made to the item mid-drag travels with it.
 
@@ -381,7 +381,7 @@ protected readonly gallery = reorderable(this.tiles, {
 
 Keyboard follows the geometry: Left/Right step the reading order, Up/Down move to the nearest tile in the adjacent row. Wrap lists join `sortableGroup` like any other list, so you can drag rows from a vertical tray into a grid and back; an incoming item lands at the nearest slot, appending included.
 
-The slot model is exact for uniform tiles and a good approximation for variable sizes, the same trade-off dnd-kit's rect sorting strategy makes. The native indicator engine has no 2D indicator placement, so wrap is pointer-engine territory (a dev warning fires if you combine them).
+The slot model is exact for uniform tiles and a good approximation for variable sizes, the same trade-off dnd-kit's rect sorting strategy makes. Only the pointer engine places a drop in 2D, so a wrap list always runs on it: a request for the native engine (per call or from a DI default) dev-warns and uses the pointer engine. The one exception is a wrap list in a `sortableGroup`: the two engines cannot hand items to each other, so it stays native and refuses drops into it (also dev-warned). Set `engine: 'pointer'` on every list in such a group.
 
 ## Placement grid (`placementGrid`) — preview
 
@@ -428,9 +428,9 @@ export class Dashboard {
 Two compaction modes cover the two grid personalities:
 
 - `compact: 'vertical'` (default): colliding items push down and gravity pulls everything up, the classic dashboard reflow.
-- `compact: 'none'`: nothing moves. A cell is either free or the move is rejected (the projection sticks to the last valid cell). `grid.targetMask()` exposes the validity mask during a drag (`mask[y * cols + x]`), so you can render drop-cell affordances; a `canPlace` predicate layers your own rules on top. This is the mode for form builders with fixed slots.
+- `compact: 'none'`: nothing moves. A cell is either free or the move is rejected (the projection sticks to the last valid cell). `grid.targetMask()` exposes the validity mask during a drag (`mask[y * cols + x]`), so you can render drop-cell affordances; a `canPlace` predicate layers your own rules on top. It is asked for every placement change in both modes: moves, resizes (pointer and keyboard, with the item's candidate `w` / `h`) and arrivals. This is the mode for form builders with fixed slots.
 
-A move released with the pointer outside the grid cancels: as soon as the pointer leaves, the preview shows the original layout again (`dropOutside()` turns `true`, `projectedCell()` turns `null`) and releasing there writes nothing (over another member of the grid's `sortableGroup` it is a transfer instead, see below). "Outside" means outside the grid's box as it was when the drag started: the preview can grow or shrink the rendered grid, but it never moves that line, so the same pointer position always gives the same result. Bring the pointer back over the grid to resume the move. Resizes are exempt, since dragging a grip past the edge is how you reach the maximum span, and Escape cancels any gesture.
+A move released with the pointer outside the grid cancels: as soon as the pointer leaves, the preview shows the original layout again (`dropOutside()` turns `true`, `projectedCell()` turns `null`) and releasing there writes nothing (over another member of the grid's `sortableGroup` it is a transfer instead, see below). Once the drag has hovered such a member, that member stays the target: releasing over empty space after that still transfers the item into it, even though `dropOutside()` reads `true` (`crossTarget()` stays `true` as well). Bring the pointer back over the grid to call the transfer off. "Outside" means outside the grid's box as it was when the drag started: the preview can grow or shrink the rendered grid, but it never moves that line, so the same pointer position always gives the same result. Bring the pointer back over the grid to resume the move. Resizes are exempt, since dragging a grip past the edge is how you reach the maximum span, and Escape cancels any gesture.
 
 The drop commits over the live source. The preview is built from the layout as it was when the drag started; on release the same move (or resize) is re-run against the current array, so an item another writer added, removed or edited during the drag survives the drop. The preview can therefore differ from the committed layout when someone else wrote during the drag; that is the honest outcome. If the dragged item was removed meanwhile, or (`compact: 'none'`) its target cell was taken, the drop is a no-op.
 
@@ -485,7 +485,7 @@ export class Board {
 
 The state seam is a pair of pure lenses: `frame` reads an item's `CanvasFrame` (`x`, `y`, `width`, `height`, optional `rotation`), `patch` writes one back immutably. Mid-gesture nothing touches your signal; the live position is a transient overlay derived from a drag-start snapshot, and moves are transform-only (the browser composites, it does not lay out). On release the controller maps `patch` over the touched items in ONE write, preserving the identity of everything untouched.
 
-Interaction defaults match the tools people know: Shift locks a move to the dominant axis and holds the aspect ratio on resize, Alt resizes from the center, Ctrl bypasses snapping, a drag of an unselected item selects it, Shift-click toggles selection, empty-surface presses marquee (or click to clear), Escape cancels. Arrows nudge the selection by the grid step (Shift for 10 steps), Cmd/Ctrl+arrows resize. `ctrl.session` exposes the pure derivation core (`guides`, `marqueeRect`, `hoverContainer`, live deltas) so your chrome renders from signals; the demo's SVG snaplines are a dozen lines of template.
+Interaction defaults match the tools people know: Shift locks a move to the dominant axis and holds the aspect ratio on resize, Alt resizes from the center, Ctrl bypasses snapping, a drag of an unselected item selects it, Shift-click toggles selection, empty-surface presses marquee (or click to clear), Escape cancels. Arrows nudge the selection by the grid step (Shift for 10 steps), Cmd/Ctrl+arrows resize. These keyboard transforms are silent by default: pass `announceTransform: ({ item, frame, count }) => string` to have each one announced through [`injectAnnounce`](#screen-reader-announcements). `ctrl.session` exposes the pure derivation core (`guides`, `marqueeRect`, `hoverContainer`, live deltas) so your chrome renders from signals; the demo's SVG snaplines are a dozen lines of template.
 
 `panZoom()` owns the space transform (wheel zoom around the cursor, middle-button pan) and doubles as the `space` option, so every gesture projects through the live transform. You can zoom mid-drag and the grabbed point stays under the cursor. Wheel input is normalized before it touches the scale: line- and page-mode deltas are scaled to pixel magnitude, a ctrl-wheel — how browsers deliver trackpad pinch — is boosted so pinching feels like pinching, and Safari's native page pinch-zoom is suppressed over the viewport. Rolling your own viewport instead? `zoomWheelDelta(event)` and `suppressNativePinch(el)` are exported on their own.
 
@@ -602,6 +602,8 @@ Resolution order is per-call option → `provideDnd` default → none. Without a
 
 > **Auto-scroll note.** `edgeAutoScroll` is engine-agnostic (drives both the pointer and native reorderable engines) and needs no pragmatic sub-package. Pragmatic's `autoScrollForElements` is monitor-driven, so it only serves the **native** engine — use `edgeAutoScroll` for the pointer engine.
 
+`edgeAutoScroll` needs a live pointer, which the reorderable, placement grid and canvas engines pass; `autoScroll()` and `mmAutoScroll` do not, so with `edgeAutoScroll` registered they do nothing (dev mode warns once).
+
 ### Screen-reader announcements
 
 `injectAnnounce()` returns the active announcer: a registered `announce` plugin if you provided one, otherwise a built-in announcer (a shared polite and assertive ARIA live region, zero dependencies). Swap in Atlassian's `@atlaskit/pragmatic-drag-and-drop-live-region` or your own:
@@ -662,6 +664,8 @@ The drag session is `providedIn: 'root'`, so the library works with zero configu
 @Component({ providers: [provideDndSession()] /* ... */ })
 export class BoardComponent {}
 ```
+
+One drag at a time per `provideDnd` scope is supported. Concurrent drags in the same scope, such as two fingers dragging two items at once on a touch screen, are not.
 
 ## Custom drag previews
 

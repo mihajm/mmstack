@@ -15,6 +15,7 @@ import {
   openSlotOf,
   sizeAlong,
   slotOf,
+  slotOfAnchor,
   startAlong,
   transfer,
   wrapInsertAtPoint,
@@ -355,11 +356,22 @@ describe('geometry — transfer (cross-list move)', () => {
     expect(b).toEqual(bc);
   });
 
-  it('is a no-op (copies, no item) when fromIndex is out of range', () => {
-    const r = transfer(a, 5, b, 0);
-    expect(r.item).toBeUndefined();
-    expect(r.from).toEqual(a);
-    expect(r.to).toEqual(b);
+  it.each([5, 3, -1])(
+    'is a no-op (copies, no item) when fromIndex %s is out of range',
+    (fromIndex) => {
+      const r = transfer(a, fromIndex, b, 0);
+      expect(r.item).toBeUndefined();
+      expect(r.from).toStrictEqual(a);
+      expect(r.to).toStrictEqual(b);
+      expect(r.from).not.toBe(a);
+      expect(r.to).not.toBe(b);
+    },
+  );
+
+  it('returns copies on a real transfer too', () => {
+    const r = transfer(a, 0, b, 0);
+    expect(r.to).not.toBe(b);
+    expect(r.from).not.toBe(a);
   });
 });
 
@@ -505,6 +517,7 @@ describe('geometry — insertIndexFromSlots (wrap collision)', () => {
   it('an out-of-range held index falls back to plain nearest', () => {
     expect(insertIndexFromSlots(GRID, 31, 11, -1, 100)).toBe(1);
     expect(insertIndexFromSlots(GRID, 31, 11, 99, 100)).toBe(1);
+    expect(insertIndexFromSlots(GRID, 31, 11, GRID.length, 100)).toBe(1);
   });
 
   it('handles empty and single-slot lists', () => {
@@ -636,6 +649,8 @@ describe('geometry — moveWithin & clampInsert', () => {
     expect(moveWithin(base, 9, 0)).toEqual(base);
     expect(moveWithin(base, -1, 2)).toEqual(base);
     expect(moveWithin(base, 9, 0)).toHaveLength(base.length);
+    expect(moveWithin(base, base.length, 0)).toStrictEqual(base);
+    expect(moveWithin(base, base.length, 0)).toHaveLength(base.length);
   });
 
   it('does not mutate the source array', () => {
@@ -682,5 +697,49 @@ describe('anchorOf — a drop position named by a neighbour key [PIN M7]', () =>
   it('out-of-range indices clamp; the mover is never its own anchor', () => {
     expect(anchorOf(['a', 'b'], 'b', 9, 'final')).toEqual({ after: 'a' });
     expect(anchorOf(['a', 'b'], 'a', -3, 'slot')).toEqual({ before: 'b' });
+  });
+});
+
+describe('geometry — insertIndexTransformAware hysteresis is symmetric', () => {
+  const centers = [10, 30, 50, 70, 90];
+  const at = (source: number, prev: number, pos: number, d = 4) =>
+    insertIndexTransformAware(centers, source, 20, pos, prev, d);
+
+  it('a held insert after the source stays until the pointer clears back by the deadband', () => {
+    expect(at(0, 1, 6)).toBe(1);
+    expect(at(0, 1, 5)).toBe(0);
+  });
+
+  it('a held insert before the source stays until the pointer clears forward by the deadband', () => {
+    expect(at(1, 0, 34)).toBe(0);
+    expect(at(1, 0, 35)).toBe(1);
+  });
+
+  it('the retreat threshold moves back by exactly the deadband', () => {
+    const retreat = (d: number) => {
+      for (let pos = 100; pos >= -20; pos--)
+        if (at(2, 3, pos, d) < 3) return pos;
+      return -Infinity;
+    };
+    expect(retreat(0) - retreat(6)).toBe(6);
+  });
+});
+
+describe('geometry — anchors round-trip', () => {
+  it('a slot anchor never discounts a mover at or after the slot', () => {
+    expect(anchorOf(['a', 'b', 'c', 'd'], 'd', 1, 'slot')).toEqual({
+      after: 'a',
+    });
+    expect(anchorOf(['a', 'b', 'c'], 'b', 1, 'slot')).toEqual({ after: 'a' });
+  });
+
+  it('slotOfAnchor resolves after, before and empty anchors', () => {
+    const keys = ['a', 'b'];
+    expect(slotOfAnchor(keys, { after: 'a' })).toBe(1);
+    expect(slotOfAnchor(keys, { before: 'a' })).toBe(0);
+    expect(slotOfAnchor(keys, { before: 'b' })).toBe(1);
+    expect(slotOfAnchor(keys, { empty: true })).toBe(0);
+    expect(slotOfAnchor(keys, { after: 'zz' })).toBe(-1);
+    expect(slotOfAnchor(keys, { before: 'zz' })).toBe(-1);
   });
 });

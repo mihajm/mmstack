@@ -56,7 +56,10 @@ export function connectPointerContainer<T, K = unknown>(
     read: () => {
       const c = controller();
       void c.items(); // tracked at rest too, so the first mid-drag change is seen
-      if (untracked(c.activeKey) !== null) untracked(() => c.syncGeometry());
+      if (untracked(c.activeKey) === null) return;
+      // an inserted row registers after the pass that renders it: measure once it has
+      if (!c.rowsRendered()) return;
+      untracked(() => c.syncGeometry());
     },
   });
   inject(DestroyRef).onDestroy(() => {

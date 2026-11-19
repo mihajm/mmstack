@@ -631,16 +631,17 @@ describe('reorderable controller — drag identity is the live key [PIN M4]', ()
   it('a drop never measures: a key change that has not rendered yet abandons the drop, loudly', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      const { data, ctrl, reorders } = list('a', 'b', 'c');
+      const { data, ctrl, reorders, dom } = list('a', 'b', 'c');
       ctrl.beginGesture('a', { x: 0, y: 10 });
       ctrl.move({ x: 0, y: 55 });
       // a peer reorders; every row is still registered, but the DOM still shows the old order
       data.update((arr) => [arr[2], arr[0], arr[1]]);
       const before = data();
-      const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+      const rects = [...dom.els.values()].map((el) =>
+        vi.spyOn(el, 'getBoundingClientRect'),
+      );
       ctrl.end();
-      expect(rect).not.toHaveBeenCalled(); // no measurement from the drop path
-      rect.mockRestore();
+      for (const r of rects) expect(r).not.toHaveBeenCalled(); // no measurement from the drop path
 
       expect(data()).toBe(before); // no write
       expect(reorders).toEqual([]);
@@ -653,15 +654,16 @@ describe('reorderable controller — drag identity is the live key [PIN M4]', ()
   });
 
   it('a write that keeps the key sequence (an edit in place) re-measures nothing', () => {
-    const { data, ctrl, reorders } = list('a', 'b', 'c', 'd');
+    const { data, ctrl, reorders, dom } = list('a', 'b', 'c', 'd');
     ctrl.beginGesture('b', { x: 0, y: 30 });
-    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+    const rects = [...dom.els.values()].map((el) =>
+      vi.spyOn(el, 'getBoundingClientRect'),
+    );
     data.update((arr) => arr.map((r) => ({ ...r }))); // fresh objects, same keys, same order
     ctrl.syncGeometry();
     ctrl.move({ x: 0, y: 95 });
     ctrl.end();
-    expect(rect).not.toHaveBeenCalled();
-    rect.mockRestore();
+    for (const r of rects) expect(r).not.toHaveBeenCalled();
     expect(ids(data())).toEqual(['a', 'c', 'd', 'b']);
     expect(reorders).toEqual([{ from: 1, to: 3 }]);
   });
@@ -871,6 +873,80 @@ describe('native drop commit — live source item, anchored slot', () => {
     a.update((arr) => [{ id: 'z' }, ...arr]); // a peer prepends
     commitNativeDrop(src, src, payload, 3, anchor);
     expect(ids(a())).toEqual(['z', 'a', 'c', 'b']);
+  });
+
+  it('a drop at slot 0 of the target lands first', () => {
+    const { a, b, src, dst, payload } = lists();
+    commitNativeDrop(dst, src, payload, 0, slotAnchor(['k', 'l'], 0));
+    expect(ids(b())).toEqual(['b', 'k', 'l']);
+    expect(ids(a())).toEqual(['a', 'c']);
+  });
+
+  it('a foreign payload goes through the list insert mapping', () => {
+    const b = signal<Row[]>([{ id: 'k' }, { id: 'l' }]);
+    const onItemInserted = vi.fn();
+    const dst = reorderable(b, {
+      key: (r) => r.id,
+      insert: { accepts: () => true, create: (d) => ({ id: String(d) }) },
+      onItemInserted,
+    });
+    commitNativeDrop(dst, undefined, 'X' as unknown as Row, 1, null);
+    expect(ids(b())).toEqual(['k', 'X', 'l']);
+    expect(onItemInserted).toHaveBeenCalledWith({
+      item: { id: 'X' },
+      index: 1,
+    });
+  });
+
+  it.each([
+    ['a', 2, ['b', 'a', 'c']],
+    ['c', 0, ['c', 'a', 'b']],
+    ['b', 1, ['a', 'b', 'c']],
+    ['b', 2, ['a', 'b', 'c']],
+    ['a', 3, ['b', 'c', 'a']],
+  ])('same list: %s dropped at slot %s', (id, slot, end) => {
+    const a = signal<Row[]>([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+    const onReorder = vi.fn();
+    const onItemArrived = vi.fn();
+    const onItemLeft = vi.fn();
+    const src = reorderable(a, {
+      key: (r) => r.id,
+      onReorder,
+      onItemArrived,
+      onItemLeft,
+    });
+    const payload = a().find((r) => r.id === id) as Row;
+    commitNativeDrop(src, src, payload, slot, null);
+    expect(ids(a())).toEqual(end);
+    expect(onReorder).toHaveBeenCalledTimes(
+      ids(a()).join() === 'a,b,c' ? 0 : 1,
+    );
+    expect(onItemArrived).not.toHaveBeenCalled();
+    expect(onItemLeft).not.toHaveBeenCalled();
+  });
+
+  it('the carried handle picks the dragged occurrence of a repeated object', () => {
+    const x = { id: 'x' };
+    const y = { id: 'y' };
+    const a = signal<Row[]>([x, y, x]);
+    const onReorder = vi.fn();
+    const src = reorderable(a, { key: (r) => r.id, onReorder });
+    const second = src.handleAt(2);
+    commitNativeDrop(src, src, x, 0, null, second);
+    expect(onReorder.mock.calls[0][0]).toMatchObject({ from: 2, to: 0 });
+  });
+
+  it('a carried handle that is gone falls back to the payload occurrence', () => {
+    const x = { id: 'x' };
+    const y = { id: 'y' };
+    const a = signal<Row[]>([x, y, x]);
+    const onReorder = vi.fn();
+    const src = reorderable(a, { key: (r) => r.id, onReorder });
+    const second = src.handleAt(2);
+    a.set([y, x]);
+    commitNativeDrop(src, src, x, 0, null, second);
+    expect(ids(a())).toEqual(['x', 'y']);
+    expect(onReorder).toHaveBeenCalledTimes(1);
   });
 });
 

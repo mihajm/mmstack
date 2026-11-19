@@ -87,7 +87,11 @@ export function reorderable<T, K>(
   // wrap collision reads main = y, cross = x (row-major flow)
   const collisionAxis: Axis = axis === 'x' ? 'x' : 'y';
   const deadband = options.deadband ?? 4;
-  const engine: DragEngine = options.engine ?? 'native';
+  const requestedEngine: DragEngine = options.engine ?? 'native';
+  // Only the pointer engine places a drop in 2D. A grouped list keeps the native
+  // engine (the two engines cannot hand items to each other) and refuses drops.
+  const wrapRefused = wrap && requestedEngine === 'native' && !!options.group;
+  const engine: DragEngine = wrap && !wrapRefused ? 'pointer' : requestedEngine;
   const activationThreshold = options.activationThreshold ?? 5;
   const touchActivation =
     engine === 'pointer'
@@ -110,9 +114,11 @@ export function reorderable<T, K>(
         '[@mmstack/dnd] reorderable: `touchActivation` is a pointer-engine option and is ignored under engine "native" (the browser owns touch activation there).',
       );
     }
-    if (engine === 'native' && wrap) {
+    if (wrap && requestedEngine === 'native') {
       console.warn(
-        "[@mmstack/dnd] reorderable: `axis: 'wrap'` is a pointer-engine layout — the native indicator engine has no 2D indicator placement and falls back to vertical behaviour. Use `engine: 'pointer'`.",
+        wrapRefused
+          ? "[@mmstack/dnd] reorderable: `axis: 'wrap'` needs the pointer engine, and the engines cannot hand items to each other, so a grouped list stays on engine \"native\" and refuses every drop into it. Set `engine: 'pointer'` on every list in the group."
+          : '[@mmstack/dnd] reorderable: `axis: \'wrap\'` needs the pointer engine (only it places a drop in 2D), so this list runs on engine "pointer" instead of "native" (was the engine flipped by a DI default?).',
       );
     }
   }
@@ -167,6 +173,10 @@ export function reorderable<T, K>(
   });
 
   const indexMap = occ.indexMap;
+  // every live occurrence has a registered row (a new row registers after the pass that renders it)
+  const rowsRendered = computed(() =>
+    occ.state().handles.every((h) => occ.elementFor(h) !== undefined),
+  );
   /** The live handles, in source order (untracked). */
   const liveHandles = () => untracked(occ.state).handles;
 
@@ -314,12 +324,20 @@ export function reorderable<T, K>(
   let measuredFrom: readonly T[] | null = null;
   let measuredHandles: readonly Handle<K>[] = [];
 
-  const begin = (k: Handle<K>, geom: DragGeometry, start: number) => {
+  const begin = (
+    k: Handle<K>,
+    geom: DragGeometry,
+    start: number,
+    cross = 0,
+  ) => {
     measuredFrom = untracked(source);
     measuredHandles = liveHandles();
     startMain.set(start);
     pointerMain.set(start);
+    startCross.set(cross);
+    pointerCross.set(cross);
     scrollDelta.set(0);
+    measureCache = new Map(); // a target is measured once per drag, never from an earlier one
     geometry.set(geom);
     activeKey.set(k);
   };
@@ -329,21 +347,19 @@ export function reorderable<T, K>(
       const m = measureWrap();
       const sourceIdx = untracked(indexMap).get(k) ?? -1;
       if (!m || sourceIdx < 0) return;
-      startCross.set(projCross(start));
-      pointerCross.set(projCross(start));
-      begin(k, { kind: 'wrap', source: sourceIdx, ...m }, projMain(start));
-      if (group) {
-        measureCache = new Map();
-        for (const gm of group.members()) gm.refreshBounds();
-      }
+      begin(
+        k,
+        { kind: 'wrap', source: sourceIdx, ...m },
+        projMain(start),
+        projCross(start),
+      );
+      if (group) for (const gm of group.members()) gm.refreshBounds();
       return;
     }
     // Measure in source order; a missing node means rendered set ≠ source() (e.g. filtered) → bail vs. misalign.
     const m = measureLinear(rectOf);
     if (!m) return;
     const sourceIdx = untracked(indexMap).get(k) ?? -1;
-    startCross.set(projCross(start));
-    pointerCross.set(projCross(start));
     begin(
       k,
       {
@@ -353,11 +369,9 @@ export function reorderable<T, K>(
         axis: collisionAxis,
       },
       projMain(start),
+      projCross(start),
     );
-    if (group) {
-      measureCache = new Map();
-      for (const m of group.members()) m.refreshBounds();
-    }
+    if (group) for (const gm of group.members()) gm.refreshBounds();
   };
 
   /** The gap a target list should open for OUR dragged item, in ITS flow axis. */
@@ -378,17 +392,16 @@ export function reorderable<T, K>(
     if (k === null) return; // no drag (or one abandoned mid-gesture): never drive sibling lists
     // the dragged item is its KEY in the live list, never the drag-start slot
     const srcIdx = untracked(indexMap).get(k) ?? -1;
-    const dragged = srcIdx >= 0 ? untracked(source)[srcIdx] : undefined;
+    // removed by another writer: the render pass abandons the drag; until then drive no list
+    if (srcIdx < 0) return;
+    const dragged = untracked(source)[srcIdx];
     // untracked: targetAt reads the members signal; move() runs inside the
     // gesture effect, which must not re-fire on register/unregister
     const target = untracked(() =>
       group.targetAt(
         p.x,
         p.y,
-        (m) =>
-          m === self ||
-          dragged === undefined ||
-          m.canReceive?.(dragged) !== false,
+        (m) => m === self || m.canReceive?.(dragged) !== false,
       ),
     );
     // Sticky: outside every list keeps the last resolved target — no snap-back / flip-flop.
@@ -740,6 +753,7 @@ export function reorderable<T, K>(
     items: source,
     key,
     indexMap,
+    rowsRendered,
     axis,
     engine,
     group,
@@ -802,6 +816,8 @@ export function reorderable<T, K>(
     handleAt: (i) => occ.handleAt(i),
     setContainer: (el) => {
       container = el;
+      // a recreated container rejoins the group its predecessor left on destroy
+      if (el) group?.register(self);
     },
     begin,
     beginGesture,

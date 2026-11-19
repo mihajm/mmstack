@@ -1,7 +1,9 @@
 import {
   ApplicationRef,
   Component,
+  DestroyRef,
   EnvironmentInjector,
+  inject,
   TemplateRef,
   input,
   inputBinding,
@@ -10,7 +12,9 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { registerCustomPreview } from './preview';
+import { pointerOutsideOfPreview } from '@atlaskit/pragmatic-drag-and-drop/utils/pointer-outside-of-preview';
+
+import { createPointerPreview, registerCustomPreview } from './preview';
 
 type PreviewNativeConfig = {
   render: (args: { container: HTMLElement }) => (() => void) | void;
@@ -32,7 +36,9 @@ vi.mock(
 
 vi.mock(
   '@atlaskit/pragmatic-drag-and-drop/utils/pointer-outside-of-preview',
-  () => ({ pointerOutsideOfPreview: () => () => ({ x: 0, y: 0 }) }),
+  () => ({
+    pointerOutsideOfPreview: vi.fn(() => () => ({ x: 0, y: 0 })),
+  }),
 );
 
 @Component({ selector: 'mm-prev', template: `{{ count() }}|{{ label() }}` })
@@ -189,4 +195,115 @@ describe('preview — config variants, cleanup & offset', () => {
     reg(undefined);
     expect(lastConfig?.getOffset).toBeUndefined();
   });
+});
+
+@Component({ selector: 'mm-prev-life', template: 'life' })
+class LifePrev {
+  static destroyed = 0;
+  constructor() {
+    inject(DestroyRef).onDestroy(() => LifePrev.destroyed++);
+  }
+}
+
+@Component({
+  imports: [LifePrev],
+  template: `<ng-template #t let-v><mm-prev-life />{{ v }}</ng-template>`,
+})
+class LifeTplHost {
+  readonly t = viewChild.required('t', { read: TemplateRef });
+}
+
+describe('preview: contract details', () => {
+  const env = () => ({
+    envInjector: TestBed.inject(EnvironmentInjector),
+    appRef: TestBed.inject(ApplicationRef),
+  });
+  beforeEach(() => {
+    renderFn = undefined;
+    lastConfig = undefined;
+    LifePrev.destroyed = 0;
+  });
+
+  it("'pointer-outside' uses pragmatic's helper with an 8px gap", () => {
+    const { envInjector, appRef } = env();
+    const sentinel = () => ({ x: 1, y: 2 });
+    vi.mocked(pointerOutsideOfPreview).mockReturnValueOnce(sentinel);
+    registerCustomPreview(
+      { render: () => undefined, offset: 'pointer-outside' },
+      envInjector,
+      appRef,
+      { nativeSetDragImage: vi.fn() },
+    );
+    expect(pointerOutsideOfPreview).toHaveBeenLastCalledWith({
+      x: '8px',
+      y: '8px',
+    });
+    expect(lastConfig?.getOffset).toBe(sentinel);
+  });
+
+  it('a template getter and a context getter are both resolved', () => {
+    const { envInjector, appRef } = env();
+    const fix = TestBed.createComponent(TplHost);
+    fix.detectChanges();
+    const tpl = fix.componentInstance.t();
+    registerCustomPreview(
+      { template: () => tpl, context: () => 'Y' },
+      envInjector,
+      appRef,
+      { nativeSetDragImage: vi.fn() },
+    );
+    const container = document.createElement('div');
+    renderFn?.({ container });
+    appRef.tick();
+    expect(container.textContent).toContain('tpl:Y');
+  });
+
+  it('cleanup destroys a component preview and the views inside a template preview', () => {
+    const { envInjector, appRef } = env();
+    registerCustomPreview({ component: LifePrev }, envInjector, appRef, {
+      nativeSetDragImage: vi.fn(),
+    });
+    const c1 = document.createElement('div');
+    const cleanup1 = renderFn?.({ container: c1 });
+    appRef.tick();
+    cleanup1?.();
+    expect(LifePrev.destroyed).toBe(1);
+
+    const fix = TestBed.createComponent(LifeTplHost);
+    fix.detectChanges();
+    registerCustomPreview(
+      { template: fix.componentInstance.t(), context: 'Z' },
+      envInjector,
+      appRef,
+      { nativeSetDragImage: vi.fn() },
+    );
+    const c2 = document.createElement('div');
+    const cleanup2 = renderFn?.({ container: c2 });
+    appRef.tick();
+    cleanup2?.();
+    expect(LifePrev.destroyed).toBe(2);
+  });
+
+  it.each([
+    [{ x: 4, y: 6 }, 'translate(34px, 16px)'],
+    ['pointer-outside', 'translate(38px, 18px)'],
+    [undefined, 'translate(30px, 10px)'],
+  ] as const)(
+    'a pointer preview is fixed, pointer-transparent, and offset by %j',
+    (offset, transform) => {
+      const { envInjector, appRef } = env();
+      let container: HTMLElement | undefined;
+      const p = createPointerPreview(
+        { render: (c) => void (container = c), offset },
+        envInjector,
+        appRef,
+      );
+      p.move(30, 10);
+      expect(container?.style.position).toBe('fixed');
+      expect(container?.style.pointerEvents).toBe('none');
+      expect(container?.style.transform).toBe(transform);
+      p.destroy();
+      expect(document.body.contains(container as HTMLElement)).toBe(false);
+    },
+  );
 });

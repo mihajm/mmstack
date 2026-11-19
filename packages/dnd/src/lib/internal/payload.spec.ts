@@ -1,4 +1,4 @@
-import { boxData, mapDropTargets, unboxData } from './payload';
+import { boxData, extractDragMeta, mapDropTargets, unboxData } from './payload';
 
 describe('payload — box/unbox round-trips', () => {
   it('round-trips data under the private symbol', () => {
@@ -35,5 +35,14 @@ describe('mapDropTargets — never leaks the internal record (#5)', () => {
       { element: el, data: boxData({ slot: 5 }) },
     ]);
     expect(mapped[0].data).toEqual({ slot: 5 });
+  });
+});
+
+describe('extractDragMeta', () => {
+  it('returns the symbol-keyed metadata without the boxed payload', () => {
+    const KIND = Symbol('kind');
+    const meta = extractDragMeta({ ...boxData({ id: 1 }), [KIND]: 'card' });
+    expect(Object.getOwnPropertySymbols(meta)).toEqual([KIND]);
+    expect((meta as Record<symbol, unknown>)[KIND]).toBe('card');
   });
 });

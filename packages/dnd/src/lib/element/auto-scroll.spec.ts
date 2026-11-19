@@ -1,12 +1,8 @@
 import { Component, ElementRef, PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { autoScroll } from './auto-scroll';
-import {
-  provideDnd,
-  ɵclearWarnedPlugins,
-  type AutoScrollPlugin,
-} from '../provide';
+import { AutoScroll, autoScroll } from './auto-scroll';
+import { provideDnd, type AutoScrollPlugin } from '../provide';
 
 const scrollMock = vi.fn();
 const scrollCleanup = vi.fn();
@@ -26,7 +22,6 @@ beforeEach(() => {
   TestBed.resetTestingModule();
   scrollMock.mockReset();
   scrollCleanup.mockReset();
-  ɵclearWarnedPlugins();
 });
 
 describe('autoScroll', () => {
@@ -124,5 +119,35 @@ describe('autoScroll', () => {
       TestBed.runInInjectionContext(() => autoScroll()),
     ).not.toThrow();
     expect(scrollMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('autoScroll: directive and missing plugin in a component', () => {
+  it('mmAutoScroll calls the plugin once with its element', async () => {
+    @Component({
+      selector: 'mm-test-autoscroll-dir',
+      imports: [AutoScroll],
+      template: `<div class="s" mmAutoScroll></div>`,
+    })
+    class DirHost {}
+    TestBed.configureTestingModule({
+      providers: [provideDnd({ plugins: { autoScroll: plugin } })],
+    });
+    const fixture = TestBed.createComponent(DirHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(scrollMock).toHaveBeenCalledOnce();
+    expect(scrollMock.mock.calls[0][0].element).toBe(
+      fixture.nativeElement.querySelector('.s'),
+    );
+  });
+
+  it('a component with no plugin registered renders without throwing', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    await expect(fixture.whenStable()).resolves.not.toThrow();
+    expect(scrollMock).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

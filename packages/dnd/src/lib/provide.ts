@@ -15,8 +15,8 @@ import type { DragEngine } from './session';
 
 /**
  * Optional sub-libraries are wired in *structurally* so core never imports the
- * `@atlaskit/*` sub-packages — they stay out of `peerDependencies` and live in
- * `optionalDependencies`. Install the one you want and plug its functions in,
+ * `@atlaskit/*` sub-packages. They are optional peer dependencies (marked in
+ * `peerDependenciesMeta`). Install the one you want and plug its functions in,
  * either globally via {@link provideDnd} or per-composable via the matching
  * option (the option always wins).
  */
@@ -103,20 +103,21 @@ export type OverrideOption<T extends Required<DndPlugins>[keyof DndPlugins]> =
   | null
   | undefined;
 
-const warnedPlugins = new Set<string>();
-
-/** @internal Testing only */
-export function ɵclearWarnedPlugins() {
-  warnedPlugins.clear();
-}
+// Per root injector, so each app (and each SSR request) warns once on its own.
+const WARNED_PLUGINS = new InjectionToken<Set<string>>(
+  '@mmstack/dnd:warned-plugins',
+  { providedIn: 'root', factory: () => new Set<string>() },
+);
 
 /**
  * Dev-only, warn-once notice that a requested feature has no plugin registered —
  * the caller then no-ops (graceful degradation, never a throw). Silent in prod.
  */
-function warnMissingPlugin(plugin: string): void {
-  if (!isDevMode() || warnedPlugins.has(plugin)) return;
-  warnedPlugins.add(plugin);
+function warnMissingPlugin(injector: Injector, plugin: string): void {
+  if (!isDevMode()) return;
+  const warned = injector.get(WARNED_PLUGINS);
+  if (warned.has(plugin)) return;
+  warned.add(plugin);
   console.warn(
     `[@mmstack/dnd] The "${plugin}" feature needs a plugin, but none is registered — skipping (no-op). ` +
       `Install the matching pragmatic plugin or use @mmstack/dnd's built-in, then register it via ` +
@@ -159,7 +160,7 @@ function createLazyResolver<
                 | undefined) ?? null,
           );
         attempted = true;
-        if (resolved == null && warn) warnMissingPlugin(plugin);
+        if (resolved == null && warn) warnMissingPlugin(injector, plugin);
       }
       return resolved;
     };

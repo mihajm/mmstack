@@ -31,7 +31,7 @@ export type ResolveMoveConfig = {
   threshold?: number;
   /** Also snap against the `bounds` edges. */
   snapToCanvas?: boolean;
-  /** Lock movement to the dominant axis (Shift held). */
+  /** Lock movement to the dominant axis (Shift held); a tie keeps x. */
   lockAxis?: boolean;
   /** Bypass grid and alignment snapping (Ctrl held). */
   bypassSnap?: boolean;
@@ -82,7 +82,11 @@ export type ApplyResizeConfig = {
   bounds?: Box;
   /** Mirror the delta to the opposite edge — resize around the center (Alt). */
   fromCenter?: boolean;
-  /** Width/height ratio to hold (Shift) — pass `base.width / base.height`. */
+  /**
+   * Width/height ratio to hold (Shift): pass `base.width / base.height`. Only a
+   * positive ratio locks; zero or negative is ignored. On a corner handle the
+   * axis the pointer moved most drives the other; a tie lets width drive.
+   */
   aspect?: number;
 };
 

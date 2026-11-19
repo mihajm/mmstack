@@ -82,6 +82,69 @@ describe('marquee (pure derivation)', () => {
     expect(ref.rect()).toEqual({ x: 0, y: 0, width: 25, height: 20 });
   });
 
+  it('re-measures the host origin for every press, even with the same pointer id', () => {
+    const { el, ref } = setup(items, { left: 0, top: 0 });
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    el.dispatchEvent(pe('pointermove', 50, 40));
+    expect(ref.rect()).toEqual({ x: 0, y: 0, width: 50, height: 40 });
+    el.dispatchEvent(pe('pointerup', 50, 40));
+
+    stubRect(el, 0, -200); // the page scrolled between the two presses
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    el.dispatchEvent(pe('pointermove', 50, 40));
+    expect(ref.rect()).toEqual({ x: 0, y: 200, width: 50, height: 40 });
+  });
+
+  it('measures the host origin once per press, not per pointer frame', () => {
+    const { el, ref } = setup(items);
+    const measure = vi.spyOn(el, 'getBoundingClientRect');
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    for (let x = 10; x <= 60; x += 10) {
+      el.dispatchEvent(pe('pointermove', x, x));
+      ref.rect();
+    }
+    expect(measure).toHaveBeenCalledTimes(1);
+  });
+
+  it('honours a custom activation threshold and button list', () => {
+    const el = document.createElement('div');
+    stubRect(el, 0, 0);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(el) }],
+    });
+    const ref = TestBed.runInInjectionContext(() =>
+      marquee(signal(items), { activationThreshold: 20, buttons: [2] }),
+    );
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    el.dispatchEvent(pe('pointermove', 30, 0));
+    expect(ref.selecting()).toBe(false); // button 0 is not in the list
+    el.dispatchEvent(pe('pointerup', 30, 0));
+
+    const down = pe('pointerdown', 0, 0) as Event & Record<string, unknown>;
+    down['button'] = 2;
+    el.dispatchEvent(down);
+    el.dispatchEvent(pe('pointermove', 10, 0));
+    expect(ref.selecting()).toBe(false); // under the 20px threshold
+    el.dispatchEvent(pe('pointermove', 30, 0));
+    expect(ref.selecting()).toBe(true);
+  });
+
+  it('defaults the activation threshold to 4px', () => {
+    const el = document.createElement('div');
+    stubRect(el, 0, 0);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ElementRef, useValue: new ElementRef(el) }],
+    });
+    const ref = TestBed.runInInjectionContext(() => marquee(signal(items)));
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    el.dispatchEvent(pe('pointermove', 3, 0));
+    expect(ref.selecting()).toBe(false);
+    el.dispatchEvent(pe('pointermove', 5, 0));
+    expect(ref.selecting()).toBe(true);
+  });
+
   it('clears on pointerup', () => {
     const { el, ref } = setup(items);
     el.dispatchEvent(pe('pointerdown', 0, 0));
@@ -107,6 +170,7 @@ describe('marquee (pure derivation)', () => {
     const sig = signal<readonly MarqueeItem<string>[]>(items);
     const ref = TestBed.runInInjectionContext(() => marquee(sig));
     expect(ref.selecting()).toBe(false);
+    expect(ref.rect()).toBeNull();
     expect(ref.selected()).toEqual([]);
   });
 });

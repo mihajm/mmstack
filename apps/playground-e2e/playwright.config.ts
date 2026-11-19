@@ -55,14 +55,11 @@ export default defineConfig({
       },
     },
     {
-      // Safari coverage for the interaction engines. CDP-based perf guards and
-      // the WebRTC/mesh suites (loopback ICE needs the Chromium launch flags)
-      // stay Chromium-only.
+      // Safari coverage for the interaction engines. The WebRTC/mesh suites
+      // (loopback ICE needs the Chromium launch flags) stay Chromium-only.
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
       testIgnore: [
-        '**/pointer-sortable-perf.spec.ts',
-        '**/pointer-edge-perf.spec.ts',
         '**/webrtc.spec.ts',
         '**/mesh-agent.spec.ts',
         '**/worker-mesh.spec.ts',

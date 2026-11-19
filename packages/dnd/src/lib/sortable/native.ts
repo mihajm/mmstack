@@ -7,6 +7,7 @@ import {
   effect,
   EnvironmentInjector,
   inject,
+  InjectionToken,
   Injector,
   inputBinding,
   isDevMode,
@@ -44,6 +45,11 @@ const NATIVE_SOURCE = Symbol('@mmstack/dnd:reorderable-source');
 const NATIVE_HANDLE = Symbol('@mmstack/dnd:reorderable-handle');
 /** The native container's "not measured during this drag" key sequence. */
 const UNMEASURED: readonly never[] = [];
+/** The mounted native list containers, to find the innermost one in a drop-target stack. */
+const NATIVE_CONTAINERS = new InjectionToken<WeakSet<Element>>(
+  '@mmstack/dnd:native-containers',
+  { providedIn: 'root', factory: () => new WeakSet<Element>() },
+);
 
 /**
  * Shared drop gate for a native list's container + item drop targets: accept a
@@ -169,6 +175,8 @@ export function connectNativeContainer<T, K = unknown>(
   element: HTMLElement,
 ): void {
   controller().setContainer(element);
+  const containers = inject(NATIVE_CONTAINERS);
+  containers.add(element);
   inject(DndSession).ensureNativeMonitor(); // native engine feeds via pragmatic
   const active = injectDndActive();
   const pointer = injectDndPointer();
@@ -190,7 +198,7 @@ export function connectNativeContainer<T, K = unknown>(
       const m = c.measure();
       // a bailed measurement (a row not rendered) has no keys: not measured
       const keys = (m.keys ?? UNMEASURED) as readonly Handle<K>[];
-      // native + wrap is unsupported (dev-warned at creation) → degrade to empty
+      // a wrap list on this engine refuses drops (dev-warned at creation): nothing to hit-test
       return { centers: m.kind === 'wrap' ? [] : m.centers, keys };
     },
     write: (measured) => {
@@ -231,11 +239,15 @@ export function connectNativeContainer<T, K = unknown>(
     });
   });
 
+  // Only the innermost list under the pointer owns the drop: an outer list of a nested tree stays inert.
   const isOwner = computed(
-    () => active() && targets().some((t) => t.element === element),
+    () =>
+      active() &&
+      targets().find((t) => containers.has(t.element))?.element === element,
   );
   const activeInsert = computed<number | null>(() => {
-    if (!isOwner()) return null;
+    // a wrap list on this engine refuses drops (no 2D placement): no indicator, no commit
+    if (!isOwner() || controller().axis === 'wrap') return null;
     const p = pointer();
     const main = (controller().axis === 'x' ? p.x : p.y) + scrollDelta();
     return insertIndexFromCenters(centers(), main);
@@ -293,6 +305,7 @@ export function connectNativeContainer<T, K = unknown>(
   });
 
   inject(DestroyRef).onDestroy(() => {
+    containers.delete(element);
     stopScroll?.();
     controller().setNativeInsert(null);
     controller().dispose?.();

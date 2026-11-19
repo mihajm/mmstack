@@ -274,3 +274,50 @@ describe('monitor — reactivity & non-happy', () => {
     expect(ref.source()).toBeUndefined();
   });
 });
+
+describe('monitor: drop payload and teardown', () => {
+  const loc = (
+    current: {
+      element: Element;
+      data: Record<string | symbol, unknown>;
+    }[] = [],
+  ) => ({
+    initial: {} as never,
+    current: { input: {} as never, dropTargets: current },
+    previous: { dropTargets: [] },
+  });
+  const src = (data: Record<string | symbol, unknown>) => ({
+    element: document.createElement('div'),
+    dragHandle: null,
+    data,
+  });
+
+  it('skips rejected drops and maps the location of accepted ones', () => {
+    const dropped: DropEvent<Card>[] = [];
+    TestBed.runInInjectionContext(() =>
+      monitor<Card>({ accepts: isCard, onDrop: (e) => dropped.push(e) }),
+    );
+    const cfg = configs.at(-1) as MonitorConfig;
+    const target = document.createElement('div');
+    expect(() =>
+      cfg.onDrop?.({ source: src(boxData('nope')), location: loc() } as never),
+    ).not.toThrow();
+    cfg.onDrop?.({
+      source: src(boxData<Card>({ id: 'a' })),
+      location: loc([{ element: target, data: boxData({ slot: 2 }) }]),
+    } as never);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].location.current[0].element).toBe(target);
+    expect(dropped[0].location.current[0].data).toEqual({ slot: 2 });
+    expect(dropped[0].location.previous).toEqual([]);
+  });
+
+  it('unsubscribes when its injector is destroyed', () => {
+    TestBed.runInInjectionContext(() =>
+      monitor<Card>({ onDrop: () => undefined }),
+    );
+    expect(cleanupMock).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+  });
+});

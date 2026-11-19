@@ -80,6 +80,16 @@ describe('canvas arbiter', () => {
     ).toEqual({ mode: 'marquee' });
   });
 
+  it('a stray move handle in a canvas nested inside another canvas item is marquee', () => {
+    const outer = surfaceWith(
+      '<div data-mm-canvas-item="outer"><div class="inner-surface"><div data-mm-canvas-handle></div></div></div>',
+    );
+    const inner = outer.querySelector('.inner-surface') as HTMLElement;
+    expect(
+      arbitrate(inner.querySelector('[data-mm-canvas-handle]'), inner),
+    ).toEqual({ mode: 'marquee' });
+  });
+
   it('an origin outside the surface is marquee (no cross-surface capture)', () => {
     const surface = surfaceWith('<div></div>');
     const foreign = document.createElement('div');

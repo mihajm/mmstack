@@ -396,3 +396,338 @@ describe('rotation', () => {
     ).toBe(15);
   });
 });
+
+describe('transform: documented edges and tie rules', () => {
+  type Dir = Parameters<typeof applyResize>[1];
+  type Cfg = Parameters<typeof applyResize>[3];
+  const OFF: Box = { x: 3, y: 3, width: 100, height: 100 };
+
+  it('lockAxis keeps x on an exact tie', () => {
+    expect(
+      resolveMove(BASE, { x: 10, y: -10 }, { lockAxis: true }).box,
+    ).toMatchObject({ x: 10, y: 0 });
+  });
+
+  it('an explicit move threshold is honored', () => {
+    const r = resolveMove(
+      BASE,
+      { x: 8, y: 0 },
+      { targets: [{ x: 110, y: 0, width: 50, height: 100 }], threshold: 1 },
+    );
+    expect(r.box.x).toBe(8);
+    expect(r.guides.some((g) => g.axis === 'x')).toBe(false);
+  });
+
+  it.each<[string, Box, Dir, { x: number; y: number }, Cfg, Box]>([
+    [
+      'fromCenter w',
+      BASE,
+      'w',
+      { x: 10, y: 0 },
+      { fromCenter: true },
+      { x: 10, y: 0, width: 80, height: 100 },
+    ],
+    [
+      'grid nw',
+      BASE,
+      'nw',
+      { x: 12, y: 8 },
+      { grid: { size: 10 } },
+      { x: 10, y: 10, width: 90, height: 90 },
+    ],
+    [
+      'grid e keeps an off-grid left',
+      OFF,
+      'e',
+      { x: 12, y: 0 },
+      { grid: { size: 10 } },
+      { x: 3, y: 3, width: 117, height: 100 },
+    ],
+    [
+      'grid s keeps an off-grid top',
+      OFF,
+      's',
+      { x: 0, y: 12 },
+      { grid: { size: 10 } },
+      { x: 3, y: 3, width: 100, height: 117 },
+    ],
+    [
+      'grid w keeps an off-grid right',
+      OFF,
+      'w',
+      { x: 12, y: 0 },
+      { grid: { size: 10 } },
+      { x: 20, y: 3, width: 83, height: 100 },
+    ],
+    [
+      'grid n keeps an off-grid bottom',
+      OFF,
+      'n',
+      { x: 0, y: 12 },
+      { grid: { size: 10 } },
+      { x: 3, y: 20, width: 100, height: 83 },
+    ],
+    [
+      'grid fromCenter e',
+      BASE,
+      'e',
+      { x: 12, y: 0 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: -10, y: 0, width: 120, height: 100 },
+    ],
+    [
+      'grid fromCenter w',
+      BASE,
+      'w',
+      { x: 12, y: 0 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: 10, y: 0, width: 80, height: 100 },
+    ],
+    [
+      'grid fromCenter s',
+      BASE,
+      's',
+      { x: 0, y: 12 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: 0, y: -10, width: 100, height: 120 },
+    ],
+    [
+      'grid fromCenter n',
+      BASE,
+      'n',
+      { x: 0, y: 12 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: 0, y: 10, width: 100, height: 80 },
+    ],
+    [
+      'grid fromCenter n keeps an off-grid right',
+      OFF,
+      'n',
+      { x: 0, y: 12 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: 3, y: 20, width: 100, height: 70 },
+    ],
+    [
+      'grid fromCenter e keeps an off-grid bottom',
+      OFF,
+      'e',
+      { x: 12, y: 0 },
+      { grid: { size: 10 }, fromCenter: true },
+      { x: -10, y: 3, width: 130, height: 100 },
+    ],
+    [
+      'aspect s grows around the center',
+      BASE,
+      's',
+      { x: 0, y: 20 },
+      { aspect: 1 },
+      { x: -10, y: 0, width: 120, height: 120 },
+    ],
+    [
+      'aspect e follows the handle axis',
+      BASE,
+      'e',
+      { x: 5, y: 30 },
+      { aspect: 1 },
+      { x: 0, y: -2.5, width: 105, height: 105 },
+    ],
+    [
+      'aspect corner tie: width drives',
+      BASE,
+      'se',
+      { x: 20, y: 20 },
+      { aspect: 2 },
+      { x: 0, y: 0, width: 120, height: 60 },
+    ],
+    [
+      'aspect height drives at ratio 2',
+      { x: 0, y: 10, width: 200, height: 100 },
+      'se',
+      { x: 2, y: 20 },
+      { aspect: 2 },
+      { x: 0, y: 10, width: 240, height: 120 },
+    ],
+    [
+      'aspect se anchors top-left',
+      BASE,
+      'se',
+      { x: 5, y: 50 },
+      { aspect: 1 },
+      { x: 0, y: 0, width: 150, height: 150 },
+    ],
+    [
+      'aspect sw anchors the right edge',
+      BASE,
+      'sw',
+      { x: -5, y: 50 },
+      { aspect: 1 },
+      { x: -50, y: 0, width: 150, height: 150 },
+    ],
+    [
+      'aspect fromCenter corner, height drives',
+      BASE,
+      'se',
+      { x: 5, y: 50 },
+      { aspect: 1, fromCenter: true },
+      { x: -50, y: -50, width: 200, height: 200 },
+    ],
+    [
+      'a non-positive aspect is ignored',
+      BASE,
+      'e',
+      { x: 20, y: 0 },
+      { aspect: -1 },
+      { x: 0, y: 0, width: 120, height: 100 },
+    ],
+    [
+      'min re-anchors n',
+      BASE,
+      'n',
+      { x: 0, y: 200 },
+      { min: { height: 20 } },
+      { x: 0, y: 80, width: 100, height: 20 },
+    ],
+    [
+      'min keeps the top on s',
+      BASE,
+      's',
+      { x: 0, y: -200 },
+      { min: { height: 20 } },
+      { x: 0, y: 0, width: 100, height: 20 },
+    ],
+    [
+      'min re-centers fromCenter n',
+      BASE,
+      'n',
+      { x: 0, y: 100 },
+      { fromCenter: true, min: { height: 40 } },
+      { x: 0, y: 30, width: 100, height: 40 },
+    ],
+    [
+      'bounds let the top grow',
+      BASE,
+      'n',
+      { x: 0, y: -10 },
+      { bounds: { x: 0, y: -50, width: 300, height: 300 } },
+      { x: 0, y: -10, width: 100, height: 110 },
+    ],
+    [
+      'bounds let the bottom grow',
+      BASE,
+      's',
+      { x: 0, y: 30 },
+      { bounds: { x: 0, y: 0, width: 300, height: 300 } },
+      { x: 0, y: 0, width: 100, height: 130 },
+    ],
+    [
+      'a bottom already outside may move in',
+      { x: 0, y: 100, width: 100, height: 100 },
+      's',
+      { x: 0, y: -10 },
+      { bounds: { x: 0, y: 0, width: 300, height: 150 } },
+      { x: 0, y: 100, width: 100, height: 90 },
+    ],
+    [
+      'squeezed below min width keeps the start width',
+      { x: 5, y: 0, width: 20, height: 30 },
+      'e',
+      { x: 0, y: 0 },
+      { bounds: { x: 0, y: 0, width: 30, height: 100 }, min: { width: 35 } },
+      { x: 5, y: 0, width: 20, height: 30 },
+    ],
+    [
+      'squeezed below min height keeps the start height',
+      { x: 0, y: 5, width: 30, height: 20 },
+      's',
+      { x: 0, y: 0 },
+      { bounds: { x: 0, y: 0, width: 100, height: 30 }, min: { height: 35 } },
+      { x: 0, y: 5, width: 30, height: 20 },
+    ],
+    [
+      'collapse to exactly min width is kept',
+      BASE,
+      'e',
+      { x: -200, y: 0 },
+      { bounds: { x: 0, y: 0, width: 300, height: 300 } },
+      { x: 0, y: 0, width: 0, height: 100 },
+    ],
+    [
+      'collapse to exactly min height is kept',
+      BASE,
+      's',
+      { x: 0, y: -200 },
+      { bounds: { x: 0, y: 0, width: 300, height: 300 } },
+      { x: 0, y: 0, width: 100, height: 0 },
+    ],
+    [
+      'negative x coordinates',
+      { x: -100, y: 0, width: 40, height: 40 },
+      'e',
+      { x: 10, y: 0 },
+      { bounds: { x: -200, y: -200, width: 150, height: 400 } },
+      { x: -100, y: 0, width: 50, height: 40 },
+    ],
+    [
+      'negative y coordinates',
+      { x: 0, y: -100, width: 40, height: 40 },
+      's',
+      { x: 0, y: 10 },
+      { bounds: { x: -200, y: -200, width: 400, height: 150 } },
+      { x: 0, y: -100, width: 40, height: 50 },
+    ],
+  ])('applyResize: %s', (_, base, dir, delta, cfg, want) => {
+    expect(applyResize(base, dir, delta, cfg)).toEqual(want);
+  });
+
+  it('resolveResize snaps at the default threshold of 6', () => {
+    const r = resolveResize(
+      BASE,
+      'e',
+      { x: -4, y: 0 },
+      {
+        targets: [{ x: 100, y: 300, width: 20, height: 20 }],
+      },
+    );
+    expect(r.box.width).toBe(100);
+    expect(r.guides.filter((g) => g.axis === 'x')).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      'width',
+      { x: 5, y: 0, width: 20, height: 30 },
+      'e',
+      { x: 0, y: 0, width: 30, height: 100 },
+      { width: 35 },
+    ],
+    [
+      'height',
+      { x: 0, y: 5, width: 30, height: 20 },
+      's',
+      { x: 0, y: 0, width: 100, height: 30 },
+      { height: 35 },
+    ],
+  ] as const)(
+    'resolveResize keeps the min-%s squeeze fallback after a snap pass',
+    (_, base, dir, bounds, min) => {
+      const r = resolveResize(
+        base,
+        dir,
+        { x: 0, y: 0 },
+        {
+          bounds,
+          min,
+          targets: [{ x: 500, y: 500, width: 1, height: 1 }],
+        },
+      );
+      expect(r.box).toEqual(base);
+    },
+  );
+
+  it('resolveRotate sweeps from a non-zero start pointer angle', () => {
+    expect(resolveRotate(30, 90, { x: 0, y: 10 }, { x: 0, y: 0 })).toBeCloseTo(
+      30,
+      6,
+    );
+  });
+});

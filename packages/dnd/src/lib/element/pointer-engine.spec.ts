@@ -151,7 +151,7 @@ describe('DndPointerEngine', () => {
     engine.move(source, 11, 22);
     expect(session()?.pointer).toEqual({ x: 11, y: 22 });
 
-    const finalTargets = engine.end();
+    const finalTargets = engine.end(source);
     expect(finalTargets.map((t) => t.element)).toEqual([target]);
     expect(session()).toBeNull(); // cleared
     expect(engine.dragging()).toBe(false);
@@ -167,7 +167,7 @@ describe('DndPointerEngine', () => {
     dispose();
     engine.begin(source, 0, 0);
     expect(session()?.targets).toHaveLength(0);
-    engine.cancel();
+    engine.cancel(source);
   });
 
   it('move before begin is a safe no-op (no fabricated session)', () => {
@@ -187,11 +187,12 @@ describe('DndPointerEngine', () => {
       }),
     );
     engine.stack = [target];
-    engine.begin(src(), 0, 10);
+    const s = src();
+    engine.begin(s, 0, 10);
     expect(session()?.targets[0].data).toEqual({ edge: 'top' });
-    engine.move(src(), 0, 90);
+    engine.move(s, 0, 90);
     expect(session()?.targets[0].data).toEqual({ edge: 'bottom' });
-    engine.cancel();
+    engine.cancel(s);
   });
 
   it('cancel mid-drag clears source + over so a later move is inert (destroy-mid-drag teardown)', () => {
@@ -205,17 +206,18 @@ describe('DndPointerEngine', () => {
     );
     engine.stack = [a];
 
-    engine.begin(src(), 0, 0);
+    const s = src();
+    engine.begin(s, 0, 0);
     expect(enter).toHaveBeenCalledTimes(1);
     expect(engine.dragging()).toBe(true);
 
-    engine.cancel(); // e.g. the dragging source component is destroyed
+    engine.cancel(s); // e.g. the dragging source component is destroyed
     expect(leave).toHaveBeenCalledTimes(1); // the still-over target is notified
     expect(engine.dragging()).toBe(false);
     expect(session()).toBeNull();
 
     // source + over are cleared: a stray move can't re-fabricate a session or re-enter
-    engine.move(src(), 5, 5);
+    engine.move(s, 5, 5);
     expect(session()).toBeNull();
     expect(enter).toHaveBeenCalledTimes(1); // no phantom re-enter after teardown
   });
@@ -263,9 +265,10 @@ describe('DndPointerEngine — enter/leave/drop dispatch', () => {
       }),
     );
     engine.stack = [a];
-    engine.begin(src(), 0, 0);
+    const s = src();
+    engine.begin(s, 0, 0);
     engine.stack = [b];
-    engine.move(src(), 1, 1);
+    engine.move(s, 1, 1);
     expect(events).toEqual(['a:enter', 'a:leave', 'b:enter']);
   });
 
@@ -275,8 +278,9 @@ describe('DndPointerEngine — enter/leave/drop dispatch', () => {
     const a = document.createElement('div');
     engine.registerDropTarget(a, entry({ onDrop: () => drops.push('a') }));
     engine.stack = [a];
-    engine.begin(src(), 0, 0);
-    engine.end();
+    const s = src();
+    engine.begin(s, 0, 0);
+    engine.end(s);
     expect(drops).toEqual(['a']);
   });
 
@@ -292,8 +296,143 @@ describe('DndPointerEngine — enter/leave/drop dispatch', () => {
       }),
     );
     engine.stack = [a];
-    engine.begin(src(), 0, 0);
-    engine.cancel();
+    const s = src();
+    engine.begin(s, 0, 0);
+    engine.cancel(s);
     expect(events).toEqual(['leave']);
   });
+});
+
+describe('DndPointerEngine: one drag at a time', () => {
+  function setup() {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: DndPointerEngine, useClass: StubEngine }],
+    });
+    const engine = TestBed.inject(DndPointerEngine) as StubEngine;
+    const session = TestBed.inject(DndSession).session;
+    return { engine, session };
+  }
+
+  it('refuses a second begin, ignores its moves and ends, and keeps the first drag intact', () => {
+    const { engine, session } = setup();
+    const drops: unknown[] = [];
+    const t = document.createElement('div');
+    engine.registerDropTarget(t, entry({ onDrop: (s) => drops.push(s.data) }));
+    engine.stack = [t];
+    const a = src({ id: 'a' });
+    const b = src({ id: 'b' });
+    expect(engine.begin(a, 0, 0)).toBe(true);
+    expect(engine.begin(b, 50, 50)).toBe(false);
+    expect(session()?.sourceData).toEqual({ id: 'a' });
+    expect(session()?.pointer).toEqual({ x: 0, y: 0 });
+    engine.move(b, 70, 70);
+    expect(session()?.pointer).toEqual({ x: 0, y: 0 });
+    expect(engine.end(b)).toEqual([]);
+    expect(drops).toEqual([]);
+    expect(engine.dragging()).toBe(true);
+    engine.cancel(b);
+    expect(engine.dragging()).toBe(true);
+    engine.move(a, 5, 5);
+    expect(session()?.pointer).toEqual({ x: 5, y: 5 });
+    expect(engine.end(a).map((h) => h.element)).toEqual([t]);
+    expect(drops).toEqual([{ id: 'a' }]);
+    expect(session()).toBeNull();
+    expect(engine.begin(b, 0, 0)).toBe(true);
+  });
+});
+
+describe('DndPointerEngine: registry and hit-testing contract', () => {
+  function setup() {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: DndPointerEngine, useClass: StubEngine }],
+    });
+    return TestBed.inject(DndPointerEngine) as StubEngine;
+  }
+
+  it('an old disposer never removes a newer registration on the same element', () => {
+    const engine = setup();
+    const el = document.createElement('div');
+    const dropA = vi.fn();
+    const dropB = vi.fn();
+    const disposeA = engine.registerDropTarget(el, entry({ onDrop: dropA }));
+    engine.registerDropTarget(el, entry({ onDrop: dropB }));
+    disposeA();
+    engine.stack = [el];
+    const s = src();
+    engine.begin(s, 0, 0);
+    engine.end(s);
+    expect(dropB).toHaveBeenCalledTimes(1);
+    expect(dropA).not.toHaveBeenCalled();
+  });
+
+  it('hit-tests with document.elementsFromPoint by default', () => {
+    TestBed.resetTestingModule();
+    const engine = TestBed.inject(DndPointerEngine);
+    const session = TestBed.inject(DndSession).session;
+    const el = document.createElement('div');
+    engine.registerDropTarget(el, entry());
+    const original = document.elementsFromPoint;
+    document.elementsFromPoint = vi.fn(() => [el]);
+    try {
+      const s = src();
+      engine.begin(s, 3, 4);
+      expect(document.elementsFromPoint).toHaveBeenCalledWith(3, 4);
+      expect(session()?.targets.map((t) => t.element)).toEqual([el]);
+      engine.cancel(s);
+    } finally {
+      document.elementsFromPoint = original;
+    }
+  });
+
+  it('enter fires once per target while the pointer stays over nested targets', () => {
+    const engine = setup();
+    const outer = document.createElement('div');
+    const inner = document.createElement('div');
+    const enter = vi.fn();
+    const leave = vi.fn();
+    engine.registerDropTarget(
+      outer,
+      entry({ onDragEnter: enter, onDragLeave: leave }),
+    );
+    engine.registerDropTarget(
+      inner,
+      entry({ onDragEnter: enter, onDragLeave: leave }),
+    );
+    engine.stack = [inner, outer];
+    const s = src();
+    engine.begin(s, 0, 0);
+    engine.move(s, 1, 1);
+    engine.move(s, 2, 2);
+    expect(enter).toHaveBeenCalledTimes(2);
+    expect(leave).not.toHaveBeenCalled();
+  });
+
+  it.each(['move away', 'end', 'cancel'] as const)(
+    'a target disposed while under the pointer is skipped on %s',
+    (how) => {
+      const engine = setup();
+      const gone = document.createElement('div');
+      const kept = document.createElement('div');
+      const keptDrop = vi.fn();
+      const dispose = engine.registerDropTarget(gone, entry());
+      engine.registerDropTarget(kept, entry({ onDrop: keptDrop }));
+      engine.stack = [gone, kept];
+      const s = src();
+      engine.begin(s, 0, 0);
+      dispose();
+      if (how === 'move away') {
+        engine.stack = [];
+        expect(() => engine.move(s, 9, 9)).not.toThrow();
+        engine.cancel(s);
+      } else if (how === 'end') {
+        expect(() => engine.end(s)).not.toThrow();
+        expect(keptDrop).toHaveBeenCalledTimes(1);
+      } else {
+        expect(() => engine.cancel(s)).not.toThrow();
+      }
+      expect(engine.dragging()).toBe(false);
+    },
+  );
 });

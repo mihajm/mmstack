@@ -24,6 +24,17 @@ describe('DndAnnouncer', () => {
     expect(regions('assertive')[0].getAttribute('role')).toBe('alert');
   });
 
+  it('makes both regions atomic and visually hidden', () => {
+    TestBed.inject(DndAnnouncer);
+    for (const el of [...regions('polite'), ...regions('assertive')]) {
+      expect(el.getAttribute('aria-atomic')).toBe('true');
+      expect(el.style.position).toBe('absolute');
+      expect(el.style.width).toBe('1px');
+      expect(el.style.height).toBe('1px');
+      expect(el.style.overflow).toBe('hidden');
+    }
+  });
+
   it('announces into the polite region by default', () => {
     const a = TestBed.inject(DndAnnouncer);
     a.announce('Moved card to position 2');
@@ -81,6 +92,14 @@ describe('injectAnnounce (pluggable)', () => {
     document.body.querySelectorAll('[aria-live]').forEach((el) => el.remove());
     TestBed.runInInjectionContext(() => injectAnnounce()('hello'));
     expect(regions('polite')[0]?.textContent).toBe('hello');
+  });
+
+  it('does not warn about a missing plugin when it falls back', () => {
+    TestBed.resetTestingModule();
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    TestBed.runInInjectionContext(() => injectAnnounce()('quiet'));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it('uses a registered announce plugin instead', () => {

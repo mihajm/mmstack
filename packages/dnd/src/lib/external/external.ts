@@ -15,44 +15,18 @@ import { monitorForExternal } from '@atlaskit/pragmatic-drag-and-drop/adapter/mo
 import { containsFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/contains-files';
 import { getFiles } from '@atlaskit/pragmatic-drag-and-drop/utils/get-files';
 
-import { toWritable, isServer } from '@mmstack/primitives';
+import { isServer } from '@mmstack/primitives';
 import { deriveHit } from '../internal/hit';
 import { boxData, mapDropTargets } from '../internal/payload';
 import { resolveSignal } from '../internal/resolve';
 import type { DropTargetInfo, Resolvable } from '../internal/types';
 
-/** Structural shape of pragmatic's external monitor/drop callback args. */
-type ExternalArgs = {
-  source: { types: readonly string[] };
-  location: {
-    current: {
-      input: { clientX: number; clientY: number };
-      dropTargets: readonly { element: Element }[];
-    };
-  };
+type ExternalLocation = {
+  current: { dropTargets: readonly { element: Element }[] };
 };
 
-export type ExternalSession = {
-  /** Native media types present on the drag (e.g. `'Files'`, `'text/uri-list'`). */
-  readonly types: readonly string[];
-  /** Innermost-first drop-target elements under the pointer. */
-  readonly targets: readonly Element[];
-  readonly pointer: { x: number; y: number };
-};
-
-function toExternalSession({
-  source,
-  location,
-}: ExternalArgs): ExternalSession {
-  return {
-    types: source.types ?? [],
-    targets: location.current.dropTargets.map((t) => t.element),
-    pointer: {
-      x: location.current.input.clientX,
-      y: location.current.input.clientY,
-    },
-  };
-}
+const targetsOf = (location: ExternalLocation): readonly Element[] =>
+  location.current.dropTargets.map((t) => t.element);
 
 /**
  * Ambient session for **external** drags (files / data dragged in from outside
@@ -63,56 +37,29 @@ function toExternalSession({
  */
 @Injectable({ providedIn: 'root' })
 export class DndExternalSession {
-  private readonly _types = signal<readonly string[] | null>(null);
+  private readonly _active = signal(false);
   private readonly _targets = signal<readonly Element[]>([]);
-  private readonly _pointer = signal<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  /** Native media types of the active external drag, or `null` when idle. */
-  readonly types: Signal<readonly string[] | null> = this._types.asReadonly();
   /** Innermost-first drop-target elements under the pointer. */
   readonly targets: Signal<readonly Element[]> = this._targets.asReadonly();
-  readonly pointer: Signal<{ x: number; y: number }> =
-    this._pointer.asReadonly();
-  readonly active = computed(() => this._types() !== null);
-
-  /** Combined snapshot; recomputes when any slice changes. */
-  readonly session = toWritable(
-    computed<ExternalSession | null>(() => {
-      const types = this._types();
-      if (!types) return null;
-      return { types, targets: this._targets(), pointer: this._pointer() };
-    }),
-    (session) => {
-      if (!session) {
-        this._types.set(null);
-        this._targets.set([]);
-        return;
-      }
-      this._types.set(session.types);
-      this._targets.set(session.targets);
-      this._pointer.set(session.pointer);
-    },
-  );
+  /** True while a file drag from outside the page is in progress. */
+  readonly active: Signal<boolean> = this._active.asReadonly();
 
   constructor() {
     if (isServer()) return;
     const cleanup = monitorForExternal({
       // File-centric: gate on containsFiles so text/links/images don't activate.
-      onDragStart: (a) => {
-        if (!containsFiles({ source: a.source })) return;
-        const s = toExternalSession(a as ExternalArgs);
-        this._types.set(s.types);
-        this._targets.set(s.targets);
-        this._pointer.set(s.pointer);
+      onDragStart: ({ source, location }) => {
+        if (!containsFiles({ source })) return;
+        this._active.set(true);
+        this._targets.set(targetsOf(location));
       },
-      onDropTargetChange: (a) => {
-        if (!containsFiles({ source: a.source })) return;
-        const s = toExternalSession(a as ExternalArgs);
-        this._targets.set(s.targets);
-        this._pointer.set(s.pointer);
+      onDropTargetChange: ({ source, location }) => {
+        if (!containsFiles({ source })) return;
+        this._targets.set(targetsOf(location));
       },
       onDrop: () => {
-        this._types.set(null);
+        this._active.set(false);
         this._targets.set([]);
       },
     });

@@ -35,10 +35,30 @@ export const IDENTITY_TRANSFORM: CanvasSpaceTransform = {
  * feedback loops (the old group-move ↔ snap-targets hazard) are impossible
  * by construction.
  */
-export type CanvasGesture<K> = {
-  readonly kind: 'move' | 'resize' | 'rotate' | 'marquee';
-  /** Resize only: which handle. */
-  readonly direction?: ResizeDirection;
+export type CanvasGesture<K> =
+  | (CanvasGestureBase<K> & {
+      readonly kind: 'move';
+      /** Candidate drop containers (participants excluded), innermost-wins. */
+      readonly containers: readonly { key: K; box: Box }[];
+    })
+  | (CanvasGestureBase<K> & {
+      readonly kind: 'resize';
+      /** Which handle. */
+      readonly direction: ResizeDirection;
+    })
+  | (CanvasGestureBase<K> & {
+      readonly kind: 'rotate';
+      /** Pivot, canvas space. */
+      readonly pivot: Point;
+      /** The item's rotation at gesture start, degrees. */
+      readonly baseAngle: number;
+      /** The pointer's angle around the pivot at gesture start, degrees. */
+      readonly startPointerAngle: number;
+    })
+  | (CanvasGestureBase<K> & { readonly kind: 'marquee' });
+
+/** The fields every {@link CanvasGesture} kind carries. */
+type CanvasGestureBase<K> = {
   /** Participating item keys (the selection, or the pressed item). */
   readonly keys: readonly K[];
   /** Participants' frames at gesture start. */
@@ -47,16 +67,10 @@ export type CanvasGesture<K> = {
   readonly union: Box;
   /** NON-participant boxes to snap against, measured once (canvas space). */
   readonly snapTargets: readonly Box[];
-  /** Candidate drop containers (participants excluded), innermost-wins. */
-  readonly containers: readonly { key: K; box: Box }[];
   /** Pointer at gesture start, canvas space. */
   readonly start: Point;
   /** The surface element's viewport origin at gesture start. */
   readonly surfaceOrigin: Point;
-  /** Rotate only: pivot (canvas space), base angle, pointer angle at start. */
-  readonly pivot?: Point;
-  readonly baseAngle?: number;
-  readonly startPointerAngle?: number;
 };
 
 export type CanvasSessionConfig = {
@@ -217,7 +231,7 @@ export function canvasSession<K>(
 
   const resizeResult = computed(() => {
     const g = input.gesture();
-    if (!g || g.kind !== 'resize' || !g.direction) return null;
+    if (!g || g.kind !== 'resize') return null;
     return resolveResize(
       g.union,
       g.direction,
@@ -248,15 +262,7 @@ export function canvasSession<K>(
 
   const angle = computed(() => {
     const g = input.gesture();
-    if (
-      !g ||
-      g.kind !== 'rotate' ||
-      !g.pivot ||
-      g.baseAngle === undefined ||
-      g.startPointerAngle === undefined
-    ) {
-      return null;
-    }
+    if (!g || g.kind !== 'rotate') return null;
     return resolveRotate(
       g.baseAngle,
       g.startPointerAngle,

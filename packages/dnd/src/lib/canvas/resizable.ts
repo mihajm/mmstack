@@ -3,18 +3,20 @@ import {
   booleanAttribute,
   computed,
   Directive,
-  effect,
   ElementRef,
   inject,
   Injector,
   input,
   runInInjectionContext,
   signal,
-  untracked,
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { pointerDrag, isServer } from '@mmstack/primitives';
+import {
+  pointerDrag,
+  isServer,
+  type PointerDragState,
+} from '@mmstack/primitives';
 
 import { resolveSignal } from '../internal/resolve';
 import type { Resolvable } from '../internal/types';
@@ -28,6 +30,7 @@ export type ResizeHandleOptions = {
   max?: { width?: number; height?: number };
   bounds?: Resolvable<Box | undefined>;
   disabled?: Resolvable<boolean>;
+  /** Pixels before a resize starts (vs a click). @default 2 */
   activationThreshold?: number;
   /**
    * Snap resized edges to sibling boxes (alignment guides; Ctrl bypasses).
@@ -82,48 +85,39 @@ export function resizeHandle(
     : undefined;
   const snapThreshold = opts.snapThreshold ?? 6;
 
-  const drag = pointerDrag({
-    target: host,
-    activationThreshold: opts.activationThreshold ?? 2,
-  });
-
-  const resizing = computed(
-    () => drag.unthrottled().active && !(disabled?.() ?? false),
-  );
-
   let base: Box | null = null;
   let baseTargets: readonly Box[] | undefined;
-  let pressIgnored = false;
+  // disabled at press → the whole gesture stays inert, `resizing` included
+  const pressIgnored = signal(false);
 
-  // Options read UNTRACKED — this effect depends only on the gesture.
-  effect(() => {
-    const d = drag.unthrottled();
-    const isDisabled = untracked(() => disabled?.() ?? false);
+  // onChange sees every transition, including a move and release in one
+  // frame; it runs untracked, so options and callbacks never subscribe.
+  const step = (d: PointerDragState): void => {
+    const isDisabled = disabled?.() ?? false;
 
-    if (d.pointerId !== null && base === null && !pressIgnored) {
+    if (d.pointerId !== null && base === null && !pressIgnored()) {
       if (isDisabled) {
-        pressIgnored = true;
+        pressIgnored.set(true);
         return;
       }
-      base = untracked(box);
-      baseTargets = untracked(() => snapTargets?.());
+      base = box();
+      baseTargets = snapTargets?.();
       opts.onResizeStart?.({ box: base });
     }
 
     if (d.active && base && !isDisabled) {
       const resolved = resolveResize(base, direction, d.delta, {
-        grid: untracked(() => grid?.()),
+        grid: grid?.(),
         min: opts.min,
         max: opts.max,
-        bounds: untracked(() => bounds?.()),
+        bounds: bounds?.(),
         targets: baseTargets,
         threshold: snapThreshold,
         snapToCanvas: opts.snapToCanvas,
-        aspect: d.modifiers.shift
-          ? base.height > 0
+        aspect:
+          d.modifiers.shift && base.height > 0
             ? base.width / base.height
-            : undefined
-          : undefined,
+            : undefined,
         fromCenter: d.modifiers.alt,
         bypassSnap: d.modifiers.ctrl,
       });
@@ -132,14 +126,25 @@ export function resizeHandle(
       opts.onResize?.({ box: resolved.box });
     }
 
-    if (d.pointerId === null) pressIgnored = false;
+    if (d.pointerId === null) pressIgnored.set(false);
     if (d.pointerId === null && base !== null) {
       base = null;
       baseTargets = undefined;
       guides.set([]);
-      opts.onResizeEnd?.({ box: untracked(box) });
+      opts.onResizeEnd?.({ box: box() });
     }
+  };
+
+  const drag = pointerDrag({
+    target: host,
+    activationThreshold: opts.activationThreshold ?? 2,
+    onChange: step,
   });
+
+  const resizing = computed(
+    () =>
+      drag.unthrottled().active && !pressIgnored() && !(disabled?.() ?? false),
+  );
 
   return { resizing, box: box.asReadonly(), guides: guides.asReadonly() };
 }

@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { PointerDragState } from '@mmstack/primitives';
 
@@ -303,6 +304,42 @@ describe('gatedPointerDrag', () => {
     el.dispatchEvent(pe('pointerup', 2, 0));
     expect(seen.at(-1)).toEqual({ active: false, pointerId: null });
     expect(drag.unthrottled().active).toBe(false);
+  });
+
+  it('moving past the tolerance cancels the press and releases the touch', () => {
+    const el = document.createElement('div');
+    const seen: PointerDragState[] = [];
+    TestBed.runInInjectionContext(() =>
+      gatedPointerDrag({
+        target: el,
+        touchActivation: { delay: 100, tolerance: 5 },
+        onChange: (s) => seen.push(s),
+      }),
+    );
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    el.dispatchEvent(pe('pointermove', 0, 6));
+    expect(seen.at(-1)).toMatchObject({ pointerId: null, cancelled: true });
+    expect(contextMenuBlocked(el)).toBe(false);
+  });
+
+  it('a signal target that renders later gets the touch listeners', () => {
+    const el = document.createElement('div');
+    const target = signal<HTMLElement | null>(null);
+    TestBed.runInInjectionContext(() =>
+      gatedPointerDrag({
+        target,
+        touchActivation: { delay: 100, tolerance: 5 },
+      }),
+    );
+    expect(() => TestBed.tick()).not.toThrow();
+    target.set(el);
+    TestBed.tick();
+    el.dispatchEvent(pe('pointerdown', 0, 0));
+    expect(contextMenuBlocked(el)).toBe(true);
+    vi.advanceTimersByTime(100);
+    expect(touchMoveBlocked(el)).toBe(true);
+    el.dispatchEvent(pe('pointerup', 0, 0));
+    expect(touchMoveBlocked(el)).toBe(false);
   });
 
   it('the arming timer is cleared on destroy', () => {

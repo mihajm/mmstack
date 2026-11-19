@@ -10,7 +10,7 @@ import type { GridSpec } from './geometry';
 export type CanvasDefaults = {
   /** Default snap grid. */
   grid?: GridSpec | (() => GridSpec | undefined);
-  /** Default snapline behaviour. */
+  /** Default snapline behaviour (threshold 6 screen px, `toCanvas` off). */
   snap?: boolean | { threshold?: number; toCanvas?: boolean };
   /** Default resize enablement/limits. */
   resize?:
@@ -27,7 +27,10 @@ export type CanvasDefaults = {
   keyboard?: boolean | { step?: number; largeStep?: number };
   /** Default Shift axis lock. */
   lockAxisOnShift?: boolean;
-  /** Default edge auto-scroll config (or `false` to keep it off). */
+  /**
+   * Default edge auto-scroll config (or `false` to keep it off); an unset
+   * `edge` is 48 and an unset `speed` is 16.
+   */
   autoScroll?:
     | {
         edge?: number;
@@ -36,7 +39,7 @@ export type CanvasDefaults = {
         maxSpeedAt?: number;
       }
     | false;
-  /** Default activation distance in px. */
+  /** Default activation distance in px (the built-in default is 3). */
   activationThreshold?: number;
   /** Default touch long-press (or `false` to keep it off). */
   touchActivation?: TouchActivation | false;

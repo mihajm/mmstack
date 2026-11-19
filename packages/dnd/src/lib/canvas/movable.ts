@@ -65,7 +65,11 @@ export type MovableOptions = {
   size?: Resolvable<{ width: number; height: number } | undefined>;
   /** Shift locks movement to the dominant axis (Figma-style). @default true */
   lockAxisOnShift?: boolean;
-  /** Other position signals to move together (e.g. the rest of a selection). */
+  /**
+   * Other position signals to move together (e.g. the rest of a selection).
+   * With `bounds`, each member is clamped on its own as a point: member sizes
+   * are unknown here, so a member can overhang the right or bottom edge.
+   */
   group?: () => readonly WritableSignal<Point>[];
   /**
    * Sibling boxes to snap edges/centers against (alignment guides; needs
@@ -166,8 +170,11 @@ export function movable(
     ),
   });
 
+  // disabled at press → the whole gesture stays inert, `moving` included
+  const pressIgnored = signal(false);
   const moving = computed(
-    () => drag.unthrottled().active && !(disabled?.() ?? false),
+    () =>
+      drag.unthrottled().active && !pressIgnored() && !(disabled?.() ?? false),
   );
 
   const scrollEl = (): HTMLElement | null => {
@@ -180,7 +187,6 @@ export function movable(
   let baseScroll: Point | null = null;
   let baseTargets: readonly Box[] | undefined;
   let groupBases: Map<WritableSignal<Point>, Point> | null = null;
-  let pressIgnored = false; // disabled at press → the whole gesture stays inert
   let raf = 0;
 
   const computeNext = (d: PointerDragState): Point => {
@@ -271,29 +277,34 @@ export function movable(
   };
 
   // EDGE: translate the pointer gesture into position writes (unthrottled view
-  // so the element follows the cursor every frame). Reads `position` untracked.
+  // so the element follows the cursor every frame). Only the gesture is
+  // tracked: options and user callbacks run untracked.
   effect(() => {
     const d = drag.unthrottled();
-    const isDisabled = untracked(() => disabled?.() ?? false);
+    untracked(() => step(d));
+  });
 
-    if (d.pointerId !== null && base === null && !pressIgnored) {
+  const step = (d: PointerDragState): void => {
+    const isDisabled = disabled?.() ?? false;
+
+    if (d.pointerId !== null && base === null && !pressIgnored()) {
       if (isDisabled) {
-        pressIgnored = true;
+        pressIgnored.set(true);
         return;
       }
-      base = opts.from ? untracked(opts.from) : untracked(position);
-      const sc = untracked(scrollEl);
+      base = opts.from ? opts.from() : position();
+      const sc = scrollEl();
       baseScroll = sc ? { x: sc.scrollLeft, y: sc.scrollTop } : null;
-      baseTargets = untracked(() => snapTargets?.());
+      baseTargets = snapTargets?.();
       groupBases = opts.group
-        ? new Map(untracked(opts.group).map((s) => [s, untracked(s)]))
+        ? new Map(opts.group().map((s) => [s, s()]))
         : null;
       opts.onMoveStart?.({ position: base });
     }
 
     if (d.active && base && !isDisabled) apply(d);
 
-    if (d.pointerId === null) pressIgnored = false;
+    if (d.pointerId === null) pressIgnored.set(false);
     if (d.pointerId === null && base !== null) {
       base = null;
       baseScroll = null;
@@ -301,9 +312,9 @@ export function movable(
       groupBases = null;
       stopScroll();
       guides.set([]);
-      opts.onMoveEnd?.({ position: untracked(position) });
+      opts.onMoveEnd?.({ position: position() });
     }
-  });
+  };
 
   destroyRef.onDestroy(stopScroll);
 

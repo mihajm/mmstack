@@ -241,8 +241,8 @@ const relay = createRelay({
 
 Return nothing and the relay releases the envelope at once — the memory-adapter behaviour, and
 the default. Return a **promise** and the relay holds everything that carries that envelope (its
-echo, the settled notice emitted with it, and any welcome answered while it is in flight) until
-the promise resolves. Presence, signal, direct, membership and ejection are not document state and always
+echo, the settled notice emitted with it, the `'duplicate'` answer to a resend of it, and any
+welcome answered while it is in flight) until the promise resolves. Presence, signal, direct, membership and ejection are not document state and always
 pass immediately.
 
 ```ts
@@ -261,6 +261,12 @@ rejected promise **stalls the room**: that envelope and everything queued behind
 unreleased and `onDurabilityFailed` fires once. Nothing is un-ingested and nothing is answered
 with state that will not survive; recovery is a process restart, after which the writers still
 holding those envelopes unacknowledged resend them.
+
+A hook may call back into the relay before it returns, for instance an in-process adapter whose
+connection writes, resends or joins. The document traffic that causes waits behind the hook's own
+envelope or row: with a hook that returns nothing it is out by the time your outermost call into
+the relay returns, with a promise once that promise resolves. Membership, presence, signal and
+direct messages, and the refusals that go out at once, are sent from inside the hook.
 
 `relay.hydrate(room, snapshot)` restores a persisted room before clients join (relay boot, or
 inside a Durable Object's `blockConcurrencyWhile`). It refuses once the room has state or
@@ -313,9 +319,11 @@ again. The next `hello` for an unloaded name gets a brand-new room at seq 0, so 
 without that gate grows a second sequence space into an old journal, and the two then read as
 one history.
 
-A room whose durability promise REJECTED is stalled: the failed head stays queued, every later
-answer queues behind it, and nothing is released again — including the welcome, so the room
-answers nobody. `room(name).stalled` says so, and `relay.unload(room, { discard: true })` is the
+A room whose durability promise REJECTED, or whose `onCommit` or `onRow` threw, is stalled: the
+failed head stays queued, every later answer queues behind it, and nothing is released again —
+including the welcome, so the room answers nobody. A hook that throws stalls the room before its
+throw reaches your code, and the throw still does reach it, so `room(name).stalled` is already
+true in your `catch`. `room(name).stalled` says so, and `relay.unload(room, { discard: true })` is the
 adapter's one way out: it drops a stalled room with no members and discards the queue, which is
 safe because nothing behind a failed head was ever acknowledged, so every client still holds
 what it sent. A queue that is merely pending is refused even with `discard` — a promise that may
@@ -325,8 +333,11 @@ then re-hydrates the name from the substrate, which is where the truth was all a
 ### Writes the relay refuses without ejecting anyone
 
 Some envelopes are neither valid nor an offence. The relay answers the submitting connection
-with a `drop` message naming the origin, version and reason — never broadcast, never held behind
-durability — and reports the same through `onDrop(room, env, reason)`. A client resends its whole
+with a `drop` message naming the origin, version and reason — never broadcast — and reports the
+same through `onDrop(room, env, reason)`. A `'duplicate'` drop is the write's acknowledgement, so
+it is held like the echo, behind everything the room has not released yet; the other three in the
+table go out at once, whatever is pending. The journaled refusals, `'citation'` and
+`'epoch-bump'`, are held behind their own row the same way. A client resends its whole
 unacknowledged tail after every welcome, so every entry is classified one round trip later:
 
 | reason         | what happened                                                                                                                                                                                                                                   |

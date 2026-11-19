@@ -9,13 +9,17 @@ export interface Budget {
   readonly allow?: readonly string[];
   /** max findings NOT in `allow` (default 0 when `allow` is given, unlimited otherwise) */
   readonly maxFindings?: number;
-  /** span name (exact or /regex/ string) → max duration ms, over ENDED spans with both stamps */
+  /**
+   * span name → max duration ms, over ENDED spans with both stamps. A key is an exact span
+   * name, or `re:<source>` for a RegExp source (no flags); a span literally named `re:...`
+   * can therefore only be budgeted through a pattern.
+   */
   readonly maxSpanMs?: Readonly<Record<string, number>>;
 }
 
 /** A checked-in file of named budgets, one per test scenario. */
 export interface BudgetFile {
-  readonly formatVersion: 1;
+  readonly formatVersion: 2;
   readonly scenarios: Readonly<Record<string, Budget>>;
 }
 
@@ -34,11 +38,12 @@ function describeFinding(finding: Finding): string {
   return `finding ${finding.code} (path ${finding.path}${node})`;
 }
 
-/** `/body/flags` → RegExp; anything else is an exact name. */
+const REGEX_PREFIX = 're:';
+
+/** `re:<source>` → RegExp (no flags, so matching is stateless); any other key is an exact name. */
 function spanMatcher(key: string): (name: string) => boolean {
-  const close = key.lastIndexOf('/');
-  if (key.startsWith('/') && close > 0) {
-    const re = new RegExp(key.slice(1, close), key.slice(close + 1));
+  if (key.startsWith(REGEX_PREFIX)) {
+    const re = new RegExp(key.slice(REGEX_PREFIX.length));
     return (name) => re.test(name);
   }
   return (name) => name === key;
@@ -153,10 +158,13 @@ export function parseBudgetFile(input: unknown): BudgetFile {
   if (!isRecord(input)) {
     errors.push('expected an object');
   } else {
-    if (input['formatVersion'] !== 1) {
+    const version = input['formatVersion'];
+    if (version === 1) {
       errors.push(
-        `formatVersion: expected 1, got ${JSON.stringify(input['formatVersion'])}`,
+        'formatVersion: 1 is no longer supported; set formatVersion to 2 and rewrite regex keys from "/source/" to "re:source"',
       );
+    } else if (version !== 2) {
+      errors.push(`formatVersion: expected 2, got ${JSON.stringify(version)}`);
     }
     const scenarios = input['scenarios'];
     if (!isRecord(scenarios)) {

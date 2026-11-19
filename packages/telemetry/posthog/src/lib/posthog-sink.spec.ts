@@ -132,6 +132,32 @@ describe('@mmstack/telemetry-posthog', () => {
     expect(captured).toEqual([]); // errors are not smuggled in as events
   });
 
+  it('builds no recordError for a capture-only client', () => {
+    const { posthog } = captureSpy();
+    const sink = TestBed.runInInjectionContext(() =>
+      posthogSink({ posthog })(),
+    );
+    expect(sink).not.toHaveProperty('recordError');
+  });
+
+  it('refreshes the replay handle on error too', () => {
+    const session = { url: undefined as string | undefined };
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      captureException: () => undefined,
+      get_session_replay_url: () => session.url,
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+    const t = TestBed.inject(TELEMETRY);
+    const handle =
+      TestBed.inject(TelemetryHandles).get<string>(POSTHOG_REPLAY_URL);
+    session.url = 'https://app.posthog.com/replay/abc';
+    t.error(new Error('boom'));
+    expect(handle()).toBe('https://app.posthog.com/replay/abc');
+  });
+
   it('identifies a user, and identify(null) resets (logout)', () => {
     const calls: string[] = [];
     const posthog: PostHogClient = {
@@ -163,6 +189,22 @@ describe('@mmstack/telemetry-posthog', () => {
     const t = TestBed.inject(TELEMETRY);
     t.setGlobalAttrs({ tool: 'etl', drop: undefined });
     expect(registered).toEqual([{ tool: 'etl' }]);
+    expect(unregistered).toEqual(['drop']);
+  });
+
+  it('an all-undefined setGlobalAttrs only unregisters', () => {
+    const registered: Record<string, unknown>[] = [];
+    const unregistered: string[] = [];
+    const posthog: PostHogClient = {
+      capture: () => undefined,
+      register_for_session: (props) => registered.push(props),
+      unregister: (key) => unregistered.push(key),
+    };
+    TestBed.configureTestingModule({
+      providers: [provideTelemetry({ sinks: [posthogSink({ posthog })] })],
+    });
+    TestBed.inject(TELEMETRY).setGlobalAttrs({ drop: undefined });
+    expect(registered).toEqual([]);
     expect(unregistered).toEqual(['drop']);
   });
 

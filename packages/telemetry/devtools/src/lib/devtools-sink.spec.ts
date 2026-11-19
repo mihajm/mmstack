@@ -81,6 +81,17 @@ describe('@mmstack/telemetry-devtools', () => {
       expect(devtoolsSink({ mode: 'cheap' })()).toBeNull();
     });
 
+    it('returns null without performance, even when console.timeStamp exists', () => {
+      vi.stubGlobal('performance', undefined);
+      expect(devtoolsSink({ mode: 'cheap', seed: [] })()).toBeNull();
+      expect(devtoolsSink({ mode: 'rich', seed: [] })()).toBeNull();
+    });
+
+    it('is named devtools unless configured', () => {
+      expect(make().name).toBe('devtools');
+      expect(make({ name: 'x' }).name).toBe('x');
+    });
+
     it('uses console.timeStamp when it is the only API, even in rich mode', () => {
       restores.push(hide(performance, 'measure'));
       make({ mode: 'rich' }).capture?.('e', {});
@@ -211,6 +222,22 @@ describe('@mmstack/telemetry-devtools', () => {
         () => undefined,
       );
       expect(timeStamp.mock.calls[0][0]).toBe('checkout.submit');
+    });
+
+    it('ignores half an origin and a non-string target', () => {
+      const sink = make({ mode: 'cheap' });
+      const spans: Record<string, unknown>[] = [
+        { 'origin.name': 'save' },
+        { 'origin.kind': 'action' },
+        { 'origin.kind': 'action', 'origin.name': 'save', 'origin.target': 5 },
+      ];
+      for (const attrs of spans)
+        sink.startSpan?.('s', CTX, attrs as never, ORIGIN).end(ORIGIN);
+      expect(timeStamp.mock.calls.map((c) => c[0])).toEqual([
+        's',
+        's',
+        'action save · s',
+      ]);
     });
 
     it('reads origin attrs set after start, and ends only once', () => {

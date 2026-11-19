@@ -51,12 +51,13 @@ function randomHex(bytes: number): string {
 }
 
 /**
- * Forces the OTel span to carry our facade ids. Span creation is synchronous in
- * sdk-trace (generateSpanId, then generateTraceId for roots; children inherit
- * the trace id from the parent context), so ids are consumed once as they are
- * read and the call site clears any leftover in a `finally`. A reentrant
- * `startSpan` (e.g. a custom SpanProcessor starting spans in `onStart`) therefore
- * gets fresh random ids instead of duplicating the forced ones.
+ * Forces the OTel span to carry our facade ids. The sink calls `set(ctx)` right
+ * before each `tracer.startSpan` and `clear()` right after it (in a `finally`),
+ * so the ids apply to that one span: the first `generateSpanId` returns the
+ * facade span id and `generateTraceId` (roots only; children inherit the trace
+ * id from the parent context) the facade trace id. Any other call, or a call
+ * outside that window, gets fresh random ids, so a stale facade trace id never
+ * reaches a later root.
  * Only used when WE build the provider; with a bring-your-own provider, OTel
  * owns ids and our ids ride along as `mmstack.*` attributes instead.
  */
@@ -320,14 +321,17 @@ export function otelSink(config: OtelSinkConfig = {}): Sink | null {
   // zero metrics. Flush everything when the page is hidden or unloading.
   if (flushables.length && typeof document !== 'undefined') {
     const flush = (): void => {
-      if (document.visibilityState === 'hidden') {
-        for (const f of flushables) void f.forceFlush().catch(() => undefined);
-      }
+      for (const f of flushables) void f.forceFlush().catch(() => undefined);
     };
-    document.addEventListener('visibilitychange', flush);
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    // pagehide can fire while the page still reports `visible`, and some browsers
+    // skip visibilitychange on unload, so it flushes unconditionally
+    document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', flush);
     disposers.push(() => {
-      document.removeEventListener('visibilitychange', flush);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', flush);
     });
   }

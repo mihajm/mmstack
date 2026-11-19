@@ -43,6 +43,8 @@ describe('provideSentinelTelemetry', () => {
       path: 'sentinel.edge',
       node: 'external-fault',
       fingerprint: 'SENTINEL_ERROR|sentinel.edge|external-fault',
+      message:
+        'A failure was contained as an error value. Check the cause at its source.',
     });
     expect(sink.findings[0].attrs).toMatchObject({
       origin: 'edge',
@@ -62,6 +64,13 @@ describe('provideSentinelTelemetry', () => {
       'SENTINEL_ERROR|sentinel.authored|author-fault',
     ]);
     expect(sink.findings[0].attrs).toMatchObject({ causeType: 'string' });
+  });
+
+  it('a null cause is reported as causeType null', () => {
+    const sink = setup();
+    TestBed.tick();
+    error(null);
+    expect(sink.findings[0].attrs).toMatchObject({ causeType: 'null' });
   });
 
   it('a sink that writes a signal still records a mint made inside a computed', () => {

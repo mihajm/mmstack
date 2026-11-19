@@ -65,7 +65,7 @@ export function posthogSink(config: PostHogSinkConfig): () => Sink | null {
     const hasReplay = typeof posthog.get_session_replay_url === 'function';
     const replayUrl = signal<string | undefined>(undefined);
     const refreshReplay = (): void => {
-      if (hasReplay) replayUrl.set(posthog.get_session_replay_url?.());
+      replayUrl.set(posthog.get_session_replay_url?.());
     };
 
     if (hasReplay) {

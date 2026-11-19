@@ -99,6 +99,9 @@ describe('telemetryInterceptor', () => {
   });
 
   it('ends the span with an error when a downstream interceptor throws synchronously', () => {
+    const nowSpy = vi
+      .spyOn(globalThis.performance, 'now')
+      .mockImplementation(() => 1_000);
     const sink = memorySink();
     const boom = new Error('sync fail');
     const failing: HttpInterceptorFn = () => {
@@ -121,8 +124,9 @@ describe('telemetryInterceptor', () => {
     const span = sink.spans[0];
     expect(span.error).toBe(boom);
     expect(span.ended).toBe(true);
-    expect(typeof span.attrs['http.duration_ms']).toBe('number');
-    expect(span.attrs['http.status_code']).toBeUndefined();
+    expect(span.attrs['http.duration_ms']).toBe(0);
+    expect(Object.keys(span.attrs)).not.toContain('http.status_code');
+    nowSpy.mockRestore();
   });
 
   it('spans each retry attempt separately (one span per subscription)', () => {
@@ -175,7 +179,7 @@ describe('telemetryInterceptor', () => {
     const span = sink.spans[0];
     expect(span.ended).toBe(true);
     expect(typeof span.attrs['http.duration_ms']).toBe('number');
-    expect(span.attrs['http.status_code']).toBeUndefined();
+    expect(Object.keys(span.attrs)).not.toContain('http.status_code');
     expect(span.error).toBeUndefined();
   });
 
@@ -211,7 +215,7 @@ describe('telemetryInterceptor', () => {
 
     expect(caught).toBe(boom);
     const span = sink.spans[0];
-    expect(span.attrs['http.status_code']).toBeUndefined();
+    expect(Object.keys(span.attrs)).not.toContain('http.status_code');
     expect(span.error).toBe(boom);
     expect(span.ended).toBe(true);
   });
@@ -232,7 +236,7 @@ describe('telemetryInterceptor', () => {
 
     req.event({ type: 3, loaded: 5, total: 10 } as never); // DownloadProgress
     const span = sink.spans[0];
-    expect(span.attrs['http.status_code']).toBeUndefined();
+    expect(Object.keys(span.attrs)).not.toContain('http.status_code');
     expect(span.ended).toBe(false);
 
     req.flush({});

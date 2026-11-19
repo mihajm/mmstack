@@ -12,7 +12,7 @@ Chrome DevTools adapter for [`@mmstack/telemetry-core`](https://www.npmjs.com/pa
 npm install @mmstack/telemetry-devtools
 ```
 
-No dependencies. The sink uses the browser's `console.timeStamp` and `performance.measure`. During SSR, or where neither API exists, the factory returns `null` and the facade drops the sink.
+No dependencies. The sink uses the browser's `console.timeStamp` and `performance.measure`. During SSR, without `performance`, or where neither API exists, the factory returns `null` and the facade drops the sink.
 
 ## Usage
 
@@ -52,8 +52,8 @@ Tracks appear in the order their first entry arrives, so they can shuffle betwee
 
 The unit tests check the exact arguments passed to `console.timeStamp` and `performance.measure`.
 
-A Playwright spec in the repo, `apps/playground-e2e/src/telemetry-devtools.spec.ts`, checks what Chrome keeps. It opens the playground's telemetry page in Chromium, records a trace over the Chrome DevTools Protocol, clicks, and asserts on the trace events the Performance panel is drawn from. In `'rich'` mode it checks the label, track, `mmstack` group, colour, and properties of a span and a finding, the finding's tooltip, that seeds are zero-length and emitted in seed order, that a span sits inside the click that caused it, and that a measure the sink cleared from `performance.getEntriesByName` is still in the trace. In `'cheap'` mode it checks the `console.timeStamp` entry's label, track, group, and colour, and that each seed is present and zero-length.
+A browser spec next to the sink, `src/lib/devtools-sink.browser.spec.ts`, checks what Chrome keeps. It mounts a small component with the sink in Chromium, records a trace over the Chrome DevTools Protocol, clicks, and asserts on the trace events the Performance panel is drawn from. In `'rich'` mode it checks the label, track, `mmstack` group, colour, and properties of a span and a finding, the finding's tooltip, that seeds are zero-length and emitted in seed order, that a span sits inside the click that caused it, and that a measure the sink cleared from `performance.getEntriesByName` is still in the trace. In `'cheap'` mode it checks the `console.timeStamp` entry's label, track, group, and colour, and that each seed is present and zero-length.
 
-Run it with `nx run playground-e2e:e2e --testFiles=telemetry-devtools.spec.ts --project=chromium`. It is not part of this package's `test` target. It needs Playwright's Chromium (`npx playwright install chromium`) and starts the playground dev server itself. On other browsers the tests skip, because CDP tracing is Chromium-only.
+Run it with `nx run telemetry-devtools:test-browser`. It is not part of this package's `test` target. It runs in vitest browser mode on Playwright's headless Chromium, because CDP tracing is Chromium-only.
 
 The spec stops at the trace. How the Performance panel draws those events is not tested, and is still checked by eye in the playground.

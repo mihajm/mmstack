@@ -65,8 +65,8 @@ describe('origin', () => {
     telemetry.withOrigin(NAV, () => telemetry.event('inside'));
     telemetry.event('outside');
 
-    expect(sink.events[0].attrs).toEqual(NAV_ATTRS);
-    expect(sink.events[1].attrs).toEqual({}); // the policy runs on `attrs ?? {}`
+    expect(sink.events[0].attrs).toStrictEqual(NAV_ATTRS);
+    expect(sink.events[1].attrs).toStrictEqual({}); // the policy runs on `attrs ?? {}`
   });
 
   it('nested withOrigin shadows, and the outer origin is restored on return', () => {

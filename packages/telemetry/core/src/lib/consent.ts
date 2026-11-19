@@ -150,12 +150,12 @@ export function createConsentState(config: ConsentConfig): ConsentState {
   };
 
   const drainDeferred = (): void => {
-    for (let i = deferred.length - 1; i >= 0; i--) {
-      const item = deferred[i];
+    // forward, so held deliveries replay in emit order
+    const held = deferred.splice(0);
+    for (const item of held) {
       const verdict = gate(item.category, item.sink);
-      if (verdict === 'defer') continue; // still hydrating + undecided
-      deferred.splice(i, 1);
-      if (verdict === 'allow') item.deliver();
+      if (verdict === 'defer') deferred.push(item); // still hydrating + undecided
+      else if (verdict === 'allow') item.deliver();
     }
   };
 

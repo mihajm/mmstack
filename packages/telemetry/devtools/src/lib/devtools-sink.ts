@@ -188,14 +188,17 @@ function richEmitter(group: string): (entry: Entry) => void {
  * gets; labels come only from `formatOrigin` and the record names.
  *
  * Entries are emitted after the fact from the facade's own time stamps, so readiness-buffered spans
- * keep their real times. Returns `null` during SSR and where neither `console.timeStamp` nor
- * `performance.measure` exists; with only one of them, that one is used whatever the `mode`.
+ * keep their real times. Returns `null` during SSR, without `performance`, and where neither
+ * `console.timeStamp` nor `performance.measure` exists; with only one of them, that one is used
+ * whatever the `mode`.
  */
 export function devtoolsSink(
   config: DevtoolsSinkConfig = {},
 ): () => Sink | null {
   return () => {
     if (typeof window === 'undefined') return null;
+    // every entry is placed on performance.timeOrigin's clock, whichever API draws it
+    if (typeof globalThis.performance?.timeOrigin !== 'number') return null;
     const cheapOk = typeof globalThis.console?.timeStamp === 'function';
     const richOk = typeof globalThis.performance?.measure === 'function';
     if (!cheapOk && !richOk) return null;

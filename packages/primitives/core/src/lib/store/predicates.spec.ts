@@ -68,9 +68,13 @@ describe('resolveVivify', () => {
     expect(resolveVivify({}, 'auto')).toBe('object');
   });
 
-  it('defers unknown values to auto', () => {
+  it('defers unknown values to the option', () => {
+    const factory = () => ({});
     expect(resolveVivify(null, 'auto')).toBe('auto');
-    expect(resolveVivify(5, 'object')).toBe('auto');
+    expect(resolveVivify(undefined, 'object')).toBe('object');
+    expect(resolveVivify(null, 'array')).toBe('array');
+    expect(resolveVivify(null, factory)).toBe(factory);
+    expect(resolveVivify(5, 'object')).toBe('object');
   });
 });
 

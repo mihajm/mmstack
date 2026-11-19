@@ -21,6 +21,14 @@ function unwrap(target: ElementRef<Element> | Element | null): Element | null {
   return target instanceof ElementRef ? target.nativeElement : target;
 }
 
+// `document.activeElement` is retargeted to the outermost shadow host, so read the
+// active element of the target's own root (document or shadow root).
+function hasFocusInside(el: Element): boolean {
+  const active = (el.getRootNode() as Partial<DocumentOrShadowRoot>)
+    .activeElement;
+  return !!active && el.contains(active);
+}
+
 /**
  * Creates a read-only signal that tracks whether the focused element is the
  * target or a descendant of it. Mirrors the CSS `:focus-within` pseudo-class.
@@ -60,7 +68,7 @@ function createFocusWithin(
   const state = signal(false, { debugName });
 
   const attach = (el: Element) => {
-    state.set(el.contains(document.activeElement));
+    state.set(hasFocusInside(el));
 
     const abortController = new AbortController();
 
@@ -70,8 +78,8 @@ function createFocusWithin(
     el.addEventListener(
       'focusout',
       () => {
-        // Defer so `document.activeElement` reflects the focus move.
-        queueMicrotask(() => state.set(el.contains(document.activeElement)));
+        // Defer so the active element reflects the focus move.
+        queueMicrotask(() => state.set(hasFocusInside(el)));
       },
       { signal: abortController.signal },
     );

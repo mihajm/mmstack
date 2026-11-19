@@ -29,9 +29,11 @@ export type KeepPreviousOptions<T> = CreateSignalOptions<T> & {
  * Built on `linkedSignal` — the only primitive that hands a computation its own
  * previous output, which is exactly what "hold the previous value" needs.
  *
- * If the source is writable, the wrapper forwards `set`/`update`/`asReadonly` to it,
- * so it stays a drop-in replacement. (Angular's `resource` is itself linkedSignal-backed
- * and exposes a writable `value` for optimistic updates; this preserves that.)
+ * If the source is writable, the wrapper forwards `set`/`update` to it (plus `mutate`/`inline`
+ * for a `mutable()` source and `from` for a `derived()` one), so it stays a drop-in replacement.
+ * `asReadonly()` is not forwarded: it is a read-only view of the held value, so it keeps
+ * holding through gaps. (Angular's `resource` is itself linkedSignal-backed and exposes a
+ * writable `value` for optimistic updates; this preserves that.)
  */
 export function keepPrevious<T>(
   value: MutableSignal<T>,

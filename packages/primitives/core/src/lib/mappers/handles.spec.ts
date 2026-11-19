@@ -157,7 +157,7 @@ function lawViolations<T, K>(
 // ---------------------------------------------------------------- random histories
 
 /** A literal key, or `{ minted: i }`: the i-th opaque handle minted earlier in the history. */
-type KeySpec = string | number | { readonly minted: number };
+type KeySpec = string | number | undefined | { readonly minted: number };
 
 type Edit =
   | { readonly t: 'insert'; readonly key: KeySpec; readonly at: number }
@@ -165,9 +165,11 @@ type Edit =
   | { readonly t: 'move'; readonly from: number; readonly to: number }
   | { readonly t: 'dup'; readonly from: number; readonly to: number }
   | { readonly t: 'replace'; readonly at: number }
-  | { readonly t: 'alias'; readonly at: number; readonly from: number };
+  | { readonly t: 'alias'; readonly at: number; readonly from: number }
+  // re-insert an item seen in an earlier state (a filter toggled back, an undo)
+  | { readonly t: 'resurrect'; readonly pick: number; readonly at: number };
 
-const KEYS: KeySpec[] = ['a', 'b', 'a#1', 1, NaN];
+const KEYS: KeySpec[] = ['a', 'b', 'a#1', 1, NaN, undefined];
 const nat = fc.nat({ max: 50 });
 const keySpec: fc.Arbitrary<KeySpec> = fc.oneof(
   fc.constantFrom(...KEYS),
@@ -184,13 +186,14 @@ const edit: fc.Arbitrary<Edit> = fc.oneof(
   fc.record({ t: fc.constant('dup' as const), from: nat, to: nat }),
   fc.record({ t: fc.constant('replace' as const), at: nat }),
   fc.record({ t: fc.constant('alias' as const), at: nat, from: nat }),
+  fc.record({ t: fc.constant('resurrect' as const), pick: nat, at: nat }),
 );
 const history = fc.array(fc.array(edit, { minLength: 1, maxLength: 4 }), {
   maxLength: 10,
 });
 
 const resolveKey = (spec: KeySpec, minted: readonly unknown[]): unknown =>
-  typeof spec === 'object'
+  typeof spec === 'object' && spec !== null
     ? minted.length
       ? minted[spec.minted % minted.length]
       : 'a'
@@ -200,6 +203,7 @@ function apply(
   items: readonly Item[],
   e: Edit,
   minted: readonly unknown[] = [],
+  past: readonly Item[] = [],
 ): Item[] {
   const out = [...items];
   const n = out.length;
@@ -227,6 +231,10 @@ function apply(
       out[e.at % n] = out[e.from % n];
       return out;
     }
+    case 'resurrect':
+      if (past.length)
+        out.splice(e.at % (n + 1), 0, past[e.pick % past.length]);
+      return out;
   }
 }
 
@@ -236,9 +244,11 @@ function runHistory(steps: readonly (readonly Edit[])[]): string[] {
   let items: Item[] = [];
   const everN = new Set<number>();
   const minted: unknown[] = [];
+  const past: Item[] = [];
   const broken: string[] = [];
   steps.forEach((step, s) => {
-    const next = step.reduce((acc, e) => apply(acc, e, minted), items);
+    const next = step.reduce((acc, e) => apply(acc, e, minted, past), items);
+    for (const item of next) if (!past.includes(item)) past.push(item);
     const prevItems = table?.items ?? [];
     const prevHandles = table?.handles ?? [];
     const result = handles(table, next, keyOf);
@@ -264,6 +274,7 @@ function runHistory(steps: readonly (readonly Edit[])[]): string[] {
 function applyUnique(items: readonly Item[], e: Edit): Item[] {
   if (e.t === 'dup') return apply(items, { t: 'replace', at: e.to });
   if (e.t === 'alias') return apply(items, { t: 'replace', at: e.at });
+  if (e.t === 'resurrect') return [...items];
   if (e.t === 'insert' && typeof e.key === 'object') return [...items];
   if (e.t === 'insert' && items.some((item) => sameValueZero(item.id, e.key)))
     return [...items];
@@ -273,7 +284,17 @@ function applyUnique(items: readonly Item[], e: Edit): Item[] {
 const uniqueEdit: fc.Arbitrary<Edit> = fc.oneof(
   fc.record({
     t: fc.constant('insert' as const),
-    key: fc.constantFrom<KeySpec>('a', 'b', 'c', 'd', 'a#1', 1, 2, NaN),
+    key: fc.constantFrom<KeySpec>(
+      'a',
+      'b',
+      'c',
+      'd',
+      'a#1',
+      1,
+      2,
+      NaN,
+      undefined,
+    ),
     at: nat,
   }),
   edit,

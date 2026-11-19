@@ -6,9 +6,9 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { derived } from '../derived';
-import { type MutableSignal } from '../mutable';
+import { isMutable, type MutableSignal } from '../mutable';
 import { toWritable } from '../to-writable';
-import { isWritableSignal } from './util';
+import { isWritableSignal, mutableItemEqual } from './util';
 
 export function pooledKeys<T extends Record<string, any>>(
   src: Signal<T>,
@@ -148,6 +148,11 @@ export function mapObject<T extends object, U>(
           // noop
         })
   ) as MutableSignal<T>; // maximal overload internally
+  // a mutable() source edits values in place: same reference, new content
+  const propOpt =
+    isWritableSignal(src) && isMutable(src)
+      ? { equal: mutableItemEqual }
+      : undefined;
 
   return linkedSignal<Set<keyof T>, MappedObject<T, U>>({
     source: pooledKeys(src),
@@ -158,7 +163,7 @@ export function mapObject<T extends object, U>(
         nextObj[k] =
           prev && prev.source.has(k)
             ? prev.value[k]
-            : mapFn(k, derived(writable, k));
+            : mapFn(k, derived(writable, k, propOpt));
 
       if (options.onDestroy && prev && prev.source.size)
         for (const k of prev.source)

@@ -116,4 +116,94 @@ describe('indexArray', () => {
       expect(result[1].doubled()).toBe(40);
     });
   });
+
+  function counted<T, V>(read: () => T, project: (v: T) => V) {
+    let runs = 0;
+    const c = computed(() => {
+      runs++;
+      return project(read());
+    });
+    return { c, runs: () => runs };
+  }
+
+  it("honors the caller's equal for item signals of a plain source", () => {
+    const source = signal([{ id: 1, v: 'a' }]);
+    const mapped = indexArray(source, (item) => counted(item, (x) => x.v), {
+      equal: (a, b) => a.id === b.id,
+    });
+    const row = mapped()[0];
+    expect(row.c()).toBe('a');
+    source.set([{ id: 1, v: 'b' }]);
+    expect(row.c()).toBe('a');
+    expect(row.runs()).toBe(1);
+  });
+
+  it('a plain source: replacing one item re-runs only that item', () => {
+    const a = { v: 'a' };
+    const source = signal([a, { v: 'b' }]);
+    const mapped = indexArray(source, (item) => counted(item, (x) => x.v));
+    const [r0, r1] = mapped();
+    r0.c();
+    r1.c();
+    source.set([a, { v: 'B' }]);
+    expect(r0.c()).toBe('a');
+    expect(r1.c()).toBe('B');
+    expect(r0.runs()).toBe(1);
+    expect(r1.runs()).toBe(2);
+  });
+
+  it('a mutable source: an in-place object edit reaches the item consumer', () => {
+    const items = mutable([{ name: 'A' }, { name: 'B' }]);
+    const mapped = indexArray(items, (item, i) =>
+      computed(() => `${i}: ${item().name}`),
+    );
+    expect(mapped()[0]()).toBe('0: A');
+    items.mutate((arr) => {
+      arr[0].name = 'Z';
+      return arr;
+    });
+    expect(mapped()[0]()).toBe('0: Z');
+    items.mutate((arr) => {
+      arr[0] = { name: 'new' };
+      return arr;
+    });
+    expect(mapped()[0]()).toBe('0: new');
+  });
+
+  it('a mutable source of primitives: only changed slots re-run', () => {
+    const items = mutable<(number | string)[]>([1, 2]);
+    const mapped = indexArray(items, (item) => counted(item, (x) => x));
+    const [r0, r1] = mapped();
+    r0.c();
+    r1.c();
+    items.mutate((arr) => {
+      arr[1] = 9;
+      return arr;
+    });
+    expect(r0.c()).toBe(1);
+    expect(r1.c()).toBe(9);
+    expect(r0.runs()).toBe(1);
+    items.mutate((arr) => {
+      arr[0] = 5;
+      return arr;
+    });
+    expect(r0.c()).toBe(5);
+    items.mutate((arr) => {
+      arr[0] = 'x';
+      return arr;
+    });
+    expect(r0.c()).toBe('x');
+  });
+
+  it('growth and shrink without options: a computed over the length follows', () => {
+    const source = signal([1, 2]);
+    const mapped = indexArray(source, (item) => item);
+    const length = computed(() => mapped().length);
+    expect(length()).toBe(2);
+    source.set([1, 2, 3]);
+    expect(length()).toBe(3);
+    source.set([1]);
+    expect(length()).toBe(1);
+    expect(mapped()[0]()).toBe(1);
+  });
 });

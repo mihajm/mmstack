@@ -6,6 +6,7 @@ import {
   inject,
   Injector,
   input,
+  isDevMode,
   TemplateRef,
   untracked,
   ViewContainerRef,
@@ -25,6 +26,10 @@ import { isServer, providePaused } from '@mmstack/primitives/core';
  * ```html
  * <section *mmActivity="tab() === 'editor'"> ...heavy stateful editor... </section>
  * ```
+ *
+ * Hiding works on the template's root elements, so use one element as the root, as above. With an
+ * `ng-container` root, its elements are hidden but text at the root stays visible; change detection
+ * is paused for the whole subtree either way. In dev mode the directive warns once about text roots.
  */
 @Directive({
   selector: '[mmActivity]',
@@ -42,6 +47,7 @@ export class MmActivity {
   private readonly paused = computed(() => !this.visible());
 
   private view: EmbeddedViewRef<unknown> | null = null;
+  private warnedTextRoots = false;
 
   constructor() {
     effect(() => {
@@ -67,11 +73,23 @@ export class MmActivity {
     }
     if (this.onServer) return;
     for (const node of this.view.rootNodes) {
-      // covers HTML and SVG roots; text/comment roots can't be styled, their CD is still detached
       if (node instanceof HTMLElement || node instanceof SVGElement)
         node.style.display = visible ? '' : 'none';
     }
+    if (!visible && isDevMode()) this.warnTextRoots(this.view);
     if (visible) this.view.reattach();
     else this.view.detach();
+  }
+
+  private warnTextRoots(view: EmbeddedViewRef<unknown>): void {
+    if (this.warnedTextRoots) return;
+    const text = view.rootNodes.some(
+      (n: Node) => n.nodeType === Node.TEXT_NODE && !!n.textContent?.trim(),
+    );
+    if (!text) return;
+    this.warnedTextRoots = true;
+    console.warn(
+      '*mmActivity: text at the template root stays visible while the content is hidden. Use one element as the template root.',
+    );
   }
 }

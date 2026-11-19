@@ -16,6 +16,8 @@ import {
   createSurvivorPermutation,
   type Permutation,
 } from './survivor-permutation';
+import { isWritableSignal, mutableItemEqual } from './util';
+import { isMutable } from '../mutable';
 
 /** A source array: a signal or a function read inside a `computed`. @internal */
 export type Source<T> = Signal<T[]> | (() => T[]);
@@ -60,6 +62,9 @@ export function keyedMapper<T, U, K>(
   const sourceSignal = isSignal(source) ? source : computed(source);
   const { getKey, build, onDestroy, onDuplicates } = options;
   const withItems = options.items;
+  // a mutable() source edits items in place: same reference, new content
+  const inPlace = isWritableSignal(sourceSignal) && isMutable(sourceSignal);
+  const itemOpt = inPlace ? { equal: mutableItemEqual } : undefined;
 
   let table: HandleTable<T, K> | undefined;
   let mapped: U[] = [];
@@ -73,6 +78,39 @@ export function keyedMapper<T, U, K>(
   const reused: boolean[] = [];
   const fresh: number[] = [];
   const counts = onDuplicates ? new Map<K, number>() : null;
+  // per pass: previous entries already destroyed, and entries built so far
+  const gone: boolean[] = [];
+  const built: U[] = [];
+
+  // after a throwing callback the pass is abandoned: every live entry is destroyed (secondary
+  // throws swallowed) and the next pass rebuilds from scratch
+  const reset = () => {
+    const live: U[] = [];
+    for (let i = 0; i < mapped.length; i++) if (!gone[i]) live.push(mapped[i]);
+    live.push(...built);
+    table = undefined;
+    mapped = [];
+    indexes = [];
+    spareIndexes = [];
+    items = [];
+    spareItems = [];
+    oldAt.clear();
+    gone.length = 0;
+    built.length = 0;
+    if (onDestroy)
+      for (const v of live) {
+        try {
+          onDestroy(v);
+        } catch {
+          // the first error is already on its way to the reader
+        }
+      }
+  };
+
+  const destroy = (i: number) => {
+    gone[i] = true;
+    onDestroy?.(mapped[i]);
+  };
 
   const reportDuplicates = (keys: readonly K[]) => {
     if (!counts || !onDuplicates) return;
@@ -98,120 +136,135 @@ export function keyedMapper<T, U, K>(
     const newItems = sourceSignal() || [];
 
     return untracked(() => {
-      // the previous table's arrays stay intact for this one call (HandleTable retention); the
-      // `items` getter follows the table, so both snapshots are taken before the call
-      const prevHandles = table ? table.handles : EMPTY;
-      const prevItems = table ? table.items : EMPTY;
-      const next = assignHandles(table, newItems, getKey).table;
-      table = next;
-      reportDuplicates(next.keys);
-
-      const hs = next.handles;
-      const keys = next.keys;
-      const newLen = hs.length;
-      const len = prevHandles.length;
-
-      if (newLen === 0) {
-        if (len !== 0) {
-          if (onDestroy) for (let k = 0; k < len; k++) onDestroy(mapped[k]);
-          mapped = [];
-          indexes.length = 0;
-          spareIndexes.length = 0;
-          items.length = 0;
-          spareItems.length = 0;
-        }
-        return mapped;
+      try {
+        return reconcile(newItems);
+      } catch (err) {
+        reset();
+        throw err;
       }
+    });
+  });
 
-      const newMapped = new Array<U>(newLen);
-      const newIndexes = spareIndexes;
-      newIndexes.length = newLen;
-      const newItemSignals = spareItems;
-      if (withItems) newItemSignals.length = newLen;
-      const create = (j: number) => {
-        const indexSignal = signal(j);
-        newIndexes[j] = indexSignal;
-        let itemSignal: WritableSignal<T> | null = null;
-        if (withItems) newItemSignals[j] = itemSignal = signal(newItems[j]);
-        newMapped[j] = build(
+  function reconcile(newItems: T[]): U[] {
+    // the previous table's arrays stay intact for this one call (HandleTable retention); the
+    // `items` getter follows the table, so both snapshots are taken before the call
+    const prevHandles = table ? table.handles : EMPTY;
+    const prevItems = table ? table.items : EMPTY;
+    const next = assignHandles(table, newItems, getKey).table;
+    reportDuplicates(next.keys);
+    gone.length = mapped.length;
+    gone.fill(false);
+    built.length = 0;
+
+    const hs = next.handles;
+    const keys = next.keys;
+    const newLen = hs.length;
+    const len = prevHandles.length;
+
+    if (newLen === 0) {
+      if (len !== 0) {
+        if (onDestroy) for (let k = 0; k < len; k++) destroy(k);
+        mapped = [];
+        indexes.length = 0;
+        spareIndexes.length = 0;
+        items.length = 0;
+        spareItems.length = 0;
+      }
+      table = next;
+      return mapped;
+    }
+
+    const newMapped = new Array<U>(newLen);
+    const newIndexes = spareIndexes;
+    newIndexes.length = newLen;
+    const newItemSignals = spareItems;
+    if (withItems) newItemSignals.length = newLen;
+    const create = (j: number) => {
+      const indexSignal = signal(j);
+      newIndexes[j] = indexSignal;
+      let itemSignal: WritableSignal<T> | null = null;
+      if (withItems)
+        newItemSignals[j] = itemSignal = signal(newItems[j], itemOpt);
+      built.push(
+        (newMapped[j] = build(
           newItems[j],
           itemSignal,
           indexSignal,
           keys[j],
           hs[j],
-        );
-      };
-      // a reused entry's item is written only when its reference changed
-      const carry = (j: number, i: number) => {
-        newMapped[j] = mapped[i];
-        newIndexes[j] = indexes[i];
-        if (!withItems) return;
-        const s = items[i];
-        newItemSignals[j] = s;
-        if (!Object.is(prevItems[i], newItems[j])) s.set(newItems[j]);
-      };
+        )),
+      );
+    };
+    // a reused entry's item is written only when its reference changed
+    const carry = (j: number, i: number) => {
+      newMapped[j] = mapped[i];
+      newIndexes[j] = indexes[i];
+      if (!withItems) return;
+      const s = items[i];
+      newItemSignals[j] = s;
+      if (inPlace || !Object.is(prevItems[i], newItems[j])) s.set(newItems[j]);
+    };
 
-      if (len === 0) {
-        for (let j = 0; j < newLen; j++) create(j);
-      } else {
-        // common prefix and suffix by handle, then a handle map in the middle
-        let start = 0;
-        const shorter = Math.min(len, newLen);
-        for (
-          ;
-          start < shorter && sameValueZero(prevHandles[start], hs[start]);
-          start++
-        )
-          carry(start, start);
-        let end = len - 1;
-        let newEnd = newLen - 1;
-        for (
-          ;
-          end >= start &&
-          newEnd >= start &&
-          sameValueZero(prevHandles[end], hs[newEnd]);
-          end--, newEnd--
-        )
-          carry(newEnd, end);
+    if (len === 0) {
+      for (let j = 0; j < newLen; j++) create(j);
+    } else {
+      // common prefix and suffix by handle, then a handle map in the middle
+      let start = 0;
+      const shorter = Math.min(len, newLen);
+      for (
+        ;
+        start < shorter && sameValueZero(prevHandles[start], hs[start]);
+        start++
+      )
+        carry(start, start);
+      let end = len - 1;
+      let newEnd = newLen - 1;
+      for (
+        ;
+        end >= start &&
+        newEnd >= start &&
+        sameValueZero(prevHandles[end], hs[newEnd]);
+        end--, newEnd--
+      )
+        carry(newEnd, end);
 
-        oldAt.clear();
-        for (let i = start; i <= end; i++) oldAt.set(prevHandles[i], i);
-        reused.length = len;
-        reused.fill(false, start, end + 1);
-        fresh.length = 0;
-        for (let j = start; j <= newEnd; j++) {
-          const i = oldAt.get(hs[j]);
-          if (i === undefined) {
-            fresh.push(j);
-            continue;
-          }
-          reused[i] = true;
-          carry(j, i);
+      oldAt.clear();
+      for (let i = start; i <= end; i++) oldAt.set(prevHandles[i], i);
+      reused.length = len;
+      reused.fill(false, start, end + 1);
+      fresh.length = 0;
+      for (let j = start; j <= newEnd; j++) {
+        const i = oldAt.get(hs[j]);
+        if (i === undefined) {
+          fresh.push(j);
+          continue;
         }
-        oldAt.clear();
-        if (onDestroy)
-          for (let i = start; i <= end; i++)
-            if (!reused[i]) onDestroy(mapped[i]);
-
-        let f = 0;
-        for (let j = start; j < newLen; j++) {
-          if (f < fresh.length && fresh[f] === j) {
-            create(j);
-            f++;
-          } else newIndexes[j].set(j);
-        }
+        reused[i] = true;
+        carry(j, i);
       }
+      oldAt.clear();
+      if (onDestroy)
+        for (let i = start; i <= end; i++) if (!reused[i]) destroy(i);
 
-      mapped = newMapped;
-      spareIndexes = indexes;
-      indexes = newIndexes;
-      if (withItems) {
-        spareItems = items;
-        items = newItemSignals;
+      let f = 0;
+      for (let j = start; j < newLen; j++) {
+        if (f < fresh.length && fresh[f] === j) {
+          create(j);
+          f++;
+        } else newIndexes[j].set(j);
       }
-      return mapped;
-    });
-  });
+    }
+
+    table = next;
+    mapped = newMapped;
+    spareIndexes = indexes;
+    indexes = newIndexes;
+    if (withItems) {
+      spareItems = items;
+      items = newItemSignals;
+    }
+    return mapped;
+  }
 
   // `reorders` keeps its own baseline: a copy of the handles at its last evaluation, in one of two
   // buffers (the table's own arrays are reused by later recomputes of the mapped signal)

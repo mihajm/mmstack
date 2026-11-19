@@ -1,4 +1,10 @@
-import { signal } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  DestroyRef,
+  EnvironmentInjector,
+  PLATFORM_ID,
+  signal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { signalFromEvent } from './signal-from-event';
 
@@ -92,4 +98,99 @@ describe('signalFromEvent', () => {
       expect(last()).toBe(1); // listener detached
     });
   });
+
+  it('honors listener options in the fourth position', () => {
+    const target = new EventTarget();
+    const last = TestBed.runInInjectionContext(() =>
+      signalFromEvent<CustomEvent<number>>(target, 'tick', null, {
+        once: true,
+      }),
+    );
+    const first = new CustomEvent('tick', { detail: 1 });
+    target.dispatchEvent(first);
+    target.dispatchEvent(new CustomEvent('tick', { detail: 2 }));
+    expect(last()).toBe(first);
+  });
+
+  it('honors listener options in the fifth position after a project', () => {
+    const target = new EventTarget();
+    const last = TestBed.runInInjectionContext(() =>
+      signalFromEvent<CustomEvent<number>, number>(
+        target,
+        'tick',
+        0,
+        (e) => e.detail,
+        { once: true },
+      ),
+    );
+    target.dispatchEvent(new CustomEvent('tick', { detail: 1 }));
+    target.dispatchEvent(new CustomEvent('tick', { detail: 2 }));
+    expect(last()).toBe(1);
+  });
+
+  it('returns the initial value and ignores events on the server', () => {
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const target = new EventTarget();
+    const last = TestBed.runInInjectionContext(() =>
+      signalFromEvent<CustomEvent<number>, number>(
+        target,
+        'tick',
+        42,
+        (e) => e.detail,
+      ),
+    );
+    const bare = TestBed.runInInjectionContext(() =>
+      signalFromEvent(target, 'tick', null),
+    );
+    target.dispatchEvent(new CustomEvent('tick', { detail: 1 }));
+    expect(last()).toBe(42);
+    expect(bare()).toBeNull();
+  });
+
+  it('accepts an injector for a signal target outside an injection context', () => {
+    const injector = TestBed.inject(EnvironmentInjector);
+    const a = new EventTarget();
+    const last = signalFromEvent<CustomEvent<number>, number>(
+      signal<EventTarget | null>(a),
+      'tick',
+      0,
+      (e) => e.detail,
+      { injector },
+    );
+    TestBed.tick();
+    a.dispatchEvent(new CustomEvent('tick', { detail: 3 }));
+    expect(last()).toBe(3);
+  });
+
+  it.each([
+    ['signal', true],
+    ['static', false],
+  ])(
+    'detaches a %s target when the given destroyRef is destroyed',
+    (_, sig) => {
+      const child = createEnvironmentInjector(
+        [],
+        TestBed.inject(EnvironmentInjector),
+      );
+      const a = new EventTarget();
+      const last = TestBed.runInInjectionContext(() =>
+        signalFromEvent<CustomEvent<number>, number>(
+          sig ? signal<EventTarget | null>(a) : a,
+          'tick',
+          0,
+          (e) => e.detail,
+          { destroyRef: child.get(DestroyRef) },
+        ),
+      );
+      TestBed.tick();
+      a.dispatchEvent(new CustomEvent('tick', { detail: 1 }));
+      expect(last()).toBe(1);
+
+      child.destroy();
+      a.dispatchEvent(new CustomEvent('tick', { detail: 2 }));
+      expect(last()).toBe(1);
+    },
+  );
 });

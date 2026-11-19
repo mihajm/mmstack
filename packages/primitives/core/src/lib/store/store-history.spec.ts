@@ -128,7 +128,7 @@ describe('storeHistory', () => {
 
 describe('storeHistory — coalescing (typing runs undo as a unit)', () => {
   function setup(coalesce?: { ms: number; samePath?: boolean }) {
-    let at = 0;
+    let at = 1_700_000_000_000; // epoch-scale, as with Date.now
     const clock = { now: () => at, tick: (ms: number) => (at += ms) };
     const bundle = TestBed.runInInjectionContext(() => {
       const s = store<{ title: string; n: { a: number } }>({

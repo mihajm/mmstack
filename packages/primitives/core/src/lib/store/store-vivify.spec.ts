@@ -290,4 +290,62 @@ describe('store vivification (deep / e2e)', () => {
       expect(sig().a).toEqual([9]);
     });
   });
+
+  describe('an explicit shape or factory applies to the root container only', () => {
+    type Cart = { items: number[]; total: number };
+
+    it('a factory seeds a null root', () => {
+      const sig = signal<Cart | null>(null);
+      const s = toStore(sig as any, {
+        injector,
+        vivify: () => ({ items: [], total: 0 }),
+      }) as any;
+      s.total.set(1);
+      expect(sig()).toEqual({ items: [], total: 1 });
+    });
+
+    it("'object' on a null root makes an object even for an index key", () => {
+      const sig = signal<Record<string, number> | null>(null);
+      const s = toStore(sig as any, { injector, vivify: 'object' }) as any;
+      s['0'].set(5);
+      expect(Array.isArray(sig())).toBe(false);
+      expect(sig()).toEqual({ '0': 5 });
+    });
+
+    it("'array' on a null root makes an array", () => {
+      const sig = signal<number[] | null>(null);
+      const s = toStore(sig as any, { injector, vivify: 'array' }) as any;
+      s[1].set(5);
+      expect(Array.isArray(sig())).toBe(true);
+      expect(sig()?.[1]).toBe(5);
+    });
+
+    it('descendants infer from the key, whatever the option', () => {
+      const factory = vi.fn(() => ({ items: [] as number[], total: 0 }));
+      const s = store(
+        { a: null as Cart | null, b: null as Record<string, number> | null },
+        { injector, vivify: factory as any },
+      );
+      s.a.total.set(1);
+      expect(s().a).toEqual({ total: 1 });
+      expect(factory).not.toHaveBeenCalled();
+
+      const o = store(
+        { b: null as Record<string, number> | null },
+        { injector, vivify: 'object' },
+      );
+      (o.b as any)['0'].set(5);
+      expect(o().b).toEqual([5]);
+    });
+
+    it('a root shape known on first read survives the root being nulled', () => {
+      const sig = signal<number[] | null>([1]);
+      const s = toStore(sig as any, { injector, vivify: 'object' }) as any;
+      expect(s[0]()).toBe(1);
+      sig.set(null);
+      s[0].set(5);
+      expect(Array.isArray(sig())).toBe(true);
+      expect(sig()).toEqual([5]);
+    });
+  });
 });

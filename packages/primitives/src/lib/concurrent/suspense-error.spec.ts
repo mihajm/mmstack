@@ -248,3 +248,43 @@ describe('mmRetryFailed', () => {
     expect(ref.reloads()).toBe(1);
   });
 });
+
+@Component({
+  selector: 'onpush-error-host',
+  imports: [MmSuspenseError],
+  providers: [provideTransitionScope()],
+  template: `
+    <ul *mmSuspenseError="let entries">
+      @for (e of entries; track e.member.id) {
+        <li>{{ e.failure.displayName }}</li>
+      }
+    </ul>
+  `,
+})
+class OnPushErrorHost {
+  readonly scope = injectTransitionScope();
+}
+
+describe('*mmSuspenseError under an OnPush host', () => {
+  it('a failure joining while the view shows is rendered with no event to mark the host', async () => {
+    const { container, fixture } = await render(OnPushErrorHost);
+    const census = fixture.componentInstance.scope.census;
+    const fail = (displayName: string) => {
+      const id = memberId('action', displayName);
+      const facade = census.enroll({ id, displayName, retry: undefined });
+      facade.started(1);
+      facade.settled(1, {
+        kind: 'error',
+        error: { id, displayName, message: 'x', generation: 1 },
+      });
+    };
+    fail('save');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(items(container)).toEqual(['save']);
+    fail('publish');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(items(container)).toEqual(['save', 'publish']);
+  });
+});

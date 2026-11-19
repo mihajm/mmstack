@@ -968,10 +968,23 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
       const roll = r();
       let ops: SyncOp[];
       if (roll < 0.18) {
+        // the record already holds child keys, so "fall back to the ancestor's raw child" and
+        // "keep a stale child" materialize different values
         ops = world.stamp(
-          [{ kind: 'set', path, next: { v: `${writer}:${clock}` } }],
+          [
+            {
+              kind: 'set',
+              path,
+              next: { v: `${writer}:${clock}`, x: `raw:${clock}` },
+            },
+          ],
           { bump: r() < 0.3 },
         );
+        // 30%: a replace by a writer that saw the descendants but nothing at the path itself, so
+        // its own set can lose the fold at the path while its clears win below it
+        if (path.length > 0 && r() < 0.3) {
+          ops = [{ ...ops[0], cites: [], epoch: 0 }, ...ops.slice(1)];
+        }
       } else if (roll < 0.28 && path.length > 0) {
         ops = world.stamp([{ kind: 'delete', path, prev: undefined }], {
           bump: r() < 0.3,
@@ -999,10 +1012,13 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
     return out;
   }
 
+  // every run also checks the incremental root against the register state's own materialization
+  // (the checkpoint-joiner parity), with strict key presence: an absent key is not `undefined`
   const run = (units: readonly OpEnvelope[], seed: number): unknown => {
     const conv = createConvergingApply();
     let root: unknown = {};
     for (const e of shuffle(units, seed)) root = applyOps(root, conv.ingest(e));
+    expect(root).toStrictEqual(conv.materialize());
     return root;
   };
 
@@ -1011,7 +1027,7 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
       const envs = genEnvs(seed * 41, 24);
       const base = run(envs, 1);
       for (let order = 2; order <= 6; order++) {
-        expect(run(envs, order + seed * 13)).toEqual(base);
+        expect(run(envs, order + seed * 13)).toStrictEqual(base);
       }
     }
   });
@@ -1024,8 +1040,10 @@ describe('PROPERTY: the real register + materialization converge (impl parity wi
         e.ops.map((op) => ({ ...e, ops: [op] })),
       );
       for (let order = 2; order <= 5; order++) {
-        expect(run(split, order + seed * 7)).toEqual(base);
-        expect(run([...split, ...split], order + seed * 19)).toEqual(base);
+        expect(run(split, order + seed * 7)).toStrictEqual(base);
+        expect(run([...split, ...split], order + seed * 19)).toStrictEqual(
+          base,
+        );
       }
     }
   });
@@ -2818,6 +2836,55 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
       mutate((e) => (e.ops[0] = { ...e.ops[0], path: 'a' as any })),
       'path',
     ],
+    ...(
+      [
+        ['an array segment (stringifies to __proto__)', ['__proto__']],
+        ['an array segment (stringifies across the separator)', ['a\u001fb']],
+        ['an object segment', { k: 1 }],
+        ['a null segment', null],
+        ['a boolean segment', true],
+        ['a negative index', -1],
+        ['a fractional index', 1.5],
+        ['a NaN index', NaN],
+        ['an infinite index', Infinity],
+      ] as const
+    ).map(([desc, seg]): [string, OpEnvelope, string] => [
+      desc,
+      mutate((e) => (e.ops[0] = { ...e.ops[0], path: ['a', seg] })),
+      'path',
+    ]),
+    ['a non-string origin', mutate((e) => (e.origin = ['o'])), 'origin'],
+    ['a null hlc', mutate((e) => (e.hlc = null)), 'hlc'],
+    [
+      'a cite with a null hlc',
+      mutate(
+        (e) =>
+          (e.ops[0] = { ...e.ops[0], cites: [{ origin: 'o', hlc: null }] }),
+      ),
+      'cites',
+    ],
+    [
+      'cites absent',
+      mutate((e) => {
+        delete e.ops[0].cites;
+      }),
+      'cites',
+    ],
+    [
+      'cites an empty string',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], cites: '' })),
+      'cites',
+    ],
+    [
+      'cites an object',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], cites: {} })),
+      'cites',
+    ],
+    [
+      'a null cite',
+      mutate((e) => (e.ops[0] = { ...e.ops[0], cites: [null] })),
+      'cites',
+    ],
     [
       'control char in a path segment',
       mutate((e) => (e.ops[0] = { ...e.ops[0], path: [`a${CTRL}`] })),
@@ -2901,6 +2968,18 @@ describe('validateEnvelope — deterministic, total well-formedness', () => {
 
   it.each(cases)('rejects: %s', (_desc, env, reason) => {
     expect(validateEnvelope(env)).toBe(reason);
+  });
+
+  it('accepts ids and segments with spaces, and integer index segments', () => {
+    expect(
+      validateEnvelope(
+        mutate((e) => {
+          e.origin = 'Ann B';
+          e.writer = 'w 1';
+          e.ops[0] = { ...e.ops[0], path: ['first name', 0, 12] };
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('is total and pure: same envelope → same verdict, no local state', () => {

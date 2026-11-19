@@ -35,7 +35,8 @@ const warnIfLong = (pos: string): string => {
  * comparison. Pass `undefined` for an open end: `posBetween()` seeds the first element,
  * `posBetween(last)` appends, `posBetween(undefined, first)` prepends. Repeated inserts into the
  * same gap grow the string one digit at a time rather than colliding, and the result is never equal
- * to either neighbor. `before` must sort before `after`.
+ * to either neighbor. `before` must sort before `after`. When no string fits strictly between them
+ * (equal bounds, or `after` is `before` followed only by '0' digits), the result sorts after both.
  */
 export function posBetween(before?: string, after?: string): string {
   // Neighbors can tie (concurrent inserts into the same gap leave two equal positions, ordered only
@@ -49,6 +50,9 @@ export function posBetween(before?: string, after?: string): string {
   // pair (gap of 1) leaves no room here, so we commit the lower digit and everything deeper is free.
   let upperOpen = upper == null;
   for (;;) {
+    // `after` ran out while every digit so far matched `before` padded with '0' (e.g. 'V' and
+    // 'V0'): no string fits between them, so open the upper end as for a tie instead of looping.
+    if (!upperOpen && upper != null && i >= upper.length) upperOpen = true;
     const lo = before != null && i < before.length ? digitOf(before[i]) : 0;
     const hi =
       upperOpen || upper == null
@@ -242,6 +246,10 @@ function resolveAnchor(
  * container stands NOW (an external drop has the same concurrency need as a local move; see
  * {@link moveElement}). An anchor that names no other element present writes nothing and returns
  * `undefined`.
+ *
+ * An element whose `~pos` is missing sorts first, and no position sorts below it, so an element
+ * placed right before it lands right after it instead. {@link rebalanceContainer} gives every
+ * element a position again.
  */
 export function insertElement<T extends object>(
   container: ContainerNode<T>,
@@ -300,8 +308,9 @@ function insertInto<T, E>(
  * `undefined`; the `empty` misuse also logs in dev mode. Resolution is local intent, not a
  * distributed adjacency guarantee: peers in different states may resolve one anchor differently,
  * as they would an index. Neighbours tied on `~pos` leave no room between them, so `after` the
- * first can land after both (an index has the same limit). An anchor is resolved in one pass over
- * the container, without sorting it.
+ * first can land after both (an index has the same limit). The same holds in front of an element
+ * whose `~pos` is missing: it sorts first, so a move right before it lands right after it. An
+ * anchor is resolved in one pass over the container, without sorting it.
  */
 export function moveElement<T extends object>(
   container: ContainerNode<T>,

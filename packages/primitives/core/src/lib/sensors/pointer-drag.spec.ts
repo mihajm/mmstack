@@ -9,6 +9,8 @@ function pe(
     pointerId?: number;
     clientX?: number;
     clientY?: number;
+    pageX?: number;
+    pageY?: number;
     button?: number;
     pointerType?: string;
     shiftKey?: boolean;
@@ -23,8 +25,8 @@ function pe(
   e['pointerId'] = opts.pointerId ?? 1;
   e['clientX'] = opts.clientX ?? 0;
   e['clientY'] = opts.clientY ?? 0;
-  e['pageX'] = opts.clientX ?? 0;
-  e['pageY'] = opts.clientY ?? 0;
+  e['pageX'] = opts.pageX ?? opts.clientX ?? 0;
+  e['pageY'] = opts.pageY ?? opts.clientY ?? 0;
   e['button'] = opts.button ?? 0;
   e['pointerType'] = opts.pointerType ?? 'mouse';
   e['shiftKey'] = !!opts.shiftKey;
@@ -228,8 +230,11 @@ describe('pointerDrag', () => {
 
   it('flushes terminal IDLE immediately, not on the trailing edge (#12)', () => {
     const { drag, el } = setup({ throttle: 100, activationThreshold: 3 });
+    expect(drag().pointerId).toBeNull();
     el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
     el.dispatchEvent(pe('pointermove', { clientX: 20, clientY: 0 }));
+    // read inside the throttle window so the view holds a non-idle value
+    expect(drag().pointerId).toBe(1);
     el.dispatchEvent(pe('pointerup', { clientX: 20, clientY: 0 }));
     // throttled view (not unthrottled) reflects IDLE right away
     expect(drag().active).toBe(false);
@@ -301,6 +306,7 @@ describe('pointerDrag', () => {
       el.dispatchEvent(
         pe('pointermove', { clientX: 20, clientY: 5, pointerId: 2 }),
       );
+      expect(drag.unthrottled().cancelled).toBe(false);
       el.dispatchEvent(
         pe('pointerup', { clientX: 20, clientY: 5, pointerId: 2 }),
       );
@@ -344,11 +350,27 @@ describe('pointerDrag', () => {
     expect(drag.unthrottled().current).toEqual({ x: 0, y: 0 });
   });
 
-  it('reports page coordinates when configured', () => {
-    const { drag, el } = setup({ coordinateSpace: 'page' });
-    el.dispatchEvent(pe('pointerdown', { clientX: 3, clientY: 4 }));
-    expect(drag.unthrottled().start).toEqual({ x: 3, y: 4 });
-  });
+  it.each([
+    [undefined, { x: 1, y: 2 }, { x: 11, y: 2 }],
+    ['client', { x: 1, y: 2 }, { x: 11, y: 2 }],
+    ['page', { x: 101, y: 202 }, { x: 111, y: 202 }],
+  ] as const)(
+    'reports %s coordinates for start, current and delta',
+    (coordinateSpace, start, current) => {
+      const { drag, el } = setup({ coordinateSpace });
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 2, pageX: 101, pageY: 202 }),
+      );
+      el.dispatchEvent(
+        pe('pointermove', { clientX: 11, clientY: 2, pageX: 111, pageY: 202 }),
+      );
+      expect(drag.unthrottled()).toMatchObject({
+        start,
+        current,
+        delta: { x: 10, y: 0 },
+      });
+    },
+  );
 
   it('re-attaches when a signal target changes', () => {
     const a = document.createElement('div');
@@ -390,8 +412,234 @@ describe('pointerDrag', () => {
         },
       ],
     });
+    const host = TestBed.inject(ElementRef).nativeElement as HTMLElement;
     const drag = TestBed.runInInjectionContext(() => pointerDrag());
+    host.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1 }));
     expect(drag().active).toBe(false);
+    expect(drag().pointerId).toBeNull();
+    expect(drag.unthrottled).toBe(drag);
     expect(() => drag.cancel()).not.toThrow();
+  });
+
+  describe('contract', () => {
+    const IDLE_SHAPE = {
+      active: false,
+      start: { x: 0, y: 0 },
+      current: { x: 0, y: 0 },
+      delta: { x: 0, y: 0 },
+      pointerId: null,
+      modifiers: { shift: false, alt: false, ctrl: false, meta: false },
+      button: -1,
+      pointerType: '',
+      origin: null,
+      cancelled: false,
+    };
+    const escape = () =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    it('has the documented idle shape, and the same with cancelled after an abort', () => {
+      const { drag, el } = setup();
+      expect(drag()).toEqual(IDLE_SHAPE);
+      el.dispatchEvent(pe('pointerdown', { clientX: 4, clientY: 4 }));
+      escape();
+      expect(drag.unthrottled()).toEqual({ ...IDLE_SHAPE, cancelled: true });
+    });
+
+    it('keeps the same state object for an identical repeat move', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+      const before = drag.unthrottled();
+      el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+      expect(drag.unthrottled()).toBe(before);
+    });
+
+    it('activates on a zero-distance move with activationThreshold: 0', () => {
+      const { drag, el } = setup({ activationThreshold: 0 });
+      el.dispatchEvent(pe('pointerdown', { clientX: 5, clientY: 5 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 5, clientY: 5 }));
+      expect(drag.unthrottled().active).toBe(true);
+    });
+
+    it('tracks and activates on a vertical-only drag', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 0, clientY: 10 }));
+      expect(drag.unthrottled()).toMatchObject({
+        active: true,
+        current: { x: 0, y: 10 },
+        delta: { x: 0, y: 10 },
+      });
+    });
+
+    it.each(['shift', 'alt', 'ctrl', 'meta'] as const)(
+      'updates modifiers when only %s changes, without movement',
+      (key) => {
+        const { drag, el } = setup();
+        el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+        el.dispatchEvent(pe('pointermove', { clientX: 10, clientY: 0 }));
+        el.dispatchEvent(
+          pe('pointermove', { clientX: 10, clientY: 0, [`${key}Key`]: true }),
+        );
+        expect(drag.unthrottled().modifiers[key]).toBe(true);
+      },
+    );
+
+    it('returns an inert idle signal with no target and no host element', () => {
+      TestBed.resetTestingModule();
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        const drag = TestBed.runInInjectionContext(() => pointerDrag());
+        expect(drag()).toEqual(IDLE_SHAPE);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    describe('throttle', () => {
+      beforeEach(() => vi.useFakeTimers());
+      afterEach(() => vi.useRealTimers());
+
+      it('shows the pointerdown on the throttled view immediately', () => {
+        const { drag, el } = setup({ throttle: 100 });
+        expect(drag().pointerId).toBeNull();
+        el.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1 }));
+        expect(drag().pointerId).toBe(1);
+      });
+
+      it('holds a move inside the window and delivers it on the trailing edge', () => {
+        const { drag, el } = setup({ throttle: 100 });
+        expect(drag().pointerId).toBeNull();
+        el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+        expect(drag().current.x).toBe(0);
+        el.dispatchEvent(pe('pointermove', { clientX: 20, clientY: 0 }));
+        expect(drag.unthrottled().current.x).toBe(20);
+        expect(drag().current.x).toBe(0);
+        vi.advanceTimersByTime(100);
+        expect(drag().current.x).toBe(20);
+      });
+    });
+
+    it('measures delta from a non-origin start', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 5, clientY: 6 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 15, clientY: 26 }));
+      expect(drag.unthrottled().delta).toEqual({ x: 10, y: 20 });
+    });
+
+    it('activates on a move of exactly activationThreshold pixels', () => {
+      const { drag, el } = setup({ activationThreshold: 3 });
+      el.dispatchEvent(pe('pointerdown', { clientX: 0, clientY: 0 }));
+      el.dispatchEvent(pe('pointermove', { clientX: 3, clientY: 0 }));
+      expect(drag.unthrottled().active).toBe(true);
+    });
+
+    it('keeps the first pointer when a second pointer goes down, up or cancels', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 }),
+      );
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 9, clientY: 9, pointerId: 2 }),
+      );
+      expect(drag.unthrottled()).toMatchObject({
+        pointerId: 1,
+        start: { x: 1, y: 1 },
+      });
+      el.dispatchEvent(pe('pointerup', { pointerId: 2 }));
+      el.dispatchEvent(pe('pointercancel', { pointerId: 2 }));
+      el.dispatchEvent(pe('lostpointercapture', { pointerId: 2 }));
+      expect(drag.unthrottled().pointerId).toBe(1);
+      el.dispatchEvent(
+        pe('pointerup', { clientX: 1, clientY: 1, pointerId: 1 }),
+      );
+      expect(drag.unthrottled()).toEqual(IDLE_SHAPE);
+    });
+
+    it.each(['Shift', 'a', ' '])('does not cancel on the %j key', (key) => {
+      const { drag, el } = setup();
+      el.dispatchEvent(pe('pointerdown', { clientX: 1, clientY: 1 }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      expect(drag.unthrottled().pointerId).toBe(1);
+    });
+
+    it('captures the pointer on pointerdown', () => {
+      const { el } = setup();
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 5 }),
+      );
+      expect(el.hasPointerCapture(5)).toBe(true);
+    });
+
+    it('ends cancelled when the target loses capture', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 5 }),
+      );
+      el.dispatchEvent(pe('lostpointercapture', { pointerId: 5 }));
+      expect(drag.unthrottled()).toEqual({ ...IDLE_SHAPE, cancelled: true });
+    });
+
+    it.each<[string, (ctx: { drag: ReturnType<typeof pointerDrag> }) => void]>([
+      ['Escape', () => escape()],
+      ['cancel()', ({ drag }) => drag.cancel()],
+    ])('releases pointer capture on %s', (_, abort) => {
+      const { drag, el } = setup();
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 5 }),
+      );
+      abort({ drag });
+      expect(el.hasPointerCapture(5)).toBe(false);
+    });
+
+    function signalTarget() {
+      const a = document.createElement('div');
+      const b = document.createElement('div');
+      document.body.append(a, b);
+      const target = signal<HTMLElement | null>(null);
+      TestBed.resetTestingModule();
+      const changes: boolean[] = [];
+      const drag = TestBed.runInInjectionContext(() =>
+        pointerDrag({ target, onChange: (st) => changes.push(st.cancelled) }),
+      );
+      return { a, b, target, drag, changes };
+    }
+
+    it('tolerates a null signal target, then attaches once it resolves', () => {
+      const { a, target, drag } = signalTarget();
+      expect(() => TestBed.tick()).not.toThrow();
+      target.set(a);
+      TestBed.tick();
+      a.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 4 }),
+      );
+      expect(drag.unthrottled().pointerId).toBe(4);
+    });
+
+    it('aborts and releases capture when the target swaps mid-gesture', () => {
+      const { a, b, target, drag, changes } = signalTarget();
+      target.set(a);
+      TestBed.tick();
+      a.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 4 }),
+      );
+      target.set(b);
+      TestBed.tick();
+      expect(drag.unthrottled()).toEqual({ ...IDLE_SHAPE, cancelled: true });
+      expect(changes.at(-1)).toBe(true);
+      expect(a.hasPointerCapture(4)).toBe(false);
+    });
+
+    it('aborts and releases capture when destroyed mid-gesture', () => {
+      const { drag, el } = setup();
+      el.dispatchEvent(
+        pe('pointerdown', { clientX: 1, clientY: 1, pointerId: 6 }),
+      );
+      TestBed.resetTestingModule();
+      expect(drag.unthrottled()).toEqual({ ...IDLE_SHAPE, cancelled: true });
+      expect(el.hasPointerCapture(6)).toBe(false);
+    });
   });
 });

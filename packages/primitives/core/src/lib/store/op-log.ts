@@ -121,7 +121,8 @@ export type OpLog<T extends object> = {
 
 function generateOrigin(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return Math.random().toString(36).substring(2);
+  // the time prefix keeps it non-empty even when Math.random() returns 0
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
 const isPlainArray = (v: unknown): v is unknown[] =>
@@ -208,6 +209,12 @@ function addValue(
     addValue(record[key], [...path, key], ops, added);
 }
 
+/** A key a write may target: any string but `'__proto__'`, or a non-negative integer index. */
+const isSafeSegment = (seg: unknown): boolean =>
+  typeof seg === 'string'
+    ? seg !== '__proto__'
+    : Number.isInteger(seg) && (seg as number) >= 0;
+
 /** Immutably applies one op along its path, vivifying missing containers `'auto'`-style. */
 function applyAt(
   container: unknown,
@@ -216,7 +223,6 @@ function applyAt(
   op: Exclude<StoreOp, { kind: 'clear' }>,
 ): unknown {
   const seg = path[idx];
-  if (seg === '__proto__') return container;
   const base: Record<Key, unknown> | unknown[] = isPlainArray(container)
     ? container.slice()
     : isRecord(container)
@@ -249,7 +255,8 @@ function applyAt(
  * (structural-sharing along op paths, missing containers vivified `'auto'`-style). This is the
  * same transform {@link OpLog.apply} runs, extracted so a replica can fold a received batch into
  * a value WITHOUT owning a diffing {@link opLog} — e.g. the worker-graph read-replica seam.
- * Accepts a batch or a bare op list.
+ * Accepts a batch or a bare op list. An op whose path holds a segment that is not a string or a
+ * non-negative integer, or holds `'__proto__'`, is ignored.
  */
 export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
   const list = Array.isArray(ops) ? ops : (ops as OpBatch).ops;
@@ -260,6 +267,7 @@ export function applyOps<T>(root: T, ops: OpBatch | readonly StoreOp[]): T {
       if (op.kind === 'set') next = op.next;
       continue; // a root delete is meaningless — ignore (mirrors OpLog.apply)
     }
+    if (!op.path.every(isSafeSegment)) continue; // never coerced into a key: the op is dropped whole
     next = applyAt(next, op.path, 0, op);
   }
   return next as T;

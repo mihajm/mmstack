@@ -337,3 +337,82 @@ describe('concurrency instrumentation: failure taps (A6)', () => {
     }
   });
 });
+
+describe('perfCustomTracks spans', () => {
+  function withClock(
+    at: number,
+    run: (measure: ReturnType<typeof vi.spyOn>) => void,
+  ) {
+    const measure = vi.spyOn(globalThis.performance, 'measure');
+    const now = vi.spyOn(globalThis.performance, 'now').mockReturnValue(at);
+    try {
+      run(measure);
+    } finally {
+      measure.mockRestore();
+      now.mockRestore();
+    }
+  }
+
+  const span = (track: string, start: number, end: number) => ({
+    start,
+    end,
+    detail: { devtools: { dataType: 'track-entry', track, color: 'primary' } },
+  });
+
+  it('writes one pending entry from the start handle to now, on the default track', () =>
+    withClock(50, (measure) => {
+      const preset = perfCustomTracks();
+      const handle = preset.pendingStart?.({ scope: 'x', resources: 1, at: 5 });
+      preset.pendingEnd?.(handle, { at: 20 });
+      expect(measure.mock.calls).toEqual([
+        ['pending', span('mmstack concurrency', 5, 50)],
+      ]);
+    }));
+
+  it('writes one transaction entry from the start handle to now', () =>
+    withClock(70, (measure) => {
+      const preset = perfCustomTracks('t');
+      const handle = preset.transactionStart?.({ scope: 'x', at: 9 });
+      preset.transactionEnd?.(handle, { at: 30 });
+      expect(measure.mock.calls).toEqual([['transaction', span('t', 9, 70)]]);
+    }));
+
+  it('ends a span on the same clock as the scope stamps', () => {
+    const measure = vi.spyOn(globalThis.performance, 'measure');
+    try {
+      const preset = perfCustomTracks('t');
+      const handle = preset.pendingStart?.({
+        scope: 'x',
+        resources: 1,
+        at: performance.now(),
+      });
+      preset.pendingEnd?.(handle, { at: performance.now() });
+      const [[, opts]] = measure.mock.calls as [
+        [string, { start: number; end: number }],
+      ];
+      expect(opts.start).toBe(handle);
+      expect(opts.end - opts.start).toBeGreaterThanOrEqual(0);
+      expect(opts.end - opts.start).toBeLessThan(10_000);
+    } finally {
+      measure.mockRestore();
+    }
+  });
+});
+
+describe('dismissAll instrumentation', () => {
+  it('reports only the entries it hides, not a retryable failure it keeps', () => {
+    const events: string[] = [];
+    const { scope, res } = setup({
+      dismissed: (e) => events.push(`dismissed(${e.name})`),
+    });
+    failFacade(scope, 'save');
+    res.set('error', new Error('boom'));
+    expect(scope.errored()).toHaveLength(2);
+
+    scope.dismissAll();
+    expect(events).toEqual(['dismissed(save)']);
+    expect(scope.errored().map((e) => e.failure.displayName)).toEqual([
+      'orders',
+    ]);
+  });
+});

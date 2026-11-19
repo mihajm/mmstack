@@ -547,3 +547,24 @@ describe('MmTransition under a transaction on the enclosing scope', () => {
     expect(container.textContent).not.toContain('b:2');
   });
 });
+
+@Component({
+  selector: 'tr-container-host',
+  imports: [MmTransition],
+  template: `<ng-container *mmTransition="tab(); let t"
+    >text-{{ t }}</ng-container
+  >`,
+})
+class ContainerHost {
+  readonly tab = signal('a');
+}
+
+describe('MmTransition with an ng-container root', () => {
+  it('swaps a text-only branch without throwing', async () => {
+    const { fixture, container } = await render(ContainerHost);
+    await flush(() => fixture.detectChanges());
+    fixture.componentInstance.tab.set('b');
+    await flush(() => fixture.detectChanges());
+    expect(container.textContent?.trim()).toBe('text-b');
+  });
+});

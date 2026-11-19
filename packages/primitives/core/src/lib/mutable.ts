@@ -130,5 +130,5 @@ export function mutable<T>(
 export function isMutable<T = unknown>(
   value: WritableSignal<T>,
 ): value is MutableSignal<T> {
-  return 'mutate' in value && typeof value.mutate === 'function';
+  return typeof (value as Partial<MutableSignal<T>>).mutate === 'function';
 }

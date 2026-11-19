@@ -35,8 +35,15 @@ export type MappedArray<U, K> = Signal<U[]> & {
  *    the entry across an immutable update (same id, new object).
  * 2. `index`: a read-only signal of the entry's current position.
  * 3. `key`: the entry's raw key (the item itself without a `key` option).
- * 4. `handle`: the entry's lifetime {@link Handle}: the raw key while that key never had
- *    duplicates, an opaque `KeyHandle` otherwise. `reorders` names entries by it.
+ * 4. `handle`: the entry's lifetime {@link Handle}, kept for the entry's whole life (it is not
+ *    reset when duplicates go away). A new entry gets its raw key as the handle when it is the
+ *    key's only occurrence and no occurrence of that key in the previous state held the raw key;
+ *    otherwise, or when the key is itself a `KeyHandle`, it gets an opaque `KeyHandle`.
+ *    `reorders` names entries by it.
+ *
+ * A `mutable()` source can be edited in place: after `mutate`, every reused entry's `item` is
+ * written again, so a row over an edited object re-runs while a row over an unchanged primitive
+ * does not.
  *
  * Freshness: the list writes `item` and `index` when it is read, so a row is as fresh as the
  * list's last read. A row read before the list sees the previous state, never a mix of two: its

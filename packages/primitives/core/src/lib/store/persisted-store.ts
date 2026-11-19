@@ -124,7 +124,10 @@ export type PersistHandle = {
    * and when no backend is configured). Gate first paint on it if a stale-flash matters.
    */
   readonly hydrated: Signal<boolean>;
-  /** Force any pending debounced write to the backend now. */
+  /**
+   * Force any pending debounced write to the backend now. Resolves once every earlier write and
+   * clear has reached the backend; backend calls run one at a time, in the order they were made.
+   */
   flush(): Promise<void>;
   /** Remove the snapshot from the backend and reset the store to the value it held when attached. */
   clear(): Promise<void>;
@@ -200,7 +203,15 @@ export function persist<T extends object>(
     };
   }
 
-  let persistedRef: T = initialRef;
+  // the newest value handed to the backend (disk once the queue drains); writes skip a value
+  // that is already there. `initialRef` stands for "nothing written": untouched, or cleared.
+  let persistedRef: unknown = initialRef;
+  // backend calls run one at a time, in the order they were made, so a slow write can neither
+  // land after a later write nor bring an entry back after clear()
+  let queue: Promise<void> = Promise.resolve();
+  const enqueue = (op: () => Promise<void>): Promise<void> =>
+    (queue = queue.then(op));
+  const UNKNOWN = {};
 
   void (async () => {
     try {
@@ -252,18 +263,22 @@ export function persist<T extends object>(
 
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const write = async (value: T): Promise<void> => {
-    try {
-      await backend.set(key, encode(value));
-      persistedRef = value;
-    } catch (err) {
-      if (isDevMode()) {
-        console.warn(
-          `[@mmstack/primitives] persist("${key}") write failed`,
-          err,
-        );
+  const write = (value: T): Promise<void> => {
+    persistedRef = value;
+    return enqueue(async () => {
+      try {
+        await backend.set(key, encode(value));
+      } catch (err) {
+        // disk state is unknown now, so the next flush or change writes again
+        if (persistedRef === value) persistedRef = UNKNOWN;
+        if (isDevMode()) {
+          console.warn(
+            `[@mmstack/primitives] persist("${key}") write failed`,
+            err,
+          );
+        }
       }
-    }
+    });
   };
 
   const cancelTimer = (): void => {
@@ -273,16 +288,12 @@ export function persist<T extends object>(
     }
   };
 
-  const flush = async (): Promise<void> => {
+  // before hydration this writes only a boot-window write (hydration then refuses to adopt over it)
+  const flush = (): Promise<void> => {
     cancelTimer();
     const current = untracked(read);
-    if (
-      !untracked(hydrated) ||
-      current === initialRef ||
-      current === persistedRef
-    )
-      return;
-    await write(current);
+    if (current === persistedRef) return queue;
+    return write(current);
   };
 
   effect(
@@ -291,8 +302,8 @@ export function persist<T extends object>(
       const value = read();
       untracked(() => {
         cancelTimer();
-        // untouched / reset-to-initial, or already the value on disk (e.g. just hydrated): skip
-        if (value === initialRef || value === persistedRef) return;
+        // untouched, cleared, or already the value on disk (e.g. just hydrated): skip
+        if (value === persistedRef) return;
         timer = setTimeout(() => {
           timer = undefined;
           void write(value);
@@ -321,20 +332,22 @@ export function persist<T extends object>(
   return {
     hydrated: hydrated.asReadonly(),
     flush,
-    clear: async () => {
+    clear: () => {
       cancelTimer();
       setRoot(initialRef); // back to initialRef, so the persist effect skips (no re-write over the delete)
-      persistedRef = initialRef; // disk is now empty
-      try {
-        await backend.del(key);
-      } catch (err) {
-        if (isDevMode()) {
-          console.warn(
-            `[@mmstack/primitives] persist("${key}") clear failed`,
-            err,
-          );
+      persistedRef = initialRef; // disk is empty once the delete lands
+      return enqueue(async () => {
+        try {
+          await backend.del(key);
+        } catch (err) {
+          if (isDevMode()) {
+            console.warn(
+              `[@mmstack/primitives] persist("${key}") clear failed`,
+              err,
+            );
+          }
         }
-      }
+      });
     },
   };
 }

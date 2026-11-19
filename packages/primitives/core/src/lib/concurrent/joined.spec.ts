@@ -322,3 +322,67 @@ describe('joined', () => {
     );
   });
 });
+
+describe('joined: argument parsing and transitions', () => {
+  it('a trailing undefined options is unset, in the fn and the tuple form', () => {
+    const a = fake('value');
+    const b = fake('value');
+    const untyped = joined as (...args: unknown[]) => () => Result<unknown>;
+    const forward = (opts?: { precedence?: Precedence }) => ({
+      fn: joined(a, (x) => x + 1, opts),
+      tuple: untyped(a, b, opts),
+    });
+    const { fn, tuple } = forward(undefined);
+    expect(fn()).toEqual({ kind: 'value', value: a.n + 1 });
+    expect(tuple()).toEqual({ kind: 'value', value: [a.n, b.n] });
+  });
+
+  it('a latest as the last tuple source is a source, not the projection', () => {
+    const a = fake('loading');
+    const doubled = latest(() => use(a) * 2);
+    const b = fake('value');
+    const pair = joined(b, doubled);
+    const solo = joined(doubled);
+    a.value.set(4);
+    a.status.set('resolved');
+    expect(pair()).toEqual({ kind: 'value', value: [b.n, 8] });
+    expect(solo()).toEqual({ kind: 'value', value: [8] });
+  });
+
+  it('one instance follows a changed value of one of two sources', () => {
+    const a = fake('value');
+    const b = fake('value');
+    const r = joined(a, b);
+    expect(r()).toEqual({ kind: 'value', value: [a.n, b.n] });
+    a.value.set(99);
+    expect(r()).toEqual({ kind: 'value', value: [99, b.n] });
+  });
+
+  it('one instance goes value, pending, value without throwing', () => {
+    const a = fake('value');
+    const b = fake('value');
+    const r = joined(a, b);
+    const kinds: string[] = [];
+    const read = () => kinds.push(r().kind);
+    read();
+    a.status.set('loading');
+    a.value.set(undefined);
+    expect(read).not.toThrow();
+    a.value.set(7);
+    a.status.set('resolved');
+    expect(read).not.toThrow();
+    expect(kinds).toEqual(['value', 'pending', 'value']);
+    expect(r()).toEqual({ kind: 'value', value: [7, b.n] });
+  });
+
+  it('an idle source that reports content is not awaiting, even with no value', () => {
+    const src: UseSource<number> = {
+      status: signal<ResourceStatus>('idle'),
+      value: signal<number | undefined>(undefined),
+      hasValue: () => false,
+      hasContent: () => true,
+    };
+    expect(demandOf(src)).toBeUndefined();
+    expect(joined(src)()).toEqual({ kind: 'value', value: [undefined] });
+  });
+});

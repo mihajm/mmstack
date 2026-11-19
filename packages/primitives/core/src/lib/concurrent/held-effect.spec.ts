@@ -266,3 +266,75 @@ describe('heldEffect in a component', () => {
     expect(cleaned).toEqual([0, 1]);
   });
 });
+
+describe('heldEffect: defaults and teardown', () => {
+  it('with no options it runs, holds while the scope holds, and runs once on release', () => {
+    TestBed.configureTestingModule({ providers: [provideTransitionScope()] });
+    const scope = getTransitionScope(TestBed.inject(EnvironmentInjector));
+    if (!scope) throw new Error('scope not provided');
+    const a = signal(0);
+    const runs: number[] = [];
+    TestBed.runInInjectionContext(() => heldEffect(() => void runs.push(a())));
+    TestBed.tick();
+    scope.beginHold();
+    a.set(1);
+    TestBed.tick();
+    a.set(2);
+    TestBed.tick();
+    expect(runs).toEqual([0]);
+    scope.endHold();
+    TestBed.tick();
+    expect(runs).toEqual([0, 2]);
+  });
+
+  it('manualCleanup keeps it alive past its injector until destroyed', () => {
+    const env = createEnvironmentInjector(
+      [],
+      TestBed.inject(EnvironmentInjector),
+    );
+    const held = signal(false);
+    const a = signal(0);
+    const runs: number[] = [];
+    const ref = heldEffect(() => void runs.push(a()), {
+      injector: env,
+      manualCleanup: true,
+      gate: held,
+    });
+    TestBed.tick();
+    held.set(true);
+    a.set(1);
+    TestBed.tick();
+    env.destroy();
+    held.set(false);
+    TestBed.tick();
+    a.set(2);
+    TestBed.tick();
+    expect(runs).toEqual([0, 1, 2]);
+    ref.destroy();
+    a.set(3);
+    TestBed.tick();
+    expect(runs).toEqual([0, 1, 2]);
+  });
+
+  it('destroyed while not held, a later change runs nothing and the gate is no longer read', () => {
+    let gateReads = 0;
+    const held = signal(false);
+    const gate = () => (gateReads++, held());
+    const a = signal(0);
+    const runs: number[] = [];
+    const ref = heldEffect(() => void runs.push(a()), {
+      injector: TestBed.inject(Injector),
+      gate,
+    });
+    TestBed.tick();
+    ref.destroy();
+    const reads = gateReads;
+    a.set(1);
+    held.set(true);
+    TestBed.tick();
+    held.set(false);
+    TestBed.tick();
+    expect(runs).toEqual([0]);
+    expect(gateReads).toBe(reads);
+  });
+});

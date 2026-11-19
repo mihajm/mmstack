@@ -76,7 +76,8 @@ export type CreateStoredOptions<T> = CreateSignalOptions<T> & {
   /**
    * If `true`, the signal will attempt to synchronize its state across multiple browser tabs
    * using the `storage` event. Changes made in one tab (set, update, clear) will be
-   * reflected in other tabs using the same storage key.
+   * reflected in other tabs using the same storage key. A `clear()` of the whole storage area
+   * in another tab resets the signal to the fallback.
    * Requires a browser environment. Defaults to `false`.
    */
   syncTabs?: boolean;
@@ -91,7 +92,8 @@ export type CreateStoredOptions<T> = CreateSignalOptions<T> & {
    */
   cleanupOldKey?: boolean;
   /**
-   * Optional validator, which is called on load of value. Store will be set to fallback if value is false
+   * Optional validator, called when a value is loaded from storage. When it returns `false`, the
+   * signal reads the fallback and the stored entry is removed on the next persistence run.
    */
   validate?: (value: T) => boolean;
   /**
@@ -199,8 +201,7 @@ export function stored<T>(
   const injector = providedInjector ?? inject(Injector);
   const onServer = isServer(injector);
 
-  const fallbackStore = onServer ? noopStore : localStorage;
-  const store = providedStore ?? fallbackStore;
+  const store = providedStore ?? (onServer ? noopStore : localStorage);
 
   const keySig =
     typeof key === 'string'
@@ -289,6 +290,7 @@ export function stored<T>(
     const destroyRef = injector.get(DestroyRef);
     const sync = (e: StorageEvent) => {
       if (e.storageArea !== store) return;
+      if (e.key === null) return internal.set(EMPTY);
       if (e.key !== untracked(keySig)) return;
 
       if (e.newValue === null) internal.set(EMPTY);

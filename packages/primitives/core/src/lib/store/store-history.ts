@@ -23,7 +23,8 @@ import {
   type FoldPolicyEntry,
   type MergePolicyEntry,
 } from './op-sync';
-import { structEq } from './predicates';
+import { isOpaque } from './opaque';
+import { isRecord, structEq } from './predicates';
 
 export type StoreHistory = {
   readonly canUndo: Signal<boolean>;
@@ -31,11 +32,15 @@ export type StoreHistory = {
   /**
    * Revert the most recent tracked change, selectively: only what that change did is taken back,
    * and what other writers changed since stays (see {@link storeHistory}). A no-op when nothing
-   * is undoable.
+   * is undoable. Returns `true` when anything was written; `false` when nothing was undoable or
+   * every op of the entry was skipped (the entry is then dropped and no redo entry is pushed).
    */
-  undo(): void;
-  /** Re-apply the most recently undone change: the inverse of what the undo actually applied. */
-  redo(): void;
+  undo(): boolean;
+  /**
+   * Re-apply the most recently undone change: the inverse of what the undo actually applied.
+   * Returns `true` when anything was written, `false` under the same rules as {@link undo}.
+   */
+  redo(): boolean;
   /**
    * Close the current coalescing run: the next tracked change starts a NEW undo entry even if
    * it lands inside the `coalesce` window. Call it on the boundaries your UX considers an
@@ -99,6 +104,8 @@ export type StoreHistoryOptions = CreateOpLogOptions & {
   readonly now?: () => number;
 };
 
+type Key = string | number;
+
 /** The value at `path`, with presence (a key holding `undefined` is found). */
 function lookup(
   root: unknown,
@@ -113,7 +120,19 @@ function lookup(
   return { found: true, value: cur };
 }
 
-type Key = string | number;
+/** Every ancestor of `path` holds a plain record or array: a write there vivifies nothing. */
+function parentStands(root: unknown, path: readonly Key[]): boolean {
+  let cur = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (!isContainer(cur) || !Object.hasOwn(cur, path[i])) return false;
+    cur = (cur as Record<Key, unknown>)[path[i]];
+  }
+  return path.length === 0 || isContainer(cur);
+}
+
+const isContainer = (v: unknown): v is object =>
+  isRecord(v) || (Array.isArray(v) && !isOpaque(v));
+
 const UNIT: DiffOpsOptions = { arrays: 'unit' };
 
 const PATH_SEP = '';
@@ -131,9 +150,13 @@ const OP_SEP = '';
  * current value: `merge(mine-after, mine-before, current)`, chosen per path from `policies` —
  * an array with no policy merges by `undoMerge` (my slots go back, theirs stay; if others moved
  * elements since, my inverse applies whole), a `keyedArray` merge policy merges by identity, an
- * explicit `lww` or a custom fold restores whole, anything else merges like `merge3`. Undoing my
+ * explicit `lww` or a custom fold restores whole, anything else merges like `merge3`. An inverse
+ * `set` whose path is gone (another writer deleted the key or a parent) is skipped. Undoing my
  * add removes the key only while it still holds what I added (an edit by others wins); undoing
- * my delete always restores.
+ * my delete restores the key while every parent still holds a plain record or array, and is
+ * skipped once another writer deleted or replaced a parent. An undo whose every op is skipped
+ * changes nothing, writes nothing to the store, pushes no
+ * redo entry, and returns `false`.
  *
  * Composes with sync for collaborative undo: pass `track: syncClient` so only YOUR writes are
  * undoable, while `undo()` emits a normal op that propagates to peers (it writes through the
@@ -212,17 +235,22 @@ export function storeHistory<T extends object>(
           here.found && structEq(here.value, op.prev)
             ? { kind: 'delete', path: op.path, prev: here.value }
             : null;
+      } else if (!Object.hasOwn(op, 'prev')) {
+        // undoing my delete: restore while the parent chain stands (a peer's delete of a parent wins)
+        next = !parentStands(root, op.path)
+          ? null
+          : here.found
+            ? { kind: 'set', path: op.path, prev: here.value, next: op.next }
+            : { kind: 'set', path: op.path, next: op.next };
+      } else if (!here.found) {
+        next = null; // undoing my edit where a peer deleted the key or a parent: the delete wins
       } else {
-        const value =
-          !Object.hasOwn(op, 'prev') ||
-          (here.found && structEq(op.prev, here.value))
-            ? op.next // undoing my delete, or nobody wrote here since: my inverse as is
-            : undoMergeAt(op.path)(op.prev, op.next, here.value, {
-                path: op.path,
-              });
-        next = here.found
-          ? { kind: 'set', path: op.path, prev: here.value, next: value }
-          : { kind: 'set', path: op.path, next: value };
+        const value = structEq(op.prev, here.value)
+          ? op.next // nobody wrote here since: my inverse as is
+          : undoMergeAt(op.path)(op.prev, op.next, here.value, {
+              path: op.path,
+            });
+        next = { kind: 'set', path: op.path, prev: here.value, next: value };
       }
       if (!next) continue;
       out.push(next);
@@ -287,11 +315,11 @@ export function storeHistory<T extends object>(
 
   const flushTrack = (): void => opt?.track?.flush?.();
 
-  const run = (from: Entry[], to: Entry[]): void => {
+  const run = (from: Entry[], to: Entry[]): boolean => {
     flushTrack();
     log.flush();
     const entry = from.pop();
-    if (!entry) return;
+    if (!entry) return false;
     runOpen = false; // stepping through history is a boundary: the next edit starts fresh
     const applied = resolve(inverseOf(entry));
     applying = true;
@@ -304,6 +332,7 @@ export function storeHistory<T extends object>(
     // the inverse of what we APPLIED restores the other direction
     if (applied.length) push(to, { inverse: invertBatch(applied) });
     version.update((v) => v + 1);
+    return applied.length > 0;
   };
 
   return {

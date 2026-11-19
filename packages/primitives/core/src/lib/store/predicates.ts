@@ -44,7 +44,7 @@ export function resolveVivify(sample: unknown, option: Vivify): Vivify {
   if (!option) return false;
   if (Array.isArray(sample)) return 'array';
   if (isRecord(sample)) return 'object';
-  return 'auto';
+  return option;
 }
 
 export function hasOwnKey(

@@ -1,6 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 import { scrollPosition } from './scroll-position';
-import { ElementRef, Injector, signal } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  ElementRef,
+  EnvironmentInjector,
+  Injector,
+  PLATFORM_ID,
+  signal,
+} from '@angular/core';
 
 describe('scrollPosition', () => {
   let fakeScrollX = 0;
@@ -101,5 +108,95 @@ describe('scrollPosition', () => {
 
       expect(scroll()).toEqual({ x: 5, y: 15 });
     });
+  });
+
+  const scrolled = (left: number, top: number) => {
+    const el = document.createElement('div');
+    Object.assign(el, { scrollLeft: left, scrollTop: top });
+    return el;
+  };
+  const scrollTo = (el: HTMLElement, left: number, top: number) => {
+    Object.assign(el, { scrollLeft: left, scrollTop: top });
+    el.dispatchEvent(new Event('scroll'));
+  };
+
+  it('tracks the window with a 100ms default throttle when called bare', () => {
+    const scroll = TestBed.runInInjectionContext(() => scrollPosition());
+    expect(scroll()).toEqual({ x: 0, y: 0 });
+    fakeScrollY = 300;
+    window.dispatchEvent(new Event('scroll'));
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 300 });
+    vi.advanceTimersByTime(50);
+    expect(scroll()).toEqual({ x: 0, y: 0 });
+    vi.advanceTimersByTime(50);
+    expect(scroll()).toEqual({ x: 0, y: 300 });
+  });
+
+  it('reports a vertical-only and then a horizontal-only scroll', () => {
+    const scroll = TestBed.runInInjectionContext(() =>
+      scrollPosition({ throttle: 0 }),
+    );
+    fakeScrollY = 300;
+    window.dispatchEvent(new Event('scroll'));
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 300 });
+    fakeScrollX = 50;
+    window.dispatchEvent(new Event('scroll'));
+    expect(scroll.unthrottled()).toEqual({ x: 50, y: 300 });
+  });
+
+  it('tolerates a null signal target on the first run', () => {
+    const target = signal<HTMLElement | null>(null);
+    const scroll = TestBed.runInInjectionContext(() =>
+      scrollPosition({ target, throttle: 0 }),
+    );
+    expect(() => TestBed.tick()).not.toThrow();
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 0 });
+  });
+
+  it('syncs to an already scrolled element when the signal resolves', () => {
+    const target = signal<HTMLElement | null>(null);
+    const scroll = TestBed.runInInjectionContext(() =>
+      scrollPosition({ target, throttle: 0 }),
+    );
+    TestBed.tick();
+    target.set(scrolled(0, 40));
+    TestBed.tick();
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 40 });
+  });
+
+  it('ignores the old element after a target switch', () => {
+    const a = scrolled(0, 0);
+    const b = scrolled(0, 10);
+    const target = signal<HTMLElement | null>(a);
+    const scroll = TestBed.runInInjectionContext(() =>
+      scrollPosition({ target, throttle: 0 }),
+    );
+    TestBed.tick();
+    target.set(b);
+    TestBed.tick();
+    scrollTo(a, 0, 99);
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 10 });
+  });
+
+  it('stops listening after destroy', () => {
+    const injector = createEnvironmentInjector(
+      [],
+      TestBed.inject(EnvironmentInjector),
+    );
+    const el = scrolled(0, 0);
+    const scroll = scrollPosition({ target: el, injector, throttle: 0 });
+    injector.destroy();
+    scrollTo(el, 0, 50);
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 0 });
+  });
+
+  it('is a static origin on the server, whatever the window says', () => {
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    fakeScrollY = 300;
+    const scroll = TestBed.runInInjectionContext(() => scrollPosition());
+    expect(scroll()).toEqual({ x: 0, y: 0 });
+    expect(scroll.unthrottled()).toEqual({ x: 0, y: 0 });
   });
 });

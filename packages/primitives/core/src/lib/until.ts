@@ -83,12 +83,14 @@ export function until<T>(
     let effectRef: EffectRef | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
+    let unregister: (() => void) | undefined;
 
     const cleanupAndReject = (reason: string) => {
       if (!settled) {
         settled = true;
         if (timeoutId) clearTimeout(timeoutId);
         effectRef?.destroy();
+        unregister?.();
         reject(new Error(reason));
       }
     };
@@ -98,6 +100,7 @@ export function until<T>(
         settled = true;
         if (timeoutId) clearTimeout(timeoutId);
         effectRef?.destroy();
+        unregister?.();
         resolve(value);
       }
     };
@@ -106,7 +109,9 @@ export function until<T>(
       const destroyRef =
         options.destroyRef ?? inject(DestroyRef, { optional: true });
 
-      destroyRef?.onDestroy(() => {
+      unregister = destroyRef?.onDestroy(() => {
+        // never unregister from inside the ref's own teardown: a custom ref may be iterating its list
+        unregister = undefined;
         cleanupAndReject(
           'until: Operation cancelled due to context destruction.',
         );

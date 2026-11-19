@@ -1,6 +1,7 @@
 import {
   computed,
   type CreateSignalOptions,
+  isDevMode,
   signal,
   untracked,
   type ValueEqualityFn,
@@ -122,6 +123,20 @@ function createUpdaterFromSample<T, U>(
 
   const vivifyFn = createVivify(vivifyOpt) as VivifyFn<any>;
 
+  // a factory's result decides the shape, so route each immutable write on what it returned
+  if (typeof vivifyOpt === 'function' && !isMutable(source))
+    return (next: U) =>
+      (source as WritableSignal<any>).update((cur) => {
+        const vivified = vivifyFn(cur, key);
+        if (vivified === null || vivified === undefined) return vivified;
+        if (Array.isArray(vivified) && keyIsIndex) {
+          const copy = vivified.slice();
+          copy[key as number] = next;
+          return copy;
+        }
+        return { ...vivified, [key]: next };
+      });
+
   // Route to the array updater whenever the container is (or will be vivified as) an
   // array, so the updater and the created container agree on shape for a nullish source.
   const isArray =
@@ -153,7 +168,8 @@ function createUpdaterFromSample<T, U>(
  * Selects the property updater once, on the first actual write. Construction must not sample the
  * source: a writable derivation may currently throw, and reads still need a child producer that can
  * subscribe and recover. The routing sample remains deliberately untracked, so deferring it adds no
- * dependency to the caller.
+ * dependency to the caller. With vivify off, a write while the source is `null`/`undefined` is
+ * dropped (with a dev-mode warning) and selects nothing.
  */
 function createUpdater<T, U>(
   source: WritableSignal<T> | MutableSignal<T>,
@@ -162,7 +178,15 @@ function createUpdater<T, U>(
 ): (next: U) => void {
   let update: ((next: U) => void) | undefined;
   return (next) => {
-    update ??= createUpdaterFromSample(source, key, vivify, untracked(source));
+    const current = untracked(source);
+    if (!vivify && (current === null || current === undefined)) {
+      if (isDevMode())
+        console.warn(
+          `[@mmstack/primitives] derived: a write to "${String(key)}" was dropped because the source is ${current}. Pass { vivify } to create the missing container.`,
+        );
+      return;
+    }
+    update ??= createUpdaterFromSample(source, key, vivify, current);
     update(next);
   };
 }

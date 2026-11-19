@@ -224,15 +224,21 @@ describe('containers', () => {
       expect(result[0]).toBe(pending);
     });
 
-    it('flatMap flattens while keeping sentinel elements', () => {
+    it('flatMap: a pending callback result decides the length, so the whole result is pending', () => {
       const pending = loading();
       const cb = sentinelAware((x: unknown) => (isLoading(x) ? x : [x, x]));
-      const result = shim('flatMap')(
-        [1, pending],
-        [cb],
-        applyCall,
-      ) as unknown[];
-      expect(result).toEqual([1, 1, pending]);
+      expect(shim('flatMap')([1, pending], [cb], applyCall)).toBe(pending);
+    });
+
+    it('flatMap keeps a pending element inside a spread result, whose length is known', () => {
+      const pending = loading();
+      const cb = sentinelAware((x: unknown) => [x, pending]);
+      expect(shim('flatMap')([1, 2], [cb], applyCall)).toEqual([
+        1,
+        pending,
+        2,
+        pending,
+      ]);
     });
   });
 
@@ -433,21 +439,23 @@ describe('containers', () => {
       );
     });
 
-    it('raw shims behave natively when sentinel-free, and flat keeps sentinel elements', () => {
+    it('raw shims behave natively when sentinel-free; flat is pending when a pending element could spread', () => {
       const pending = loading();
       expect(shim('at')([1, 2], [-1], applyCall)).toBe(2);
       expect(shim('slice')([1, 2, 3], [1], applyCall)).toEqual([2, 3]);
       expect(shim('toReversed')([1, 2], [], applyCall)).toEqual([2, 1]);
-      const flat = shim('flat')([[1], pending], [], applyCall) as unknown[];
-      expect(flat[0]).toBe(1);
-      expect(flat[1]).toBe(pending);
+      expect(shim('flat')([[1], pending], [], applyCall)).toBe(pending);
+      expect(shim('flat')([[pending]], [2], applyCall)).toBe(pending);
+      expect(shim('flat')([[[pending]]], [2], applyCall)).toEqual([pending]);
+      expect(shim('flat')([[[pending]]], [], applyCall)).toEqual([[pending]]);
+      expect(shim('flat')([pending], [0], applyCall)).toEqual([pending]);
     });
 
-    it('[ORACLE] content-position args stay transparent: concat/with append pending elements', () => {
+    it('[ORACLE] a pending concat argument decides the length (pending); with and nested elements keep it', () => {
       const pending = loading();
-      const concat = shim('concat')([1], [pending], applyCall) as unknown[];
-      expect(concat[0]).toBe(1);
-      expect(concat[1]).toBe(pending);
+      expect(shim('concat')([1], [pending], applyCall)).toBe(pending);
+      expect(shim('concat')([1], [[pending]], applyCall)).toEqual([1, pending]);
+      expect(shim('concat')([pending], [2], applyCall)).toEqual([pending, 2]);
       const withResult = shim('with')(
         [1, 2],
         [0, pending],

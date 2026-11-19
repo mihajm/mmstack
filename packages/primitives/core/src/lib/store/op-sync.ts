@@ -156,8 +156,9 @@ const isFiniteHlc = (h: unknown): boolean =>
  * string when the envelope must be rejected WHOLE, or `null` when it is well-formed. It reads only
  * the envelope (no clock, no local state), so every replica accepts or rejects a given envelope
  * identically. This validates SHAPE, not authority: it closes malformed input (control characters
- * in an id or path segment that could forge a path-key separator, a non-integer version, an unknown
- * op kind, a negative epoch, forged cites, a root delete, two ops racing on one path). Authority and
+ * in an id or path segment that could forge a path-key separator, a path segment that is neither a
+ * string nor a non-negative integer, a non-integer version, an unknown op kind, a negative epoch,
+ * forged cites, a root delete, two ops racing on one path). Authority and
  * access control stay at the relay; direct peer-to-peer rooms are trust-full for authority, so this
  * shape check is a peer's only line against a malformed neighbor.
  */
@@ -178,7 +179,14 @@ export function validateEnvelope(env: OpEnvelope): string | null {
     if (op.kind !== 'set' && op.kind !== 'delete' && op.kind !== 'clear')
       return 'kind';
     if (!Array.isArray(op.path)) return 'path';
-    for (const seg of op.path) {
+    for (const seg of op.path as readonly unknown[]) {
+      // a segment is a property key: an array or object would stringify into any key (`__proto__`,
+      // or one spanning the separator) past the string checks below
+      if (
+        typeof seg !== 'string' &&
+        !(typeof seg === 'number' && Number.isInteger(seg) && seg >= 0)
+      )
+        return 'path';
       // the register store keys a path by its segments joined with a control character, so an
       // empty segment or a control character inside one would make two paths one register
       if (seg === '') return 'path-empty';
@@ -585,6 +593,13 @@ export type FoldResult =
  * long-partitioned replica can resurface an old write that nothing ever cited, and without the
  * epoch gate a fold that ranks it high would snap the value backwards. Folding a lower-epoch
  * sibling's content into the result reopens exactly that hazard.
+ *
+ * A fold of one sibling MUST return that sibling: its value for a `set` (structurally equal), a
+ * `delete` for a delete, a `clear` for a clear. A plain local write cites every live sibling at its
+ * path, so afterwards the writer's own write is the only live sibling there, and the writer keeps
+ * the value it wrote without folding it. A fold that changes a lone sibling therefore shows one
+ * value on the writer and another on every peer. In dev mode a local write at a custom-fold path
+ * that breaks this logs a warning.
  */
 export type FoldFn = (
   siblings: readonly SyncSibling[],
@@ -976,15 +991,44 @@ export function createConvergingApply(opt?: {
     fold: e.fold,
   }));
 
-  const foldFor = (path: readonly Key[]): FoldFn => {
+  const customFoldAt = (path: readonly Key[]): FoldFn | undefined => {
     for (const f of customFolds) {
       if (matchSegments(f.segments, path)) return f.fold;
     }
+    return undefined;
+  };
+
+  const foldFor = (path: readonly Key[]): FoldFn => {
+    const custom = customFoldAt(path);
+    if (custom) return custom;
     const merge = policyFor(policies, path);
     if (merge === undefined) return noPolicyFold;
     if (merge === lww || merge === replace) return defaultFold;
     if (merge === preserve) return preserveFold;
     return mergeFold(merge);
+  };
+
+  // dev-only, once per path: a plain local write is not reconciled, so a custom fold that changes a
+  // lone sibling leaves the writer on its raw value while peers apply the fold (the FoldFn law)
+  const warnedFolds = new Set<string>();
+  const lintLoneFolds = (env: OpEnvelope): void => {
+    for (const op of env.ops) {
+      const fold = customFoldAt(op.path);
+      if (!fold) continue;
+      const key = keyOf(op.path);
+      const own = registers.get(key)?.siblings.get(env.origin);
+      if (!own || warnedFolds.has(key)) continue;
+      const res = fold([own], { path: op.path });
+      const keeps =
+        res.kind === own.kind &&
+        (own.kind !== 'set' ||
+          structEq((res as { value: unknown }).value, own.value));
+      if (keeps) continue;
+      warnedFolds.add(key);
+      console.warn(
+        `[@mmstack/primitives] the custom fold at "${op.path.join('.')}" changed a lone ${own.kind}: a fold of one sibling must return that sibling. This replica keeps the value it wrote while every peer shows the fold result, so the room diverges.`,
+      );
+    }
   };
 
   const regAt = (path: readonly Key[]): PathReg => {
@@ -1256,6 +1300,9 @@ export function createConvergingApply(opt?: {
       const changed: Changed[] = [];
       for (const c of touched.values()) {
         if (refresh(c.reg)) changed.push(c);
+      }
+      if (o?.local && !o?.reconcile && customFolds.length && isDevMode()) {
+        lintLoneFolds(env);
       }
       if ((o?.local && !o?.reconcile) || !changed.length) return [];
       return deltas(changed);
@@ -1548,6 +1595,11 @@ export type OpSyncOptions = {
  * along because a value alone is not enough to join a room: a peer hydrated from a bare value
  * cannot tell a late straggler from a live concurrent write, so an already-superseded op would
  * resurrect on it while every established peer keeps ignoring it.
+ *
+ * A checkpoint never carries emission epoch floors: they are the replica's own emission state,
+ * and `hydrate` takes a checkpoint from any peer. To persist a replica locally, save
+ * {@link OpSync.floors} beside its outbox and hand them back with
+ * `restore(envs, highWater, floors)` on boot.
  */
 export type OpSyncCheckpoint<T = unknown> = {
   /**
@@ -1560,14 +1612,6 @@ export type OpSyncCheckpoint<T = unknown> = {
   readonly root: T;
   readonly registers: readonly RegisterCheckpoint[];
   readonly wm: Readonly<Record<string, number>>;
-  /**
-   * This replica's emission epoch floors. Local, not a peer's: a persisted local snapshot must
-   * carry them (a floor whose own sibling was collected has no other source on reload).
-   */
-  readonly floors?: readonly {
-    readonly path: readonly Key[];
-    readonly epoch: number;
-  }[];
 };
 
 /**
@@ -1640,7 +1684,10 @@ export type OpSync<T = unknown> = {
   appliedFrontier(): AppliedFrontier;
   /** Per-origin latest versions — the handshake watermark. */
   watermark(): Record<string, number>;
-  /** The full checkpoint (root + register state + watermark), for answering a peer's hello. */
+  /**
+   * The full checkpoint (root + register state + watermark), for answering a peer's hello. It
+   * leaves out this replica's emission floors (see {@link OpSyncCheckpoint}).
+   */
   snapshot(): OpSyncCheckpoint<T>;
   /**
    * Emit the CURRENT root as a root-set envelope: the fresh-room seed of the relay contract.
@@ -1655,7 +1702,8 @@ export type OpSync<T = unknown> = {
    * doesn't cover (per its watermark) are re-applied on top, so writes made before hydration
    * are never silently lost; the next emitted version continues past the folded watermark.
    * Pass `pending` (a durable outbox) to rebase from it instead of the bounded in-memory recent
-   * ring, so an offline burst larger than that ring is not dropped from the rebase.
+   * ring, so an offline burst larger than that ring is not dropped from the rebase. The clock
+   * observes every loaded stamp, so the next local write is stamped after all of them.
    */
   hydrate(state: OpSyncCheckpoint<T>, pending?: readonly OpEnvelope[]): void;
   /**
@@ -1705,7 +1753,8 @@ export type OpSync<T = unknown> = {
 
 function generateOrigin(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return Math.random().toString(36).substring(2);
+  // the time prefix keeps it non-empty: `Math.random()` may return 0, whose digits are ''
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
 /**
@@ -1928,7 +1977,6 @@ export function opSync<T extends object>(
         root: untracked(source),
         registers: conv.checkpoint(),
         wm: Object.fromEntries(versions),
-        floors: conv.emissionFloors(),
       };
     },
     seed: () => {
@@ -1957,6 +2005,11 @@ export function opSync<T extends object>(
         (e) => e.version > (state.wm?.[e.origin] ?? 0),
       );
       conv.reset();
+      // like receive: local stamps must sort after every write this state carries
+      for (const r of state.registers ?? []) {
+        for (const s of r.siblings) clock.observe(s.hlc);
+        for (const h of Object.values(r.water)) clock.observe(h);
+      }
       // parity: the root is what THIS fold derives from the loaded registers, whatever fold wrote
       // the checkpoint's root (a v3 checkpoint's root keeps array winners whole)
       const deltas: StoreOp[] = conv.load(state.registers ?? []);

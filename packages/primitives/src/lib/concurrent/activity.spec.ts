@@ -128,3 +128,42 @@ describe('MmActivity (keep-alive)', () => {
     expect(container.textContent).toContain('on');
   });
 });
+
+@Component({
+  selector: 'ab-ka-container-host',
+  imports: [MmActivity, Child],
+  template: `<ng-container *mmActivity="show()"
+    >kept <ab-ka-child
+  /></ng-container>`,
+})
+class ContainerHost {
+  readonly show = signal(true);
+}
+
+describe('MmActivity with an ng-container root', () => {
+  beforeEach(() => {
+    Child.created = 0;
+    Child.last = null;
+  });
+
+  it('toggles without throwing and still pauses change detection while hidden', async () => {
+    const { fixture, container } = await render(ContainerHost);
+    await flush(() => fixture.detectChanges());
+    const child = Child.last!;
+
+    fixture.componentInstance.show.set(false);
+    await flush(() => fixture.detectChanges());
+    const runs0 = child.tmplRuns;
+    child.src.set(5);
+    await flush(() => fixture.detectChanges());
+    expect(child.tmplRuns).toBe(runs0);
+    expect(container.textContent).not.toContain('5');
+
+    fixture.componentInstance.show.set(true);
+    await flush(() => fixture.detectChanges());
+    expect([Child.created, container.textContent?.includes('5|on')]).toEqual([
+      1,
+      true,
+    ]);
+  });
+});

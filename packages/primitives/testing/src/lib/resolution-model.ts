@@ -100,6 +100,8 @@ export type HofName =
   | 'flatMap'
   | 'reduce';
 export type SearchName = 'indexOf' | 'lastIndexOf' | 'includes';
+/** Array methods whose arguments or elements may spread into the result. */
+export type SpreadingMethodName = 'flat' | 'concat';
 export type ParamName = 'p' | 'q';
 
 export const HOF_NAMES: readonly HofName[] = Object.freeze([
@@ -114,6 +116,9 @@ export const HOF_NAMES: readonly HofName[] = Object.freeze([
   'flatMap',
   'reduce',
 ]);
+
+export const SPREADING_METHOD_NAMES: readonly SpreadingMethodName[] =
+  Object.freeze(['flat', 'concat']);
 
 export const SEARCH_NAMES: readonly SearchName[] = Object.freeze([
   'indexOf',
@@ -146,7 +151,13 @@ export type Expr =
   | { t: 'arrow'; params: readonly ParamName[]; body: Expr }
   | { t: 'apply'; fn: Expr; args: readonly Slot[] }
   | { t: 'hof'; m: HofName; arr: Expr; cb: Expr; init?: Expr }
-  | { t: 'search'; m: SearchName; arr: Expr; target: Expr; from?: Expr };
+  | { t: 'search'; m: SearchName; arr: Expr; target: Expr; from?: Expr }
+  | {
+      t: 'spreading';
+      m: SpreadingMethodName;
+      arr: Expr;
+      args: readonly Expr[];
+    };
 
 export const POOL: readonly unknown[] = Object.freeze([
   0,
@@ -444,6 +455,27 @@ function evalNode(
       }
       return ARRAY_METHOD_SHIMS[e.m](receiver, args, applyCall);
     }
+    case 'spreading': {
+      const receiver = evalAlgebra(e.arr, pending, env, options);
+      const method =
+        isAbsorbing(receiver) || Array.isArray(receiver)
+          ? undefined
+          : operation(
+              options,
+              () => (receiver as Record<string, unknown>)[e.m],
+            );
+      const args = e.args.map((a) => evalAlgebra(a, pending, env, options));
+      if (isAbsorbing(receiver)) return joinAbsorbers([receiver, ...args]);
+      if (!Array.isArray(receiver)) {
+        const applyBound: ApplyFn = (fn, fnArgs) =>
+          (fn as (...a: unknown[]) => unknown).apply(
+            receiver,
+            fnArgs as unknown[],
+          );
+        return invoke(method, args, applyBound);
+      }
+      return ARRAY_METHOD_SHIMS[e.m](receiver, args, applyCall);
+    }
     case 'search': {
       const receiver = evalAlgebra(e.arr, pending, env, options);
       const method =
@@ -565,6 +597,13 @@ export function evalPlain(e: Expr, resolution: unknown, env: Env): unknown {
         ? receiver[e.m](callback)
         : receiver[e.m](callback, evalPlain(e.init, resolution, env));
     }
+    case 'spreading': {
+      const receiver = evalPlain(e.arr, resolution, env) as Record<
+        string,
+        (...methodArgs: unknown[]) => unknown
+      >;
+      return receiver[e.m](...e.args.map((a) => evalPlain(a, resolution, env)));
+    }
     case 'search': {
       const receiver = evalPlain(e.arr, resolution, env) as Record<
         string,
@@ -619,6 +658,8 @@ export function hasPending(e: Expr): boolean {
         hasPending(e.cb) ||
         (e.init !== undefined && hasPending(e.init))
       );
+    case 'spreading':
+      return hasPending(e.arr) || e.args.some(hasPending);
     case 'search':
       return (
         hasPending(e.arr) ||

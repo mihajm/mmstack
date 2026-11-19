@@ -133,13 +133,24 @@ export function withHistory<T>(
 
   const originalSet = source.set;
 
+  // makes room for one more entry, so the stack stays within maxSize after the push
   const trim = (arr: T[]): T[] => {
     if (arr.length < maxSize) return arr;
+    const over = arr.length - maxSize + 1;
     if (opt?.cleanupStrategy === 'shift') {
-      arr.shift();
+      arr.splice(0, over);
       return arr;
     }
-    return arr.slice(Math.floor(maxSize / 2));
+    return arr.slice(Math.max(over, Math.floor(maxSize / 2)));
+  };
+
+  const push = (stack: typeof history, value: T): void => {
+    if (maxSize <= 0) return;
+    stack.mutate((c) => {
+      c = trim(c);
+      c.push(value);
+      return c;
+    });
   };
 
   const set = (value: T) => {
@@ -148,11 +159,7 @@ export function withHistory<T>(
 
     source.set(value);
 
-    history.mutate((c) => {
-      c = trim(c);
-      c.push(current);
-      return c;
-    });
+    push(history, current);
     redoArray.set([]);
   };
 
@@ -181,11 +188,7 @@ export function withHistory<T>(
     originalSet.call(source, valueToRestore);
 
     history.inline((h) => h.pop());
-    redoArray.mutate((r) => {
-      r = trim(r);
-      r.push(valueForRedo);
-      return r;
-    });
+    push(redoArray, valueForRedo);
   };
 
   internal.redo = () => {
@@ -199,11 +202,7 @@ export function withHistory<T>(
     originalSet.call(source, valueToRestore);
 
     redoArray.inline((r) => r.pop());
-    history.mutate((h) => {
-      h = trim(h);
-      h.push(valueForUndo);
-      return h;
-    });
+    push(history, valueForUndo);
   };
 
   internal.clear = () => {

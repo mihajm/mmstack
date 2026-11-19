@@ -37,3 +37,14 @@ export function createSetter<T>(
     source.update((arr) => arr.map((v, i) => (i === index ? value : v)));
   };
 }
+
+/**
+ * @internal
+ * Item equality over a `mutable()` source: objects are edited in place, so the same reference
+ * may carry new content and is never equal; primitives compare by value.
+ */
+export function mutableItemEqual<T>(a: T, b: T): boolean {
+  if (typeof a !== typeof b) return false;
+  if (typeof a === 'object' || typeof a === 'function') return false;
+  return a === b;
+}

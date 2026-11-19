@@ -263,15 +263,20 @@ const DEFAULT_DISPLAY_NAME = 'resource';
 const statusInFlight = (s: ResourceStatus): boolean =>
   s === 'loading' || s === 'reloading';
 
+/** The activity reading `pending` uses: a status can settle to `'error'` with work in flight. */
+const hasWorkInFlight = (ref: ResourceLike): boolean =>
+  ref.isLoading() || statusInFlight(ref.status());
+
 export type CreateTransitionScopeOptions = {
   /** Scope identity for instrumentation events (idea/concurrency-devtools.md). */
   readonly name?: string;
   /** Optional observability listener; taps are no-ops when omitted (zero cost). */
   readonly instrumentation?: ConcurrencyInstrumentation;
   /**
-   * Per-member settlement backstop: a suspending member that has not settled within `ms` of its
-   * registration is declared failed, so the boundary presents an error instead of waiting forever.
-   * Absent by default.
+   * Per-member settlement backstop: a suspending member that stays pending for `ms` (counted from
+   * its registration, or from when it went pending again after settling) is declared failed, so the
+   * boundary presents an error instead of waiting forever. The clock runs while the scope is
+   * observed; a boundary always observes it. Absent by default.
    */
   readonly deadline?: SettlementDeadline;
   /**
@@ -396,7 +401,7 @@ export function createTransitionScope(
       untracked(() => {
         let aborted = 0;
         for (const { ref } of list()) {
-          if (statusInFlight(ref.status()) && ref.abort) {
+          if (ref.abort && hasWorkInFlight(ref)) {
             ref.abort();
             aborted++;
           }
@@ -747,7 +752,9 @@ export function injectTransitionScope(): TransitionScope {
  * A transition scope that can be re-pointed at a delegate target at runtime. Reads and
  * commit/hold follow the current target; `add`/`remove` pin to the target that was current
  * at add-time, so re-pointing between a resource's registration and its destroy-time removal
- * never strands it in the wrong scope. With no target it behaves as a plain own-scope.
+ * never strands it in the wrong scope. Holds pin the same way: `endHold` ends the most recent
+ * hold begun through the forwarder, on the target it began on, and a transaction releases the
+ * target it held. With no target it behaves as a plain own-scope.
  */
 export type ForwardingTransitionScope = TransitionScope & {
   setTarget(target: TransitionScope | null): void;
@@ -765,6 +772,7 @@ export function createForwardingScope(
   // ephemeron semantics let the ref↔dead-target cycle collect once the registrant
   // drops the ref, instead of this map pinning every stranded pair forever.
   const owners = new WeakMap<ResourceLike, TransitionScope>();
+  const opened: TransitionScope[] = [];
 
   const self: ForwardingTransitionScope = {
     setTarget: (t) => target.set(t),
@@ -783,10 +791,14 @@ export function createForwardingScope(
     },
     commit: <T>(value: Signal<T>): Signal<T> =>
       committedReader(value, () => !eff().pending()),
-    abortPending: () => (untracked(target) ?? own).abortPending(),
+    abortPending: () => current().abortPending(),
     holding: computed(() => eff().holding()),
-    beginHold: () => (untracked(target) ?? own).beginHold(),
-    endHold: () => (untracked(target) ?? own).endHold(),
+    beginHold: () => {
+      const t = current();
+      t.beginHold();
+      opened.push(t);
+    },
+    endHold: () => opened.pop()?.endHold(),
     hold: <T>(value: Signal<T>): Signal<T> =>
       heldReader(self, value, () => eff().holding()),
     failed: computed(() => eff().failed()),
@@ -802,9 +814,29 @@ export function createForwardingScope(
       () => current().census,
     ),
   };
+  pinnedHolds.set(self, () => beginPinnedHold(current()));
   // seeders follow the hold to the scope it lands on
-  redirectHoldSeeds(self, () => untracked(target) ?? own);
+  redirectHoldSeeds(self, current);
   return self;
+}
+
+/** A forwarding scope's pinned hold: begins on its current target, ends there. */
+const pinnedHolds = new WeakMap<TransitionScope, () => () => void>();
+
+/**
+ * @internal Begin a hold on `scope` and get back its release, which ends the hold on the scope
+ * it landed on (a forwarding scope's target at begin time). Releasing twice is harmless.
+ */
+export function beginPinnedHold(scope: TransitionScope): () => void {
+  const pinned = pinnedHolds.get(scope);
+  if (pinned) return pinned();
+  scope.beginHold();
+  let open = true;
+  return () => {
+    if (!open) return;
+    open = false;
+    scope.endHold();
+  };
 }
 
 /**
@@ -965,10 +997,9 @@ export function createAttributedPending(
   scope: TransitionScope,
   owner?: object,
 ): Signal<boolean> {
-  const inFlight = (s: ResourceStatus) => s === 'loading' || s === 'reloading';
   const loads0 = snapshotLoads(scope);
   const preexisting = new Set(
-    untracked(scope.resources).filter((ref) => inFlight(untracked(ref.status))),
+    untracked(() => scope.resources().filter(hasWorkInFlight)),
   );
   const claims = claimsOf(scope);
 
@@ -976,7 +1007,7 @@ export function createAttributedPending(
     claims.version();
     let pending = false;
     for (const ref of scope.resources()) {
-      const loading = inFlight(ref.status());
+      const loading = hasWorkInFlight(ref);
       const loads = ref.loads?.();
       if (loads === undefined) {
         if (preexisting.has(ref)) {

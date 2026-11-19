@@ -30,11 +30,67 @@ function observerSupported() {
 
 export type ElementSizeSignal = Signal<ElementSize | undefined>;
 
+function isVerticalWritingMode(el: Element): boolean {
+  if (typeof getComputedStyle !== 'function') return false;
+  const mode = getComputedStyle(el).writingMode ?? '';
+  return mode.startsWith('vertical') || mode.startsWith('sideways');
+}
+
+// ResizeObserver sizes are logical: inline is the vertical axis in vertical writing modes.
+function toPhysical(size: ResizeObserverSize, vertical: boolean): ElementSize {
+  return vertical
+    ? { width: size.blockSize, height: size.inlineSize }
+    : { width: size.inlineSize, height: size.blockSize };
+}
+
+function toDevicePixels(size: ElementSize): ElementSize {
+  const ratio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  return {
+    width: Math.round(size.width * ratio),
+    height: Math.round(size.height * ratio),
+  };
+}
+
+function measure(
+  el: Element,
+  box: ResizeObserverBoxOptions,
+): ElementSize | undefined {
+  if (!el.getBoundingClientRect) return undefined;
+  const rect = el.getBoundingClientRect();
+  if (box === 'border-box' || typeof getComputedStyle !== 'function')
+    return { width: rect.width, height: rect.height };
+
+  const style = getComputedStyle(el);
+  const px = (value: string) => parseFloat(value) || 0;
+  const content = {
+    width: Math.max(
+      0,
+      rect.width -
+        px(style.paddingLeft) -
+        px(style.paddingRight) -
+        px(style.borderLeftWidth) -
+        px(style.borderRightWidth),
+    ),
+    height: Math.max(
+      0,
+      rect.height -
+        px(style.paddingTop) -
+        px(style.paddingBottom) -
+        px(style.borderTopWidth) -
+        px(style.borderBottomWidth),
+    ),
+  };
+  return box === 'device-pixel-content-box' ? toDevicePixels(content) : content;
+}
+
 /**
  * Creates a read-only signal that tracks the size of a target DOM element.
  *
- * By default, it observes the `border-box` size to align with `getBoundingClientRect()`,
- * which is used to provide a synchronous initial value if possible.
+ * By default, it observes the `border-box` size. A synchronous initial value is
+ * measured with `getBoundingClientRect()` (minus padding and border for the content
+ * boxes), so it includes CSS transforms until the first observer callback replaces it.
+ * Sizes are physical (`width` is horizontal) in every writing mode. With
+ * `box: 'device-pixel-content-box'` the size is in device pixels.
  *
  * @param target The DOM element (or `ElementRef`, or a `Signal` resolving to one) to observe.
  * @param options Optional configuration including `box` (defaults to 'border-box') and `debugName`.
@@ -80,15 +136,13 @@ function createElementSize(
     return target instanceof ElementRef ? target.nativeElement : target;
   };
 
+  const boxOption = opt?.box ?? 'border-box';
+
   const resolveInitialValue = (): ElementSize | undefined => {
     // measuring needs only getBoundingClientRect — ResizeObserver support gates
     // live updates, not the initial read
     const el = getElement();
-    if (el && el.getBoundingClientRect) {
-      const rect = el.getBoundingClientRect();
-      return { width: rect.width, height: rect.height };
-    }
-    return undefined;
+    return el ? measure(el, boxOption) : undefined;
   };
 
   if (isServer()) {
@@ -109,49 +163,40 @@ function createElementSize(
 
   effect((cleanup) => {
     const el = targetSignal();
-    if (el) {
-      const nativeEl = el instanceof ElementRef ? el.nativeElement : el;
-      const rect = nativeEl.getBoundingClientRect();
-      untracked(() => state.set({ width: rect.width, height: rect.height }));
-    } else {
+    if (!el) {
       untracked(() => state.set(undefined));
       return;
     }
+    const nativeEl = el instanceof ElementRef ? el.nativeElement : el;
+    untracked(() => state.set(measure(nativeEl, boxOption)));
 
     if (!observerSupported()) return;
 
-    let observer: ResizeObserver | null = null;
-    observer = new ResizeObserver(([entry]) => {
-      let width = 0;
-      let height = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      const sizes =
+        boxOption === 'border-box'
+          ? entry.borderBoxSize
+          : boxOption === 'content-box'
+            ? entry.contentBoxSize
+            : entry.devicePixelContentBoxSize;
 
-      const boxOption = opt?.box ?? 'border-box';
-
-      if (boxOption === 'border-box' && entry.borderBoxSize?.length > 0) {
-        const size = entry.borderBoxSize[0];
-        width = size.inlineSize;
-        height = size.blockSize;
-      } else if (
-        boxOption === 'content-box' &&
-        entry.contentBoxSize?.length > 0
-      ) {
-        width = entry.contentBoxSize[0].inlineSize;
-        height = entry.contentBoxSize[0].blockSize;
-      } else {
-        width = entry.contentRect.width;
-        height = entry.contentRect.height;
+      if (sizes?.length > 0) {
+        state.set(toPhysical(sizes[0], isVerticalWritingMode(nativeEl)));
+        return;
       }
 
-      state.set({ width, height });
+      const rect = {
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      };
+      state.set(
+        boxOption === 'device-pixel-content-box' ? toDevicePixels(rect) : rect,
+      );
     });
 
-    observer.observe(el instanceof ElementRef ? el.nativeElement : el, {
-      box: opt?.box ?? 'border-box',
-    });
+    observer.observe(nativeEl, { box: boxOption });
 
-    cleanup(() => {
-      observer?.disconnect();
-    });
+    cleanup(() => observer.disconnect());
   });
 
   return state.asReadonly();

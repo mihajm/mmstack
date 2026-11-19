@@ -49,6 +49,30 @@ describe('recordAdmission', () => {
     );
     expect(restored.settled).toEqual(live.settled);
   });
+
+  it('everMax holds the highest stamp per origin, the logical counter included, whatever the arrival order', () => {
+    const evidence: AdmissionEvidence = { ...fresh(), everMax: new Map() };
+    const stamps = [
+      { p: 5, l: 0 },
+      { p: 5, l: 2 },
+      { p: 4, l: 9 },
+      { p: 5, l: 1 },
+    ];
+    stamps.forEach((hlc, i) =>
+      recordAdmission(evidence, { origin: 'a', version: i + 1, hlc }),
+    );
+    expect(evidence.everMax?.get('a')).toEqual({ p: 5, l: 2 });
+    recordAdmission(evidence, { origin: 'a', version: 5, hlc: { p: 6, l: 0 } });
+    expect(evidence.everMax?.get('a')).toEqual({ p: 6, l: 0 });
+  });
+
+  it('minimal evidence takes an envelope that names its generation', () => {
+    const evidence = fresh();
+    expect(() =>
+      recordAdmission(evidence, { ...at('a', 1, 10), instance: 'g' }),
+    ).not.toThrow();
+    expect(evidence.ranges.get('a')?.toJSON()).toEqual([[1, 1]]);
+  });
 });
 
 describe('createRanges', () => {

@@ -108,6 +108,30 @@ function client(
   return { sock, conn, hello, env, instance };
 }
 
+/** Admitted, not refused: the submitter got the echo and no drop (a journaled refusal also takes a seq). */
+const admitted = (
+  sock: { sent: readonly ServerMsg[] },
+  origin: string,
+  version: number,
+): boolean =>
+  sock.sent.some(
+    (m) =>
+      m.t === 'env' && m.env.origin === origin && m.env.version === version,
+  ) &&
+  !sock.sent.some(
+    (m) => m.t === 'drop' && m.origin === origin && m.version === version,
+  );
+const dropReason = (
+  sock: { sent: readonly ServerMsg[] },
+  origin: string,
+  version: number,
+): string | undefined => {
+  const m = sock.sent.find(
+    (x) => x.t === 'drop' && x.origin === origin && x.version === version,
+  );
+  return m?.t === 'drop' ? m.reason : undefined;
+};
+
 // an uncited op is a CONCURRENT write; causal succession must cite the superseded dot(s)
 const set = (
   path: (string | number)[],
@@ -285,6 +309,7 @@ describe('createRelay', () => {
     expect(regAt(welcome.registers, ['items', 'a'])?.siblings).toEqual([
       expect.objectContaining({ kind: 'delete', origin: 'oa' }),
     ]);
+    expect(regAt(welcome.registers, ['items', 'a'])?.water).toEqual({});
     expect(regAt(welcome.registers, ['other'])?.siblings[0]).toMatchObject({
       kind: 'set',
       value: 2,
@@ -1634,6 +1659,8 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
 
     expect(b.sock.closed).toBe(false);
     expect(relay.room('r')).toMatchObject({ seq: 4 });
+    expect(admitted(b.sock, 'ob', 1)).toBe(true);
+    expect(admitted(b.sock, 'ob', 2)).toBe(true);
   });
 
   it('exempts cites at or below the compaction frontier: a stale-but-honest cite of a compacted dot is admitted', () => {
@@ -1642,21 +1669,27 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
       journalLimit: 2,
     });
     const a = client(relay, 'wa', 'oa');
+    const c = client(relay, 'wc', 'oc');
     a.hello();
+    c.hello();
     a.env([set([], {})]);
     a.env([set(['items', 'a'], 1)]); // (oa, 2.0)
-    a.env([
+    // oc supersedes (oa, 2.0); once oa settles past 2.0 the trim collects oa's sibling and the
+    // watermark, so nothing retained at the path answers for oa any more
+    c.env([
       del(['items', 'a'], 1, {
         cites: [{ origin: 'oa', hlc: { p: 2, l: 0 } }],
       }),
     ]);
     a.env([set(['other'], 1)]);
-    a.env([set(['other'], 2)]); // journal trims past the delete; ['items','a'] compacts away entirely
 
     // an observer that saw (oa, 2.0) before it settled: the relay can no longer verify the cite,
     // and a forged cite down there could kill nothing anyway (below-frontier ops are settled)
     const b = client(relay, 'wb', 'ob');
     b.hello();
+    const held = regAt(snapshotOf(b.sock).registers, ['items', 'a']);
+    expect(held?.siblings.map((s) => s.origin)).toEqual(['oc']);
+    expect(held?.water).toEqual({});
     b.env(
       [
         set(['items', 'a'], 7, {
@@ -1665,7 +1698,17 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
       ],
       { hlc: { p: 50, l: 0 } },
     );
-    expect(b.sock.closed).toBe(false);
+    expect(admitted(b.sock, 'ob', 1)).toBe(true);
+    // above oa's settled stamp the exemption answers nothing
+    b.env(
+      [
+        set(['items', 'b'], 7, {
+          cites: [{ origin: 'oa', hlc: { p: 40, l: 0 } }],
+        }),
+      ],
+      { hlc: { p: 51, l: 0 } },
+    );
+    expect(dropReason(b.sock, 'ob', 2)).toBe('citation');
   });
 
   it("tolerates a self-citation of the envelope's own dot, exactly as ingest does (born-dead guard)", () => {
@@ -1677,6 +1720,73 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     ]); // cites its own envelope stamp
     expect(a.sock.closed).toBe(false);
     expect(relay.room('r')).toMatchObject({ seq: 1 });
+    expect(admitted(a.sock, 'oa', 1)).toBe(true);
+  });
+
+  it.each([
+    [
+      'another origin at the same stamp',
+      { origin: 'ghost', hlc: { p: 5, l: 0 } },
+    ],
+    ['its own origin at a later time', { origin: 'oa', hlc: { p: 99, l: 0 } }],
+    [
+      'its own origin at a later counter',
+      { origin: 'oa', hlc: { p: 5, l: 7 } },
+    ],
+  ])(
+    'a near miss of the own dot is verified like any cite: %s is refused',
+    (_, cite) => {
+      const relay = createRelay({ policy: { verifyCitations: true } });
+      const a = client(relay, 'wa', 'oa');
+      a.hello();
+      a.env([set(['doc'], 'x', { cites: [cite] })], { hlc: { p: 5, l: 0 } });
+      expect(dropReason(a.sock, 'oa', 1)).toBe('citation');
+    },
+  );
+
+  it('a same-time stamp with a higher counter is not covered by the lower one', () => {
+    const relay = createRelay({ policy: { verifyCitations: true } });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set(['doc'], 'v1')], { hlc: { p: 5, l: 0 } });
+    b.env([
+      set(['doc'], 'w', { cites: [{ origin: 'oa', hlc: { p: 5, l: 3 } }] }),
+    ]);
+    expect(dropReason(b.sock, 'ob', 1)).toBe('citation');
+  });
+
+  it("a cite of an origin's own skipped version stamp is covered by the store's extent", () => {
+    const relay = createRelay({ policy: { verifyCitations: true } });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set(['b'], 1)], { version: 1, hlc: { p: 1, l: 0 } });
+    a.env([set(['b'], 3)], { version: 3, hlc: { p: 3, l: 0 } });
+    b.env([
+      set(['b'], 'w', { cites: [{ origin: 'oa', hlc: { p: 3, l: 0 } }] }),
+    ]);
+    expect(admitted(b.sock, 'ob', 1)).toBe(true);
+  });
+
+  it("the settled exemption is floored at the cited origin's first stamp of the generation", () => {
+    const relay = createRelay({
+      policy: { verifyCitations: true },
+      journalLimit: 1,
+    });
+    const a = client(relay, 'wa', 'oa');
+    const b = client(relay, 'wb', 'ob');
+    a.hello();
+    b.hello();
+    a.env([set([], {})], { hlc: { p: 5, l: 0 } });
+    a.env([set(['x'], 1)], { hlc: { p: 6, l: 0 } });
+    // oa never wrote at 3: below its first stamp the exemption answers nothing
+    b.env([
+      set(['y'], 'w', { cites: [{ origin: 'oa', hlc: { p: 3, l: 0 } }] }),
+    ]);
+    expect(dropReason(b.sock, 'ob', 1)).toBe('citation');
   });
 
   it('a stale-schema straggler stays a silent drop, never an ejection for its now-unverifiable cites', () => {
@@ -1717,6 +1827,7 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
     ]);
     expect(a.sock.closed).toBe(false);
     expect(relay.room('r')).toMatchObject({ seq: 1 });
+    expect(admitted(a.sock, 'oa', 1)).toBe(true);
   });
 });
 
@@ -2142,7 +2253,11 @@ function releaseGate<M>(
         return;
       }
       if (!draining && queue.length === 0 && done === undefined) {
-        for (const msg of msgs) emit(msg); // nothing is owed: release at once
+        // nothing is owed: release at once, and a submit made from inside `emit` queues behind it
+        draining = true;
+        for (const msg of msgs) emit(msg);
+        draining = false;
+        if (queue.length > 0) void drain();
         return;
       }
       queue.push({ msgs, done });
@@ -2208,6 +2323,43 @@ describe('release gate (pure model)', () => {
           expect(e.resolvedThen.has(j)).toBe(true);
         }
       }
+    }
+  });
+
+  it('a group submitted from inside an emit releases after the group in flight (re-entrant, 500 seeds)', async () => {
+    for (let seed = 0; seed < 500; seed++) {
+      const rnd = mulberry32(seed);
+      const submitted: number[] = [];
+      const emitted: number[] = [];
+      const pending: Deferred[] = [];
+      let budget = 2 + Math.floor(rnd() * 8);
+      let ids = 0;
+      const submit = (): void => {
+        const id = ids++;
+        submitted.push(id * 10, id * 10 + 1);
+        let d: Deferred | undefined;
+        if (rnd() < 0.3) pending.push((d = deferred()));
+        gate.submit([id * 10, id * 10 + 1], d?.promise);
+      };
+      const gate: Gate<number> = releaseGate<number>((msg) => {
+        emitted.push(msg);
+        if (budget > 0 && rnd() < 0.5) {
+          budget--;
+          submit();
+        }
+      });
+      const top = 1 + Math.floor(rnd() * 4);
+      for (let i = 0; i < top; i++) {
+        submit();
+        if (pending.length && rnd() < 0.5) pending.shift()?.resolve();
+        await settle(4);
+      }
+      while (pending.length) {
+        pending.shift()?.resolve();
+        await settle();
+      }
+      await settle();
+      expect(emitted, `seed ${seed}`).toEqual(submitted);
     }
   });
 

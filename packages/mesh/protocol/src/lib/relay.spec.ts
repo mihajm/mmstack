@@ -1728,11 +1728,6 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
       'another origin at the same stamp',
       { origin: 'ghost', hlc: { p: 5, l: 0 } },
     ],
-    ['its own origin at a later time', { origin: 'oa', hlc: { p: 99, l: 0 } }],
-    [
-      'its own origin at a later counter',
-      { origin: 'oa', hlc: { p: 5, l: 7 } },
-    ],
   ])(
     'a near miss of the own dot is verified like any cite: %s is refused',
     (_, cite) => {
@@ -1741,6 +1736,47 @@ describe('createRelay: citation-existence admission (verifyCitations)', () => {
       a.hello();
       a.env([set(['doc'], 'x', { cites: [cite] })], { hlc: { p: 5, l: 0 } });
       expect(dropReason(a.sock, 'oa', 1)).toBe('citation');
+    },
+  );
+
+  it.each([
+    [
+      'its own origin at a later time',
+      { origin: 'oa', hlc: { p: 99, l: 0 } },
+      true,
+    ],
+    [
+      'its own origin at a later counter',
+      { origin: 'oa', hlc: { p: 5, l: 7 } },
+      true,
+    ],
+    [
+      'its own origin at a later time, without verifyCitations',
+      { origin: 'oa', hlc: { p: 99, l: 0 } },
+      false,
+    ],
+  ])(
+    'an own cite above the stamp is malformed, ejected before the citation gate: %s',
+    (_, cite, verifyCitations) => {
+      const violations: PolicyViolation[] = [];
+      const relay = createRelay({
+        policy: { verifyCitations },
+        onViolation: (_room, v) => violations.push(v),
+      });
+      const a = client(relay, 'wa', 'oa');
+      const b = client(relay, 'wb', 'ob');
+      a.hello();
+      b.hello();
+      a.env([set(['doc'], 'x', { cites: [cite] })], { hlc: { p: 5, l: 0 } });
+      expect(violations).toEqual([
+        { writer: 'wa', reason: 'malformed', detail: 'cites' },
+      ]);
+      expect(last(a.sock)).toMatchObject({ t: 'eject', reason: 'malformed' });
+      expect(a.sock.closed).toBe(true);
+      expect(a.sock.sent.some((m) => m.t === 'drop')).toBe(false);
+      expect(
+        b.sock.sent.some((m) => m.t === 'env' && m.env.origin === 'oa'),
+      ).toBe(false);
     },
   );
 

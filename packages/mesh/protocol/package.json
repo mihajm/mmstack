@@ -1,6 +1,7 @@
 {
   "name": "@mmstack/mesh-protocol",
   "version": "0.16.0",
+  "description": "Zero-dependency relay and wire protocol for @mmstack/mesh.",
   "type": "module",
   "main": "./index.js",
   "module": "./index.js",
@@ -23,7 +24,8 @@
     "multiplayer",
     "relay",
     "op-log",
-    "local-first"
+    "local-first",
+    "realtime"
   ],
   "license": "MIT",
   "repository": {

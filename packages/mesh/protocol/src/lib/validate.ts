@@ -1,4 +1,4 @@
-import type { ClientDirectMsg, Dot, OpEnvelope, SyncOp } from './wire';
+import type { ClientDirectMsg, Dot, Hlc, OpEnvelope, SyncOp } from './wire';
 
 const hasControlChar = (s: string): boolean => {
   for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) < 0x20) return true;
@@ -11,6 +11,8 @@ const isFiniteHlc = (h: unknown): boolean =>
   typeof h === 'object' &&
   Number.isFinite((h as { p?: unknown }).p) &&
   Number.isFinite((h as { l?: unknown }).l);
+const hlcAbove = (a: Hlc, b: Hlc): boolean =>
+  a.p > b.p || (a.p === b.p && a.l > b.l);
 
 /**
  * Deterministic, total well-formedness check for a received envelope: returns a short reason string
@@ -19,6 +21,8 @@ const isFiniteHlc = (h: unknown): boolean =>
  * TWIN of the client's `validateEnvelope` in @mmstack/primitives; the two must stay byte-identical
  * in their accept/reject decisions (a parity property in the mesh client spec pins this). It
  * validates SHAPE, not authority: authority and access control stay in the relay's policy check.
+ * A cite is checked for its shape, and a cite of the envelope's own origin above the envelope's
+ * own stamp is rejected.
  */
 export function validateEnvelope(env: OpEnvelope): string | null {
   if (!env || typeof env !== 'object') return 'envelope';
@@ -66,6 +70,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
       ) {
         return 'cites';
       }
+      if ((c as Dot).origin === env.origin && hlcAbove((c as Dot).hlc, env.hlc))
+        return 'cites';
     }
     const key = op.path.map(String).join(String.fromCharCode(0x1f));
     if (seenPaths.has(key)) return 'dup-path';

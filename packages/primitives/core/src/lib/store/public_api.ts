@@ -59,6 +59,7 @@ export {
   syncedFork,
   undoMerge,
   validateEnvelope,
+  validateOps,
   type Conflicted,
   type ConvergingApply,
   type Dot,

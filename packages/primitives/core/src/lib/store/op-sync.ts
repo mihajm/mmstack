@@ -153,6 +153,39 @@ const isFiniteHlc = (h: unknown): boolean =>
 const hlcAbove = (a: Hlc, b: Hlc): boolean =>
   a.p > b.p || (a.p === b.p && a.l > b.l);
 
+type OpShapeFault =
+  | 'op'
+  | 'kind'
+  | 'path'
+  | 'path-empty'
+  | 'path-control'
+  | 'path-proto'
+  | 'root-op';
+
+/** The checks of one op that read only its kind and path, shared by the envelope and batch checks. */
+function opShapeFault(op: unknown): OpShapeFault | null {
+  if (!op || typeof op !== 'object') return 'op';
+  const { kind, path } = op as { kind?: unknown; path?: unknown };
+  if (kind !== 'set' && kind !== 'delete' && kind !== 'clear') return 'kind';
+  if (!Array.isArray(path)) return 'path';
+  for (const seg of path as readonly unknown[]) {
+    // a segment is a property key: an array or object would stringify into any key (`__proto__`,
+    // or one spanning the separator) past the string checks below
+    if (
+      typeof seg !== 'string' &&
+      !(typeof seg === 'number' && Number.isInteger(seg) && seg >= 0)
+    )
+      return 'path';
+    // the register store keys a path by its segments joined with a control character, so an
+    // empty segment or a control character inside one would make two paths one register
+    if (seg === '') return 'path-empty';
+    if (typeof seg === 'string' && hasControlChar(seg)) return 'path-control';
+    if (seg === '__proto__') return 'path-proto';
+  }
+  if (path.length === 0 && kind !== 'set') return 'root-op';
+  return null;
+}
+
 /**
  * Deterministic, total well-formedness check for a received envelope. Returns a short reason
  * string when the envelope must be rejected WHOLE, or `null` when it is well-formed. It reads only
@@ -178,25 +211,8 @@ export function validateEnvelope(env: OpEnvelope): string | null {
   if (!Array.isArray(env.ops)) return 'ops';
   const seenPaths = new Set<string>();
   for (const op of env.ops) {
-    if (!op || typeof op !== 'object') return 'op';
-    if (op.kind !== 'set' && op.kind !== 'delete' && op.kind !== 'clear')
-      return 'kind';
-    if (!Array.isArray(op.path)) return 'path';
-    for (const seg of op.path as readonly unknown[]) {
-      // a segment is a property key: an array or object would stringify into any key (`__proto__`,
-      // or one spanning the separator) past the string checks below
-      if (
-        typeof seg !== 'string' &&
-        !(typeof seg === 'number' && Number.isInteger(seg) && seg >= 0)
-      )
-        return 'path';
-      // the register store keys a path by its segments joined with a control character, so an
-      // empty segment or a control character inside one would make two paths one register
-      if (seg === '') return 'path-empty';
-      if (typeof seg === 'string' && hasControlChar(seg)) return 'path-control';
-      if (seg === '__proto__') return 'path-proto';
-    }
-    if (op.path.length === 0 && op.kind !== 'set') return 'root-op';
+    const fault = opShapeFault(op);
+    if (fault) return fault;
     const epoch = (op as SyncOp).epoch;
     if (typeof epoch !== 'number' || !Number.isFinite(epoch) || epoch < 0)
       return 'epoch';
@@ -220,6 +236,47 @@ export function validateEnvelope(env: OpEnvelope): string | null {
     const key = op.path.map(String).join(String.fromCharCode(0x1f));
     if (seenPaths.has(key)) return 'dup-path';
     seenPaths.add(key);
+  }
+  return null;
+}
+
+/**
+ * Well-formedness check for a batch of authored ops, the ops one local write emits as one envelope.
+ * A batch is well-formed when every op has a known kind and a path that can travel (the reasons
+ * {@link validateEnvelope} gives: `'op'`, `'kind'`, `'path'`, `'path-empty'`, `'path-control'`,
+ * `'path-proto'`, `'root-op'`), each path appears at most once (`'dup-path'`; a numeric segment
+ * and its string form are one path), and an op sits under another op's path only when that other
+ * op comes earlier and is a `set` of a plain record (`'nested-path'`; an opaque value, an array, a
+ * scalar or `null` holds no children here). Returns the first reason in that order, or `null`.
+ * The op log's own diffs never repeat or misnest a path, but a store key that is empty, holds a
+ * control character or is `__proto__` still yields a path that cannot travel.
+ * {@link OpSync.emitOps} refuses any batch this rejects.
+ */
+export function validateOps(
+  ops: readonly StoreOp[],
+): OpShapeFault | 'dup-path' | 'nested-path' | null {
+  for (const op of ops) {
+    const fault = opShapeFault(op);
+    if (fault) return fault;
+  }
+  const at = new Map<string, number>();
+  for (let i = 0; i < ops.length; i++) {
+    const key = keyOf(ops[i].path);
+    if (at.has(key)) return 'dup-path';
+    at.set(key, i);
+  }
+  for (let i = 0; i < ops.length; i++) {
+    const path = ops[i].path;
+    let prefix = keyOf([]);
+    for (let n = 0; n < path.length; n++) {
+      const j = at.get(prefix);
+      if (j !== undefined) {
+        const anc = ops[j];
+        if (!(j < i && anc.kind === 'set' && isRecord(anc.next)))
+          return 'nested-path';
+      }
+      prefix = n === 0 ? String(path[0]) : prefix + SEP + String(path[n]);
+    }
   }
   return null;
 }
@@ -872,7 +929,12 @@ export type ConvergingApply = {
    */
   stamp(
     ops: readonly StoreOp[],
-    opt?: { bump?: boolean; frontier?: DotFrontier },
+    opt?: {
+      bump?: boolean;
+      frontier?: DotFrontier;
+      /** With a frontier, siblings this origin registered after `seq` count as observed too. */
+      since?: { readonly origin: string; readonly seq: number };
+    },
   ): SyncOp[];
   /** Capture the current observation frontier, for later scoped emission; O(1). */
   captureFrontier(): DotFrontier;
@@ -1061,11 +1123,18 @@ export function createConvergingApply(opt?: {
   const liveObserved = (
     reg: PathReg,
     frontier: DotFrontier | undefined,
+    since: { readonly origin: string; readonly seq: number } | undefined,
   ): SyncSibling[] => {
     const live = liveOf(reg);
     if (!frontier) return live;
     const sm = seqs.get(keyOf(reg.path));
-    return live.filter((s) => (sm?.get(s.origin) ?? 0) <= frontier.seq);
+    return live.filter((s) => {
+      const seq = sm?.get(s.origin) ?? 0;
+      return (
+        seq <= frontier.seq ||
+        (since !== undefined && s.origin === since.origin && seq > since.seq)
+      );
+    });
   };
 
   const sigOf = (live: readonly SyncSibling[]): string =>
@@ -1318,6 +1387,9 @@ export function createConvergingApply(opt?: {
       const out: SyncOp[] = [];
       const bump = o?.bump ? 1 : 0;
       const frontier = o?.frontier;
+      const since = o?.since;
+      const authoredKeys = new Set(ops.map((op) => keyOf(op.path)));
+      const clearedKeys = new Set<string>();
       const epochFor = (key: string, live: readonly SyncSibling[]): number => {
         let e = floors.get(key) ?? 0;
         for (const s of live) if (s.epoch > e) e = s.epoch;
@@ -1326,7 +1398,7 @@ export function createConvergingApply(opt?: {
       for (const op of ops) {
         const key = keyOf(op.path);
         const reg = registers.get(key);
-        const live = reg ? liveObserved(reg, frontier) : [];
+        const live = reg ? liveObserved(reg, frontier, since) : [];
         // a `replace` path keeps no ancestor: the set travels and registers without its `prev`
         // (the local op log keeps its own for inversion; `raws` carry the authored op whole)
         const authored =
@@ -1343,13 +1415,17 @@ export function createConvergingApply(opt?: {
         if (op.kind === 'clear') continue;
         for (const d of descendantsOf(key)) {
           if (d.result?.kind === 'clear') continue; // already abstaining
-          const dlive = liveObserved(d, frontier);
+          const dkey = keyOf(d.path);
+          // one op per path: an authored op there stands, and one generated clear covers the rest
+          if (authoredKeys.has(dkey) || clearedKeys.has(dkey)) continue;
+          const dlive = liveObserved(d, frontier, since);
           if (!dlive.length) continue;
+          clearedKeys.add(dkey);
           out.push({
             kind: 'clear',
             path: d.path,
             cites: dlive.map((s) => ({ origin: s.origin, hlc: s.hlc })),
-            epoch: epochFor(keyOf(d.path), dlive),
+            epoch: epochFor(dkey, dlive),
           });
         }
       }
@@ -1660,7 +1736,8 @@ export type OpSync<T = unknown> = {
    * fold result keeps the very root object. When the
    * store agreed with its registers before the write (a seeded or hydrated store), it agrees after;
    * a value no register knows (an unseeded base) stays. The {@link EmitContext} root is the raw
-   * result, the ops applied to the store as it was.
+   * result, the ops applied to the store as it was. The batch must be well-formed (see
+   * {@link validateOps}): an ill-formed one throws and changes nothing.
    */
   emitOps(ops: readonly StoreOp[], opt?: { readonly bump?: boolean }): void;
   /**
@@ -1668,7 +1745,8 @@ export type OpSync<T = unknown> = {
    * epoch `max(observed at that path) + 1`, and a bumped subtree replace bumps every path it
    * clears, so concurrent edits under it lose the fold instead of surviving. Scoped and
    * synchronous: writes before/after emit normally. WHO may bump is admission policy at the
-   * transport/relay, not merge semantics; the register accepts any well-formed epoch.
+   * transport/relay, not merge semantics; the register accepts any well-formed epoch. When `fn`
+   * throws, the writes it made are still emitted with the bump, and the error propagates.
    */
   override(fn: () => void): void;
   /**
@@ -1684,6 +1762,10 @@ export type OpSync<T = unknown> = {
    * never saw. Scoped and synchronous, like {@link override}. When `commitScope` returns, the store
    * shows the fold result, as every peer does; reads inside `fn` see the raw writes until the scope
    * flushes (`flush()`, `captureFrontier()` or an `emitOps` inside `fn` reconcile mid-scope).
+   * Several emissions inside one scope are ordered among themselves, a later one observes what the
+   * earlier ones wrote; the scope as a whole stays concurrent with what its frontier does not cover.
+   * When `fn` throws, the writes it made are still emitted against the frontier, and the error
+   * propagates.
    */
   commitScope(frontier: DotFrontier, fn: () => void): void;
   /**
@@ -1825,6 +1907,8 @@ export function opSync<T extends object>(
   let bumping = false;
   // set while a synced fork's commit is emitting: freezes emission cites to what the fork observed
   let scopeFrontier: DotFrontier | undefined;
+  // the ingest seq at scope entry: own writes registered after it are observed by later emissions
+  let scopeEntry: number | undefined;
 
   // a signal the drain reaction tracks; bumping it schedules an outbox drain for the next tick
   const drainTick = signal(0);
@@ -1855,7 +1939,9 @@ export function opSync<T extends object>(
   ): void => {
     const bump = bumping;
     const frontier = scopeFrontier;
-    const stamped = conv.stamp(ops, { bump, frontier });
+    const since =
+      scopeEntry === undefined ? undefined : { origin, seq: scopeEntry };
+    const stamped = conv.stamp(ops, { bump, frontier, since });
     if (isDevMode()) lintWireValues(stamped);
     const nextVersion = (versions.get(origin) ?? 0) + 1;
     const env: OpEnvelope = {
@@ -1959,6 +2045,11 @@ export function opSync<T extends object>(
       log.flush();
     },
     emitOps: (ops, o) => {
+      const fault = validateOps(ops);
+      if (fault)
+        throw new Error(
+          `[@mmstack/primitives] emitOps: ill-formed batch (${fault})`,
+        );
       log.flush(); // earlier pending writes emit first, on their own
       const pre = untracked(source);
       const was = bumping;
@@ -1971,13 +2062,27 @@ export function opSync<T extends object>(
     },
     override: (fn) => {
       log.flush(); // earlier pending writes emit un-bumped
+      const was = bumping;
       bumping = true;
+      let failed = false;
+      let error: unknown;
       try {
         fn();
-        log.flush();
-      } finally {
-        bumping = false;
+      } catch (e) {
+        failed = true;
+        error = e;
       }
+      try {
+        log.flush(); // the writes fn made carry the bump, also when fn threw
+      } catch (e) {
+        if (!failed) {
+          failed = true;
+          error = e;
+        }
+      } finally {
+        bumping = was;
+      }
+      if (failed) throw error;
     },
     captureFrontier: () => {
       log.flush(); // fold pending base writes in first, so they count as observed
@@ -1989,15 +2094,32 @@ export function opSync<T extends object>(
     commitScope: (frontier, fn) => {
       log.flush(); // earlier pending writes emit against the frontier in force, not this one
       const outer = scopeFrontier;
+      const outerEntry = scopeEntry;
       scopeFrontier = frontier;
+      scopeEntry = conv.captureFrontier().seq;
+      let failed = false;
+      let error: unknown;
       try {
         fn();
+      } catch (e) {
+        failed = true;
+        error = e;
+      }
+      try {
         log.flush(); // stamp + register the scoped writes now, while the frontier is frozen
+      } catch (e) {
+        // the body's error wins over a flush error behind it
+        if (!failed) {
+          failed = true;
+          error = e;
+        }
       } finally {
         // restore, never clear: a scope opened inside another (a fork commit inside a manager
         // emission) hands the outer one back its frontier for the writes that follow
         scopeFrontier = outer;
+        scopeEntry = outerEntry;
       }
+      if (failed) throw error;
     },
     watermark: () => Object.fromEntries(versions),
     settle: (settled) => conv.settle(settled),
